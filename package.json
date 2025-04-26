@@ -8,6 +8,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@types/jest": "^29.5.14"
+    "@types/jest": "^29.5.14",
+    "puppycad": "file:"
   }
 }

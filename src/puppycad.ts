@@ -5,10 +5,16 @@
 
 export type UUID = string;
 
-export interface Vec3 {
+export class Vec3 {
 	x: number;
 	y: number;
 	z: number;
+
+	constructor(x: number = 0, y: number = 0, z: number = 0) {
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
 }
 
 export class Transform {
@@ -337,10 +343,6 @@ export interface FeatureContext {
 	target: Body | Sketch;
 }
 
-export abstract class Feature extends Entity {
-	abstract apply(ctx: FeatureContext): Body | Sketch;
-}
-
 export class Assembly extends Group {
 	constraints: Constraint[] = [];
 }
@@ -496,4 +498,34 @@ export class Netlist {
 
 export class Plane {
 
+}
+
+export class Path {
+
+}
+
+export class Profile {
+	points: Vec3[] = []
+
+	public constructor(points: number[][]) {
+
+	}
+}
+
+export class Solid {
+	private profile: Profile
+
+	public constructor(profile: Profile) {
+		this.profile = profile
+	}
+
+	public sweep(path: Path) {
+
+	}
+}
+
+export class LinePath {
+	public constructor(start: Vec3, end: Vec3) {
+
+	}
 }
