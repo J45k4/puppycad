@@ -1,0 +1,13 @@
+{
+  "name": "puppycad",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@types/jest": "^29.5.14"
+  }
+}
