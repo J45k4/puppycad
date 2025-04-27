@@ -1,8 +1,6 @@
 // PuppyCad – Core type & class skeleton
 // MIT License – © PuppyCorp
 
-// ---- Generic Types & Utilities --------------------------------------------
-
 export type UUID = string;
 
 export class Vec3 {
@@ -14,6 +12,16 @@ export class Vec3 {
 		this.x = x;
 		this.y = y;
 		this.z = z;
+	}
+}
+
+export class Vec2 {
+	x: number;
+	y: number;
+
+	constructor(x: number = 0, y: number = 0) {
+		this.x = x;
+		this.y = y;
 	}
 }
 
@@ -66,8 +74,6 @@ export class Group extends Entity {
 		this.children.push(child);
 	}
 }
-
-// ---- Electronic Footprint System --------------------------------------------
 
 /** Pad shape types for electronic footprints */
 export enum PadShape {
@@ -172,8 +178,6 @@ export abstract class Constraint {
 	}
 }
 
-// ---- Mechanical Constraints ------------------------------------------------
-
 export class CoincidentConstraint extends Constraint {
 	constructor(lhs: Entity, rhs: Entity) {
 		super(ConstraintType.Coincident, lhs, rhs);
@@ -226,7 +230,6 @@ export class FixedConstraint extends Constraint {
 	}
 }
 
-// ---- Electrical Constraints ------------------------------------------------
 
 /** Ensures two nets maintain a minimum clearance distance */
 export class ClearanceConstraint extends Constraint {
@@ -237,14 +240,12 @@ export class ClearanceConstraint extends Constraint {
 	}
 }
 
-/** Forces two nets or nodes to be tied together electrically */
 export class NetTieConstraint extends Constraint {
 	constructor(lhs: Entity, rhs: Entity) {
 		super(ConstraintType.NetTie, lhs, rhs);
 	}
 }
 
-/** Aligns two components or pads along an axis with an offset */
 export class AlignmentConstraint extends Constraint {
 	axis: "x" | "y";
 	offset: number;
@@ -255,8 +256,6 @@ export class AlignmentConstraint extends Constraint {
 	}
 }
 
-// ---- Shared Port / Attachment‑Point System ---------------------------------
-
 export type PortKind = "mechanical" | "electrical";
 
 export class Port extends Entity {
@@ -266,8 +265,6 @@ export class Port extends Entity {
 		this.kind = kind;
 	}
 }
-
-// ---- Reusable Block Templates & Instances ----------------------------------
 
 export class BlockTemplate extends Group {
 	ports: Port[] = [];
@@ -288,8 +285,6 @@ export class BlockInstance extends Group {
 		});
 	}
 }
-
-// ---- Mechanical Domain ------------------------------------------------------
 
 export class Circle extends Entity {
 	diameter: number
@@ -347,8 +342,6 @@ export class Assembly extends Group {
 	constraints: Constraint[] = [];
 }
 
-// ---- Electronics Domain -----------------------------------------------------
-
 export type NetNode = Pad | Port;
 
 export class Pad extends Entity {
@@ -368,6 +361,7 @@ export class Pin {
 
 export class Component extends Entity {
 	footprint: Footprint
+	position: Vec2
 	pads: Pad[] = [];
 	pins: Pin[] = [];
 
@@ -389,6 +383,15 @@ export class Net {
 
 	public connect(pin: Pin) {
 		this.pins.push(pin)
+	}
+}
+
+export class Schematic {
+	public nets: Net[] = []
+	public constructor(args: {
+		nets: Net[]
+	}) {
+		this.nets = args.nets
 	}
 }
 
@@ -426,7 +429,6 @@ export interface LayerDefinition {
 	thickness?: number;
 }
 
-// ---- New Trace structures ---------------------------------------------------
 export interface TraceSegment { start: Vec3; end: Vec3; width: number; layer: string; curvature?: number; }
 export class Trace extends Entity {
 	constructor(name: string, public segments: TraceSegment[], public net?: Net) {

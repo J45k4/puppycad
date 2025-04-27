@@ -1,4 +1,4 @@
-import { Component, Net, Pin } from "./puppycad"
+import { Component, Net, Pin, Schematic } from "./puppycad"
 
 class Resistor extends Component {
 	public pin1: Pin
@@ -54,4 +54,8 @@ it("simple electronic scemantic", () => {
 	const net3 = new Net("VCC")
 	net3.connect(resistor.pin2)
 	net3.connect(led.anode)
+
+	const schemantic = new Schematic({
+		nets: [net, net2, net3]
+	})
 })
