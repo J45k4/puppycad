@@ -26,9 +26,15 @@ export class VList extends UiComponent<HTMLDivElement> {
 		if (args?.style) Object.assign(this.root.style, args.style)
 	}
 
-	public add(...components: UiComponent<HTMLElement>[]) {
-		this.root.append(...components.map(c => c.root))
-		return this
+	public add(...components: (UiComponent<HTMLElement> | HTMLElement)[]): this {
+		this.root.append(
+			...components.map(c => c instanceof HTMLElement ? c : c.root)
+		);
+		return this;
+	}
+
+	public clear() {
+		this.root.innerHTML = ""
 	}
 }
 
@@ -439,4 +445,232 @@ export class Collapsible extends UiComponent<HTMLDivElement> {
             this.hide()
         }
     }
+}
+
+export class Modal extends UiComponent<HTMLDivElement> {
+    private backdrop: HTMLDivElement
+    private modalContainer: HTMLDivElement
+    private contentContainer: HTMLDivElement
+    private closeButton: HTMLButtonElement
+
+    constructor(args: { title?: string; content: UiComponent<HTMLElement> | HTMLElement }) {
+        // Create backdrop
+        const backdrop = document.createElement("div")
+        backdrop.className = "modal-backdrop"
+		backdrop.style.display = "none";
+		backdrop.style.position = "fixed";
+		backdrop.style.top = "0";
+		backdrop.style.left = "0";
+		backdrop.style.width = "100%";
+		backdrop.style.height = "100%";
+		backdrop.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+		backdrop.style.alignItems = "center";
+		backdrop.style.justifyContent = "center";
+		backdrop.style.zIndex = "1000";
+		backdrop.onclick = () => this.hide()
+        super(backdrop)
+        this.backdrop = backdrop
+
+        // Create modal container
+        this.modalContainer = document.createElement("div")
+		this.modalContainer.onclick = (e: MouseEvent) => e.stopPropagation()
+
+		this.modalContainer.style.backgroundColor = "white"
+		this.modalContainer.style.padding = "16px"
+		this.modalContainer.style.borderRadius = "4px"
+		this.modalContainer.style.maxWidth = "90%"
+		this.modalContainer.style.maxHeight = "90%"
+		this.modalContainer.style.overflow = "auto"
+		this.modalContainer.style.position = "relative"
+		this.modalContainer.style.width = "600px"
+        backdrop.appendChild(this.modalContainer)
+
+        // Add close button
+        this.closeButton = document.createElement("button")
+        this.closeButton.textContent = "✖"
+        Object.assign(this.closeButton.style, {
+            position: "absolute",
+            top: "8px",
+            right: "8px",
+            cursor: "pointer",
+            background: "none",
+            border: "none",
+            fontSize: "16px"
+        })
+        this.modalContainer.appendChild(this.closeButton)
+        this.closeButton.onclick = () => this.hide()
+
+        // Add title if provided
+        if (args.title) {
+            const titleEl = document.createElement("h2")
+            titleEl.textContent = args.title
+            titleEl.style.marginTop = "0"
+            this.modalContainer.appendChild(titleEl)
+        }
+
+        // Add content
+        const contentRoot = args.content instanceof HTMLElement ? args.content : args.content.root
+        this.contentContainer = document.createElement("div")
+        this.contentContainer.appendChild(contentRoot)
+        this.modalContainer.appendChild(this.contentContainer)
+        document.body.appendChild(this.backdrop)
+    }
+
+    public show(): void {
+        this.backdrop.style.display = "flex"
+    }
+
+    public hide(): void {
+        this.backdrop.style.display = "none"
+    }
+}
+
+export class ItemList<T> extends UiComponent<HTMLDivElement> {
+	private items: UiComponent<HTMLElement>[] = []
+
+	constructor(args: {
+		onClick?: (value: T) => void
+		items: {
+			label: string
+			value: T
+			href?: string
+		}[]
+	}) {
+		super(document.createElement("div"))
+		this.root.style.display = "flex"
+		this.root.style.flexDirection = "column"
+		this.root.style.gap = "5px"
+
+		for (const item of args.items) {
+			const container = document.createElement("div")
+			container.className = "itemlistItem"
+			container.style.display = "flex"
+			container.style.alignItems = "center"
+			container.style.gap = "5px"
+
+			const label = document.createElement("span")
+			label.textContent = item.label
+			label.style.fontWeight = "bold"
+
+			// if (item.href) {
+			// 	const link = document.createElement("a")
+			// 	link.href = item.href
+			// 	link.textContent = item.value
+			// 	value.appendChild(link)
+			// }
+
+			if (args.onClick) {
+				container.style.cursor = "pointer"
+				container.onclick = () => args.onClick!(item.value)
+			}
+
+			container.appendChild(label)
+			this.root.appendChild(container)
+			this.items.push(new UiComponent(container))
+		}
+	}
+}
+
+export type TreeNode<T> = {
+	label: string
+	value: T
+	children?: TreeNode<T>[]
+}
+
+export class TreeList<T> extends UiComponent<HTMLDivElement> {
+	private onClick?: (value: T) => void
+	private headers: Map<T, HTMLDivElement> = new Map()
+	private selectedValue?: T
+
+	public constructor(args: {
+		items: TreeNode<T>[]
+		onClick?: (value: T) => void
+	}) {
+		super(document.createElement("div"))
+		this.root.style.display = "flex"
+		this.root.style.flexDirection = "column"
+		this.root.style.gap = "5px"
+		this.onClick = args.onClick
+		this.setItems(args.items)
+	}
+
+	private createNode(item: TreeNode<T>, level: number): HTMLDivDivElement {
+		const container = document.createElement("div")
+		container.style.display = "flex"
+		container.style.flexDirection = "column"
+
+		const header = document.createElement("div")
+		header.style.display = "flex"
+		header.style.alignItems = "center"
+		header.style.cursor = "pointer"
+		header.style.paddingLeft = `${level * 16}px`
+
+		let toggleIcon: HTMLSpanElement | null = null
+		if (item.children && item.children.length > 0) {
+			toggleIcon = document.createElement("span")
+			toggleIcon.textContent = "▾"
+			toggleIcon.style.marginRight = "5px"
+			header.appendChild(toggleIcon)
+		} else {
+			const spacer = document.createElement("span")
+			spacer.style.display = "inline-block"
+			spacer.style.width = "12px"
+			spacer.style.marginRight = "5px"
+			header.appendChild(spacer)
+		}
+
+		const labelEl = document.createElement("span")
+		labelEl.textContent = item.label
+		header.appendChild(labelEl)
+		container.appendChild(header)
+		this.headers.set(item.value, header)
+
+		let childrenContainer: HTMLDivElement | null = null
+		if (item.children && item.children.length > 0) {
+			childrenContainer = document.createElement("div")
+			childrenContainer.style.display = "flex"
+			childrenContainer.style.flexDirection = "column"
+			item.children.forEach(child => {
+				childrenContainer!.appendChild(this.createNode(child, level + 1))
+			})
+			container.appendChild(childrenContainer)
+
+			header.onclick = (e: MouseEvent) => {
+				e.stopPropagation()
+				const isVisible = childrenContainer!.style.display !== "none"
+				childrenContainer!.style.display = isVisible ? "none" : "flex"
+				if (toggleIcon) toggleIcon.textContent = isVisible ? "▸" : "▾"
+				if (this.onClick) this.onClick(item.value)
+			}
+		} else if (this.onClick) {
+			header.onclick = () => this.onClick!(item.value)
+		}
+
+		return container
+	}
+
+	public setItems(items: TreeNode<T>[]): void {
+		this.headers.clear()
+		this.selectedValue = undefined
+		// Clear existing nodes
+		this.root.innerHTML = "";
+		// Render new tree nodes
+		items.forEach(item => {
+			this.root.appendChild(this.createNode(item, 0));
+		});
+	}
+
+	public setSelected(value: T): void {
+		// Un-highlight previous selection
+		if (this.selectedValue !== undefined) {
+			const prevHeader = this.headers.get(this.selectedValue)
+			if (prevHeader) prevHeader.style.backgroundColor = ""
+		}
+		// Highlight new selection
+		const header = this.headers.get(value)
+		if (header) {
+			header.style.backgroundColor = "#e0e0e0"
+			this.selectedValue = value
+		}
+	}
 }

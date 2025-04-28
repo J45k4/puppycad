@@ -1,6 +1,5 @@
-import { schemanticEditor } from "./canvas"
-import { ProjectView } from "./project-view"
-import { SchemanticEditor } from "./schemantic"
+
+import { ProjectView } from "./project"
 import { Container } from "./ui"
 
 window.onload = () => {
@@ -10,8 +9,12 @@ window.onload = () => {
 
 	const container = new Container(body)
 
-	const schemanticEditor = new SchemanticEditor()
-	container.add(schemanticEditor)
+	const projectView = new ProjectView()
+
+	container.add(projectView)
+
+	// const schemanticEditor = new SchemanticEditor()
+	// container.add(schemanticEditor)
 
 
 	// // Create layout container with canvas and sidebar
