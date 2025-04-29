@@ -594,7 +594,7 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 		this.setItems(args.items)
 	}
 
-	private createNode(item: TreeNode<T>, level: number): HTMLDivDivElement {
+	private createNode(item: TreeNode<T>, level: number) {
 		const container = document.createElement("div")
 		container.style.display = "flex"
 		container.style.flexDirection = "column"

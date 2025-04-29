@@ -1,16 +1,15 @@
+import { AssemblyEditor } from "./assembly";
+import { PartEditor } from "./part";
+import { PCBEditor } from "./pcb";
 import { SchemanticEditor } from "./schemantic";
 import { ItemList, Modal, UiComponent, TreeList } from "./ui";
 
 export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly"
 
-export type SchemanticItem = {
-	type: "schemantic"
-	editor: SchemanticEditor
+export type ProjectItem = {
+	type: ProjectFileType
+	editor: UiComponent<HTMLDivElement>
 }
-
-export type ProjectItem = SchemanticItem
-
-
 
 class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private items: ProjectItem[] = []
@@ -32,24 +31,36 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 								type: "schemantic",
 								editor: new SchemanticEditor()
 							})
-							this.renderItems()
 							break
 						}
 						case "pcb": {
+							this.items.push({
+								type: "pcb",
+								editor: new PCBEditor()
+							})
 							break
 						}
 						case "part": {
+							this.items.push({
+								type: "part",
+								editor: new PartEditor()
+							})
 							break
 						}
 						case "assembly": {
+							this.items.push({
+								type: "assembly",
+								editor: new AssemblyEditor()
+							})
 							break
 						}
 					}
+					this.renderItems()
 				},
 				items: [
 					{ label: "Schemantic", value: "schemantic" },
 					{ label: "PCB", value: "pcb" },
-					{ label: "Mechanical", value: "part" },
+					{ label: "Part", value: "part" },
 					{ label: "Assembly", value: "assembly" },
 				]
 			})
@@ -107,10 +118,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 			onClick: (item) => {
 				console.log("selected item", item)
 				this.content.innerHTML = ""
-				if (item.type === "schemantic") {
-					console.log("add schemantic editor")
-					this.content.appendChild(item.editor.root)
-				}
+				this.content.appendChild(item.editor.root)
 			}
 		})
 		this.root.appendChild(this.treeView.root)

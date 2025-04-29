@@ -357,6 +357,10 @@ export class Pad extends Entity {
 
 export class Pin {
 	name: string = ""
+
+	public constructor(name: string) {
+		this.name = name
+	}
 }
 
 export class Component extends Entity {
