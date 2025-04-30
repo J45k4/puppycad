@@ -3,6 +3,30 @@
 
 export type UUID = string;
 
+export abstract class Entity {
+	readonly id: UUID;
+	name: string;
+	metadata: Record<string, unknown> = {}
+
+
+	protected constructor(name: string = "Entity") {
+		this.id = crypto.randomUUID();
+		this.name = name;
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity>): void {
+
+	}
+
+	public serialize(): any {
+
+	}
+
+	public equal(other: Entity): boolean {
+		return this.id === other.id
+	}
+}
+
 export class Vec3 {
 	x: number;
 	y: number;
@@ -49,22 +73,6 @@ export class Transform {
 	}
 
 	// TODO: add combine, invert, apply methods
-}
-
-// ---- Core Scene Graph -------------------------------------------------------
-
-export abstract class Entity {
-	readonly id: UUID;
-	name: string;
-	transform: Transform;
-	metadata: Record<string, unknown> = {}
-
-
-	protected constructor(name: string = "Entity") {
-		this.id = crypto.randomUUID();
-		this.name = name;
-		this.transform = new Transform();
-	}
 }
 
 export class Group extends Entity {
@@ -353,13 +361,49 @@ export class Pad extends Entity {
 		this.number = number;
 		this.position = position;
 	}
+
+	public static parse(obj: any): Pad {
+		const pad = new Pad(obj.number, new Vec3(obj.position.x, obj.position.y, obj.position.z))
+		return pad
+	}
+
+	public serialize() {
+		return {
+			type: "pad",
+			id: this.id,
+			number: this.number,
+			position: { x: this.position.x, y: this.position.y, z: this.position.z }
+		}
+	}
 }
 
-export class Pin {
-	name: string = ""
+export class Pin extends Entity {
+	private component: Component
 
-	public constructor(name: string) {
-		this.name = name
+	public constructor(name: string, component: Component) {
+		super(name)
+		this.component = component
+	}
+
+	public serialize() {
+		return {
+			type: "pin",
+			id: this.id,
+			name: this.name,
+			component: this.component.id,
+		}
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
+		if (visited.has(this)) return
+		visited.add(this)
+		this.component.visit(cb, visited)
+		cb(this)
+	}
+
+	public static parse(obj: any, component: Component): Pin {
+		const pin = new Pin(obj.name, component)
+		return pin
 	}
 }
 
@@ -376,26 +420,112 @@ export class Component extends Entity {
 	public addPin(pin: Pin) {
 		this.pins.push(pin)
 	}
+
+	public static parse(obj: any): Component {
+		const component = new Component(obj.name)
+		for (const pad of obj.pads) {
+			component.pads.push(Pad.parse(pad))
+		}
+		return component
+	}
+
+	public serialize() {
+		return {
+			type: "component",
+			id: this.id,
+			name: this.name,
+			pads: this.pads.map(pad => pad.id),
+			pins: this.pins.map(pin => pin.id)
+		}
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
+		if (visited.has(this)) return
+		visited.add(this)
+		cb(this)
+		for (const pad of this.pads) {
+			pad.visit(cb, visited)
+		}
+		for (const pin of this.pins) {
+			pin.visit(cb, visited)
+		}
+	}
 }
 
-export class Net {
-	name: string
+export class Net extends Entity {
 	pins: Pin[] = []
 	constructor(name: string) {
-		this.name = name
+		super(name)
 	}
 
 	public connect(pin: Pin) {
 		this.pins.push(pin)
 	}
+
+	public static parse(obj: any): Net {
+		const net = new Net(obj.name)
+
+		return net
+	}
+
+	public serialize() {
+		return {
+			type: "net",
+			id: this.id,
+			name: this.name,
+			pins: this.pins.map(pin => pin.id)
+		}
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
+		if (visited.has(this)) return
+		visited.add(this)
+		cb(this)
+		for (const pin of this.pins) {
+			pin.visit(cb, visited)
+		}
+	}
 }
 
-export class Schematic {
+export class Schematic extends Entity {
 	public nets: Net[] = []
 	public constructor(args: {
+		name: string
 		nets: Net[]
 	}) {
+		super(args.name)
 		this.nets = args.nets
+	}
+
+	public serialize() {
+		return {
+			type: "schematic",
+			name: this.name,
+			nets: this.nets.map(net => net.id)
+		}
+	}
+
+	public static parse(obj: any): Schematic {
+		const schematic = new Schematic({
+			name: obj.name,
+			nets: []
+		})
+		for (const net of obj.nets) {
+			schematic.nets.push(Net.parse(net))
+		}
+		return schematic
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
+		if (visited.has(this)) return
+		visited.add(this)
+		cb(this)
+		for (const net of this.nets) {
+			net.visit(cb, visited)
+		}
+		for (const component of this.nets) {
+			component.visit(cb, visited)
+		}
 	}
 }
 
@@ -461,6 +591,13 @@ export class PCB extends Entity {
 
 	addLayer(layer: LayerDefinition): void {
 		this.layers.push(layer);
+	}
+
+	public serialize() {
+		return {
+			type: "pcb",
+			name: this.name,
+		}
 	}
 }
 

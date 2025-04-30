@@ -3,7 +3,7 @@
 import { Command } from "commander"
 import path from "path"
 import fs from "fs"
-import { createPuppyCADServer } from "./server"
+import { createServer } from "./server"
 
 const program = new Command()
 
@@ -23,7 +23,7 @@ program
 			process.exit(1)
 		}
 		const port = parseInt(options.port, 10)
-		createPuppyCADServer(fullPath)
+		createServer(fullPath)
 	})
 
 program.parse(process.argv)
