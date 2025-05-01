@@ -93,6 +93,7 @@ export enum PadShape {
 
 /** Represents a single pad in a footprint */
 export type Pad = {
+	type: "smd" | "through"
 	pin: Pin
 	x: number    // mm, relative to footprint origin
 	y: number    // mm, relative to footprint origin
@@ -541,26 +542,58 @@ export class Trace extends Entity {
 }
 
 
-export class PCB extends Entity {
-	private material: LayerMaterial
-	private thickness: number
-	components: Component[] = []
-	nets: Net[] = []
-	outline?: Sketch
-	layers: LayerDefinition[] = []
+export class Layer extends Entity {
+	type: "copper" | "dielectric" | "soldermask" | "silkscreen" | "fabrication" | "drill" | "keepout"
+	material?: LayerMaterial
+	thickness?: number
+	traces: Trace[] = []
 
 	constructor(args: {
 		name: string
-		material: LayerMaterial
+		type: "copper" | "dielectric" | "soldermask" | "silkscreen" | "fabrication" | "drill" | "keepout"
+		material?: LayerMaterial
+		thickness?: number
+		traces: Trace[]
+	}) {
+		super(args.name)
+		this.type = args.type
+		this.material = args.material
+		this.thickness = args.thickness
+		this.traces = args.traces
+	}
+}
+
+export type BoardShape = 
+	{ type: "polygon"; points: Vec2[] }
+
+export class Via extends Entity {
+	public pos: Vec2
+	public diameter: number
+	public drillDiameter: number
+	public layers: Layer[] = []
+	public shape: BoardShape
+	public constructor() {
+		super("Via")
+		this.pos = new Vec2(0, 0)
+		this.diameter = 0
+		this.drillDiameter = 0
+		this.shape = { type: "polygon", points: [] }
+	}
+}
+
+export class PCB extends Entity {
+	private thickness: number
+	public layers: Layer[] = []
+	public topFootprints: Footprint[] = []
+	public bottomFootprints: Footprint[] = []
+	public vias: Via[] = []
+
+	constructor(args: {
+		name: string
 		thickness: number
 	}) {
 		super(args.name)
-		this.material = args.material
 		this.thickness = args.thickness
-	}
-
-	addLayer(layer: LayerDefinition): void {
-		this.layers.push(layer);
 	}
 
 	public serialize() {
