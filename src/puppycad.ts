@@ -92,15 +92,15 @@ export enum PadShape {
 }
 
 /** Represents a single pad in a footprint */
-export interface Pad {
-	name: string; // e.g., "1", "A", "GND"
-	x: number;    // mm, relative to footprint origin
-	y: number;    // mm, relative to footprint origin
-	width: number; // mm
-	height: number; // mm
-	shape: PadShape;
-	rotation?: number; // degrees
-	net?: string; // optional net name
+export type Pad = {
+	pin: Pin
+	x: number    // mm, relative to footprint origin
+	y: number    // mm, relative to footprint origin
+	width: number // mm
+	height: number // mm
+	shape: PadShape
+	rotation?: number // degrees
+	net?: string // optional net name
 }
 
 /** Represents the outline (body) of a footprint */
@@ -109,24 +109,44 @@ export interface FootprintOutline {
 	lineWidth?: number; // mm
 }
 
-/** Represents an electronic component footprint */
-export class Footprint {
-	name: string // e.g., "SOIC-8"
+/** Represents an electronic component footprint spec */
+export interface FootprintSpec {
 	pads: Pad[]
 	outline?: FootprintOutline
 	referenceOrigin?: { 
-		x: number 
-		y: number 
-	} // Where the refdes is placed
+		x: number
+		y: number
+	}
 	description?: string
 }
 
-/** Entity representing a footprint in the scene */
-export class FootprintEntity extends Entity {
-	footprint: Footprint;
-	constructor(name: string, footprint: Footprint) {
-		super(name);
-		this.footprint = footprint;
+/** Represents an electronic component footprint */
+export class Footprint extends Entity {
+	public points: Vec2[] = []
+	public lineWidth: number = 0
+	public referenceOrigin: Vec2
+	public pads: Pad[] = []
+
+	constructor(args: {
+		name: string
+		points: Vec2[]
+		lineWidth: number
+		referenceOrigin: Vec2
+		pads: Pad[]
+	}) {
+		super(args.name)
+		this.lineWidth = args.lineWidth
+		this.points = args.points
+		this.referenceOrigin = args.referenceOrigin
+		this.pads = args.pads
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity>): void {
+		// stub or implement as needed
+	}
+
+	public serialize(): any {
+		// stub or implement as needed
 	}
 }
 
@@ -350,39 +370,36 @@ export class Assembly extends Group {
 	constraints: Constraint[] = [];
 }
 
-export type NetNode = Pad | Port;
+// export type NetNode = Pad | Port;
 
-export class Pad extends Entity {
-	number: string;
-	position: Vec3;
-	// ... other pad properties as before
-	constructor(number: string, position: Vec3) {
-		super("Pad");
-		this.number = number;
-		this.position = position;
-	}
+// export class Pad extends Entity {
+// 	number: string;
+// 	position: Vec3;
+// 	// ... other pad properties as before
+// 	constructor(number: string, position: Vec3) {
+// 		super("Pad");
+// 		this.number = number;
+// 		this.position = position;
+// 	}
 
-	public static parse(obj: any): Pad {
-		const pad = new Pad(obj.number, new Vec3(obj.position.x, obj.position.y, obj.position.z))
-		return pad
-	}
+// 	public static parse(obj: any): Pad {
+// 		const pad = new Pad(obj.number, new Vec3(obj.position.x, obj.position.y, obj.position.z))
+// 		return pad
+// 	}
 
-	public serialize() {
-		return {
-			type: "pad",
-			id: this.id,
-			number: this.number,
-			position: { x: this.position.x, y: this.position.y, z: this.position.z }
-		}
-	}
-}
+// 	public serialize() {
+// 		return {
+// 			type: "pad",
+// 			id: this.id,
+// 			number: this.number,
+// 			position: { x: this.position.x, y: this.position.y, z: this.position.z }
+// 		}
+// 	}
+// }
 
 export class Pin extends Entity {
-	private component: Component
-
-	public constructor(name: string, component: Component) {
+	public constructor(name: string) {
 		super(name)
-		this.component = component
 	}
 
 	public serialize() {
@@ -390,65 +407,18 @@ export class Pin extends Entity {
 			type: "pin",
 			id: this.id,
 			name: this.name,
-			component: this.component.id,
 		}
 	}
 
 	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
 		if (visited.has(this)) return
 		visited.add(this)
-		this.component.visit(cb, visited)
 		cb(this)
 	}
 
-	public static parse(obj: any, component: Component): Pin {
-		const pin = new Pin(obj.name, component)
+	public static parse(obj: any): Pin {
+		const pin = new Pin(obj.name)
 		return pin
-	}
-}
-
-export class Component extends Entity {
-	footprint: Footprint
-	position: Vec2
-	pads: Pad[] = [];
-	pins: Pin[] = [];
-
-	public constructor(name: string) {
-		super(name)
-	}
-
-	public addPin(pin: Pin) {
-		this.pins.push(pin)
-	}
-
-	public static parse(obj: any): Component {
-		const component = new Component(obj.name)
-		for (const pad of obj.pads) {
-			component.pads.push(Pad.parse(pad))
-		}
-		return component
-	}
-
-	public serialize() {
-		return {
-			type: "component",
-			id: this.id,
-			name: this.name,
-			pads: this.pads.map(pad => pad.id),
-			pins: this.pins.map(pin => pin.id)
-		}
-	}
-
-	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
-		if (visited.has(this)) return
-		visited.add(this)
-		cb(this)
-		for (const pad of this.pads) {
-			pad.visit(cb, visited)
-		}
-		for (const pin of this.pins) {
-			pin.visit(cb, visited)
-		}
 	}
 }
 
