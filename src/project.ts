@@ -1,10 +1,11 @@
 import { AssemblyEditor } from "./assembly";
+import { DiagramEditor } from "./diagram";
 import { PartEditor } from "./part";
 import { PCBEditor } from "./pcb";
 import { SchemanticEditor } from "./schemantic";
 import { ItemList, Modal, UiComponent, TreeList } from "./ui";
 
-export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly"
+export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
 
 export type ProjectItem = {
 	type: ProjectFileType
@@ -25,44 +26,52 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			content: new ItemList<ProjectFileType>({
 				onClick: (type) => {
 					console.log("createNew", type)
-					switch (type) {
-						case "schemantic": {
-							this.items.push({
-								type: "schemantic",
-								editor: new SchemanticEditor()
-							})
-							break
-						}
-						case "pcb": {
-							this.items.push({
-								type: "pcb",
-								editor: new PCBEditor()
-							})
-							break
-						}
-						case "part": {
-							this.items.push({
-								type: "part",
-								editor: new PartEditor()
-							})
-							break
-						}
-						case "assembly": {
-							this.items.push({
-								type: "assembly",
-								editor: new AssemblyEditor()
-							})
-							break
-						}
-					}
+                                        switch (type) {
+                                                case "schemantic": {
+                                                        this.items.push({
+                                                                type: "schemantic",
+                                                                editor: new SchemanticEditor()
+                                                        })
+                                                        break
+                                                }
+                                                case "pcb": {
+                                                        this.items.push({
+                                                                type: "pcb",
+                                                                editor: new PCBEditor()
+                                                        })
+                                                        break
+                                                }
+                                                case "part": {
+                                                        this.items.push({
+                                                                type: "part",
+                                                                editor: new PartEditor()
+                                                        })
+                                                        break
+                                                }
+                                                case "assembly": {
+                                                        this.items.push({
+                                                                type: "assembly",
+                                                                editor: new AssemblyEditor()
+                                                        })
+                                                        break
+                                                }
+                                                case "diagram": {
+                                                        this.items.push({
+                                                                type: "diagram",
+                                                                editor: new DiagramEditor()
+                                                        })
+                                                        break
+                                                }
+                                        }
 					this.renderItems()
 				},
 				items: [
-					{ label: "Schemantic", value: "schemantic" },
-					{ label: "PCB", value: "pcb" },
-					{ label: "Part", value: "part" },
-					{ label: "Assembly", value: "assembly" },
-				]
+                                        { label: "Schemantic", value: "schemantic" },
+                                        { label: "PCB", value: "pcb" },
+                                        { label: "Part", value: "part" },
+                                        { label: "Assembly", value: "assembly" },
+                                        { label: "Diagram", value: "diagram" },
+                                ]
 			})
 		})
 		this.root.style.width = "200px"
