@@ -10,6 +10,5 @@
   "dependencies": {
     "@types/jest": "^29.5.14",
     "commander": "^13.1.0",
-    "puppycad": "file:"
   }
 }
