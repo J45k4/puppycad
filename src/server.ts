@@ -9,8 +9,5 @@ Bun.serve({
 	port: 5337,
 	routes: {
 		"/": index,
-		"/project/items": (req) => {
-			return new Response(JSON.stringify(serialized), { status: 200 })
-		}
 	}
 })
