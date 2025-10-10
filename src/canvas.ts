@@ -2,6 +2,25 @@ import { HList, UiComponent, VList } from "./ui"
 
 interface Component { id: number; x: number; y: number; width: number; height: number }
 
+type EdgeName = "left" | "right" | "top" | "bottom"
+
+interface EdgeAnchor {
+	component: Component
+	edge: EdgeName
+	point: { x: number; y: number }
+}
+
+interface ConnectionEndpoint {
+	componentId: number
+	edge: EdgeName
+	ratio: number
+}
+
+interface Connection {
+	from: ConnectionEndpoint
+	to: ConnectionEndpoint
+}
+
 export class EditorCanvas extends UiComponent<HTMLDivElement> {
 	private canvas: HTMLCanvasElement
 	private ctx!: CanvasRenderingContext2D
@@ -12,6 +31,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		{ id: 1, x: 100, y: 50, width: 80, height: 40 },
 		// add more components here
 	]
+	private connections: Connection[] = []
 	private selectedIds: number[] = []
 	private isDraggingGroup = false
 	private groupDragStartX = 0
@@ -22,6 +42,11 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 	private selectStartY = 0
 	private selectCurrentX = 0
 	private selectCurrentY = 0
+	private isConnecting = false
+	private connectionStartAnchor: EdgeAnchor | null = null
+	private connectionPreviewPoint: { x: number; y: number } | null = null
+	private hoveredEdge: EdgeAnchor | null = null
+	private readonly edgeHitPadding = 40
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -69,6 +94,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 				isPanning = true
 				panStartX = event.clientX
 				panStartY = event.clientY
+				this.canvas.style.cursor = "grabbing"
 			}
 		})
 
@@ -88,15 +114,25 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		this.canvas.addEventListener("mouseup", (event) => {
 			if (event.button === 1) {
 				isPanning = false
+				this.canvas.style.cursor = this.hoveredEdge ? "crosshair" : "default"
 			}
 		})
 
 		// Multi-select and group dragging
 		this.canvas.addEventListener("mousedown", (event) => {
 			if (event.button === 0) {
-				const rect = this.canvas.getBoundingClientRect()
-				const wx = (event.clientX - rect.left - this.originX) / this.scale
-				const wy = (event.clientY - rect.top - this.originY) / this.scale
+				console.log("left mouse down")
+				const { wx, wy } = this.worldPointFromEvent(event)
+				const hoverAnchor = this.findHoveredEdge(wx, wy)
+				if (hoverAnchor) {
+					this.isConnecting = true
+					this.connectionStartAnchor = hoverAnchor
+					this.connectionPreviewPoint = hoverAnchor.point
+					this.hoveredEdge = hoverAnchor
+					this.canvas.style.cursor = "crosshair"
+					this.drawScene()
+					return
+				}
 				// Check if clicked on a component
 				const clicked = this.components.find(c => wx >= c.x && wx <= c.x + c.width && wy >= c.y && wy <= c.y + c.height)
 				if (clicked) {
@@ -121,15 +157,34 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 					this.isSelecting = true
 					this.selectStartX = wx; this.selectStartY = wy
 					this.selectCurrentX = wx; this.selectCurrentY = wy
+					this.hoveredEdge = null
+					this.canvas.style.cursor = "default"
 				}
 				this.drawScene()
 			}
 		})
 		this.canvas.addEventListener("mousemove", (event) => {
-			const rect = this.canvas.getBoundingClientRect()
-			const wx = (event.clientX - rect.left - this.originX) / this.scale
-			const wy = (event.clientY - rect.top - this.originY) / this.scale
-			if (this.isDraggingGroup) {
+			if (isPanning) {
+				this.canvas.style.cursor = "grabbing"
+				return
+			}
+			const { wx, wy } = this.worldPointFromEvent(event)
+			const previousHover = this.hoveredEdge
+			const hovered = this.findHoveredEdge(wx, wy)
+			if (this.isConnecting) {
+				const startAnchor = this.connectionStartAnchor
+				const candidateAnchor = hovered ?? this.findNearestEdgeAnchor(wx, wy)
+				const isValidDrop = candidateAnchor && (!startAnchor || candidateAnchor.component.id !== startAnchor.component.id)
+				this.hoveredEdge = isValidDrop ? candidateAnchor : null
+				if (this.hoveredEdge) {
+					this.connectionPreviewPoint = this.hoveredEdge.point
+				} else {
+					this.connectionPreviewPoint = { x: wx, y: wy }
+				}
+				this.canvas.style.cursor = "crosshair"
+				this.drawScene()
+			} else if (this.isDraggingGroup) {
+				this.canvas.style.cursor = "grabbing"
 				const dx = wx - this.groupDragStartX
 				const dy = wy - this.groupDragStartY
 				this.originalPositions.forEach(op => {
@@ -139,12 +194,41 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 				})
 				this.drawScene()
 			} else if (this.isSelecting) {
+				this.canvas.style.cursor = "default"
 				this.selectCurrentX = wx; this.selectCurrentY = wy
 				this.drawScene()
+			} else {
+				this.hoveredEdge = hovered
+				if (hovered) {
+					this.canvas.style.cursor = "crosshair"
+				} else {
+					this.canvas.style.cursor = "default"
+				}
+				if (hovered || previousHover) {
+					this.drawScene()
+				}
 			}
 		})
 		this.canvas.addEventListener("mouseup", (event) => {
 			if (event.button === 0) {
+				const { wx, wy } = this.worldPointFromEvent(event)
+				if (this.isConnecting) {
+					const startAnchor = this.connectionStartAnchor
+					const dropAnchor = this.hoveredEdge ?? this.findNearestEdgeAnchor(wx, wy)
+					this.isConnecting = false
+					this.connectionStartAnchor = null
+					this.connectionPreviewPoint = null
+					if (startAnchor && dropAnchor && dropAnchor.component.id !== startAnchor.component.id) {
+						this.connections.push({
+							from: this.endpointFromAnchor(startAnchor),
+							to: this.endpointFromAnchor(dropAnchor),
+						})
+					}
+					this.hoveredEdge = this.findHoveredEdge(wx, wy)
+					this.canvas.style.cursor = this.hoveredEdge ? "crosshair" : "default"
+					this.drawScene()
+					return
+				}
 				if (this.isDraggingGroup) this.isDraggingGroup = false
 				if (this.isSelecting) {
 					const x1 = Math.min(this.selectStartX, this.selectCurrentX)
@@ -157,11 +241,22 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 					this.isSelecting = false
 				}
 				this.drawScene()
+				if (!this.isConnecting) this.canvas.style.cursor = this.hoveredEdge ? "crosshair" : "default"
 			}
 		})
 
 		this.canvas.addEventListener("mouseleave", () => {
 			isPanning = false
+			if (this.isConnecting) {
+				this.isConnecting = false
+				this.connectionStartAnchor = null
+				this.connectionPreviewPoint = null
+				this.drawScene()
+			}
+			const hadHover = this.hoveredEdge !== null
+			this.hoveredEdge = null
+			if (hadHover) this.drawScene()
+			this.canvas.style.cursor = "default"
 		})
 
 		// Allow dropping new components from sidebar
@@ -222,6 +317,31 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 			this.ctx.restore()
 		}
 
+		// Draw existing connections
+		this.connections.forEach(conn => {
+			const fromPoint = this.pointFromEndpoint(conn.from)
+			const toPoint = this.pointFromEndpoint(conn.to)
+			if (!fromPoint || !toPoint) return
+			this.ctx.strokeStyle = "#444"
+			this.ctx.lineWidth = 2
+			this.ctx.beginPath()
+			this.ctx.moveTo(fromPoint.x, fromPoint.y)
+			this.ctx.lineTo(toPoint.x, toPoint.y)
+			this.ctx.stroke()
+		})
+
+		// Draw preview connection if connecting
+		if (this.isConnecting && this.connectionStartAnchor && this.connectionPreviewPoint) {
+			this.ctx.strokeStyle = "#888"
+			this.ctx.lineWidth = 2
+			this.ctx.setLineDash([4, 4])
+			this.ctx.beginPath()
+			this.ctx.moveTo(this.connectionStartAnchor.point.x, this.connectionStartAnchor.point.y)
+			this.ctx.lineTo(this.connectionPreviewPoint.x, this.connectionPreviewPoint.y)
+			this.ctx.stroke()
+			this.ctx.setLineDash([])
+		}
+
 		// Draw components
 		this.components.forEach(comp => {
 			this.ctx.fillStyle = "white"
@@ -239,7 +359,216 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 			this.ctx.fillText(`R${comp.id}`, comp.x + 10, comp.y + 25)
 		})
 
+		if (this.connectionStartAnchor) {
+			this.drawEdgeHighlight(this.connectionStartAnchor, "#1565c0")
+			this.drawAnchorMarker(this.connectionStartAnchor.point, "#1565c0")
+		}
+		if (this.hoveredEdge) {
+			const color = this.isConnecting ? "#2e7d32" : "#ef6c00"
+			this.drawEdgeHighlight(this.hoveredEdge, color)
+			this.drawAnchorMarker(this.hoveredEdge.point, color)
+		}
+
 		this.ctx.restore()
+	}
+
+	private getEdgeAnchor(component: Component, x: number, y: number, tolerance = this.edgeHitPadding / this.scale): EdgeAnchor | null {
+		const expandedLeft = component.x - tolerance
+		const expandedRight = component.x + component.width + tolerance
+		const expandedTop = component.y - tolerance
+		const expandedBottom = component.y + component.height + tolerance
+		if (x < expandedLeft || x > expandedRight || y < expandedTop || y > expandedBottom) return null
+
+		const { edge, point, distance } = this.computeAnchor(component, x, y)
+		if (distance > tolerance) return null
+		return { component, edge, point }
+	}
+
+	private getNearestEdgeAnchor(component: Component, x: number, y: number): EdgeAnchor {
+		const { edge, point } = this.computeAnchor(component, x, y)
+		return { component, edge, point }
+	}
+
+	private anchorForEdge(
+		component: Component,
+		edge: EdgeName,
+		x: number,
+		y: number,
+	): { x: number; y: number } {
+		switch (edge) {
+			case "left":
+				return { x: component.x, y: this.clamp(y, component.y, component.y + component.height) }
+			case "right":
+				return { x: component.x + component.width, y: this.clamp(y, component.y, component.y + component.height) }
+			case "top":
+				return { x: this.clamp(x, component.x, component.x + component.width), y: component.y }
+			case "bottom":
+				return { x: this.clamp(x, component.x, component.x + component.width), y: component.y + component.height }
+		}
+		return { x: component.x, y: component.y }
+	}
+
+	private clamp(value: number, min: number, max: number) {
+		return Math.max(min, Math.min(max, value))
+	}
+
+	private worldPointFromEvent(event: MouseEvent) {
+		const rect = this.canvas.getBoundingClientRect()
+		const wx = (event.clientX - rect.left - this.originX) / this.scale
+		const wy = (event.clientY - rect.top - this.originY) / this.scale
+		return { wx, wy }
+	}
+
+	private findHoveredEdge(x: number, y: number) {
+		let closest: EdgeAnchor | null = null
+		let closestDistance = Number.POSITIVE_INFINITY
+		const tolerance = this.edgeHitPadding / this.scale
+		for (const component of this.components) {
+			const anchor = this.getEdgeAnchor(component, x, y, tolerance)
+			if (!anchor) continue
+			const distance = this.distanceToAnchor(anchor, x, y)
+			if (distance < closestDistance) {
+				closest = anchor
+				closestDistance = distance
+			}
+		}
+		console.log("Hovered edge:", closest)
+		return closest
+	}
+
+	private findNearestEdgeAnchor(x: number, y: number): EdgeAnchor | null {
+		const insideComponent = this.components.find(component => this.isPointInsideComponent(component, x, y))
+		if (insideComponent) {
+			return this.getNearestEdgeAnchor(insideComponent, x, y)
+		}
+
+		const tolerance = this.edgeHitPadding / this.scale
+		let closest: EdgeAnchor | null = null
+		let closestDistance = Number.POSITIVE_INFINITY
+
+		for (const component of this.components) {
+			const anchor = this.getEdgeAnchor(component, x, y, tolerance)
+			if (!anchor) continue
+			const distance = this.distanceBetweenPoints(anchor.point, { x, y })
+			if (distance < closestDistance) {
+				closest = anchor
+				closestDistance = distance
+			}
+		}
+		return closest
+	}
+
+	private computeAnchor(component: Component, x: number, y: number): { edge: EdgeName; point: { x: number; y: number }; distance: number } {
+		const distances = [
+			{ edge: "left", distance: Math.abs(x - component.x) },
+			{ edge: "right", distance: Math.abs(x - (component.x + component.width)) },
+			{ edge: "top", distance: Math.abs(y - component.y) },
+			{ edge: "bottom", distance: Math.abs(y - (component.y + component.height)) },
+		]
+		const closest = distances.reduce((prev, curr) => (curr.distance < prev.distance ? curr : prev))
+		return {
+			edge: closest.edge as EdgeName,
+			point: this.anchorForEdge(component, closest.edge as EdgeName, x, y),
+			distance: closest.distance,
+		}
+	}
+
+	private drawAnchorMarker(point: { x: number; y: number }, color: string) {
+		this.ctx.save()
+		const radius = 6 / this.scale
+		this.ctx.fillStyle = color
+		this.ctx.strokeStyle = "#ffffff"
+		this.ctx.lineWidth = 2 / this.scale
+		this.ctx.beginPath()
+		this.ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
+		this.ctx.fill()
+		this.ctx.stroke()
+		this.ctx.restore()
+	}
+
+	private drawEdgeHighlight(anchor: EdgeAnchor, color: string) {
+		this.ctx.save()
+		this.ctx.strokeStyle = color
+		this.ctx.lineWidth = 4 / this.scale
+		this.ctx.beginPath()
+		const { component, edge } = anchor
+		switch (edge) {
+			case "left":
+				this.ctx.moveTo(component.x, component.y)
+				this.ctx.lineTo(component.x, component.y + component.height)
+				break
+			case "right":
+				this.ctx.moveTo(component.x + component.width, component.y)
+				this.ctx.lineTo(component.x + component.width, component.y + component.height)
+				break
+			case "top":
+				this.ctx.moveTo(component.x, component.y)
+				this.ctx.lineTo(component.x + component.width, component.y)
+				break
+			case "bottom":
+				this.ctx.moveTo(component.x, component.y + component.height)
+				this.ctx.lineTo(component.x + component.width, component.y + component.height)
+				break
+		}
+		this.ctx.stroke()
+		this.ctx.restore()
+	}
+
+	private distanceToAnchor(anchor: EdgeAnchor, x: number, y: number): number {
+		switch (anchor.edge) {
+			case "left":
+			case "right":
+				return Math.abs(x - anchor.point.x)
+			case "top":
+			case "bottom":
+				return Math.abs(y - anchor.point.y)
+		}
+		return Number.POSITIVE_INFINITY
+	}
+
+	private endpointFromAnchor(anchor: EdgeAnchor): ConnectionEndpoint {
+		const ratio = (anchor.edge === "left" || anchor.edge === "right")
+			? this.safeRatio(anchor.point.y - anchor.component.y, anchor.component.height)
+			: this.safeRatio(anchor.point.x - anchor.component.x, anchor.component.width)
+		return {
+			componentId: anchor.component.id,
+			edge: anchor.edge,
+			ratio: this.clamp(ratio, 0, 1),
+		}
+	}
+
+	private pointFromEndpoint(endpoint: ConnectionEndpoint): { x: number; y: number } | null {
+		const component = this.components.find(c => c.id === endpoint.componentId)
+		if (!component) return null
+		return this.anchorPointForRatio(component, endpoint.edge, endpoint.ratio)
+	}
+
+	private anchorPointForRatio(component: Component, edge: EdgeName, ratio: number) {
+		const clamped = this.clamp(ratio, 0, 1)
+		switch (edge) {
+			case "left":
+				return { x: component.x, y: component.y + component.height * clamped }
+			case "right":
+				return { x: component.x + component.width, y: component.y + component.height * clamped }
+			case "top":
+				return { x: component.x + component.width * clamped, y: component.y }
+			case "bottom":
+				return { x: component.x + component.width * clamped, y: component.y + component.height }
+		}
+		return { x: component.x, y: component.y }
+	}
+
+	private safeRatio(delta: number, size: number) {
+		if (size === 0) return 0
+		return delta / size
+	}
+
+	private distanceBetweenPoints(a: { x: number; y: number }, b: { x: number; y: number }) {
+		return Math.hypot(a.x - b.x, a.y - b.y)
+	}
+
+	private isPointInsideComponent(component: Component, x: number, y: number) {
+		return x >= component.x && x <= component.x + component.width && y >= component.y && y <= component.y + component.height
 	}
 
 	private fitAllClicked() {
