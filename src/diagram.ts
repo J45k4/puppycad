@@ -57,6 +57,19 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
         private readonly boundPointerMove = this.onPointerMove.bind(this)
         private readonly boundPointerUp = this.onPointerUp.bind(this)
         private readonly boundResize = this.updateConnectorPositions.bind(this)
+        private readonly boundPanMove = this.onPanPointerMove.bind(this)
+        private readonly boundPanUp = this.onPanPointerUp.bind(this)
+        private readonly boundWheel = this.onWheel.bind(this)
+        private readonly minZoom = 0.25
+        private readonly maxZoom = 3
+        private panPointerId: number | null = null
+        private panStartClientX = 0
+        private panStartClientY = 0
+        private panStartX = 0
+        private panStartY = 0
+        private panX = 0
+        private panY = 0
+        private zoom = 1
 
         public constructor() {
                 super(document.createElement("div"))
@@ -148,6 +161,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 this.svgLayer.style.width = "100%"
                 this.svgLayer.style.height = "100%"
                 this.svgLayer.style.pointerEvents = "none"
+                this.svgLayer.style.transformOrigin = "0 0"
 
                 this.nodesLayer = document.createElement("div")
                 this.nodesLayer.style.position = "absolute"
@@ -155,6 +169,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 this.nodesLayer.style.left = "0"
                 this.nodesLayer.style.right = "0"
                 this.nodesLayer.style.bottom = "0"
+                this.nodesLayer.style.transformOrigin = "0 0"
 
                 this.canvasArea.appendChild(this.svgLayer)
                 this.canvasArea.appendChild(this.nodesLayer)
@@ -164,6 +179,12 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
                 this.root.appendChild(this.palette.root)
                 this.root.appendChild(this.editorArea)
+
+                this.canvasArea.addEventListener("pointerdown", (event: PointerEvent) => {
+                        if (event.button === 1) {
+                                this.startPan(event)
+                        }
+                })
 
                 this.canvasArea.addEventListener("mousedown", (event) => {
                         if (event.target === this.canvasArea) {
@@ -175,6 +196,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                         }
                 })
 
+                this.canvasArea.addEventListener("wheel", this.boundWheel, { passive: false })
+
+                this.updateCanvasTransform()
                 window.addEventListener("resize", this.boundResize)
         }
 
@@ -185,8 +209,12 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
         private addNode(shape: FlowchartShape) {
                 const config = this.getShapeConfig(shape)
                 const rect = this.canvasArea.getBoundingClientRect()
-                const defaultX = rect.width ? rect.width / 2 - config.width / 2 : 80
-                const defaultY = rect.height ? rect.height / 2 - config.height / 2 : 80
+                const screenCenterX = rect.width ? rect.width / 2 : 80
+                const screenCenterY = rect.height ? rect.height / 2 : 80
+                const worldCenterX = (screenCenterX - this.panX) / this.zoom
+                const worldCenterY = (screenCenterY - this.panY) / this.zoom
+                const defaultX = worldCenterX - config.width / 2
+                const defaultY = worldCenterY - config.height / 2
 
                 const node: FlowchartNode = {
                         id: this.nextNodeId++,
@@ -245,6 +273,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 element.appendChild(node.textElement)
 
                 element.addEventListener("pointerdown", (event: PointerEvent) => {
+                        if (event.button === 1) {
+                                this.startPan(event)
+                                return
+                        }
+                        if (event.button !== 0) {
+                                return
+                        }
                         event.stopPropagation()
                         if (this.connectMode) {
                                 this.handleConnectClick(node)
@@ -252,10 +287,10 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                         }
                         this.selectNode(node.id)
                         element.style.cursor = "grabbing"
-                        const rect = this.canvasArea.getBoundingClientRect()
+                        const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
                         this.draggingNode = node
-                        this.dragOffsetX = event.clientX - rect.left - node.x
-                        this.dragOffsetY = event.clientY - rect.top - node.y
+                        this.dragOffsetX = pointerPosition.x - node.x
+                        this.dragOffsetY = pointerPosition.y - node.y
                         document.addEventListener("pointermove", this.boundPointerMove)
                         document.addEventListener("pointerup", this.boundPointerUp)
                 })
@@ -311,11 +346,84 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 return borderColor
         }
 
+        private screenToWorld(clientX: number, clientY: number) {
+                const rect = this.canvasArea.getBoundingClientRect()
+                const x = (clientX - rect.left - this.panX) / this.zoom
+                const y = (clientY - rect.top - this.panY) / this.zoom
+                return { x, y }
+        }
+
+        private updateCanvasTransform() {
+                const transform = `matrix(${this.zoom}, 0, 0, ${this.zoom}, ${this.panX}, ${this.panY})`
+                this.nodesLayer.style.transform = transform
+                this.svgLayer.style.transform = transform
+                const gridSize = 40 * this.zoom
+                this.canvasArea.style.backgroundSize = `${gridSize}px ${gridSize}px`
+                this.canvasArea.style.backgroundPosition = `${this.panX}px ${this.panY}px`
+        }
+
+        private startPan(event: PointerEvent) {
+                if (this.panPointerId !== null) return
+                this.panPointerId = event.pointerId
+                this.panStartClientX = event.clientX
+                this.panStartClientY = event.clientY
+                this.panStartX = this.panX
+                this.panStartY = this.panY
+                this.canvasArea.style.cursor = "grabbing"
+                document.addEventListener("pointermove", this.boundPanMove)
+                document.addEventListener("pointerup", this.boundPanUp)
+                document.addEventListener("pointercancel", this.boundPanUp)
+                event.preventDefault()
+                event.stopPropagation()
+        }
+
+        private onPanPointerMove(event: PointerEvent) {
+                if (this.panPointerId !== event.pointerId) return
+                const deltaX = event.clientX - this.panStartClientX
+                const deltaY = event.clientY - this.panStartClientY
+                this.panX = this.panStartX + deltaX
+                this.panY = this.panStartY + deltaY
+                this.updateCanvasTransform()
+        }
+
+        private onPanPointerUp(event: PointerEvent) {
+                if (this.panPointerId !== event.pointerId) return
+                document.removeEventListener("pointermove", this.boundPanMove)
+                document.removeEventListener("pointerup", this.boundPanUp)
+                document.removeEventListener("pointercancel", this.boundPanUp)
+                this.canvasArea.style.cursor = ""
+                this.panPointerId = null
+        }
+
+        private onWheel(event: WheelEvent) {
+                const deltaX = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaX * 16 : event.deltaX
+                const deltaY = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY
+                if (event.ctrlKey || event.metaKey) {
+                        event.preventDefault()
+                        const rect = this.canvasArea.getBoundingClientRect()
+                        const screenX = event.clientX - rect.left
+                        const screenY = event.clientY - rect.top
+                        const worldX = (screenX - this.panX) / this.zoom
+                        const worldY = (screenY - this.panY) / this.zoom
+                        const zoomFactor = Math.exp(-deltaY * 0.001)
+                        const newZoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * zoomFactor))
+                        this.zoom = newZoom
+                        this.panX = screenX - worldX * this.zoom
+                        this.panY = screenY - worldY * this.zoom
+                        this.updateCanvasTransform()
+                        return
+                }
+                event.preventDefault()
+                this.panX -= deltaX
+                this.panY -= deltaY
+                this.updateCanvasTransform()
+        }
+
         private onPointerMove(event: PointerEvent) {
                 if (!this.draggingNode) return
-                const rect = this.canvasArea.getBoundingClientRect()
-                const newX = event.clientX - rect.left - this.dragOffsetX
-                const newY = event.clientY - rect.top - this.dragOffsetY
+                const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
+                const newX = pointerPosition.x - this.dragOffsetX
+                const newY = pointerPosition.y - this.dragOffsetY
                 this.setNodePosition(this.draggingNode, newX, newY)
         }
 
@@ -409,6 +517,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 path.setAttribute("stroke", "#475569")
                 path.setAttribute("stroke-width", "3")
                 path.setAttribute("stroke-linecap", "round")
+                path.setAttribute("vector-effect", "non-scaling-stroke")
 
                 const connection: FlowchartConnection = {
                         id: this.nextConnectionId++,
