@@ -106,6 +106,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                         button.onmouseenter = () => button.style.backgroundColor = "#e2e8f0"
                         button.onmouseleave = () => button.style.backgroundColor = "#fff"
                         button.onclick = () => this.addNode(shape)
+                        button.draggable = true
+                        button.addEventListener("dragstart", event => {
+                                if (!event.dataTransfer) return
+                                event.dataTransfer.effectAllowed = "copy"
+                                event.dataTransfer.setData("application/x-flowchart-shape", shape)
+                                event.dataTransfer.setData("text/plain", shape)
+                        })
                         this.palette.add(button)
                 }
 
@@ -162,6 +169,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 this.svgLayer.style.height = "100%"
                 this.svgLayer.style.pointerEvents = "none"
                 this.svgLayer.style.transformOrigin = "0 0"
+                this.svgLayer.style.overflow = "visible"
 
                 this.nodesLayer = document.createElement("div")
                 this.nodesLayer.style.position = "absolute"
@@ -186,6 +194,27 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                         }
                 })
 
+                this.canvasArea.addEventListener("dragover", event => {
+                        if (!event.dataTransfer) return
+                        const hasShapeData = Array.from(event.dataTransfer.types).some(type =>
+                                type === "application/x-flowchart-shape" || type === "text/plain"
+                        )
+                        if (!hasShapeData) return
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = "copy"
+                })
+
+                this.canvasArea.addEventListener("drop", event => {
+                        if (!event.dataTransfer) return
+                        const shapeData =
+                                event.dataTransfer.getData("application/x-flowchart-shape") ||
+                                event.dataTransfer.getData("text/plain")
+                        if (!this.isFlowchartShape(shapeData)) return
+                        event.preventDefault()
+                        const worldPosition = this.screenToWorld(event.clientX, event.clientY)
+                        this.addNode(shapeData, worldPosition)
+                })
+
                 this.canvasArea.addEventListener("mousedown", (event) => {
                         if (event.target === this.canvasArea) {
                                 this.selectNode(null)
@@ -202,17 +231,28 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
                 window.addEventListener("resize", this.boundResize)
         }
 
+        private isFlowchartShape(value: string | null | undefined): value is FlowchartShape {
+                return value === "startEnd" || value === "process" || value === "decision" || value === "inputOutput"
+        }
+
         private getShapeConfig(shape: FlowchartShape): ShapeConfig {
                 return SHAPE_CONFIG[shape]
         }
 
-        private addNode(shape: FlowchartShape) {
+        private addNode(shape: FlowchartShape, worldPosition?: { x: number; y: number }) {
                 const config = this.getShapeConfig(shape)
-                const rect = this.canvasArea.getBoundingClientRect()
-                const screenCenterX = rect.width ? rect.width / 2 : 80
-                const screenCenterY = rect.height ? rect.height / 2 : 80
-                const worldCenterX = (screenCenterX - this.panX) / this.zoom
-                const worldCenterY = (screenCenterY - this.panY) / this.zoom
+                let worldCenterX: number
+                let worldCenterY: number
+                if (worldPosition) {
+                        worldCenterX = worldPosition.x
+                        worldCenterY = worldPosition.y
+                } else {
+                        const rect = this.canvasArea.getBoundingClientRect()
+                        const screenCenterX = rect.width ? rect.width / 2 : 80
+                        const screenCenterY = rect.height ? rect.height / 2 : 80
+                        worldCenterX = (screenCenterX - this.panX) / this.zoom
+                        worldCenterY = (screenCenterY - this.panY) / this.zoom
+                }
                 const defaultX = worldCenterX - config.width / 2
                 const defaultY = worldCenterY - config.height / 2
 
