@@ -44,6 +44,8 @@ type PersistedDiagramState = {
 	nextNodeId?: number
 	nextConnectionId?: number
 	selectedNodeId?: number | null
+	selectedNodeIds?: number[]
+	selectedConnectionId?: number | null
 	connectMode?: boolean
 	panX?: number
 	panY?: number
@@ -55,6 +57,13 @@ type ShapeConfig = {
 	width: number
 	height: number
 	defaultText: string
+}
+
+type ScreenRect = {
+	left: number
+	top: number
+	right: number
+	bottom: number
 }
 
 const SHAPE_CONFIG: Record<FlowchartShape, ShapeConfig> = {
@@ -74,16 +83,25 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	private connections: FlowchartConnection[] = []
 	private nextNodeId = 1
 	private nextConnectionId = 1
-	private selectedNodeId: number | null = null
+	private selectedNodeIds: Set<number> = new Set()
+	private selectedConnectionId: number | null = null
 	private connectMode = false
 	private connectStartNodeId: number | null = null
-	private draggingNode: FlowchartNode | null = null
-	private dragOffsetX = 0
-	private dragOffsetY = 0
+	private draggingNodes: FlowchartNode[] = []
+	private dragStartPointer: { x: number; y: number } | null = null
+	private dragInitialNodePositions: Map<number, { x: number; y: number }> = new Map()
+	private selectionOverlay: HTMLDivElement
+	private selectionRect: HTMLDivElement
+	private isSelecting = false
+	private selectionStartX = 0
+	private selectionStartY = 0
+	private selectionMoved = false
 	private connectButton: HTMLButtonElement
 	private deleteButton: HTMLButtonElement
 	private readonly boundPointerMove = this.onPointerMove.bind(this)
 	private readonly boundPointerUp = this.onPointerUp.bind(this)
+	private readonly boundSelectionMove = this.onSelectionPointerMove.bind(this)
+	private readonly boundSelectionUp = this.onSelectionPointerUp.bind(this)
 	private readonly boundResize = this.updateConnectorPositions.bind(this)
 	private readonly boundPanMove = this.onPanPointerMove.bind(this)
 	private readonly boundPanUp = this.onPanPointerUp.bind(this)
@@ -181,7 +199,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.deleteButton.style.backgroundColor = "#fee2e2"
 		this.deleteButton.style.color = "#b91c1c"
 		this.deleteButton.style.cursor = "pointer"
-		this.deleteButton.onclick = () => this.deleteSelectedNode()
+		this.deleteButton.onclick = () => this.deleteSelection()
 
 		toolbar.append(this.connectButton, this.deleteButton)
 
@@ -202,7 +220,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.svgLayer.style.left = "0"
 		this.svgLayer.style.width = "100%"
 		this.svgLayer.style.height = "100%"
-		this.svgLayer.style.pointerEvents = "none"
+		this.svgLayer.style.pointerEvents = "auto"
 		this.svgLayer.style.transformOrigin = "0 0"
 		this.svgLayer.style.overflow = "visible"
 
@@ -217,6 +235,24 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.canvasArea.appendChild(this.svgLayer)
 		this.canvasArea.appendChild(this.nodesLayer)
 
+		this.selectionOverlay = document.createElement("div")
+		this.selectionOverlay.style.position = "absolute"
+		this.selectionOverlay.style.top = "0"
+		this.selectionOverlay.style.left = "0"
+		this.selectionOverlay.style.right = "0"
+		this.selectionOverlay.style.bottom = "0"
+		this.selectionOverlay.style.pointerEvents = "none"
+		this.selectionOverlay.style.zIndex = "10"
+
+		this.selectionRect = document.createElement("div")
+		this.selectionRect.style.position = "absolute"
+		this.selectionRect.style.border = "1px dashed rgba(37, 99, 235, 0.8)"
+		this.selectionRect.style.backgroundColor = "rgba(37, 99, 235, 0.15)"
+		this.selectionRect.style.display = "none"
+
+		this.selectionOverlay.appendChild(this.selectionRect)
+		this.canvasArea.appendChild(this.selectionOverlay)
+
 		this.editorArea.appendChild(toolbar)
 		this.editorArea.appendChild(this.canvasArea)
 
@@ -226,6 +262,19 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.canvasArea.addEventListener("pointerdown", (event: PointerEvent) => {
 			if (event.button === 1) {
 				this.startPan(event)
+				return
+			}
+			if (event.button !== 0) {
+				return
+			}
+			const target = event.target as HTMLElement | null
+			if (
+				target === this.canvasArea ||
+				target === this.svgLayer ||
+				target === this.selectionOverlay ||
+				target === this.nodesLayer
+			) {
+				this.startSelection(event)
 			}
 		})
 
@@ -252,11 +301,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 		this.canvasArea.addEventListener("mousedown", (event) => {
 			if (event.target === this.canvasArea) {
-				this.selectNode(null)
-				if (this.connectMode && this.connectStartNodeId !== null) {
-					this.connectStartNodeId = null
-					this.updateNodeStyles()
-				}
+				event.preventDefault()
 			}
 		})
 
@@ -363,12 +408,28 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				this.handleConnectClick(node)
 				return
 			}
-			this.selectNode(node.id)
-			element.style.cursor = "grabbing"
+			const wasSelected = this.selectedNodeIds.has(node.id)
+			if (!wasSelected) {
+				this.setSelectedNodes([node.id])
+			} else {
+				this.selectConnection(null, false)
+			}
 			const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
-			this.draggingNode = node
-			this.dragOffsetX = pointerPosition.x - node.x
-			this.dragOffsetY = pointerPosition.y - node.y
+			this.dragStartPointer = pointerPosition
+			this.dragInitialNodePositions.clear()
+			this.draggingNodes = this.nodes.filter(n => this.selectedNodeIds.has(n.id))
+			if (this.draggingNodes.length === 0) {
+				this.draggingNodes = [node]
+			}
+			this.draggingNodes.forEach(dragNode => {
+				this.dragInitialNodePositions.set(dragNode.id, {
+					x: dragNode.x,
+					y: dragNode.y
+				})
+			})
+			this.draggingNodes.forEach(dragNode => {
+				dragNode.element.style.cursor = "grabbing"
+			})
 			document.addEventListener("pointermove", this.boundPointerMove)
 			document.addEventListener("pointerup", this.boundPointerUp)
 		})
@@ -430,6 +491,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		const x = (clientX - rect.left - this.panX) / this.zoom
 		const y = (clientY - rect.top - this.panY) / this.zoom
 		return { x, y }
+	}
+
+	private worldToScreen(x: number, y: number) {
+		return {
+			x: x * this.zoom + this.panX,
+			y: y * this.zoom + this.panY
+		}
 	}
 
 	private updateCanvasTransform() {
@@ -502,40 +570,58 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private onPointerMove(event: PointerEvent) {
-		if (!this.draggingNode) return
-		const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
-		const newX = pointerPosition.x - this.dragOffsetX
-		const newY = pointerPosition.y - this.dragOffsetY
-		this.setNodePosition(this.draggingNode, newX, newY)
-	}
-
-	private onPointerUp() {
-		if (this.draggingNode) {
-			this.draggingNode.element.style.cursor = "grab"
-			this.draggingNode = null
+		if (this.draggingNodes.length === 0 || !this.dragStartPointer) {
+			return
 		}
-		document.removeEventListener("pointermove", this.boundPointerMove)
-		document.removeEventListener("pointerup", this.boundPointerUp)
-	}
-
-	private setNodePosition(node: FlowchartNode, x: number, y: number) {
-		node.x = x
-		node.y = y
-		node.element.style.left = `${x}px`
-		node.element.style.top = `${y}px`
+		const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
+		const deltaX = pointerPosition.x - this.dragStartPointer.x
+		const deltaY = pointerPosition.y - this.dragStartPointer.y
+		this.draggingNodes.forEach(node => {
+			const initial = this.dragInitialNodePositions.get(node.id)
+			if (!initial) {
+				return
+			}
+			this.setNodePosition(node, initial.x + deltaX, initial.y + deltaY, false)
+		})
 		this.updateConnectorPositions()
 		this.schedulePersist()
 	}
 
+	private onPointerUp() {
+		if (this.draggingNodes.length > 0) {
+			this.draggingNodes.forEach(node => {
+				node.element.style.cursor = "grab"
+			})
+			this.draggingNodes = []
+		}
+		this.dragInitialNodePositions.clear()
+		this.dragStartPointer = null
+		document.removeEventListener("pointermove", this.boundPointerMove)
+		document.removeEventListener("pointerup", this.boundPointerUp)
+	}
+
+	private setNodePosition(node: FlowchartNode, x: number, y: number, updateConnections = true) {
+		node.x = x
+		node.y = y
+		node.element.style.left = `${x}px`
+		node.element.style.top = `${y}px`
+		if (updateConnections) {
+			this.updateConnectorPositions()
+			this.schedulePersist()
+		}
+	}
+
 	private selectNode(nodeId: number | null) {
-		this.selectedNodeId = nodeId
-		this.updateNodeStyles()
-		this.schedulePersist()
+		if (nodeId === null) {
+			this.setSelectedNodes([])
+		} else {
+			this.setSelectedNodes([nodeId])
+		}
 	}
 
 	private updateNodeStyles() {
 		this.nodes.forEach(node => {
-			const isSelected = node.id === this.selectedNodeId
+			const isSelected = this.selectedNodeIds.has(node.id)
 			const isConnectStart = node.id === this.connectStartNodeId
 			if (isConnectStart) {
 				node.element.style.borderColor = "#16a34a"
@@ -549,6 +635,153 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			}
 		})
 		this.updateConnectButtonState()
+	}
+
+	private updateConnectionStyles() {
+		this.connections.forEach(connection => {
+			const isSelected = connection.id === this.selectedConnectionId
+			if (isSelected) {
+				connection.path.setAttribute("stroke", "#2563eb")
+				connection.path.setAttribute("stroke-width", "4")
+			} else {
+				connection.path.setAttribute("stroke", "#475569")
+				connection.path.setAttribute("stroke-width", "3")
+				connection.path.removeAttribute("stroke-dasharray")
+			}
+		})
+	}
+
+	private updateSelectionStyles() {
+		this.updateNodeStyles()
+		this.updateConnectionStyles()
+	}
+
+	private setSelectedNodes(nodeIds: Iterable<number>, persist = true) {
+		this.selectedNodeIds = new Set(nodeIds)
+		if (this.selectedConnectionId !== null) {
+			this.selectedConnectionId = null
+		}
+		this.updateSelectionStyles()
+		if (persist) {
+			this.schedulePersist()
+		}
+	}
+
+	private selectConnection(connectionId: number | null, persist = true) {
+		if (connectionId !== null) {
+			this.selectedNodeIds.clear()
+		}
+		this.selectedConnectionId = connectionId
+		this.updateSelectionStyles()
+		if (persist) {
+			this.schedulePersist()
+		}
+	}
+
+	private clearSelection(persist = true) {
+		this.selectedNodeIds.clear()
+		this.selectedConnectionId = null
+		this.updateSelectionStyles()
+		if (persist) {
+			this.schedulePersist()
+		}
+	}
+
+	private startSelection(event: PointerEvent) {
+		if (this.isSelecting) {
+			return
+		}
+		event.preventDefault()
+		const rect = this.canvasArea.getBoundingClientRect()
+		this.isSelecting = true
+		this.selectionMoved = false
+		this.selectionStartX = event.clientX - rect.left
+		this.selectionStartY = event.clientY - rect.top
+		this.selectionRect.style.display = "block"
+		this.updateSelectionRect(this.selectionStartX, this.selectionStartY, this.selectionStartX, this.selectionStartY)
+		this.setSelectedNodes([], false)
+		this.selectConnection(null, false)
+		if (this.connectMode && this.connectStartNodeId !== null) {
+			this.connectStartNodeId = null
+			this.updateNodeStyles()
+		}
+		document.addEventListener("pointermove", this.boundSelectionMove)
+		document.addEventListener("pointerup", this.boundSelectionUp)
+	}
+
+	private onSelectionPointerMove(event: PointerEvent) {
+		if (!this.isSelecting) {
+			return
+		}
+		const rect = this.canvasArea.getBoundingClientRect()
+		const currentX = event.clientX - rect.left
+		const currentY = event.clientY - rect.top
+		const deltaX = Math.abs(currentX - this.selectionStartX)
+		const deltaY = Math.abs(currentY - this.selectionStartY)
+		if (deltaX > 2 || deltaY > 2) {
+			this.selectionMoved = true
+		}
+		this.updateSelectionRect(this.selectionStartX, this.selectionStartY, currentX, currentY)
+		const selectionRect = this.getSelectionRect(this.selectionStartX, this.selectionStartY, currentX, currentY)
+		this.updateSelectionFromRect(selectionRect, false)
+	}
+
+	private onSelectionPointerUp() {
+		if (!this.isSelecting) {
+			return
+		}
+		document.removeEventListener("pointermove", this.boundSelectionMove)
+		document.removeEventListener("pointerup", this.boundSelectionUp)
+		this.isSelecting = false
+		this.selectionRect.style.display = "none"
+		if (this.selectionMoved) {
+			this.schedulePersist()
+		} else {
+			this.clearSelection()
+		}
+	}
+
+	private updateSelectionRect(startX: number, startY: number, currentX: number, currentY: number) {
+		const selectionRect = this.getSelectionRect(startX, startY, currentX, currentY)
+		this.selectionRect.style.left = `${selectionRect.left}px`
+		this.selectionRect.style.top = `${selectionRect.top}px`
+		this.selectionRect.style.width = `${selectionRect.right - selectionRect.left}px`
+		this.selectionRect.style.height = `${selectionRect.bottom - selectionRect.top}px`
+	}
+
+	private getSelectionRect(startX: number, startY: number, currentX: number, currentY: number): ScreenRect {
+		const left = Math.min(startX, currentX)
+		const top = Math.min(startY, currentY)
+		const right = Math.max(startX, currentX)
+		const bottom = Math.max(startY, currentY)
+		return { left, top, right, bottom }
+	}
+
+	private updateSelectionFromRect(rect: ScreenRect, persist = true) {
+		const selectedIds: number[] = []
+		this.nodes.forEach(node => {
+			const bounds = this.getNodeScreenBounds(node)
+			if (this.rectanglesIntersect(rect, bounds)) {
+				selectedIds.push(node.id)
+			}
+		})
+		this.setSelectedNodes(selectedIds, persist)
+	}
+
+	private getNodeScreenBounds(node: FlowchartNode): ScreenRect {
+		const topLeft = this.worldToScreen(node.x, node.y)
+		const width = node.width * this.zoom
+		const height = node.height * this.zoom
+		return {
+			left: topLeft.x,
+			top: topLeft.y,
+			right: topLeft.x + width,
+			bottom: topLeft.y + height
+		}
+	}
+
+	private rectanglesIntersect(a: ScreenRect, b: ScreenRect) {
+		return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top
 	}
 
 	private handleConnectClick(node: FlowchartNode) {
@@ -633,6 +866,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		path.setAttribute("stroke-width", "3")
 		path.setAttribute("stroke-linecap", "round")
 		path.setAttribute("vector-effect", "non-scaling-stroke")
+		path.style.cursor = "pointer"
 
 		const connection: FlowchartConnection = {
 			id: args.id,
@@ -641,7 +875,20 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			path
 		}
 
+		path.addEventListener("pointerdown", (event: PointerEvent) => {
+			if (event.button === 1) {
+				this.startPan(event)
+				return
+			}
+			if (event.button !== 0) {
+				return
+			}
+			event.stopPropagation()
+			this.selectConnection(connection.id)
+		})
+
 		this.svgLayer.appendChild(path)
+		this.updateConnectionStyles()
 		return connection
 	}
 
@@ -664,24 +911,42 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		return { x, y }
 	}
 
-	private deleteSelectedNode() {
-		if (this.selectedNodeId === null) return
-		const index = this.nodes.findIndex(node => node.id === this.selectedNodeId)
-		if (index === -1) return
-		const [node] = this.nodes.splice(index, 1)
-		if (!node) return
-		node.element.remove()
-		this.connections = this.connections.filter(connection => {
-			if (connection.from === node.id || connection.to === node.id) {
-				connection.path.remove()
-				return false
+	private deleteSelection() {
+		if (this.selectedNodeIds.size > 0) {
+			const idsToDelete = new Set(this.selectedNodeIds)
+			const remainingNodes: FlowchartNode[] = []
+			this.nodes.forEach(node => {
+				if (idsToDelete.has(node.id)) {
+					node.element.remove()
+				} else {
+					remainingNodes.push(node)
+				}
+			})
+			this.nodes = remainingNodes
+			this.connections = this.connections.filter(connection => {
+				if (idsToDelete.has(connection.from) || idsToDelete.has(connection.to)) {
+					connection.path.remove()
+					return false
+				}
+				return true
+			})
+			this.clearSelection(false)
+			this.updateConnectorPositions()
+			this.schedulePersist()
+			return
+		}
+		if (this.selectedConnectionId !== null) {
+			const index = this.connections.findIndex(connection => connection.id === this.selectedConnectionId)
+			if (index !== -1) {
+				const [connection] = this.connections.splice(index, 1)
+				if (connection) {
+					connection.path.remove()
+				}
 			}
-			return true
-		})
-		this.selectedNodeId = null
-		this.updateNodeStyles()
-		this.updateConnectorPositions()
-		this.schedulePersist()
+			this.selectedConnectionId = null
+			this.updateSelectionStyles()
+			this.schedulePersist()
+		}
 	}
 
 	private schedulePersist() {
@@ -702,6 +967,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			const db = await this.getDatabase()
 			const transaction = db.transaction(DiagramEditor.STORE_NAME, "readwrite")
 			const store = transaction.objectStore(DiagramEditor.STORE_NAME)
+			const selectedNodeIdsArray = Array.from(this.selectedNodeIds)
 			const state: PersistedDiagramState = {
 				nodes: this.nodes.map(node => ({
 					id: node.id,
@@ -719,7 +985,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				})),
 				nextNodeId: this.nextNodeId,
 				nextConnectionId: this.nextConnectionId,
-				selectedNodeId: this.selectedNodeId,
+				selectedNodeId: selectedNodeIdsArray[0] ?? null,
+				selectedNodeIds: selectedNodeIdsArray,
+				selectedConnectionId: this.selectedConnectionId,
 				connectMode: this.connectMode,
 				panX: this.panX,
 				panY: this.panY,
@@ -778,7 +1046,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			})
 			this.nextNodeId = Math.max(result.nextNodeId ?? 0, maxNodeId + 1)
 			this.nextConnectionId = Math.max(result.nextConnectionId ?? 0, maxConnectionId + 1)
-			this.selectedNodeId = result.selectedNodeId ?? null
+			const restoredSelectedNodes = result.selectedNodeIds ?? (
+				result.selectedNodeId !== undefined && result.selectedNodeId !== null
+					? [result.selectedNodeId]
+					: []
+			)
+			this.selectedNodeIds = new Set(restoredSelectedNodes)
+			this.selectedConnectionId = result.selectedConnectionId ?? null
 			this.connectMode = result.connectMode ?? false
 			this.connectStartNodeId = null
 			this.panX = result.panX ?? 0
@@ -786,7 +1060,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			const persistedZoom = result.zoom ?? 1
 			this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, persistedZoom))
 			this.updateCanvasTransform()
-			this.updateNodeStyles()
+			this.updateSelectionStyles()
 			this.updateConnectorPositions()
 		} catch (error) {
 			console.error("Failed to load diagram state", error)
