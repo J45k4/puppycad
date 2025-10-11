@@ -123,6 +123,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	private static readonly STORE_NAME = "diagramState"
 	private static readonly STORE_KEY = "current"
 	private static readonly PERSIST_DEBOUNCE_MS = 200
+	private static readonly CONNECTION_STROKE_COLOR = "#475569"
+	private static readonly SELECTED_CONNECTION_STROKE_COLOR = "#2563eb"
+	private static readonly SELECTED_CONNECTION_GLOW = "drop-shadow(0 0 6px rgba(37, 99, 235, 0.45))"
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -231,6 +234,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.nodesLayer.style.right = "0"
 		this.nodesLayer.style.bottom = "0"
 		this.nodesLayer.style.transformOrigin = "0 0"
+		this.nodesLayer.style.pointerEvents = "none"
 
 		this.canvasArea.appendChild(this.svgLayer)
 		this.canvasArea.appendChild(this.nodesLayer)
@@ -380,6 +384,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		element.style.cursor = "grab"
 		element.style.userSelect = "none"
 		element.style.transition = "box-shadow 0.1s ease, border-color 0.1s ease"
+		element.style.pointerEvents = "auto"
 
 		const baseBorderColor = this.applyShapeStyle(element, node.type)
 		node.baseBorderColor = baseBorderColor
@@ -641,11 +646,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.connections.forEach(connection => {
 			const isSelected = connection.id === this.selectedConnectionId
 			if (isSelected) {
-				connection.path.setAttribute("stroke", "#2563eb")
-				connection.path.setAttribute("stroke-width", "4")
+				connection.path.style.stroke = DiagramEditor.SELECTED_CONNECTION_STROKE_COLOR
+				connection.path.style.strokeWidth = "4px"
+				connection.path.style.filter = DiagramEditor.SELECTED_CONNECTION_GLOW
 			} else {
-				connection.path.setAttribute("stroke", "#475569")
-				connection.path.setAttribute("stroke-width", "3")
+				connection.path.style.stroke = DiagramEditor.CONNECTION_STROKE_COLOR
+				connection.path.style.strokeWidth = "3px"
+				connection.path.style.filter = "none"
 				connection.path.removeAttribute("stroke-dasharray")
 			}
 		})
@@ -862,11 +869,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}): FlowchartConnection {
 		const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
 		path.setAttribute("fill", "none")
-		path.setAttribute("stroke", "#475569")
-		path.setAttribute("stroke-width", "3")
 		path.setAttribute("stroke-linecap", "round")
 		path.setAttribute("vector-effect", "non-scaling-stroke")
 		path.style.cursor = "pointer"
+		path.style.stroke = DiagramEditor.CONNECTION_STROKE_COLOR
+		path.style.strokeWidth = "3px"
+		path.style.transition = "stroke 120ms ease, stroke-width 120ms ease, filter 120ms ease"
+		path.style.pointerEvents = "stroke"
 
 		const connection: FlowchartConnection = {
 			id: args.id,
