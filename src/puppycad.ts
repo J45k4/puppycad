@@ -3,19 +3,38 @@
 
 export type UUID = string
 
+type NamedReference = { id: UUID; name: string }
+type SchematicReference = NamedReference & {
+	nets?: NamedReference[]
+	components?: NamedReference[]
+}
+
 export abstract class Entity {
 	readonly id: UUID
 	name: string
 	metadata: Record<string, unknown> = {}
+	transform?: Transform
 
-	protected constructor(name: string = "Entity") {
-		this.id = crypto.randomUUID()
+	protected constructor(name = "Entity", id: UUID = crypto.randomUUID()) {
+		this.id = id
 		this.name = name
 	}
 
-	public visit(cb: (obj: Entity) => void, visited: Set<Entity>): void {}
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()): void {
+		if (visited.has(this)) {
+			return
+		}
+		visited.add(this)
+		cb(this)
+	}
 
-	public serialize(): any {}
+	public serialize(): { type: string; [key: string]: unknown } {
+		return {
+			type: "entity",
+			id: this.id,
+			name: this.name
+		}
+	}
 
 	public equal(other: Entity): boolean {
 		return this.id === other.id
@@ -27,7 +46,7 @@ export class Vec3 {
 	y: number
 	z: number
 
-	constructor(x: number = 0, y: number = 0, z: number = 0) {
+	constructor(x = 0, y = 0, z = 0) {
 		this.x = x
 		this.y = y
 		this.z = z
@@ -38,7 +57,7 @@ export class Vec2 {
 	x: number
 	y: number
 
-	constructor(x: number = 0, y: number = 0) {
+	constructor(x = 0, y = 0) {
 		this.x = x
 		this.y = y
 	}
@@ -80,7 +99,7 @@ export enum PadShape {
 
 /** Represents a single pad in a footprint */
 export type Pad = {
-	type: "smd" | "through"
+	type?: "smd" | "through"
 	pin: Pin
 	x: number // mm, relative to footprint origin
 	y: number // mm, relative to footprint origin
@@ -111,7 +130,7 @@ export interface FootprintSpec {
 /** Represents an electronic component footprint */
 export class Footprint extends Entity {
 	public points: Vec2[] = []
-	public lineWidth: number = 0
+	public lineWidth = 0
 	public referenceOrigin: Vec2
 	public pads: Pad[] = []
 
@@ -133,8 +152,13 @@ export class Footprint extends Entity {
 		// stub or implement as needed
 	}
 
-	public serialize(): any {
-		// stub or implement as needed
+	public serialize(): { type: string; [key: string]: unknown } {
+		return {
+			...super.serialize(),
+			lineWidth: this.lineWidth,
+			referenceOrigin: this.referenceOrigin,
+			pads: this.pads.map((pad) => pad.pin.id)
+		}
 	}
 }
 
@@ -149,20 +173,19 @@ export class RotationalMotion implements Motion {
 		public angularVelocity: number
 	) {}
 	step(dt: number) {
+		const transform = this.entity.transform
+		if (!transform) {
+			return
+		}
 		const angle = this.angularVelocity * dt
 		const half = angle / 2
 		const [ax, ay, az] = [this.axis.x, this.axis.y, this.axis.z]
-		const sinH = Math.sin(half),
-			cosH = Math.cos(half)
+		const sinH = Math.sin(half)
+		const cosH = Math.cos(half)
 		const dq: [number, number, number, number] = [ax * sinH, ay * sinH, az * sinH, cosH]
-		const [qx, qy, qz, qw] = this.entity.transform.rotation
+		const [qx, qy, qz, qw] = transform.rotation
 		const [rx, ry, rz, rw] = dq
-		this.entity.transform.rotation = [
-			rw * qx + rx * qw + ry * qz - rz * qy,
-			rw * qy - rx * qz + ry * qw + rz * qx,
-			rw * qz + rx * qy - ry * qx + rz * qw,
-			rw * qw - rx * qx - ry * qy - rz * qz
-		]
+		transform.rotation = [rw * qx + rx * qw + ry * qz - rz * qy, rw * qy - rx * qz + ry * qw + rz * qx, rw * qz + rx * qy - ry * qx + rz * qw, rw * qw - rx * qx - ry * qy - rz * qz]
 	}
 }
 export class SimEngine {
@@ -171,7 +194,9 @@ export class SimEngine {
 		this.motions.push(m)
 	}
 	step(dt: number) {
-		this.motions.forEach((m) => m.step(dt))
+		for (const motion of this.motions) {
+			motion.step(dt)
+		}
 	}
 }
 
@@ -304,15 +329,17 @@ export class BlockInstance extends Group {
 	template: BlockTemplate
 	portMap: Map<UUID, Port> = new Map()
 
-	constructor(template: BlockTemplate, name: string = `${template.name}_inst`) {
+	constructor(template: BlockTemplate, name = `${template.name}_inst`) {
 		super(name)
 		this.template = template
-		template.children.forEach((c) => this.addChild(structuredClone(c)))
-		template.ports.forEach((p) => {
-			const cp = structuredClone(p) as Port
-			this.portMap.set(p.id, cp)
-			this.addChild(cp)
-		})
+		for (const child of template.children) {
+			this.addChild(structuredClone(child))
+		}
+		for (const port of template.ports) {
+			const clonedPort = structuredClone(port) as Port
+			this.portMap.set(port.id, clonedPort)
+			this.addChild(clonedPort)
+		}
 	}
 }
 
@@ -330,27 +357,23 @@ export class Rectangle {}
 export class Line {}
 
 export class Edge {
-	start: Vec3
-	end: Vec3
-	type: "line" | "arc" | "circle" | "spline"
+	start: Vec3 = new Vec3()
+	end: Vec3 = new Vec3()
+	type: "line" | "arc" | "circle" | "spline" = "line"
 }
 
 export class Face {
-	edges: Edge[]
+	edges: Edge[] = []
 }
 
 export class Feature {}
 
 export class Sketch extends Entity {
 	// TODO: 2‑D curve definitions (lines, arcs, splines)
-	extrusionDepth: number = 0
-	direction: { x: number; y: number; z: number }
-	operation: "add" | "cut" | "intersect" // boolean operation type
+	extrusionDepth = 0
+	direction: { x: number; y: number; z: number } = { x: 0, y: 0, z: 1 }
+	operation: "add" | "cut" | "intersect" = "add" // boolean operation type
 	features: Feature[] = []
-
-	constructor(name: string) {
-		super(name)
-	}
 }
 
 export class Body extends Entity {
@@ -393,44 +416,98 @@ export class Assembly extends Group {
 // }
 
 export class Pin extends Entity {
-	public constructor(name: string) {
-		super(name)
+	public component?: Component
+
+	public constructor(name = "Pin", id?: UUID) {
+		super(name, id)
 	}
 
 	public serialize() {
 		return {
 			type: "pin",
 			id: this.id,
-			name: this.name
+			name: this.name,
+			componentId: this.component?.id ?? null
 		}
 	}
 
 	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
-		if (visited.has(this)) return
-		visited.add(this)
-		cb(this)
+		super.visit(cb, visited)
 	}
 
-	public static parse(obj: any): Pin {
-		const pin = new Pin(obj.name)
-		return pin
+	public static parse(obj: NamedReference): Pin {
+		return new Pin(obj.name, obj.id)
+	}
+}
+
+export class Component extends Entity {
+	public pins: Pin[]
+
+	public constructor(name: string, id?: UUID) {
+		super(name, id)
+		this.pins = []
+	}
+
+	public addPin(pin: Pin) {
+		if (pin.component && pin.component !== this) {
+			pin.component.removePin(pin)
+		}
+		if (!this.pins.includes(pin)) {
+			this.pins.push(pin)
+		}
+		pin.component = this
+	}
+
+	public removePin(pin: Pin) {
+		const index = this.pins.indexOf(pin)
+		if (index !== -1) {
+			this.pins.splice(index, 1)
+		}
+		if (pin.component === this) {
+			pin.component = undefined
+		}
+	}
+
+	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
+		if (visited.has(this)) {
+			return
+		}
+		super.visit(cb, visited)
+		for (const pin of this.pins) {
+			pin.visit(cb, visited)
+		}
+	}
+
+	public serialize() {
+		return {
+			type: "component",
+			id: this.id,
+			name: this.name,
+			pins: this.pins.map((pin) => pin.id)
+		}
+	}
+
+	public static parse(obj: NamedReference): Component {
+		return new Component(obj.name, obj.id)
 	}
 }
 
 export class Net extends Entity {
-	pins: Pin[] = []
-	constructor(name: string) {
-		super(name)
+	public pins: Pin[]
+
+	public constructor(name: string, id?: UUID) {
+		super(name, id)
+		this.pins = []
 	}
 
 	public connect(pin: Pin) {
-		this.pins.push(pin)
+		if (!this.pins.includes(pin)) {
+			this.pins.push(pin)
+		}
 	}
 
-	public static parse(obj: any): Net {
-		const net = new Net(obj.name)
-
-		return net
+	public static parse(obj: NamedReference): Net {
+		return new Net(obj.name, obj.id)
 	}
 
 	public serialize() {
@@ -443,9 +520,10 @@ export class Net extends Entity {
 	}
 
 	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
-		if (visited.has(this)) return
-		visited.add(this)
-		cb(this)
+		if (visited.has(this)) {
+			return
+		}
+		super.visit(cb, visited)
 		for (const pin of this.pins) {
 			pin.visit(cb, visited)
 		}
@@ -454,41 +532,63 @@ export class Net extends Entity {
 
 export class Schematic extends Entity {
 	public nets: Net[] = []
-	public constructor(args: {
-		name: string
-		nets: Net[]
-	}) {
-		super(args.name)
-		this.nets = args.nets
+	public components: Component[] = []
+
+	public constructor(
+		args: {
+			name?: string
+			nets?: Net[]
+			components?: Component[]
+		},
+		id?: UUID
+	) {
+		super(args.name ?? "Schematic", id)
+		this.nets = args.nets ?? []
+		this.components = args.components ?? []
+	}
+
+	public addNet(net: Net) {
+		if (!this.nets.includes(net)) {
+			this.nets.push(net)
+		}
+	}
+
+	public addComponent(component: Component) {
+		if (!this.components.includes(component)) {
+			this.components.push(component)
+		}
 	}
 
 	public serialize() {
 		return {
 			type: "schematic",
+			id: this.id,
 			name: this.name,
-			nets: this.nets.map((net) => net.id)
+			nets: this.nets.map((net) => net.id),
+			components: this.components.map((component) => component.id)
 		}
 	}
 
-	public static parse(obj: any): Schematic {
-		const schematic = new Schematic({
-			name: obj.name,
-			nets: []
-		})
-		for (const net of obj.nets) {
-			schematic.nets.push(Net.parse(net))
-		}
-		return schematic
+	public static parse(obj: SchematicReference): Schematic {
+		return new Schematic(
+			{
+				name: obj.name,
+				nets: [],
+				components: []
+			},
+			obj.id
+		)
 	}
 
 	public visit(cb: (obj: Entity) => void, visited: Set<Entity> = new Set()) {
-		if (visited.has(this)) return
-		visited.add(this)
-		cb(this)
+		if (visited.has(this)) {
+			return
+		}
+		super.visit(cb, visited)
 		for (const net of this.nets) {
 			net.visit(cb, visited)
 		}
-		for (const component of this.nets) {
+		for (const component of this.components) {
 			component.visit(cb, visited)
 		}
 	}
@@ -549,13 +649,13 @@ export class Layer extends Entity {
 		type: "copper" | "dielectric" | "soldermask" | "silkscreen" | "fabrication" | "drill" | "keepout"
 		material?: LayerMaterial
 		thickness?: number
-		traces: Trace[]
+		traces?: Trace[]
 	}) {
 		super(args.name)
 		this.type = args.type
 		this.material = args.material
 		this.thickness = args.thickness
-		this.traces = args.traces
+		this.traces = args.traces ?? []
 	}
 }
 
@@ -578,23 +678,55 @@ export class Via extends Entity {
 
 export class PCB extends Entity {
 	private thickness: number
+	public material?: LayerMaterial
 	public layers: Layer[] = []
 	public topFootprints: Footprint[] = []
 	public bottomFootprints: Footprint[] = []
 	public vias: Via[] = []
+	public components: Entity[] = []
+	public nets: Net[] = []
 
-	constructor(args: {
-		name: string
-		thickness: number
-	}) {
-		super(args.name)
+	constructor(
+		args: {
+			name: string
+			thickness: number
+			material?: LayerMaterial
+		},
+		id?: UUID
+	) {
+		super(args.name, id)
 		this.thickness = args.thickness
+		this.material = args.material
+	}
+
+	public addLayer(layer: Layer | LayerDefinition) {
+		const nextLayer = layer instanceof Layer ? layer : new Layer({ ...layer })
+		this.layers.push(nextLayer)
+		return nextLayer
+	}
+
+	public addComponent(component: Entity) {
+		if (!this.components.includes(component)) {
+			this.components.push(component)
+		}
+	}
+
+	public addNet(net: Net) {
+		if (!this.nets.includes(net)) {
+			this.nets.push(net)
+		}
 	}
 
 	public serialize() {
 		return {
 			type: "pcb",
-			name: this.name
+			id: this.id,
+			name: this.name,
+			thickness: this.thickness,
+			material: this.material,
+			layers: this.layers.map((layer) => layer.id),
+			nets: this.nets.map((net) => net.id),
+			components: this.components.map((component) => component.id)
 		}
 	}
 }
@@ -642,9 +774,11 @@ export class Plane {}
 export class Path {}
 
 export class Profile {
-	points: Vec3[] = []
+	public points: Vec3[]
 
-	public constructor(points: number[][]) {}
+	public constructor(points: number[][]) {
+		this.points = points.map(([x, y, z]) => new Vec3(x, y, z))
+	}
 }
 
 export class Solid {
@@ -657,6 +791,13 @@ export class Solid {
 	public sweep(path: Path) {}
 }
 
-export class LinePath {
-	public constructor(start: Vec3, end: Vec3) {}
+export class LinePath extends Path {
+	public start: Vec3
+	public end: Vec3
+
+	public constructor(start: Vec3, end: Vec3) {
+		super()
+		this.start = start
+		this.end = end
+	}
 }

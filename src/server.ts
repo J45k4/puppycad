@@ -1,8 +1,6 @@
-import { promises as fs } from "fs"
-import { pathToFileURL } from "url"
-import path from "path"
-import index from "./index.html"
-import { Entity, Schematic } from "./puppycad"
+import index from "./web/index.html"
+
+console.log("Starting server on http://localhost:5337")
 
 Bun.serve({
 	port: 5337,

@@ -373,8 +373,14 @@ export interface IRPatch {
  * Type Guards (optional helpers)
  * ========================= */
 
-export const isFeature = (x: any): x is Feature => !!x && typeof x.op === "string" && typeof x.id === "string"
-export const isSketch = (x: any): x is Sketch => isFeature(x) && x.op === "Sketch"
-export const isExtrude = (x: any): x is Extrude => isFeature(x) && x.op === "Extrude"
-export const isRevolve = (x: any): x is Revolve => isFeature(x) && x.op === "Revolve"
-export const isSweep = (x: any): x is Sweep => isFeature(x) && x.op === "Sweep"
+export const isFeature = (value: unknown): value is Feature => {
+	if (typeof value !== "object" || value === null) {
+		return false
+	}
+	const feature = value as Partial<Feature>
+	return typeof feature.op === "string" && typeof feature.id === "string"
+}
+export const isSketch = (value: unknown): value is Sketch => isFeature(value) && value.op === "Sketch"
+export const isExtrude = (value: unknown): value is Extrude => isFeature(value) && value.op === "Extrude"
+export const isRevolve = (value: unknown): value is Revolve => isFeature(value) && value.op === "Revolve"
+export const isSweep = (value: unknown): value is Sweep => isFeature(value) && value.op === "Sweep"

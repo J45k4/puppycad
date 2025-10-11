@@ -1,3 +1,4 @@
+import { it } from "bun:test"
 import { Component, Net, Pin, Schematic } from "./puppycad"
 
 class Resistor extends Component {

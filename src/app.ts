@@ -2,7 +2,10 @@ import { ProjectView } from "./project"
 import { Container } from "./ui"
 
 window.onload = () => {
-	const body = document.querySelector("body")!
+	const body = document.body
+	if (!body) {
+		throw new Error("document.body is not available")
+	}
 	// body.style.display = "flex"
 	// body.style.flexDirection = "column"
 
