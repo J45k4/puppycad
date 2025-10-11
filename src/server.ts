@@ -1,4 +1,4 @@
-import index from "./web/index.html"
+import index from "./index.html"
 
 console.log("Starting server on http://localhost:5337")
 
