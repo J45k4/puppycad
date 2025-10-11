@@ -3,13 +3,19 @@
 
 export type UUID = string
 
+type NamedReference = { id: UUID; name: string }
+type SchematicReference = NamedReference & {
+	nets?: NamedReference[]
+	components?: NamedReference[]
+}
+
 export abstract class Entity {
 	readonly id: UUID
 	name: string
 	metadata: Record<string, unknown> = {}
 	transform?: Transform
 
-	protected constructor(name: string = "Entity", id: UUID = crypto.randomUUID()) {
+	protected constructor(name = "Entity", id: UUID = crypto.randomUUID()) {
 		this.id = id
 		this.name = name
 	}
@@ -40,7 +46,7 @@ export class Vec3 {
 	y: number
 	z: number
 
-	constructor(x: number = 0, y: number = 0, z: number = 0) {
+	constructor(x = 0, y = 0, z = 0) {
 		this.x = x
 		this.y = y
 		this.z = z
@@ -51,7 +57,7 @@ export class Vec2 {
 	x: number
 	y: number
 
-	constructor(x: number = 0, y: number = 0) {
+	constructor(x = 0, y = 0) {
 		this.x = x
 		this.y = y
 	}
@@ -124,7 +130,7 @@ export interface FootprintSpec {
 /** Represents an electronic component footprint */
 export class Footprint extends Entity {
 	public points: Vec2[] = []
-	public lineWidth: number = 0
+	public lineWidth = 0
 	public referenceOrigin: Vec2
 	public pads: Pad[] = []
 
@@ -146,8 +152,13 @@ export class Footprint extends Entity {
 		// stub or implement as needed
 	}
 
-	public serialize(): any {
-		// stub or implement as needed
+	public serialize(): { type: string; [key: string]: unknown } {
+		return {
+			...super.serialize(),
+			lineWidth: this.lineWidth,
+			referenceOrigin: this.referenceOrigin,
+			pads: this.pads.map((pad) => pad.pin.id)
+		}
 	}
 }
 
@@ -169,8 +180,8 @@ export class RotationalMotion implements Motion {
 		const angle = this.angularVelocity * dt
 		const half = angle / 2
 		const [ax, ay, az] = [this.axis.x, this.axis.y, this.axis.z]
-		const sinH = Math.sin(half),
-			cosH = Math.cos(half)
+		const sinH = Math.sin(half)
+		const cosH = Math.cos(half)
 		const dq: [number, number, number, number] = [ax * sinH, ay * sinH, az * sinH, cosH]
 		const [qx, qy, qz, qw] = transform.rotation
 		const [rx, ry, rz, rw] = dq
@@ -183,7 +194,9 @@ export class SimEngine {
 		this.motions.push(m)
 	}
 	step(dt: number) {
-		this.motions.forEach((m) => m.step(dt))
+		for (const motion of this.motions) {
+			motion.step(dt)
+		}
 	}
 }
 
@@ -316,15 +329,17 @@ export class BlockInstance extends Group {
 	template: BlockTemplate
 	portMap: Map<UUID, Port> = new Map()
 
-	constructor(template: BlockTemplate, name: string = `${template.name}_inst`) {
+	constructor(template: BlockTemplate, name = `${template.name}_inst`) {
 		super(name)
 		this.template = template
-		template.children.forEach((c) => this.addChild(structuredClone(c)))
-		template.ports.forEach((p) => {
-			const cp = structuredClone(p) as Port
-			this.portMap.set(p.id, cp)
-			this.addChild(cp)
-		})
+		for (const child of template.children) {
+			this.addChild(structuredClone(child))
+		}
+		for (const port of template.ports) {
+			const clonedPort = structuredClone(port) as Port
+			this.portMap.set(port.id, clonedPort)
+			this.addChild(clonedPort)
+		}
 	}
 }
 
@@ -355,14 +370,10 @@ export class Feature {}
 
 export class Sketch extends Entity {
 	// TODO: 2‑D curve definitions (lines, arcs, splines)
-	extrusionDepth: number = 0
+	extrusionDepth = 0
 	direction: { x: number; y: number; z: number } = { x: 0, y: 0, z: 1 }
 	operation: "add" | "cut" | "intersect" = "add" // boolean operation type
 	features: Feature[] = []
-
-	constructor(name: string) {
-		super(name)
-	}
 }
 
 export class Body extends Entity {
@@ -407,7 +418,7 @@ export class Assembly extends Group {
 export class Pin extends Entity {
 	public component?: Component
 
-	public constructor(name: string = "Pin", id?: UUID) {
+	public constructor(name = "Pin", id?: UUID) {
 		super(name, id)
 	}
 
@@ -424,16 +435,17 @@ export class Pin extends Entity {
 		super.visit(cb, visited)
 	}
 
-	public static parse(obj: any): Pin {
+	public static parse(obj: NamedReference): Pin {
 		return new Pin(obj.name, obj.id)
 	}
 }
 
 export class Component extends Entity {
-	public pins: Pin[] = []
+	public pins: Pin[]
 
 	public constructor(name: string, id?: UUID) {
 		super(name, id)
+		this.pins = []
 	}
 
 	public addPin(pin: Pin) {
@@ -475,15 +487,17 @@ export class Component extends Entity {
 		}
 	}
 
-	public static parse(obj: any): Component {
+	public static parse(obj: NamedReference): Component {
 		return new Component(obj.name, obj.id)
 	}
 }
 
 export class Net extends Entity {
-	public pins: Pin[] = []
+	public pins: Pin[]
+
 	public constructor(name: string, id?: UUID) {
 		super(name, id)
+		this.pins = []
 	}
 
 	public connect(pin: Pin) {
@@ -492,7 +506,7 @@ export class Net extends Entity {
 		}
 	}
 
-	public static parse(obj: any): Net {
+	public static parse(obj: NamedReference): Net {
 		return new Net(obj.name, obj.id)
 	}
 
@@ -555,7 +569,7 @@ export class Schematic extends Entity {
 		}
 	}
 
-	public static parse(obj: any): Schematic {
+	public static parse(obj: SchematicReference): Schematic {
 		return new Schematic(
 			{
 				name: obj.name,
@@ -760,9 +774,11 @@ export class Plane {}
 export class Path {}
 
 export class Profile {
-	points: Vec3[] = []
+	public points: Vec3[]
 
-	public constructor(points: number[][]) {}
+	public constructor(points: number[][]) {
+		this.points = points.map(([x, y, z]) => new Vec3(x, y, z))
+	}
 }
 
 export class Solid {
@@ -775,6 +791,13 @@ export class Solid {
 	public sweep(path: Path) {}
 }
 
-export class LinePath {
-	public constructor(start: Vec3, end: Vec3) {}
+export class LinePath extends Path {
+	public start: Vec3
+	public end: Vec3
+
+	public constructor(start: Vec3, end: Vec3) {
+		super()
+		this.start = start
+		this.end = end
+	}
 }

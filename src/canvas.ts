@@ -65,14 +65,14 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		topButtonRow.add(fitButton)
 		this.root.appendChild(topButtonRow.root)
 
-	this.canvas = document.createElement("canvas")
-	this.canvas.width = 800
-	this.canvas.height = 600
-	const context = this.canvas.getContext("2d")
-	if (!context) {
-		throw new Error("Unable to acquire 2D drawing context")
-	}
-	this.ctx = context
+		this.canvas = document.createElement("canvas")
+		this.canvas.width = 800
+		this.canvas.height = 600
+		const context = this.canvas.getContext("2d")
+		if (!context) {
+			throw new Error("Unable to acquire 2D drawing context")
+		}
+		this.ctx = context
 
 		// Append canvas into the layout
 		const middle = new HList()
@@ -154,17 +154,17 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 						if (!this.selectedIds.includes(clicked.id)) this.selectedIds = [clicked.id]
 					}
 					// Start group drag
-				this.isDraggingGroup = true
-				this.groupDragStartX = wx
-				this.groupDragStartY = wy
-				const positions: { id: number; x: number; y: number }[] = []
-				for (const id of this.selectedIds) {
-					const comp = this.components.find((c) => c.id === id)
-					if (comp) {
-						positions.push({ id, x: comp.x, y: comp.y })
+					this.isDraggingGroup = true
+					this.groupDragStartX = wx
+					this.groupDragStartY = wy
+					const positions: { id: number; x: number; y: number }[] = []
+					for (const id of this.selectedIds) {
+						const comp = this.components.find((c) => c.id === id)
+						if (comp) {
+							positions.push({ id, x: comp.x, y: comp.y })
+						}
 					}
-				}
-				this.originalPositions = positions
+					this.originalPositions = positions
 				} else {
 					// Start selection rectangle
 					this.selectedIds = []
@@ -203,11 +203,14 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 				this.canvas.style.cursor = "grabbing"
 				const dx = wx - this.groupDragStartX
 				const dy = wy - this.groupDragStartY
-				this.originalPositions.forEach((op) => {
-					const comp = this.components.find((c) => c.id === op.id)!
+				for (const op of this.originalPositions) {
+					const comp = this.components.find((c) => c.id === op.id)
+					if (!comp) {
+						continue
+					}
 					comp.x = op.x + dx
 					comp.y = op.y + dy
-				})
+				}
 				this.drawScene()
 			} else if (this.isSelecting) {
 				this.canvas.style.cursor = "default"
@@ -280,7 +283,10 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		})
 		this.canvas.addEventListener("drop", (event) => {
 			event.preventDefault()
-			const type = event.dataTransfer!.getData("component")
+			const type = event.dataTransfer?.getData("component")
+			if (!type) {
+				return
+			}
 			const rect = this.canvas.getBoundingClientRect()
 			const wx = (event.clientX - rect.left - this.originX) / this.scale
 			const wy = (event.clientY - rect.top - this.originY) / this.scale
@@ -333,17 +339,19 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		}
 
 		// Draw existing connections
-		this.connections.forEach((conn) => {
+		for (const conn of this.connections) {
 			const fromPoint = this.pointFromEndpoint(conn.from)
 			const toPoint = this.pointFromEndpoint(conn.to)
-			if (!fromPoint || !toPoint) return
+			if (!fromPoint || !toPoint) {
+				continue
+			}
 			this.ctx.strokeStyle = "#444"
 			this.ctx.lineWidth = 2
 			this.ctx.beginPath()
 			this.ctx.moveTo(fromPoint.x, fromPoint.y)
 			this.ctx.lineTo(toPoint.x, toPoint.y)
 			this.ctx.stroke()
-		})
+		}
 
 		// Draw preview connection if connecting
 		if (this.isConnecting && this.connectionStartAnchor && this.connectionPreviewPoint) {
@@ -358,7 +366,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		}
 
 		// Draw components
-		this.components.forEach((comp) => {
+		for (const comp of this.components) {
 			this.ctx.fillStyle = "white"
 			this.ctx.strokeStyle = "black"
 			this.ctx.lineWidth = 2
@@ -372,7 +380,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 			this.ctx.font = "16px Arial"
 			this.ctx.fillStyle = "black"
 			this.ctx.fillText(`R${comp.id}`, comp.x + 10, comp.y + 25)
-		})
+		}
 
 		if (this.connectionStartAnchor) {
 			this.drawEdgeHighlight(this.connectionStartAnchor, "#1565c0")
@@ -606,10 +614,10 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		const ys = this.components.map((c) => c.y)
 		const xsMax = this.components.map((c) => c.x + c.width)
 		const ysMax = this.components.map((c) => c.y + c.height)
-		const minX = Math.min(...xs),
-			maxX = Math.max(...xsMax)
-		const minY = Math.min(...ys),
-			maxY = Math.max(...ysMax)
+		const minX = Math.min(...xs)
+		const maxX = Math.max(...xsMax)
+		const minY = Math.min(...ys)
+		const maxY = Math.max(...ysMax)
 		const bboxWidth = maxX - minX
 		const bboxHeight = maxY - minY
 		const bboxCenterX = minX + bboxWidth / 2

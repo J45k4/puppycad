@@ -7,10 +7,6 @@ export class UiComponent<T> {
 }
 
 export class Container extends UiComponent<HTMLElement> {
-	constructor(root: HTMLElement) {
-		super(root)
-	}
-
 	public add(...components: UiComponent<HTMLElement>[]) {
 		this.root.append(...components.map((c) => c.root))
 	}
@@ -78,12 +74,12 @@ export class Select extends UiComponent<HTMLSelectElement> {
 		options: SelectOption[]
 	}) {
 		super(document.createElement("select"))
-		args.options.forEach((option) => {
+		for (const option of args.options) {
 			const optionEl = document.createElement("option")
 			optionEl.value = option.value
 			optionEl.textContent = option.text
 			this.root.appendChild(optionEl)
-		})
+		}
 		this.root.value = args.value || ""
 	}
 
@@ -231,9 +227,9 @@ export class MultiCheckboxSelect extends UiComponent<HTMLDivElement> {
 	}
 
 	public set onChange(callback: () => void) {
-		this.checkboxes.forEach((checkbox) => {
+		for (const checkbox of this.checkboxes) {
 			checkbox.onchange = callback
-		})
+		}
 	}
 }
 
@@ -264,11 +260,11 @@ export class InfiniteScroll extends UiComponent<HTMLElement> {
 			threshold: 0.1
 		}
 		this.observer = new IntersectionObserver((entries: IntersectionObserverEntry[]) => {
-			entries.forEach((entry: IntersectionObserverEntry) => {
+			for (const entry of entries) {
 				if (!this.isLoading && entry.isIntersecting) {
 					this.loadMore()
 				}
-			})
+			}
 		}, options)
 		this.observer.observe(this.sentinel)
 	}
@@ -539,6 +535,7 @@ export class ItemList<T> extends UiComponent<HTMLDivElement> {
 		this.root.style.flexDirection = "column"
 		this.root.style.gap = "5px"
 
+		const onClick = args.onClick
 		for (const item of args.items) {
 			const container = document.createElement("div")
 			container.className = "itemlistItem"
@@ -557,9 +554,9 @@ export class ItemList<T> extends UiComponent<HTMLDivElement> {
 			// 	value.appendChild(link)
 			// }
 
-			if (args.onClick) {
+			if (onClick) {
 				container.style.cursor = "pointer"
-				container.onclick = () => args.onClick!(item.value)
+				container.onclick = () => onClick(item.value)
 			}
 
 			container.appendChild(label)
@@ -628,20 +625,25 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 			childrenContainer = document.createElement("div")
 			childrenContainer.style.display = "flex"
 			childrenContainer.style.flexDirection = "column"
-			item.children.forEach((child) => {
-				childrenContainer!.appendChild(this.createNode(child, level + 1))
-			})
+			for (const child of item.children) {
+				childrenContainer.appendChild(this.createNode(child, level + 1))
+			}
 			container.appendChild(childrenContainer)
 
 			header.onclick = (e: MouseEvent) => {
 				e.stopPropagation()
-				const isVisible = childrenContainer!.style.display !== "none"
-				childrenContainer!.style.display = isVisible ? "none" : "flex"
+				const targetContainer = childrenContainer
+				if (!targetContainer) {
+					return
+				}
+				const isVisible = targetContainer.style.display !== "none"
+				targetContainer.style.display = isVisible ? "none" : "flex"
 				if (toggleIcon) toggleIcon.textContent = isVisible ? "▸" : "▾"
 				if (this.onClick) this.onClick(item.value)
 			}
 		} else if (this.onClick) {
-			header.onclick = () => this.onClick!(item.value)
+			const onClick = this.onClick
+			header.onclick = () => onClick(item.value)
 		}
 
 		return container
@@ -653,9 +655,9 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 		// Clear existing nodes
 		this.root.innerHTML = ""
 		// Render new tree nodes
-		items.forEach((item) => {
+		for (const item of items) {
 			this.root.appendChild(this.createNode(item, 0))
-		})
+		}
 	}
 
 	public setSelected(value: T): void {

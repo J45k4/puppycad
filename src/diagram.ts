@@ -163,8 +163,12 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			button.style.border = "1px solid #94a3b8"
 			button.style.backgroundColor = "#fff"
 			button.style.cursor = "pointer"
-			button.onmouseenter = () => (button.style.backgroundColor = "#e2e8f0")
-			button.onmouseleave = () => (button.style.backgroundColor = "#fff")
+			button.onmouseenter = () => {
+				button.style.backgroundColor = "#e2e8f0"
+			}
+			button.onmouseleave = () => {
+				button.style.backgroundColor = "#fff"
+			}
 			button.onclick = () => this.addNode(shape)
 			button.draggable = true
 			button.addEventListener("dragstart", (event) => {

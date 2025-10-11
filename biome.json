@@ -5,6 +5,7 @@
 		"indentWidth": 8,
 		"indentStyle": "tab"
 	},
+	"files": {},
 	"javascript": {
 		"formatter": {
 			"quoteStyle": "double",

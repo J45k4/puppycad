@@ -1,3 +1,4 @@
+import { it } from "bun:test"
 import { Profile, LinePath, Solid, Vec3 } from "./puppycad.ts"
 
 it("box part", () => {
