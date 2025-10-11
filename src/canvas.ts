@@ -65,10 +65,14 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		topButtonRow.add(fitButton)
 		this.root.appendChild(topButtonRow.root)
 
-		this.canvas = document.createElement("canvas")
-		this.canvas.width = 800
-		this.canvas.height = 600
-		this.ctx = this.canvas.getContext("2d")!
+	this.canvas = document.createElement("canvas")
+	this.canvas.width = 800
+	this.canvas.height = 600
+	const context = this.canvas.getContext("2d")
+	if (!context) {
+		throw new Error("Unable to acquire 2D drawing context")
+	}
+	this.ctx = context
 
 		// Append canvas into the layout
 		const middle = new HList()
@@ -150,13 +154,17 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 						if (!this.selectedIds.includes(clicked.id)) this.selectedIds = [clicked.id]
 					}
 					// Start group drag
-					this.isDraggingGroup = true
-					this.groupDragStartX = wx
-					this.groupDragStartY = wy
-					this.originalPositions = this.selectedIds.map((id) => {
-						const comp = this.components.find((c) => c.id === id)!
-						return { id, x: comp.x, y: comp.y }
-					})
+				this.isDraggingGroup = true
+				this.groupDragStartX = wx
+				this.groupDragStartY = wy
+				const positions: { id: number; x: number; y: number }[] = []
+				for (const id of this.selectedIds) {
+					const comp = this.components.find((c) => c.id === id)
+					if (comp) {
+						positions.push({ id, x: comp.x, y: comp.y })
+					}
+				}
+				this.originalPositions = positions
 				} else {
 					// Start selection rectangle
 					this.selectedIds = []

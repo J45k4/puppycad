@@ -275,7 +275,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			if (event.button !== 0) {
 				return
 			}
-			const target = event.target as HTMLElement | null
+			const target = event.target as EventTarget | null
 			if (target === this.canvasArea || target === this.svgLayer || target === this.selectionOverlay || target === this.nodesLayer) {
 				this.startSelection(event)
 			}
@@ -430,15 +430,15 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			if (this.draggingNodes.length === 0) {
 				this.draggingNodes = [node]
 			}
-			this.draggingNodes.forEach((dragNode) => {
+			for (const dragNode of this.draggingNodes) {
 				this.dragInitialNodePositions.set(dragNode.id, {
 					x: dragNode.x,
 					y: dragNode.y
 				})
-			})
-			this.draggingNodes.forEach((dragNode) => {
+			}
+			for (const dragNode of this.draggingNodes) {
 				dragNode.element.style.cursor = "grabbing"
-			})
+			}
 			document.addEventListener("pointermove", this.boundPointerMove)
 			document.addEventListener("pointerup", this.boundPointerUp)
 		})
@@ -619,22 +619,22 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
 		const deltaX = pointerPosition.x - this.dragStartPointer.x
 		const deltaY = pointerPosition.y - this.dragStartPointer.y
-		this.draggingNodes.forEach((node) => {
+		for (const node of this.draggingNodes) {
 			const initial = this.dragInitialNodePositions.get(node.id)
 			if (!initial) {
 				return
 			}
 			this.setNodePosition(node, initial.x + deltaX, initial.y + deltaY, false)
-		})
+		}
 		this.updateConnectorPositions()
 		this.schedulePersist()
 	}
 
 	private onPointerUp() {
 		if (this.draggingNodes.length > 0) {
-			this.draggingNodes.forEach((node) => {
+			for (const node of this.draggingNodes) {
 				node.element.style.cursor = "grab"
-			})
+			}
 			this.draggingNodes = []
 		}
 		this.dragInitialNodePositions.clear()
@@ -663,7 +663,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateNodeStyles() {
-		this.nodes.forEach((node) => {
+		for (const node of this.nodes) {
 			const isSelected = this.selectedNodeIds.has(node.id)
 			const isConnectStart = node.id === this.connectStartNodeId
 			if (isConnectStart) {
@@ -676,12 +676,12 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				node.element.style.borderColor = node.baseBorderColor
 				node.element.style.boxShadow = "0 1px 4px rgba(15, 23, 42, 0.15)"
 			}
-		})
+		}
 		this.updateConnectButtonState()
 	}
 
 	private updateConnectionStyles() {
-		this.connections.forEach((connection) => {
+		for (const connection of this.connections) {
 			const isSelected = connection.id === this.selectedConnectionId
 			if (isSelected) {
 				connection.path.style.stroke = DiagramEditor.SELECTED_CONNECTION_STROKE_COLOR
@@ -693,7 +693,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				connection.path.style.filter = "none"
 				connection.path.removeAttribute("stroke-dasharray")
 			}
-		})
+		}
 	}
 
 	private updateSelectionStyles() {
@@ -804,12 +804,12 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 	private updateSelectionFromRect(rect: ScreenRect, persist = true) {
 		const selectedIds: number[] = []
-		this.nodes.forEach((node) => {
+		for (const node of this.nodes) {
 			const bounds = this.getNodeScreenBounds(node)
 			if (this.rectanglesIntersect(rect, bounds)) {
 				selectedIds.push(node.id)
 			}
-		})
+		}
 		this.setSelectedNodes(selectedIds, persist)
 	}
 
@@ -940,7 +940,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateConnectorPositions() {
-		this.connections.forEach((connection) => {
+		for (const connection of this.connections) {
 			const fromNode = this.nodes.find((node) => node.id === connection.from)
 			const toNode = this.nodes.find((node) => node.id === connection.to)
 			if (!fromNode || !toNode) return
@@ -949,7 +949,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			const midX = (fromPoint.x + toPoint.x) / 2
 			const pathData = `M ${fromPoint.x} ${fromPoint.y} L ${midX} ${fromPoint.y} L ${midX} ${toPoint.y} L ${toPoint.x} ${toPoint.y}`
 			connection.path.setAttribute("d", pathData)
-		})
+		}
 	}
 
 	private getNodeConnectionPoint(node: FlowchartNode, position: "top" | "bottom") {
@@ -962,13 +962,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		if (this.selectedNodeIds.size > 0) {
 			const idsToDelete = new Set(this.selectedNodeIds)
 			const remainingNodes: FlowchartNode[] = []
-			this.nodes.forEach((node) => {
+			for (const node of this.nodes) {
 				if (idsToDelete.has(node.id)) {
 					node.element.remove()
 				} else {
 					remainingNodes.push(node)
 				}
-			})
+			}
 			this.nodes = remainingNodes
 			this.connections = this.connections.filter((connection) => {
 				if (idsToDelete.has(connection.from) || idsToDelete.has(connection.to)) {
@@ -1072,17 +1072,17 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			this.nodes = []
 			this.connections = []
 			let maxNodeId = 0
-			result.nodes.forEach((nodeData) => {
+			for (const nodeData of result.nodes) {
 				const node = this.createNodeFromPersisted(nodeData)
 				this.nodes.push(node)
 				this.nodesLayer.appendChild(node.element)
 				if (node.id > maxNodeId) {
 					maxNodeId = node.id
 				}
-			})
+			}
 			let maxConnectionId = 0
 			const connections = result.connections ?? []
-			connections.forEach((connectionData) => {
+			for (const connectionData of connections) {
 				const connection = this.createConnectionFromPersisted(connectionData)
 				if (connection) {
 					this.connections.push(connection)
@@ -1090,7 +1090,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 						maxConnectionId = connection.id
 					}
 				}
-			})
+			}
 			this.nextNodeId = Math.max(result.nextNodeId ?? 0, maxNodeId + 1)
 			this.nextConnectionId = Math.max(result.nextConnectionId ?? 0, maxConnectionId + 1)
 			const restoredSelectedNodes = result.selectedNodeIds ?? (result.selectedNodeId !== undefined && result.selectedNodeId !== null ? [result.selectedNodeId] : [])

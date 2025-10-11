@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { Command } from "commander"
-import path from "path"
-import fs from "fs"
+import fs from "node:fs"
+import path from "node:path"
 import { createServer } from "./server"
 
 const program = new Command()
@@ -18,8 +18,12 @@ program.command("serve <folderPath>")
 			console.error(`Error: ${fullPath} is not a valid directory.`)
 			process.exit(1)
 		}
-		const port = parseInt(options.port, 10)
-		createServer(fullPath)
+		const port = Number.parseInt(options.port, 10)
+		if (Number.isNaN(port)) {
+			console.error(`Error: ${options.port} is not a valid port.`)
+			process.exit(1)
+		}
+		createServer(fullPath, port)
 	})
 
 program.parse(process.argv)

@@ -13,15 +13,19 @@ class ComponentList extends UiComponent<HTMLDivElement> {
 			{ type: "capacitor", label: "Capacitor" },
 			{ type: "ic", label: "IC" }
 		]
-		items.forEach((item) => {
+		for (const item of items) {
 			const el = document.createElement("div")
 			el.textContent = item.label
 			el.draggable = true
 			el.addEventListener("dragstart", (event) => {
-				event.dataTransfer!.setData("component", item.type)
+				const dataTransfer = event.dataTransfer
+				if (!dataTransfer) {
+					return
+				}
+				dataTransfer.setData("component", item.type)
 			})
 			this.root.appendChild(el)
-		})
+		}
 	}
 }
 
