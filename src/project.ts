@@ -1,5 +1,5 @@
 import { AssemblyEditor } from "./assembly"
-import { DiagramEditor } from "./diagram"
+import { createDiagramEditor } from "./diagram"
 import { PartEditor } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor } from "./schemantic"
@@ -30,6 +30,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private databasePromise: Promise<IDBDatabase> | null = null
 	private persistTimeout: number | null = null
 	private isRestoring = false
+	private persistenceEnabled = typeof indexedDB !== "undefined"
 	private static readonly DATABASE_NAME = "puppycad-project"
 	private static readonly STORE_NAME = "projectState"
 	private static readonly STORE_KEY = "items"
@@ -73,7 +74,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			onClick: (item) => this.handleItemSelection(item)
 		})
 		this.root.appendChild(this.itemsListContainer.root)
-		void this.loadFromIndexedDB()
+		if (this.persistenceEnabled) {
+			void this.loadFromIndexedDB()
+		}
 	}
 
 	private renderItems() {
@@ -130,13 +133,13 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			case "assembly":
 				return { type, editor: new AssemblyEditor() }
 			case "diagram":
-				return { type, editor: new DiagramEditor() }
+				return { type, editor: createDiagramEditor() }
 		}
 		throw new Error(`Unsupported project item type: ${type}`)
 	}
 
 	private schedulePersist() {
-		if (this.isRestoring) {
+		if (this.isRestoring || !this.persistenceEnabled) {
 			return
 		}
 		if (this.persistTimeout !== null) {
@@ -149,6 +152,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private async saveToIndexedDB() {
+		if (!this.persistenceEnabled) {
+			return
+		}
 		try {
 			const db = await this.getDatabase()
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
@@ -160,15 +166,18 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			store.put(state, ProjectTreeView.STORE_KEY)
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
-				transaction.onerror = () => reject(transaction.error)
-				transaction.onabort = () => reject(transaction.error)
+				transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
+				transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"))
 			})
 		} catch (error) {
-			console.error("Failed to save project items", error)
+			this.handlePersistenceError("Failed to save project items", error)
 		}
 	}
 
 	private async loadFromIndexedDB() {
+		if (!this.persistenceEnabled) {
+			return
+		}
 		try {
 			const db = await this.getDatabase()
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readonly")
@@ -177,8 +186,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			const result = await this.promisifyRequest<PersistedProjectState | undefined>(request)
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
-				transaction.onerror = () => reject(transaction.error)
-				transaction.onabort = () => reject(transaction.error)
+				transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
+				transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"))
 			})
 			if (!result) {
 				return
@@ -196,7 +205,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				}
 			}
 		} catch (error) {
-			console.error("Failed to load project items", error)
+			this.handlePersistenceError("Failed to load project items", error)
 		} finally {
 			this.isRestoring = false
 		}
@@ -210,6 +219,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private getDatabase(): Promise<IDBDatabase> {
+		if (!this.persistenceEnabled) {
+			return Promise.reject(new Error("IndexedDB persistence disabled"))
+		}
 		if (!this.databasePromise) {
 			this.databasePromise = new Promise((resolve, reject) => {
 				const request = indexedDB.open(ProjectTreeView.DATABASE_NAME, 1)
@@ -224,6 +236,19 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			})
 		}
 		return this.databasePromise
+	}
+
+	private handlePersistenceError(message: string, error: unknown) {
+		console.error(message, error)
+		if (!this.persistenceEnabled) {
+			return
+		}
+		this.persistenceEnabled = false
+		this.databasePromise = null
+		if (this.persistTimeout !== null) {
+			window.clearTimeout(this.persistTimeout)
+			this.persistTimeout = null
+		}
 	}
 }
 

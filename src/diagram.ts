@@ -1740,3 +1740,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		return this.databasePromise
 	}
 }
+
+export function createDiagramEditor(): DiagramEditor {
+	return new DiagramEditor()
+}
