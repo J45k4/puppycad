@@ -1,21 +1,21 @@
 {
-  "name": "puppycad",
-  "private": true,
-  "scripts": {
-    "lint": "bunx biome lint .",
-    "format": "bunx biome format .",
-	"check": "tsc --noEmit",
-	"test": "bun test"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@biomejs/biome": "^1.8.3"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "@types/jest": "^29.5.14",
-    "commander": "^13.1.0"
-  }
+	"name": "puppycad",
+	"private": true,
+	"scripts": {
+		"lint": "bunx biome lint .",
+		"format": "bunx biome format .",
+		"check": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@biomejs/biome": "^1.8.3"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"@types/jest": "^29.5.14",
+		"commander": "^13.1.0"
+	}
 }
