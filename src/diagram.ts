@@ -136,6 +136,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	private readonly boundPanMove = this.onPanPointerMove.bind(this)
 	private readonly boundPanUp = this.onPanPointerUp.bind(this)
 	private readonly boundWheel = this.onWheel.bind(this)
+	private readonly boundKeyDown = this.onKeyDown.bind(this)
 	private readonly minZoom = 0.25
 	private readonly maxZoom = 3
 	private panPointerId: number | null = null
@@ -349,6 +350,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 		this.updateCanvasTransform()
 		window.addEventListener("resize", this.boundResize)
+		document.addEventListener("keydown", this.boundKeyDown)
 
 		void this.loadFromIndexedDB()
 	}
@@ -369,10 +371,6 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 	private isEntityShape(shape: FlowchartShape): boolean {
 		return shape === "entity"
-	}
-
-	private isEntityShape(shape: FlowchartShape): boolean {
-		return shape === "entity" || shape === "associativeEntity"
 	}
 
 	private getShapeConfig(shape: FlowchartShape): ShapeConfig {
@@ -1508,6 +1506,34 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		const x = node.x + node.width / 2
 		const y = position === "top" ? node.y : node.y + node.height
 		return { x, y }
+	}
+
+	private onKeyDown(event: KeyboardEvent) {
+		if (event.key !== "Backspace") {
+			return
+		}
+		if (this.isEditableTarget(event.target)) {
+			return
+		}
+		if (this.selectedNodeIds.size === 0 && this.selectedConnectionId === null) {
+			return
+		}
+		event.preventDefault()
+		this.deleteSelection()
+	}
+
+	private isEditableTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) {
+			return false
+		}
+		if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+			return true
+		}
+		if (target.isContentEditable) {
+			return true
+		}
+		const editableAncestor = target.closest("[contenteditable]")
+		return editableAncestor instanceof HTMLElement && editableAncestor.isContentEditable
 	}
 
 	private deleteSelection() {
