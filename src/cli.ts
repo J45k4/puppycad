@@ -7,13 +7,9 @@ import { createServer } from "./server"
 
 const program = new Command()
 
-program
-	.name("puppycad")
-	.description("PuppyCAD command-line interface")
-	.version("0.1.0")
+program.name("puppycad").description("PuppyCAD command-line interface").version("0.1.0")
 
-program
-	.command("serve <folderPath>")
+program.command("serve <folderPath>")
 	.description("Serve static files from the specified folder")
 	.option("-p, --port <port>", "Port to listen on", "3000")
 	.action((folderPath: string, options: { port: string }) => {

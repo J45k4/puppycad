@@ -1,7 +1,6 @@
 import { puppybotSchematic } from "../examples/puppybot"
 import { deserialize, serialize } from "../src/serilization"
 
-
 it("Serializes and deserializes a PuppyBot", () => {
 	const map = serialize(puppybotSchematic)
 	//console.log("map", map)

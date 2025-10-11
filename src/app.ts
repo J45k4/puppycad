@@ -1,4 +1,3 @@
-
 import { ProjectView } from "./project"
 import { Container } from "./ui"
 
@@ -16,33 +15,32 @@ window.onload = () => {
 	// const schemanticEditor = new SchemanticEditor()
 	// container.add(schemanticEditor)
 
-
 	// // Create layout container with canvas and sidebar
 	// const container = document.createElement("div")
 	// container.style.display = "flex"
 	// document.body.appendChild(container)
 
-    // // Project view panel
-    // const projectView = document.createElement("div")
-    // projectView.style.width = "200px"
-    // projectView.style.marginRight = "10px"
-    // projectView.style.display = "flex"
-    // projectView.style.flexDirection = "column"
-    // projectView.style.gap = "8px"
-    // const projects = [
-    //     { id: "schematic1", label: "Schematic Design" },
-    //     { id: "mechanical1", label: "Mechanical Design" }
-    // ]
-    // projects.forEach(proj => {
-    //     const btn = document.createElement("button")
-    //     btn.textContent = proj.label
-    //     btn.addEventListener("click", () => {
-    //         console.log("Load project", proj.id)
-    //         // TODO: implement project loading logic
-    //     })
-    //     projectView.appendChild(btn)
-    // })
-    // container.appendChild(projectView)
+	// // Project view panel
+	// const projectView = document.createElement("div")
+	// projectView.style.width = "200px"
+	// projectView.style.marginRight = "10px"
+	// projectView.style.display = "flex"
+	// projectView.style.flexDirection = "column"
+	// projectView.style.gap = "8px"
+	// const projects = [
+	//     { id: "schematic1", label: "Schematic Design" },
+	//     { id: "mechanical1", label: "Mechanical Design" }
+	// ]
+	// projects.forEach(proj => {
+	//     const btn = document.createElement("button")
+	//     btn.textContent = proj.label
+	//     btn.addEventListener("click", () => {
+	//         console.log("Load project", proj.id)
+	//         // TODO: implement project loading logic
+	//     })
+	//     projectView.appendChild(btn)
+	// })
+	// container.appendChild(projectView)
 
 	// // Canvas area
 	// const canvas = document.createElement("canvas")

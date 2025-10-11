@@ -1,166 +1,412 @@
 import { Schematic, Net, Pin, PCB, Entity, Footprint, PadShape, Vec2 } from "../src/puppycad"
 
 export class BatteryPack extends Entity {
-    public readonly plus12V = new Pin("plus12V")
-    public readonly GND = new Pin("GND")
-    public readonly footprint: Footprint
-    constructor() {
-        super("BatteryPack")
-        this.footprint = new Footprint({
-            name: "BatteryPack_Conn2",
-            pads: [
-                { pin: this.plus12V, x: -1.5, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.GND,      x:  1.5, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-2.0, -1.0),
-                new Vec2( 2.0, -1.0),
-                new Vec2( 2.0,  1.0),
-                new Vec2(-2.0,  1.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	public readonly plus12V = new Pin("plus12V")
+	public readonly GND = new Pin("GND")
+	public readonly footprint: Footprint
+	constructor() {
+		super("BatteryPack")
+		this.footprint = new Footprint({
+			name: "BatteryPack_Conn2",
+			pads: [
+				{
+					pin: this.plus12V,
+					x: -1.5,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.GND,
+					x: 1.5,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-2.0, -1.0), new Vec2(2.0, -1.0), new Vec2(2.0, 1.0), new Vec2(-2.0, 1.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class PPTCFuse extends Entity {
-    public readonly IN = new Pin("IN")
-    public readonly OUT = new Pin("OUT")
-    public readonly footprint: Footprint
-    constructor() {
-        super("PPTCFuse")
-        this.footprint = new Footprint({
-            name: "PPTCFuse_SMD_2",
-            pads: [
-                { pin: this.IN,  x: -1.0, y: 0.0, width: 1.0, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.OUT, x:  1.0, y: 0.0, width: 1.0, height: 1.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-1.5, -1.0),
-                new Vec2( 1.5, -1.0),
-                new Vec2( 1.5,  1.0),
-                new Vec2(-1.5,  1.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	public readonly IN = new Pin("IN")
+	public readonly OUT = new Pin("OUT")
+	public readonly footprint: Footprint
+	constructor() {
+		super("PPTCFuse")
+		this.footprint = new Footprint({
+			name: "PPTCFuse_SMD_2",
+			pads: [
+				{
+					pin: this.IN,
+					x: -1.0,
+					y: 0.0,
+					width: 1.0,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.OUT,
+					x: 1.0,
+					y: 0.0,
+					width: 1.0,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-1.5, -1.0), new Vec2(1.5, -1.0), new Vec2(1.5, 1.0), new Vec2(-1.5, 1.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class TVSDiode extends Entity {
-    public readonly VIN = new Pin("VIN")
-    public readonly VOUT = new Pin("VOUT")
-    public readonly footprint: Footprint
-    constructor() {
-        super("TVSDiode")
-        this.footprint = new Footprint({
-            name: "TVSDiode_SMD_2",
-            pads: [
-                { pin: this.VIN,  x: -1.5, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.VOUT, x:  1.5, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-2.0, -1.0),
-                new Vec2( 2.0, -1.0),
-                new Vec2( 2.0,  1.0),
-                new Vec2(-2.0,  1.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	public readonly VIN = new Pin("VIN")
+	public readonly VOUT = new Pin("VOUT")
+	public readonly footprint: Footprint
+	constructor() {
+		super("TVSDiode")
+		this.footprint = new Footprint({
+			name: "TVSDiode_SMD_2",
+			pads: [
+				{
+					pin: this.VIN,
+					x: -1.5,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.VOUT,
+					x: 1.5,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-2.0, -1.0), new Vec2(2.0, -1.0), new Vec2(2.0, 1.0), new Vec2(-2.0, 1.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class BQ25703A extends Entity {
-    public readonly BAT = new Pin("BAT")
-    public readonly IN = new Pin("IN")
-    public readonly SYS = new Pin("SYS")
-    public readonly P1 = new Pin("P1")
-    public readonly P2 = new Pin("P2")
-    public readonly P3 = new Pin("P3")
-    public readonly P4 = new Pin("P4")
-    public readonly P5 = new Pin("P5")
-    public readonly P6 = new Pin("P6")
-    public readonly P7 = new Pin("P7")
-    public readonly P8 = new Pin("P8")
-    public readonly P9 = new Pin("P9")
-    public readonly P10 = new Pin("P10")
-    public readonly P11 = new Pin("P11")
-    public readonly P12 = new Pin("P12")
-    public readonly P13 = new Pin("P13")
-    public readonly P14 = new Pin("P14")
-    public readonly P15 = new Pin("P15")
-    public readonly P16 = new Pin("P16")
-    public readonly P17 = new Pin("P17")
-    public readonly P18 = new Pin("P18")
-    public readonly P19 = new Pin("P19")
-    public readonly P20 = new Pin("P20")
-    public readonly P21 = new Pin("P21")
-    public readonly P22 = new Pin("P22")
-    public readonly P23 = new Pin("P23")
-    public readonly P24 = new Pin("P24")
-    public readonly P25 = new Pin("P25")
-    public readonly P26 = new Pin("P26")
-    public readonly P27 = new Pin("P27")
-    public readonly P28 = new Pin("P28")
-    public readonly P29 = new Pin("P29")
-    public readonly P30 = new Pin("P30")
-    public readonly P31 = new Pin("P31")
-    public readonly P32 = new Pin("P32")
-    public readonly footprint: Footprint
-    constructor() {
-        super("BQ25703A")
-        this.footprint = new Footprint({
-            name: "BQ25703A_WQFN32",
-            pads: [
-                // Top side pins 1-8 (left to right)
-                { pin: this.P1, x: -1.75, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P2, x: -1.25, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P3, x: -0.75, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P4, x: -0.25, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P5, x: 0.25, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P6, x: 0.75, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P7, x: 1.25, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P8, x: 1.75, y: 2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                // Right side pins 9-16 (top to bottom)
-                { pin: this.P9, x: 2.15, y: 1.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P10, x: 2.15, y: 1.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P11, x: 2.15, y: 0.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P12, x: 2.15, y: 0.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P13, x: 2.15, y: -0.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P14, x: 2.15, y: -0.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P15, x: 2.15, y: -1.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P16, x: 2.15, y: -1.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                // Bottom side pins 17-24 (right to left)
-                { pin: this.P17, x: 1.75, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P18, x: 1.25, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P19, x: 0.75, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P20, x: 0.25, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P21, x: -0.25, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P22, x: -0.75, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P23, x: -1.25, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                { pin: this.P24, x: -1.75, y: -2.15, width: 0.2, height: 0.6, shape: PadShape.Rectangular },
-                // Left side pins 25-32 (bottom to top)
-                { pin: this.P25, x: -2.15, y: -1.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P26, x: -2.15, y: -1.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P27, x: -2.15, y: -0.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P28, x: -2.15, y: -0.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P29, x: -2.15, y: 0.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P30, x: -2.15, y: 0.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P31, x: -2.15, y: 1.25, width: 0.6, height: 0.2, shape: PadShape.Rectangular },
-                { pin: this.P32, x: -2.15, y: 1.75, width: 0.6, height: 0.2, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-2.0, -2.0),
-                new Vec2(2.0, -2.0),
-                new Vec2(2.0, 2.0),
-                new Vec2(-2.0, 2.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        });
-    }
+	public readonly BAT = new Pin("BAT")
+	public readonly IN = new Pin("IN")
+	public readonly SYS = new Pin("SYS")
+	public readonly P1 = new Pin("P1")
+	public readonly P2 = new Pin("P2")
+	public readonly P3 = new Pin("P3")
+	public readonly P4 = new Pin("P4")
+	public readonly P5 = new Pin("P5")
+	public readonly P6 = new Pin("P6")
+	public readonly P7 = new Pin("P7")
+	public readonly P8 = new Pin("P8")
+	public readonly P9 = new Pin("P9")
+	public readonly P10 = new Pin("P10")
+	public readonly P11 = new Pin("P11")
+	public readonly P12 = new Pin("P12")
+	public readonly P13 = new Pin("P13")
+	public readonly P14 = new Pin("P14")
+	public readonly P15 = new Pin("P15")
+	public readonly P16 = new Pin("P16")
+	public readonly P17 = new Pin("P17")
+	public readonly P18 = new Pin("P18")
+	public readonly P19 = new Pin("P19")
+	public readonly P20 = new Pin("P20")
+	public readonly P21 = new Pin("P21")
+	public readonly P22 = new Pin("P22")
+	public readonly P23 = new Pin("P23")
+	public readonly P24 = new Pin("P24")
+	public readonly P25 = new Pin("P25")
+	public readonly P26 = new Pin("P26")
+	public readonly P27 = new Pin("P27")
+	public readonly P28 = new Pin("P28")
+	public readonly P29 = new Pin("P29")
+	public readonly P30 = new Pin("P30")
+	public readonly P31 = new Pin("P31")
+	public readonly P32 = new Pin("P32")
+	public readonly footprint: Footprint
+	constructor() {
+		super("BQ25703A")
+		this.footprint = new Footprint({
+			name: "BQ25703A_WQFN32",
+			pads: [
+				// Top side pins 1-8 (left to right)
+				{
+					pin: this.P1,
+					x: -1.75,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P2,
+					x: -1.25,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P3,
+					x: -0.75,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P4,
+					x: -0.25,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P5,
+					x: 0.25,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P6,
+					x: 0.75,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P7,
+					x: 1.25,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P8,
+					x: 1.75,
+					y: 2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				// Right side pins 9-16 (top to bottom)
+				{
+					pin: this.P9,
+					x: 2.15,
+					y: 1.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P10,
+					x: 2.15,
+					y: 1.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P11,
+					x: 2.15,
+					y: 0.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P12,
+					x: 2.15,
+					y: 0.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P13,
+					x: 2.15,
+					y: -0.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P14,
+					x: 2.15,
+					y: -0.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P15,
+					x: 2.15,
+					y: -1.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P16,
+					x: 2.15,
+					y: -1.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				// Bottom side pins 17-24 (right to left)
+				{
+					pin: this.P17,
+					x: 1.75,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P18,
+					x: 1.25,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P19,
+					x: 0.75,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P20,
+					x: 0.25,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P21,
+					x: -0.25,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P22,
+					x: -0.75,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P23,
+					x: -1.25,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P24,
+					x: -1.75,
+					y: -2.15,
+					width: 0.2,
+					height: 0.6,
+					shape: PadShape.Rectangular
+				},
+				// Left side pins 25-32 (bottom to top)
+				{
+					pin: this.P25,
+					x: -2.15,
+					y: -1.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P26,
+					x: -2.15,
+					y: -1.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P27,
+					x: -2.15,
+					y: -0.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P28,
+					x: -2.15,
+					y: -0.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P29,
+					x: -2.15,
+					y: 0.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P30,
+					x: -2.15,
+					y: 0.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P31,
+					x: -2.15,
+					y: 1.25,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.P32,
+					x: -2.15,
+					y: 1.75,
+					width: 0.6,
+					height: 0.2,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-2.0, -2.0), new Vec2(2.0, -2.0), new Vec2(2.0, 2.0), new Vec2(-2.0, 2.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 /**
@@ -185,20 +431,50 @@ export class TPS563201 extends Entity {
 			name: "TPS563201",
 			pads: [
 				// Top row: pins 1-2-3 (left to right)
-				{ pin: this.GND, x: -0.95, y: +0.55, width: 0.95, height: 1.1, shape: PadShape.Rectangular },
-				{ pin: this.SW,  x:  0.00, y: +0.55, width: 0.95, height: 1.1, shape: PadShape.Rectangular },
-				{ pin: this.VIN, x: +0.95, y: +0.55, width: 0.95, height: 1.1, shape: PadShape.Rectangular },
+				{
+					pin: this.GND,
+					x: -0.95,
+					y: +0.55,
+					width: 0.95,
+					height: 1.1,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.SW,
+					x: 0.0,
+					y: +0.55,
+					width: 0.95,
+					height: 1.1,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.VIN,
+					x: +0.95,
+					y: +0.55,
+					width: 0.95,
+					height: 1.1,
+					shape: PadShape.Rectangular
+				},
 				// Bottom row: pins 6-5 (right to left), pin 4 (VOUT/FB) skipped
-				{ pin: this.VBST, x: -0.95, y: -0.55, width: 0.95, height: 1.1, shape: PadShape.Rectangular },
-				{ pin: this.EN,   x:  0.00, y: -0.55, width: 0.95, height: 1.1, shape: PadShape.Rectangular },
+				{
+					pin: this.VBST,
+					x: -0.95,
+					y: -0.55,
+					width: 0.95,
+					height: 1.1,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.EN,
+					x: 0.0,
+					y: -0.55,
+					width: 0.95,
+					height: 1.1,
+					shape: PadShape.Rectangular
+				}
 				// Pin 4 (VOUT/FB) not used in this design; skip pad
 			],
-			points: [
-				new Vec2(-1.45, -0.8),
-				new Vec2( 1.45, -0.8),
-				new Vec2( 1.45,  0.8),
-				new Vec2(-1.45,  0.8)
-			],
+			points: [new Vec2(-1.45, -0.8), new Vec2(1.45, -0.8), new Vec2(1.45, 0.8), new Vec2(-1.45, 0.8)],
 			lineWidth: 0.2,
 			referenceOrigin: { x: 0, y: 0 }
 		})
@@ -206,27 +482,36 @@ export class TPS563201 extends Entity {
 }
 
 export class InductorL1 extends Entity {
-    public readonly L1_IN = new Pin("L1_IN")
-    public readonly L1_OUT = new Pin("L1_OUT")
-    public readonly footprint: Footprint
-    constructor() {
-        super("InductorL1")
-        this.footprint = new Footprint({
-            name: "InductorL1_Conn2",
-            pads: [
-                { pin: this.L1_IN,  x: -2.0, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.L1_OUT, x:  2.0, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-3.0, -1.0),
-                new Vec2( 3.0, -1.0),
-                new Vec2( 3.0,  1.0),
-                new Vec2(-3.0,  1.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	public readonly L1_IN = new Pin("L1_IN")
+	public readonly L1_OUT = new Pin("L1_OUT")
+	public readonly footprint: Footprint
+	constructor() {
+		super("InductorL1")
+		this.footprint = new Footprint({
+			name: "InductorL1_Conn2",
+			pads: [
+				{
+					pin: this.L1_IN,
+					x: -2.0,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.L1_OUT,
+					x: 2.0,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-3.0, -1.0), new Vec2(3.0, -1.0), new Vec2(3.0, 1.0), new Vec2(-3.0, 1.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class ESP32_WROOM_32E extends Entity {
@@ -299,43 +584,241 @@ export class ESP32_WROOM_32E extends Entity {
 		this.footprint = new Footprint({
 			name: "ESP32-WROOM-32E",
 			pads: [
-				{ pin: this.V5_IN,    x: -9.0, y:  5.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular },
-				{ pin: this.V33,      x: -6.0, y:  5.0, width: 1.5, height: 1.5, shape: PadShape.Rectangular },
-				{ pin: this.GPIO21,   x: -3.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO22,   x: -1.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.EN,       x:  1.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.SENSOR_VP,x:  3.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.SENSOR_VN,x:  5.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO34,   x:  7.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO35,   x:  9.0, y:  5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO32,   x:  9.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO33,   x:  7.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO25,   x:  5.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO26,   x:  3.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO27,   x:  1.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO14,   x: -1.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO12,   x: -3.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO13,   x: -5.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO15,   x: -7.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO2,    x: -9.0, y:  3.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO0,    x: -9.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO4,    x: -7.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO16,   x: -5.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO17,   x: -3.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO5,    x: -1.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO18,   x:  1.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO19,   x:  3.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.GPIO23,   x:  5.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.RXD0,     x:  7.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.TXD0,     x:  9.0, y:  1.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
-				{ pin: this.gnd,        x:  9.0, y: -5.0, width: 2.0, height: 2.0, shape: PadShape.Rectangular }
+				{
+					pin: this.V5_IN,
+					x: -9.0,
+					y: 5.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.V33,
+					x: -6.0,
+					y: 5.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.GPIO21,
+					x: -3.0,
+					y: 5.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO22,
+					x: -1.0,
+					y: 5.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{ pin: this.EN, x: 1.0, y: 5.0, width: 1.0, height: 1.0, shape: PadShape.Circular },
+				{
+					pin: this.SENSOR_VP,
+					x: 3.0,
+					y: 5.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.SENSOR_VN,
+					x: 5.0,
+					y: 5.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO34,
+					x: 7.0,
+					y: 5.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO35,
+					x: 9.0,
+					y: 5.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO32,
+					x: 9.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO33,
+					x: 7.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO25,
+					x: 5.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO26,
+					x: 3.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO27,
+					x: 1.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO14,
+					x: -1.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO12,
+					x: -3.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO13,
+					x: -5.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO15,
+					x: -7.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO2,
+					x: -9.0,
+					y: 3.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO0,
+					x: -9.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO4,
+					x: -7.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO16,
+					x: -5.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO17,
+					x: -3.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO5,
+					x: -1.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO18,
+					x: 1.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO19,
+					x: 3.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.GPIO23,
+					x: 5.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.RXD0,
+					x: 7.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.TXD0,
+					x: 9.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.gnd,
+					x: 9.0,
+					y: -5.0,
+					width: 2.0,
+					height: 2.0,
+					shape: PadShape.Rectangular
+				}
 			],
-			points: [
-				new Vec2(-9.0, 5.0),
-				new Vec2(-9.0, -5.0),
-				new Vec2( 9.0, -5.0),
-				new Vec2( 9.0, 5.0)
-			],
+			points: [new Vec2(-9.0, 5.0), new Vec2(-9.0, -5.0), new Vec2(9.0, -5.0), new Vec2(9.0, 5.0)],
 			lineWidth: 0.2,
 			referenceOrigin: { x: 0, y: 3.0 }
 		})
@@ -353,132 +836,210 @@ export class ESP32_WROOM_32E extends Entity {
  *   Tab: GND     – Heatsink tab tied to ground
  */
 export class AMS1117_3_3 extends Entity {
-    /**
-     * Regulator input pin. Accepts up to ~15 V (max spec).
-     */
-    public readonly VIN = new Pin("VIN")
+	/**
+	 * Regulator input pin. Accepts up to ~15 V (max spec).
+	 */
+	public readonly VIN = new Pin("VIN")
 
-    /**
-     * Regulator output pin. Provides a regulated 3.3 V output.
-     */
-    public readonly VOUT = new Pin("VOUT")
+	/**
+	 * Regulator output pin. Provides a regulated 3.3 V output.
+	 */
+	public readonly VOUT = new Pin("VOUT")
 
-    /**
-     * Ground return pin. Also connected to the SOT-223 tab.
-     */
-    public readonly GND = new Pin("GND")
+	/**
+	 * Ground return pin. Also connected to the SOT-223 tab.
+	 */
+	public readonly GND = new Pin("GND")
 
-    /**
-     * SOT-223 footprint for AMS1117-3.3:
-     * pins 1=GND, 2=VOUT, 3=VIN; tab on the back is also GND.
-     * Pads: 1.2 × 1.2 mm, tab pad: 5.0 × 1.5 mm.
-     */
-    public readonly footprint: Footprint
+	/**
+	 * SOT-223 footprint for AMS1117-3.3:
+	 * pins 1=GND, 2=VOUT, 3=VIN; tab on the back is also GND.
+	 * Pads: 1.2 × 1.2 mm, tab pad: 5.0 × 1.5 mm.
+	 */
+	public readonly footprint: Footprint
 
-    constructor() {
-        super("AMS1117-3.3")
-        this.footprint = new Footprint({
-            name: "AMS1117-3.3_SOT-223",
-            pads: [
-                { pin: this.VIN,  x: -2.0, y: 1.0, width: 1.2, height: 1.2, shape: PadShape.Rectangular },
-                { pin: this.VOUT, x:  0.0, y: 1.0, width: 1.2, height: 1.2, shape: PadShape.Rectangular },
-                { pin: this.GND,  x:  2.0, y: 1.0, width: 1.2, height: 1.2, shape: PadShape.Rectangular },
-                // Tab pad for GND
-                { pin: this.GND,  x:  0.0, y: -1.0, width: 5.0, height: 1.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-3.0, -1.5),
-                new Vec2( 3.0, -1.5),
-                new Vec2( 3.0,  2.0),
-                new Vec2(-3.0,  2.0)
-            ],
-            lineWidth: 0.15,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	constructor() {
+		super("AMS1117-3.3")
+		this.footprint = new Footprint({
+			name: "AMS1117-3.3_SOT-223",
+			pads: [
+				{
+					pin: this.VIN,
+					x: -2.0,
+					y: 1.0,
+					width: 1.2,
+					height: 1.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.VOUT,
+					x: 0.0,
+					y: 1.0,
+					width: 1.2,
+					height: 1.2,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.GND,
+					x: 2.0,
+					y: 1.0,
+					width: 1.2,
+					height: 1.2,
+					shape: PadShape.Rectangular
+				},
+				// Tab pad for GND
+				{
+					pin: this.GND,
+					x: 0.0,
+					y: -1.0,
+					width: 5.0,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-3.0, -1.5), new Vec2(3.0, -1.5), new Vec2(3.0, 2.0), new Vec2(-3.0, 2.0)],
+			lineWidth: 0.15,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class OV2640 extends Entity {
-    public readonly VCC = new Pin("VCC")
-    public readonly SDA = new Pin("SDA")
-    public readonly SCL = new Pin("SCL")
-    /** Ground reference pin */
-    public readonly GND = new Pin("GND")
-    public readonly footprint: Footprint
-    constructor() {
-        super("OV2640")
-        this.footprint = new Footprint({
-            name: "OV2640_Module",
-            pads: [
-                { pin: this.VCC, x: -1.5, y: 1.5, width: 1.0, height: 1.0, shape: PadShape.Rectangular },
-                { pin: this.GND, x: -0.5, y: 1.5, width: 1.0, height: 1.0, shape: PadShape.Rectangular },
-                { pin: this.SDA, x: 0.5, y: 1.5, width: 1.0, height: 1.0, shape: PadShape.Rectangular },
-                { pin: this.SCL, x: 1.5, y: 1.5, width: 1.0, height: 1.0, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-2.0, -1.0),
-                new Vec2(2.0, -1.0),
-                new Vec2(2.0, 2.0),
-                new Vec2(-2.0, 2.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	public readonly VCC = new Pin("VCC")
+	public readonly SDA = new Pin("SDA")
+	public readonly SCL = new Pin("SCL")
+	/** Ground reference pin */
+	public readonly GND = new Pin("GND")
+	public readonly footprint: Footprint
+	constructor() {
+		super("OV2640")
+		this.footprint = new Footprint({
+			name: "OV2640_Module",
+			pads: [
+				{
+					pin: this.VCC,
+					x: -1.5,
+					y: 1.5,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.GND,
+					x: -0.5,
+					y: 1.5,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.SDA,
+					x: 0.5,
+					y: 1.5,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.SCL,
+					x: 1.5,
+					y: 1.5,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-2.0, -1.0), new Vec2(2.0, -1.0), new Vec2(2.0, 2.0), new Vec2(-2.0, 2.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class STUSB4500 extends Entity {
-    /** Power supply input */
-    public readonly VCC = new Pin("VCC")
-    /** Ground reference pin */
-    public readonly GND = new Pin("GND")
-    public readonly SDA = new Pin("SDA")
-    public readonly SCL = new Pin("SCL")
-    public readonly footprint: Footprint
-    constructor() {
-        super("STUSB4500")
-        this.footprint = new Footprint({
-            name: "STUSB4500_QFN16",
-            pads: [
-                { pin: this.VCC, x: -1.0, y: 1.0, width: 0.5, height: 0.5, shape: PadShape.Rectangular },
-                { pin: this.GND, x: 1.0, y: 1.0, width: 0.5, height: 0.5, shape: PadShape.Rectangular },
-                { pin: this.SDA, x: -1.0, y: -1.0, width: 0.5, height: 0.5, shape: PadShape.Rectangular },
-                { pin: this.SCL, x: 1.0, y: -1.0, width: 0.5, height: 0.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-1.5, -1.5),
-                new Vec2(1.5, -1.5),
-                new Vec2(1.5, 1.5),
-                new Vec2(-1.5, 1.5)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	/** Power supply input */
+	public readonly VCC = new Pin("VCC")
+	/** Ground reference pin */
+	public readonly GND = new Pin("GND")
+	public readonly SDA = new Pin("SDA")
+	public readonly SCL = new Pin("SCL")
+	public readonly footprint: Footprint
+	constructor() {
+		super("STUSB4500")
+		this.footprint = new Footprint({
+			name: "STUSB4500_QFN16",
+			pads: [
+				{
+					pin: this.VCC,
+					x: -1.0,
+					y: 1.0,
+					width: 0.5,
+					height: 0.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.GND,
+					x: 1.0,
+					y: 1.0,
+					width: 0.5,
+					height: 0.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.SDA,
+					x: -1.0,
+					y: -1.0,
+					width: 0.5,
+					height: 0.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.SCL,
+					x: 1.0,
+					y: -1.0,
+					width: 0.5,
+					height: 0.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-1.5, -1.5), new Vec2(1.5, -1.5), new Vec2(1.5, 1.5), new Vec2(-1.5, 1.5)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class DCMotor extends Entity {
-    public readonly IN1 = new Pin("IN1")
-    public readonly IN2 = new Pin("IN2")
-    public readonly footprint: Footprint
-    constructor() {
-        super("DCMotor")
-        this.footprint = new Footprint({
-            name: "DCMotor_Conn2",
-            pads: [
-                { pin: this.IN1, x: -2.0, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Circular },
-                { pin: this.IN2, x: 2.0, y: 0.0, width: 1.5, height: 1.5, shape: PadShape.Circular }
-            ],
-            points: [
-                new Vec2(-3.0, -1.0),
-                new Vec2(3.0, -1.0),
-                new Vec2(3.0, 1.0),
-                new Vec2(-3.0, 1.0)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	public readonly IN1 = new Pin("IN1")
+	public readonly IN2 = new Pin("IN2")
+	public readonly footprint: Footprint
+	constructor() {
+		super("DCMotor")
+		this.footprint = new Footprint({
+			name: "DCMotor_Conn2",
+			pads: [
+				{
+					pin: this.IN1,
+					x: -2.0,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Circular
+				},
+				{
+					pin: this.IN2,
+					x: 2.0,
+					y: 0.0,
+					width: 1.5,
+					height: 1.5,
+					shape: PadShape.Circular
+				}
+			],
+			points: [new Vec2(-3.0, -1.0), new Vec2(3.0, -1.0), new Vec2(3.0, 1.0), new Vec2(-3.0, 1.0)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class DNF83x3 extends Footprint {
@@ -495,16 +1056,32 @@ export class DNF83x3 extends Footprint {
 		super({
 			name: "DNF83x3",
 			pads: [
-				{ pin: new Pin("VIN"), x: -1.0, y: 1.0, width: 1.0, height: 1.0, shape: PadShape.Rectangular },
-				{ pin: new Pin("VOUT"), x: 1.0, y: 1.0, width: 1.0, height: 1.0, shape: PadShape.Rectangular },
-				{ pin: new Pin("GND"), x: 0.0, y: -1.0, width: 2.0, height: 2.0, shape: PadShape.Rectangular }
+				{
+					pin: new Pin("VIN"),
+					x: -1.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: new Pin("VOUT"),
+					x: 1.0,
+					y: 1.0,
+					width: 1.0,
+					height: 1.0,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: new Pin("GND"),
+					x: 0.0,
+					y: -1.0,
+					width: 2.0,
+					height: 2.0,
+					shape: PadShape.Rectangular
+				}
 			],
-			points: [
-				new Vec2(-2.5, -2.5),
-				new Vec2(2.5, -2.5),
-				new Vec2(2.5, 2.5),
-				new Vec2(-2.5, 2.5)
-			],
+			points: [new Vec2(-2.5, -2.5), new Vec2(2.5, -2.5), new Vec2(2.5, 2.5), new Vec2(-2.5, 2.5)],
 			lineWidth: 0.2,
 			referenceOrigin: { x: 0, y: -3.0 }
 		})
@@ -516,75 +1093,182 @@ export class DNF83x3 extends Footprint {
  * Provides motor drive outputs with integrated current sensing and protection.
  */
 export class DRV8876PWPR extends Entity {
-    /** Sleep mode input: logic high to enable, low to enter low-power mode */
-    public readonly nSLEEP = new Pin("nSLEEP")
-    /** Current regulation and overcurrent protection mode select */
-    public readonly IMODE = new Pin("IMODE")
-    /** H-bridge control mode select (PH/EN, PWM, or independent half-bridge) */
-    public readonly PMODE = new Pin("PMODE")
-    /** H-bridge control input 1 */
-    public readonly EN_IN1 = new Pin("EN/IN1")
-    /** H-bridge control input 2 */
-    public readonly PH_IN2 = new Pin("PH/IN2")
-    /** Fault indicator open-drain output */
-    public readonly nFAULT = new Pin("nFAULT")
-    /** Proportional current output for current sensing */
-    public readonly IPROPI = new Pin("IPROPI")
-    /** Reference voltage input for current regulation threshold */
-    public readonly VREF = new Pin("VREF")
-    /** Power supply input (4.5–37 V) */
-    public readonly VM = new Pin("VM")
-    /** Power ground */
-    public readonly PGND = new Pin("PGND")
-    /** Ground reference pin */
-    public readonly GND = new Pin("GND")
-    /** H-bridge outputs to motor */
-    public readonly OUT1 = new Pin("OUT1")
-    /** H-bridge outputs to motor */
-    public readonly OUT2 = new Pin("OUT2")
-    /** Charge pump voltage output */
-    public readonly VCP = new Pin("VCP")
-    /** Charge pump switching node */
-    public readonly CPH = new Pin("CPH")
-    /** Charge pump flying capacitor node */
-    public readonly CPL = new Pin("CPL")
+	/** Sleep mode input: logic high to enable, low to enter low-power mode */
+	public readonly nSLEEP = new Pin("nSLEEP")
+	/** Current regulation and overcurrent protection mode select */
+	public readonly IMODE = new Pin("IMODE")
+	/** H-bridge control mode select (PH/EN, PWM, or independent half-bridge) */
+	public readonly PMODE = new Pin("PMODE")
+	/** H-bridge control input 1 */
+	public readonly EN_IN1 = new Pin("EN/IN1")
+	/** H-bridge control input 2 */
+	public readonly PH_IN2 = new Pin("PH/IN2")
+	/** Fault indicator open-drain output */
+	public readonly nFAULT = new Pin("nFAULT")
+	/** Proportional current output for current sensing */
+	public readonly IPROPI = new Pin("IPROPI")
+	/** Reference voltage input for current regulation threshold */
+	public readonly VREF = new Pin("VREF")
+	/** Power supply input (4.5–37 V) */
+	public readonly VM = new Pin("VM")
+	/** Power ground */
+	public readonly PGND = new Pin("PGND")
+	/** Ground reference pin */
+	public readonly GND = new Pin("GND")
+	/** H-bridge outputs to motor */
+	public readonly OUT1 = new Pin("OUT1")
+	/** H-bridge outputs to motor */
+	public readonly OUT2 = new Pin("OUT2")
+	/** Charge pump voltage output */
+	public readonly VCP = new Pin("VCP")
+	/** Charge pump switching node */
+	public readonly CPH = new Pin("CPH")
+	/** Charge pump flying capacitor node */
+	public readonly CPL = new Pin("CPL")
 
-    public readonly footprint: Footprint
+	public readonly footprint: Footprint
 
-    constructor() {
-        super("DRV8876PWPR")
-        this.footprint = new Footprint({
-            name: "DRV8876_PWP_TSSOP16",
-            pads: [
-                // top side pins 1-8
-                { pin: this.EN_IN1, x: -2.275, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.PH_IN2, x: -1.625, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.nSLEEP, x: -0.975, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.nFAULT, x: -0.325, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.VREF, x: 0.325, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.IPROPI, x: 0.975, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.IMODE, x: 1.625, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.OUT1, x: 2.275, y: 2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                // bottom side pins 16-9 (left to right)
-                { pin: this.PMODE, x: -2.275, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.GND, x: -1.625, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.CPL, x: -0.975, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.CPH, x: -0.325, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.VCP, x: 0.325, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.VM, x: 0.975, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.OUT2, x: 1.625, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular },
-                { pin: this.PGND, x: 2.275, y: -2.15, width: 0.3, height: 1.5, shape: PadShape.Rectangular }
-            ],
-            points: [
-                new Vec2(-2.75, -2.15),
-                new Vec2(2.75, -2.15),
-                new Vec2(2.75, 2.15),
-                new Vec2(-2.75, 2.15)
-            ],
-            lineWidth: 0.2,
-            referenceOrigin: { x: 0, y: 0 }
-        })
-    }
+	constructor() {
+		super("DRV8876PWPR")
+		this.footprint = new Footprint({
+			name: "DRV8876_PWP_TSSOP16",
+			pads: [
+				// top side pins 1-8
+				{
+					pin: this.EN_IN1,
+					x: -2.275,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.PH_IN2,
+					x: -1.625,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.nSLEEP,
+					x: -0.975,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.nFAULT,
+					x: -0.325,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.VREF,
+					x: 0.325,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.IPROPI,
+					x: 0.975,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.IMODE,
+					x: 1.625,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.OUT1,
+					x: 2.275,
+					y: 2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				// bottom side pins 16-9 (left to right)
+				{
+					pin: this.PMODE,
+					x: -2.275,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.GND,
+					x: -1.625,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.CPL,
+					x: -0.975,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.CPH,
+					x: -0.325,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.VCP,
+					x: 0.325,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.VM,
+					x: 0.975,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.OUT2,
+					x: 1.625,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				},
+				{
+					pin: this.PGND,
+					x: 2.275,
+					y: -2.15,
+					width: 0.3,
+					height: 1.5,
+					shape: PadShape.Rectangular
+				}
+			],
+			points: [new Vec2(-2.75, -2.15), new Vec2(2.75, -2.15), new Vec2(2.75, 2.15), new Vec2(-2.75, 2.15)],
+			lineWidth: 0.2,
+			referenceOrigin: { x: 0, y: 0 }
+		})
+	}
 }
 
 export class MG995 extends Entity {
@@ -653,7 +1337,6 @@ net5V.connect(esp.V5_IN)
 net3V3.connect(esp.V33)
 netI2C_SDA.connect(esp.GPIO21)
 netI2C_SCL.connect(esp.GPIO22)
-
 
 const ldo = new AMS1117_3_3()
 net5V.connect(ldo.VIN)
@@ -734,10 +1417,9 @@ export const puppybotSchematic = new Schematic({
 		netMD2_EN,
 		netMD2_PH,
 		netMD2_SLEEP,
-		netServoSig,
+		netServoSig
 	]
 })
-
 
 export const puppybotPCB = new PCB({
 	name: "PuppyBot v0.2 PCB",
@@ -746,40 +1428,25 @@ export const puppybotPCB = new PCB({
 })
 // Add board layers
 puppybotPCB.addLayer({ name: "TopCopper", type: "copper", material: "copper", thickness: 0.035 })
-puppybotPCB.addLayer({ name: "BottomCopper", type: "copper", material: "copper", thickness: 0.035 })
-puppybotPCB.addLayer({ name: "SilkscreenTop", type: "silkscreen", material: "silkscreen_ink", thickness: 0.1 })
-puppybotPCB.addLayer({ name: "SoldermaskTop", type: "soldermask", material: "epoxy_soldermask", thickness: 0.1 })
+puppybotPCB.addLayer({
+	name: "BottomCopper",
+	type: "copper",
+	material: "copper",
+	thickness: 0.035
+})
+puppybotPCB.addLayer({
+	name: "SilkscreenTop",
+	type: "silkscreen",
+	material: "silkscreen_ink",
+	thickness: 0.1
+})
+puppybotPCB.addLayer({
+	name: "SoldermaskTop",
+	type: "soldermask",
+	material: "epoxy_soldermask",
+	thickness: 0.1
+})
 
 // Add components and nets to PCB
-puppybotPCB.components.push(
-	batteryPack,
-	pptcFuse,
-	tvsDiode,
-	charger,
-	buck,
-	inductor,
-	esp,
-	ldo,
-	camera,
-	pdCtrl,
-	motorDriver1,
-	motor1,
-	motorDriver2,
-	motor2,
-	servo,
-)
-puppybotPCB.nets.push(
-	netBattery,
-	netBattInput,
-	netSystem12V,
-	net5V,
-	net3V3,
-	netGND,
-	netI2C_SDA,
-	netI2C_SCL,
-	netMotor1A,
-	netMotor1B,
-	netMotor2A,
-	netMotor2B,
-	netServoSig,
-)
+puppybotPCB.components.push(batteryPack, pptcFuse, tvsDiode, charger, buck, inductor, esp, ldo, camera, pdCtrl, motorDriver1, motor1, motorDriver2, motor2, servo)
+puppybotPCB.nets.push(netBattery, netBattInput, netSystem12V, net5V, net3V3, netGND, netI2C_SDA, netI2C_SCL, netMotor1A, netMotor1B, netMotor2A, netMotor2B, netServoSig)

@@ -6,7 +6,7 @@ it("box part", () => {
 		[10, 0, 0],
 		[10, 10, 0],
 		[0, 10, 0],
-		[0, 0, 0],
+		[0, 0, 0]
 	])
 	const rect = new Solid(part)
 	const upPath = new LinePath(

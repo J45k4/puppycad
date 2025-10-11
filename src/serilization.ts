@@ -1,4 +1,4 @@
-import { Component, Entity, Net, Pin, Schematic } from "./puppycad";
+import { Component, Entity, Net, Pin, Schematic } from "./puppycad"
 
 export type SerializedMap = {
 	[key: string]: any
@@ -9,7 +9,7 @@ export const serialize = (entities: Entity[] | Entity) => {
 	const visited = new Set<Entity>()
 
 	const serializeEntity = (entity: Entity) => {
-		entity.visit(entity => {
+		entity.visit((entity) => {
 			map[entity.id] = entity.serialize()
 		}, visited)
 	}
@@ -26,29 +26,29 @@ export const serialize = (entities: Entity[] | Entity) => {
 }
 
 export const deserialize = (data: SerializedMap): Entity[] => {
-	const entityMap = new Map<string, Entity>();
+	const entityMap = new Map<string, Entity>()
 
 	for (const [id, value] of Object.entries(data)) {
-		let entity: Entity;
+		let entity: Entity
 		switch (value.type) {
 			case "schematic":
-				entity = Schematic.parse(value);
-				break;
+				entity = Schematic.parse(value)
+				break
 			case "net":
-				entity = Net.parse(value);
-				break;
+				entity = Net.parse(value)
+				break
 			case "component":
-				entity = Component.parse(value);
-				break;
+				entity = Component.parse(value)
+				break
 			case "pin":
-				const component = entityMap.get(value.componentId) as Component;
-				entity = Pin.parse(value, component);
-				break;
+				const component = entityMap.get(value.componentId) as Component
+				entity = Pin.parse(value, component)
+				break
 			default:
-				continue;
+				continue
 		}
-		entityMap.set(id, entity);
+		entityMap.set(id, entity)
 	}
 
-	return Array.from(entityMap.values());
+	return Array.from(entityMap.values())
 }

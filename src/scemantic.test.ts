@@ -42,7 +42,7 @@ it("simple electronic scemantic", () => {
 	const resistor = new Resistor()
 	const led = new Led()
 	const battery = new Battery()
-	
+
 	const net = new Net("GND")
 	net.connect(led.cathode)
 	net.connect(battery.negative)

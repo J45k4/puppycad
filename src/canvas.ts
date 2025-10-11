@@ -1,6 +1,12 @@
 import { HList, UiComponent, VList } from "./ui"
 
-interface Component { id: number; x: number; y: number; width: number; height: number }
+interface Component {
+	id: number
+	x: number
+	y: number
+	width: number
+	height: number
+}
 
 type EdgeName = "left" | "right" | "top" | "bottom"
 
@@ -28,7 +34,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 	private originX = 0
 	private originY = 0
 	private components: Component[] = [
-		{ id: 1, x: 100, y: 50, width: 80, height: 40 },
+		{ id: 1, x: 100, y: 50, width: 80, height: 40 }
 		// add more components here
 	]
 	private connections: Connection[] = []
@@ -134,7 +140,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 					return
 				}
 				// Check if clicked on a component
-				const clicked = this.components.find(c => wx >= c.x && wx <= c.x + c.width && wy >= c.y && wy <= c.y + c.height)
+				const clicked = this.components.find((c) => wx >= c.x && wx <= c.x + c.width && wy >= c.y && wy <= c.y + c.height)
 				if (clicked) {
 					if (event.shiftKey) {
 						const idx = this.selectedIds.indexOf(clicked.id)
@@ -147,16 +153,18 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 					this.isDraggingGroup = true
 					this.groupDragStartX = wx
 					this.groupDragStartY = wy
-					this.originalPositions = this.selectedIds.map(id => {
-						const comp = this.components.find(c => c.id === id)!
+					this.originalPositions = this.selectedIds.map((id) => {
+						const comp = this.components.find((c) => c.id === id)!
 						return { id, x: comp.x, y: comp.y }
 					})
 				} else {
 					// Start selection rectangle
 					this.selectedIds = []
 					this.isSelecting = true
-					this.selectStartX = wx; this.selectStartY = wy
-					this.selectCurrentX = wx; this.selectCurrentY = wy
+					this.selectStartX = wx
+					this.selectStartY = wy
+					this.selectCurrentX = wx
+					this.selectCurrentY = wy
 					this.hoveredEdge = null
 					this.canvas.style.cursor = "default"
 				}
@@ -187,15 +195,16 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 				this.canvas.style.cursor = "grabbing"
 				const dx = wx - this.groupDragStartX
 				const dy = wy - this.groupDragStartY
-				this.originalPositions.forEach(op => {
-					const comp = this.components.find(c => c.id === op.id)!
+				this.originalPositions.forEach((op) => {
+					const comp = this.components.find((c) => c.id === op.id)!
 					comp.x = op.x + dx
 					comp.y = op.y + dy
 				})
 				this.drawScene()
 			} else if (this.isSelecting) {
 				this.canvas.style.cursor = "default"
-				this.selectCurrentX = wx; this.selectCurrentY = wy
+				this.selectCurrentX = wx
+				this.selectCurrentY = wy
 				this.drawScene()
 			} else {
 				this.hoveredEdge = hovered
@@ -221,7 +230,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 					if (startAnchor && dropAnchor && dropAnchor.component.id !== startAnchor.component.id) {
 						this.connections.push({
 							from: this.endpointFromAnchor(startAnchor),
-							to: this.endpointFromAnchor(dropAnchor),
+							to: this.endpointFromAnchor(dropAnchor)
 						})
 					}
 					this.hoveredEdge = this.findHoveredEdge(wx, wy)
@@ -235,9 +244,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 					const y1 = Math.min(this.selectStartY, this.selectCurrentY)
 					const x2 = Math.max(this.selectStartX, this.selectCurrentX)
 					const y2 = Math.max(this.selectStartY, this.selectCurrentY)
-					this.selectedIds = this.components
-						.filter(c => c.x < x2 && c.x + c.width > x1 && c.y < y2 && c.y + c.height > y1)
-						.map(c => c.id)
+					this.selectedIds = this.components.filter((c) => c.x < x2 && c.x + c.width > x1 && c.y < y2 && c.y + c.height > y1).map((c) => c.id)
 					this.isSelecting = false
 				}
 				this.drawScene()
@@ -260,17 +267,17 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		})
 
 		// Allow dropping new components from sidebar
-		this.canvas.addEventListener("dragover", event => {
+		this.canvas.addEventListener("dragover", (event) => {
 			event.preventDefault()
 		})
-		this.canvas.addEventListener("drop", event => {
-			event.preventDefault();
-			const type = event.dataTransfer!.getData("component");
-			const rect = this.canvas.getBoundingClientRect();
-			const wx = (event.clientX - rect.left - this.originX) / this.scale;
-			const wy = (event.clientY - rect.top - this.originY) / this.scale;
-			this.addComponent(type, wx, wy);
-		});
+		this.canvas.addEventListener("drop", (event) => {
+			event.preventDefault()
+			const type = event.dataTransfer!.getData("component")
+			const rect = this.canvas.getBoundingClientRect()
+			const wx = (event.clientX - rect.left - this.originX) / this.scale
+			const wy = (event.clientY - rect.top - this.originY) / this.scale
+			this.addComponent(type, wx, wy)
+		})
 	}
 
 	private drawScene() {
@@ -318,7 +325,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		}
 
 		// Draw existing connections
-		this.connections.forEach(conn => {
+		this.connections.forEach((conn) => {
 			const fromPoint = this.pointFromEndpoint(conn.from)
 			const toPoint = this.pointFromEndpoint(conn.to)
 			if (!fromPoint || !toPoint) return
@@ -343,7 +350,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		}
 
 		// Draw components
-		this.components.forEach(comp => {
+		this.components.forEach((comp) => {
 			this.ctx.fillStyle = "white"
 			this.ctx.strokeStyle = "black"
 			this.ctx.lineWidth = 2
@@ -389,21 +396,28 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 		return { component, edge, point }
 	}
 
-	private anchorForEdge(
-		component: Component,
-		edge: EdgeName,
-		x: number,
-		y: number,
-	): { x: number; y: number } {
+	private anchorForEdge(component: Component, edge: EdgeName, x: number, y: number): { x: number; y: number } {
 		switch (edge) {
 			case "left":
-				return { x: component.x, y: this.clamp(y, component.y, component.y + component.height) }
+				return {
+					x: component.x,
+					y: this.clamp(y, component.y, component.y + component.height)
+				}
 			case "right":
-				return { x: component.x + component.width, y: this.clamp(y, component.y, component.y + component.height) }
+				return {
+					x: component.x + component.width,
+					y: this.clamp(y, component.y, component.y + component.height)
+				}
 			case "top":
-				return { x: this.clamp(x, component.x, component.x + component.width), y: component.y }
+				return {
+					x: this.clamp(x, component.x, component.x + component.width),
+					y: component.y
+				}
 			case "bottom":
-				return { x: this.clamp(x, component.x, component.x + component.width), y: component.y + component.height }
+				return {
+					x: this.clamp(x, component.x, component.x + component.width),
+					y: component.y + component.height
+				}
 		}
 		return { x: component.x, y: component.y }
 	}
@@ -437,7 +451,7 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 	}
 
 	private findNearestEdgeAnchor(x: number, y: number): EdgeAnchor | null {
-		const insideComponent = this.components.find(component => this.isPointInsideComponent(component, x, y))
+		const insideComponent = this.components.find((component) => this.isPointInsideComponent(component, x, y))
 		if (insideComponent) {
 			return this.getNearestEdgeAnchor(insideComponent, x, y)
 		}
@@ -463,13 +477,13 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 			{ edge: "left", distance: Math.abs(x - component.x) },
 			{ edge: "right", distance: Math.abs(x - (component.x + component.width)) },
 			{ edge: "top", distance: Math.abs(y - component.y) },
-			{ edge: "bottom", distance: Math.abs(y - (component.y + component.height)) },
+			{ edge: "bottom", distance: Math.abs(y - (component.y + component.height)) }
 		]
 		const closest = distances.reduce((prev, curr) => (curr.distance < prev.distance ? curr : prev))
 		return {
 			edge: closest.edge as EdgeName,
 			point: this.anchorForEdge(component, closest.edge as EdgeName, x, y),
-			distance: closest.distance,
+			distance: closest.distance
 		}
 	}
 
@@ -527,18 +541,19 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 	}
 
 	private endpointFromAnchor(anchor: EdgeAnchor): ConnectionEndpoint {
-		const ratio = (anchor.edge === "left" || anchor.edge === "right")
-			? this.safeRatio(anchor.point.y - anchor.component.y, anchor.component.height)
-			: this.safeRatio(anchor.point.x - anchor.component.x, anchor.component.width)
+		const ratio =
+			anchor.edge === "left" || anchor.edge === "right"
+				? this.safeRatio(anchor.point.y - anchor.component.y, anchor.component.height)
+				: this.safeRatio(anchor.point.x - anchor.component.x, anchor.component.width)
 		return {
 			componentId: anchor.component.id,
 			edge: anchor.edge,
-			ratio: this.clamp(ratio, 0, 1),
+			ratio: this.clamp(ratio, 0, 1)
 		}
 	}
 
 	private pointFromEndpoint(endpoint: ConnectionEndpoint): { x: number; y: number } | null {
-		const component = this.components.find(c => c.id === endpoint.componentId)
+		const component = this.components.find((c) => c.id === endpoint.componentId)
 		if (!component) return null
 		return this.anchorPointForRatio(component, endpoint.edge, endpoint.ratio)
 	}
@@ -549,11 +564,17 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 			case "left":
 				return { x: component.x, y: component.y + component.height * clamped }
 			case "right":
-				return { x: component.x + component.width, y: component.y + component.height * clamped }
+				return {
+					x: component.x + component.width,
+					y: component.y + component.height * clamped
+				}
 			case "top":
 				return { x: component.x + component.width * clamped, y: component.y }
 			case "bottom":
-				return { x: component.x + component.width * clamped, y: component.y + component.height }
+				return {
+					x: component.x + component.width * clamped,
+					y: component.y + component.height
+				}
 		}
 		return { x: component.x, y: component.y }
 	}
@@ -573,12 +594,14 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 
 	private fitAllClicked() {
 		// Fit view to show all components
-		const xs = this.components.map(c => c.x)
-		const ys = this.components.map(c => c.y)
-		const xsMax = this.components.map(c => c.x + c.width)
-		const ysMax = this.components.map(c => c.y + c.height)
-		const minX = Math.min(...xs), maxX = Math.max(...xsMax)
-		const minY = Math.min(...ys), maxY = Math.max(...ysMax)
+		const xs = this.components.map((c) => c.x)
+		const ys = this.components.map((c) => c.y)
+		const xsMax = this.components.map((c) => c.x + c.width)
+		const ysMax = this.components.map((c) => c.y + c.height)
+		const minX = Math.min(...xs),
+			maxX = Math.max(...xsMax)
+		const minY = Math.min(...ys),
+			maxY = Math.max(...ysMax)
 		const bboxWidth = maxX - minX
 		const bboxHeight = maxY - minY
 		const bboxCenterX = minX + bboxWidth / 2
@@ -592,19 +615,19 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 	}
 
 	public addComponent(type: string, x: number, y: number) {
-		const newId = Math.max(0, ...this.components.map(c => c.id)) + 1;
-		let size = { width: 80, height: 40 };
+		const newId = Math.max(0, ...this.components.map((c) => c.id)) + 1
+		let size = { width: 80, height: 40 }
 		switch (type) {
 			case "resistor":
-				size = { width: 80, height: 40 };
-				break;
+				size = { width: 80, height: 40 }
+				break
 			case "capacitor":
-				size = { width: 60, height: 60 };
-				break;
+				size = { width: 60, height: 60 }
+				break
 			// add more cases as needed
 			default:
-				console.warn(`Unknown component type: ${type}`);
-				return;
+				console.warn(`Unknown component type: ${type}`)
+				return
 		}
 		const newComp: Component = {
 			id: newId,
@@ -612,8 +635,8 @@ export class EditorCanvas extends UiComponent<HTMLDivElement> {
 			y,
 			width: size.width,
 			height: size.height
-		};
-		this.components.push(newComp);
-		this.drawScene();
+		}
+		this.components.push(newComp)
+		this.drawScene()
 	}
 }

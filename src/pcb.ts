@@ -1,4 +1,4 @@
-import { UiComponent } from "./ui";
+import { UiComponent } from "./ui"
 
 export class PCBEditor extends UiComponent<HTMLDivElement> {
 	public constructor() {

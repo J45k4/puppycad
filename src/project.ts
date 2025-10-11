@@ -1,9 +1,9 @@
-import { AssemblyEditor } from "./assembly";
-import { DiagramEditor } from "./diagram";
-import { PartEditor } from "./part";
-import { PCBEditor } from "./pcb";
-import { SchemanticEditor } from "./schemantic";
-import { ItemList, Modal, UiComponent, TreeList } from "./ui";
+import { AssemblyEditor } from "./assembly"
+import { DiagramEditor } from "./diagram"
+import { PartEditor } from "./part"
+import { PCBEditor } from "./pcb"
+import { SchemanticEditor } from "./schemantic"
+import { ItemList, Modal, UiComponent, TreeList } from "./ui"
 
 export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
 
@@ -52,7 +52,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					{ label: "PCB", value: "pcb" },
 					{ label: "Part", value: "part" },
 					{ label: "Assembly", value: "assembly" },
-					{ label: "Diagram", value: "diagram" },
+					{ label: "Diagram", value: "diagram" }
 				]
 			})
 		})
@@ -70,16 +70,18 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.itemsListContainer = new TreeList<ProjectItem>({
 			items: [],
 			onClick: (item) => this.handleItemSelection(item)
-		});
-		this.root.appendChild(this.itemsListContainer.root);
+		})
+		this.root.appendChild(this.itemsListContainer.root)
 		void this.loadFromIndexedDB()
 	}
 
 	private renderItems() {
-		this.itemsListContainer.setItems(this.items.map(item => ({
-			label: item.type,
-			value: item
-		})));
+		this.itemsListContainer.setItems(
+			this.items.map((item) => ({
+				label: item.type,
+				value: item
+			}))
+		)
 		if (this.selectedIndex !== null) {
 			const selectedItem = this.items[this.selectedIndex]
 			if (selectedItem) {
@@ -151,7 +153,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
 			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
 			const state: PersistedProjectState = {
-				items: this.items.map(item => ({ type: item.type })),
+				items: this.items.map((item) => ({ type: item.type })),
 				selectedIndex: this.selectedIndex
 			}
 			store.put(state, ProjectTreeView.STORE_KEY)
@@ -181,7 +183,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				return
 			}
 			this.isRestoring = true
-			this.items = result.items.map(item => this.createProjectItem(item.type))
+			this.items = result.items.map((item) => this.createProjectItem(item.type))
 			this.selectedIndex = result.selectedIndex ?? null
 			this.renderItems()
 			if (this.selectedIndex !== null) {

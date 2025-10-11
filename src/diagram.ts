@@ -1,14 +1,6 @@
 import { UiComponent, VList } from "./ui"
 
-type FlowchartShape =
-	| "startEnd"
-	| "process"
-	| "decision"
-	| "inputOutput"
-	| "predefinedProcess"
-	| "manualInput"
-	| "document"
-	| "database"
+type FlowchartShape = "startEnd" | "process" | "decision" | "inputOutput" | "predefinedProcess" | "manualInput" | "document" | "database"
 
 interface FlowchartNode {
 	id: number
@@ -171,11 +163,11 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			button.style.border = "1px solid #94a3b8"
 			button.style.backgroundColor = "#fff"
 			button.style.cursor = "pointer"
-			button.onmouseenter = () => button.style.backgroundColor = "#e2e8f0"
-			button.onmouseleave = () => button.style.backgroundColor = "#fff"
+			button.onmouseenter = () => (button.style.backgroundColor = "#e2e8f0")
+			button.onmouseleave = () => (button.style.backgroundColor = "#fff")
 			button.onclick = () => this.addNode(shape)
 			button.draggable = true
-			button.addEventListener("dragstart", event => {
+			button.addEventListener("dragstart", (event) => {
 				if (!event.dataTransfer) return
 				event.dataTransfer.effectAllowed = "copy"
 				event.dataTransfer.setData("application/x-flowchart-shape", shape)
@@ -284,31 +276,22 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				return
 			}
 			const target = event.target as HTMLElement | null
-			if (
-				target === this.canvasArea ||
-				target === this.svgLayer ||
-				target === this.selectionOverlay ||
-				target === this.nodesLayer
-			) {
+			if (target === this.canvasArea || target === this.svgLayer || target === this.selectionOverlay || target === this.nodesLayer) {
 				this.startSelection(event)
 			}
 		})
 
-		this.canvasArea.addEventListener("dragover", event => {
+		this.canvasArea.addEventListener("dragover", (event) => {
 			if (!event.dataTransfer) return
-			const hasShapeData = Array.from(event.dataTransfer.types).some(type =>
-				type === "application/x-flowchart-shape" || type === "text/plain"
-			)
+			const hasShapeData = Array.from(event.dataTransfer.types).some((type) => type === "application/x-flowchart-shape" || type === "text/plain")
 			if (!hasShapeData) return
 			event.preventDefault()
 			event.dataTransfer.dropEffect = "copy"
 		})
 
-		this.canvasArea.addEventListener("drop", event => {
+		this.canvasArea.addEventListener("drop", (event) => {
 			if (!event.dataTransfer) return
-			const shapeData =
-				event.dataTransfer.getData("application/x-flowchart-shape") ||
-				event.dataTransfer.getData("text/plain")
+			const shapeData = event.dataTransfer.getData("application/x-flowchart-shape") || event.dataTransfer.getData("text/plain")
 			if (!this.isFlowchartShape(shapeData)) return
 			event.preventDefault()
 			const worldPosition = this.screenToWorld(event.clientX, event.clientY)
@@ -443,17 +426,17 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
 			this.dragStartPointer = pointerPosition
 			this.dragInitialNodePositions.clear()
-			this.draggingNodes = this.nodes.filter(n => this.selectedNodeIds.has(n.id))
+			this.draggingNodes = this.nodes.filter((n) => this.selectedNodeIds.has(n.id))
 			if (this.draggingNodes.length === 0) {
 				this.draggingNodes = [node]
 			}
-			this.draggingNodes.forEach(dragNode => {
+			this.draggingNodes.forEach((dragNode) => {
 				this.dragInitialNodePositions.set(dragNode.id, {
 					x: dragNode.x,
 					y: dragNode.y
 				})
 			})
-			this.draggingNodes.forEach(dragNode => {
+			this.draggingNodes.forEach((dragNode) => {
 				dragNode.element.style.cursor = "grabbing"
 			})
 			document.addEventListener("pointermove", this.boundPointerMove)
@@ -636,7 +619,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		const pointerPosition = this.screenToWorld(event.clientX, event.clientY)
 		const deltaX = pointerPosition.x - this.dragStartPointer.x
 		const deltaY = pointerPosition.y - this.dragStartPointer.y
-		this.draggingNodes.forEach(node => {
+		this.draggingNodes.forEach((node) => {
 			const initial = this.dragInitialNodePositions.get(node.id)
 			if (!initial) {
 				return
@@ -649,7 +632,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 	private onPointerUp() {
 		if (this.draggingNodes.length > 0) {
-			this.draggingNodes.forEach(node => {
+			this.draggingNodes.forEach((node) => {
 				node.element.style.cursor = "grab"
 			})
 			this.draggingNodes = []
@@ -680,7 +663,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateNodeStyles() {
-		this.nodes.forEach(node => {
+		this.nodes.forEach((node) => {
 			const isSelected = this.selectedNodeIds.has(node.id)
 			const isConnectStart = node.id === this.connectStartNodeId
 			if (isConnectStart) {
@@ -698,7 +681,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateConnectionStyles() {
-		this.connections.forEach(connection => {
+		this.connections.forEach((connection) => {
 			const isSelected = connection.id === this.selectedConnectionId
 			if (isSelected) {
 				connection.path.style.stroke = DiagramEditor.SELECTED_CONNECTION_STROKE_COLOR
@@ -821,7 +804,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 	private updateSelectionFromRect(rect: ScreenRect, persist = true) {
 		const selectedIds: number[] = []
-		this.nodes.forEach(node => {
+		this.nodes.forEach((node) => {
 			const bounds = this.getNodeScreenBounds(node)
 			if (this.rectanglesIntersect(rect, bounds)) {
 				selectedIds.push(node.id)
@@ -886,10 +869,10 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 
 	private createConnection(fromId: number, toId: number) {
 		if (fromId === toId) return
-		const exists = this.connections.some(conn => conn.from === fromId && conn.to === toId)
+		const exists = this.connections.some((conn) => conn.from === fromId && conn.to === toId)
 		if (exists) return
-		const fromNode = this.nodes.find(node => node.id === fromId)
-		const toNode = this.nodes.find(node => node.id === toId)
+		const fromNode = this.nodes.find((node) => node.id === fromId)
+		const toNode = this.nodes.find((node) => node.id === toId)
 		if (!fromNode || !toNode) return
 
 		const connection = this.createConnectionElement({
@@ -904,8 +887,8 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private createConnectionFromPersisted(data: PersistedFlowchartConnection): FlowchartConnection | null {
-		const fromNode = this.nodes.find(node => node.id === data.from)
-		const toNode = this.nodes.find(node => node.id === data.to)
+		const fromNode = this.nodes.find((node) => node.id === data.from)
+		const toNode = this.nodes.find((node) => node.id === data.to)
 		if (!fromNode || !toNode) {
 			return null
 		}
@@ -957,9 +940,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateConnectorPositions() {
-		this.connections.forEach(connection => {
-			const fromNode = this.nodes.find(node => node.id === connection.from)
-			const toNode = this.nodes.find(node => node.id === connection.to)
+		this.connections.forEach((connection) => {
+			const fromNode = this.nodes.find((node) => node.id === connection.from)
+			const toNode = this.nodes.find((node) => node.id === connection.to)
 			if (!fromNode || !toNode) return
 			const fromPoint = this.getNodeConnectionPoint(fromNode, "bottom")
 			const toPoint = this.getNodeConnectionPoint(toNode, "top")
@@ -979,7 +962,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		if (this.selectedNodeIds.size > 0) {
 			const idsToDelete = new Set(this.selectedNodeIds)
 			const remainingNodes: FlowchartNode[] = []
-			this.nodes.forEach(node => {
+			this.nodes.forEach((node) => {
 				if (idsToDelete.has(node.id)) {
 					node.element.remove()
 				} else {
@@ -987,7 +970,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				}
 			})
 			this.nodes = remainingNodes
-			this.connections = this.connections.filter(connection => {
+			this.connections = this.connections.filter((connection) => {
 				if (idsToDelete.has(connection.from) || idsToDelete.has(connection.to)) {
 					connection.path.remove()
 					return false
@@ -1000,7 +983,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		if (this.selectedConnectionId !== null) {
-			const index = this.connections.findIndex(connection => connection.id === this.selectedConnectionId)
+			const index = this.connections.findIndex((connection) => connection.id === this.selectedConnectionId)
 			if (index !== -1) {
 				const [connection] = this.connections.splice(index, 1)
 				if (connection) {
@@ -1033,7 +1016,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			const store = transaction.objectStore(DiagramEditor.STORE_NAME)
 			const selectedNodeIdsArray = Array.from(this.selectedNodeIds)
 			const state: PersistedDiagramState = {
-				nodes: this.nodes.map(node => ({
+				nodes: this.nodes.map((node) => ({
 					id: node.id,
 					type: node.type,
 					x: node.x,
@@ -1042,7 +1025,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 					height: node.height,
 					text: node.text
 				})),
-				connections: this.connections.map(connection => ({
+				connections: this.connections.map((connection) => ({
 					id: connection.id,
 					from: connection.from,
 					to: connection.to
@@ -1089,7 +1072,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			this.nodes = []
 			this.connections = []
 			let maxNodeId = 0
-			result.nodes.forEach(nodeData => {
+			result.nodes.forEach((nodeData) => {
 				const node = this.createNodeFromPersisted(nodeData)
 				this.nodes.push(node)
 				this.nodesLayer.appendChild(node.element)
@@ -1099,7 +1082,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			})
 			let maxConnectionId = 0
 			const connections = result.connections ?? []
-			connections.forEach(connectionData => {
+			connections.forEach((connectionData) => {
 				const connection = this.createConnectionFromPersisted(connectionData)
 				if (connection) {
 					this.connections.push(connection)
@@ -1110,11 +1093,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			})
 			this.nextNodeId = Math.max(result.nextNodeId ?? 0, maxNodeId + 1)
 			this.nextConnectionId = Math.max(result.nextConnectionId ?? 0, maxConnectionId + 1)
-			const restoredSelectedNodes = result.selectedNodeIds ?? (
-				result.selectedNodeId !== undefined && result.selectedNodeId !== null
-					? [result.selectedNodeId]
-					: []
-			)
+			const restoredSelectedNodes = result.selectedNodeIds ?? (result.selectedNodeId !== undefined && result.selectedNodeId !== null ? [result.selectedNodeId] : [])
 			this.selectedNodeIds = new Set(restoredSelectedNodes)
 			this.selectedConnectionId = result.selectedConnectionId ?? null
 			this.connectMode = result.connectMode ?? false

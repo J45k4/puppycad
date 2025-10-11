@@ -10,5 +10,4 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.root.style.position = "relative"
 		this.root.innerHTML = "<h2>Part Editor</h2>"
 	}
-
 }

@@ -4,10 +4,9 @@ import path from "path"
 import index from "./index.html"
 import { Entity, Schematic } from "./puppycad"
 
-
 Bun.serve({
 	port: 5337,
 	routes: {
-		"/": index,
+		"/": index
 	}
 })
