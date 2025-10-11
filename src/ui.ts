@@ -152,6 +152,276 @@ export class TextInput extends UiComponent<HTMLDivElement> {
 	}
 }
 
+type ModalActionType = "primary" | "secondary" | "danger"
+
+type ModalAction = {
+	label: string
+	type?: ModalActionType
+	onClick: () => void
+}
+
+export class Modal extends UiComponent<HTMLDivElement> {
+	private dialog: HTMLDivElement
+	private body: HTMLDivElement
+	private actionsContainer: HTMLDivElement
+	private isOpen = false
+	private closeCallbacks: (() => void)[] = []
+	private previouslyFocused: Element | null = null
+
+	constructor(args?: { title?: string; content?: HTMLElement | UiComponent<HTMLElement> }) {
+		super(document.createElement("div"))
+
+		this.root.className = "modal-backdrop"
+		this.root.style.position = "fixed"
+		this.root.style.inset = "0"
+		this.root.style.backgroundColor = "rgba(15, 23, 42, 0.55)"
+		this.root.style.display = "flex"
+		this.root.style.alignItems = "center"
+		this.root.style.justifyContent = "center"
+		this.root.style.padding = "24px"
+		this.root.style.zIndex = "1000"
+
+		this.dialog = document.createElement("div")
+		this.dialog.className = "modal-dialog"
+		this.dialog.style.minWidth = "280px"
+		this.dialog.style.maxWidth = "560px"
+		this.dialog.style.width = "100%"
+		this.dialog.style.backgroundColor = "#ffffff"
+		this.dialog.style.borderRadius = "12px"
+		this.dialog.style.boxShadow = "0 20px 45px rgba(15, 23, 42, 0.25)"
+		this.dialog.style.padding = "24px"
+		this.dialog.style.display = "flex"
+		this.dialog.style.flexDirection = "column"
+		this.dialog.style.gap = "16px"
+		this.dialog.style.position = "relative"
+
+		if (args?.title) {
+			const titleEl = document.createElement("h2")
+			titleEl.textContent = args.title
+			titleEl.className = "modal-title"
+			titleEl.style.margin = "0"
+			titleEl.style.fontSize = "20px"
+			titleEl.style.fontWeight = "600"
+			titleEl.style.color = "#0f172a"
+			this.dialog.appendChild(titleEl)
+		}
+
+		this.body = document.createElement("div")
+		this.body.className = "modal-body"
+		this.body.style.display = "flex"
+		this.body.style.flexDirection = "column"
+		this.body.style.gap = "12px"
+		if (args?.content) {
+			this.setContent(args.content)
+		}
+		this.dialog.appendChild(this.body)
+
+		this.actionsContainer = document.createElement("div")
+		this.actionsContainer.className = "modal-actions"
+		this.actionsContainer.style.display = "flex"
+		this.actionsContainer.style.justifyContent = "flex-end"
+		this.actionsContainer.style.gap = "8px"
+		this.dialog.appendChild(this.actionsContainer)
+
+		this.root.appendChild(this.dialog)
+
+		this.root.addEventListener("mousedown", (event) => {
+			if (event.target === this.root) {
+				event.preventDefault()
+				this.close()
+			}
+		})
+
+		this.handleKeydown = this.handleKeydown.bind(this)
+	}
+
+	private handleKeydown(event: KeyboardEvent) {
+		if (event.key === "Escape") {
+			event.preventDefault()
+			this.close()
+		}
+	}
+
+	public open(parent: HTMLElement = document.body) {
+		if (this.isOpen) return
+		this.isOpen = true
+		this.previouslyFocused = document.activeElement
+		parent.appendChild(this.root)
+		document.addEventListener("keydown", this.handleKeydown)
+	}
+
+	public close() {
+		if (!this.isOpen) return
+		this.isOpen = false
+		this.root.remove()
+		document.removeEventListener("keydown", this.handleKeydown)
+		for (const callback of this.closeCallbacks) {
+			callback()
+		}
+		const previousElement = this.previouslyFocused
+		if (previousElement instanceof HTMLElement) {
+			previousElement.focus({ preventScroll: true })
+		}
+	}
+
+	public show(parent?: HTMLElement) {
+		this.open(parent)
+	}
+
+	public hide() {
+		this.close()
+	}
+
+	public onClose(callback: () => void) {
+		this.closeCallbacks.push(callback)
+	}
+
+	public setContent(content: HTMLElement | UiComponent<HTMLElement>) {
+		this.body.innerHTML = ""
+		const element = content instanceof HTMLElement ? content : content.root
+		this.body.appendChild(element)
+	}
+
+	public addAction(action: ModalAction) {
+		const button = document.createElement("button")
+		button.textContent = action.label
+		button.className = "modal-button"
+		button.style.padding = "8px 16px"
+		button.style.borderRadius = "8px"
+		button.style.border = "none"
+		button.style.fontWeight = "600"
+		button.style.cursor = "pointer"
+		button.style.fontSize = "14px"
+		button.style.transition = "background-color 0.2s ease, color 0.2s ease"
+
+		switch (action.type) {
+			case "primary":
+				button.style.backgroundColor = "#2563eb"
+				button.style.color = "#ffffff"
+				button.onmouseenter = () => {
+					button.style.backgroundColor = "#1d4ed8"
+				}
+				button.onmouseleave = () => {
+					button.style.backgroundColor = "#2563eb"
+				}
+				break
+			case "danger":
+				button.style.backgroundColor = "#ef4444"
+				button.style.color = "#ffffff"
+				button.onmouseenter = () => {
+					button.style.backgroundColor = "#dc2626"
+				}
+				button.onmouseleave = () => {
+					button.style.backgroundColor = "#ef4444"
+				}
+				break
+			default:
+				button.style.backgroundColor = "#e2e8f0"
+				button.style.color = "#0f172a"
+				button.onmouseenter = () => {
+					button.style.backgroundColor = "#cbd5f5"
+				}
+				button.onmouseleave = () => {
+					button.style.backgroundColor = "#e2e8f0"
+				}
+		}
+
+		button.onclick = () => action.onClick()
+		this.actionsContainer.appendChild(button)
+	}
+}
+
+export function showTextPromptModal(args: {
+	title: string
+	initialValue?: string
+	placeholder?: string
+	description?: string
+	confirmText?: string
+	cancelText?: string
+}): Promise<string | null> {
+	return new Promise((resolve) => {
+		const modal = new Modal({ title: args.title })
+		let isResolved = false
+
+		const safeResolve = (value: string | null) => {
+			if (isResolved) return
+			isResolved = true
+			resolve(value)
+		}
+
+		const container = document.createElement("form")
+		container.style.display = "flex"
+		container.style.flexDirection = "column"
+		container.style.gap = "12px"
+
+		if (args.description) {
+			const descriptionEl = document.createElement("p")
+			descriptionEl.textContent = args.description
+			descriptionEl.style.margin = "0"
+			descriptionEl.style.fontSize = "14px"
+			descriptionEl.style.color = "#475569"
+			container.appendChild(descriptionEl)
+		}
+
+		const input = document.createElement("input")
+		input.type = "text"
+		input.value = args.initialValue ?? ""
+		input.placeholder = args.placeholder ?? ""
+		input.style.padding = "10px 12px"
+		input.style.borderRadius = "8px"
+		input.style.border = "1px solid #cbd5e1"
+		input.style.fontSize = "14px"
+		input.style.outline = "none"
+		input.onfocus = () => {
+			input.style.borderColor = "#2563eb"
+			input.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.2)"
+		}
+		input.onblur = () => {
+			input.style.borderColor = "#cbd5e1"
+			input.style.boxShadow = "none"
+		}
+
+		container.appendChild(input)
+
+		const submit = () => {
+			safeResolve(input.value)
+			modal.close()
+		}
+
+		const cancel = () => {
+			safeResolve(null)
+			modal.close()
+		}
+
+		container.addEventListener("submit", (event) => {
+			event.preventDefault()
+			submit()
+		})
+
+		modal.setContent(container)
+
+		modal.addAction({
+			label: args.cancelText ?? "Cancel",
+			type: "secondary",
+			onClick: cancel
+		})
+
+		modal.addAction({
+			label: args.confirmText ?? "Save",
+			type: "primary",
+			onClick: submit
+		})
+
+		modal.onClose(() => {
+			safeResolve(null)
+		})
+
+		modal.open()
+		input.focus()
+		input.select()
+	})
+}
+
 export class MultiCheckboxSelect extends UiComponent<HTMLDivElement> {
 	private checkboxes: HTMLInputElement[] = []
 	private checkboxContainer: HTMLDivElement
@@ -438,84 +708,6 @@ export class Collapsible extends UiComponent<HTMLDivElement> {
 		if (!this.root.contains(e.target as Node)) {
 			this.hide()
 		}
-	}
-}
-
-export class Modal extends UiComponent<HTMLDivElement> {
-	private backdrop: HTMLDivElement
-	private modalContainer: HTMLDivElement
-	private contentContainer: HTMLDivElement
-	private closeButton: HTMLButtonElement
-
-	constructor(args: { title?: string; content: UiComponent<HTMLElement> | HTMLElement }) {
-		// Create backdrop
-		const backdrop = document.createElement("div")
-		backdrop.className = "modal-backdrop"
-		backdrop.style.display = "none"
-		backdrop.style.position = "fixed"
-		backdrop.style.top = "0"
-		backdrop.style.left = "0"
-		backdrop.style.width = "100%"
-		backdrop.style.height = "100%"
-		backdrop.style.backgroundColor = "rgba(0, 0, 0, 0.5)"
-		backdrop.style.alignItems = "center"
-		backdrop.style.justifyContent = "center"
-		backdrop.style.zIndex = "1000"
-		backdrop.onclick = () => this.hide()
-		super(backdrop)
-		this.backdrop = backdrop
-
-		// Create modal container
-		this.modalContainer = document.createElement("div")
-		this.modalContainer.onclick = (e: MouseEvent) => e.stopPropagation()
-
-		this.modalContainer.style.backgroundColor = "white"
-		this.modalContainer.style.padding = "16px"
-		this.modalContainer.style.borderRadius = "4px"
-		this.modalContainer.style.maxWidth = "90%"
-		this.modalContainer.style.maxHeight = "90%"
-		this.modalContainer.style.overflow = "auto"
-		this.modalContainer.style.position = "relative"
-		this.modalContainer.style.width = "600px"
-		backdrop.appendChild(this.modalContainer)
-
-		// Add close button
-		this.closeButton = document.createElement("button")
-		this.closeButton.textContent = "✖"
-		Object.assign(this.closeButton.style, {
-			position: "absolute",
-			top: "8px",
-			right: "8px",
-			cursor: "pointer",
-			background: "none",
-			border: "none",
-			fontSize: "16px"
-		})
-		this.modalContainer.appendChild(this.closeButton)
-		this.closeButton.onclick = () => this.hide()
-
-		// Add title if provided
-		if (args.title) {
-			const titleEl = document.createElement("h2")
-			titleEl.textContent = args.title
-			titleEl.style.marginTop = "0"
-			this.modalContainer.appendChild(titleEl)
-		}
-
-		// Add content
-		const contentRoot = args.content instanceof HTMLElement ? args.content : args.content.root
-		this.contentContainer = document.createElement("div")
-		this.contentContainer.appendChild(contentRoot)
-		this.modalContainer.appendChild(this.contentContainer)
-		document.body.appendChild(this.backdrop)
-	}
-
-	public show(): void {
-		this.backdrop.style.display = "flex"
-	}
-
-	public hide(): void {
-		this.backdrop.style.display = "none"
 	}
 }
 

@@ -1,4 +1,4 @@
-import { UiComponent, VList } from "./ui"
+import { UiComponent, VList, showTextPromptModal } from "./ui"
 
 type FlowchartShape = "startEnd" | "process" | "decision" | "inputOutput" | "predefinedProcess" | "manualInput" | "document" | "database"
 
@@ -451,9 +451,12 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			element.style.cursor = "grab"
 		})
 
-		element.addEventListener("dblclick", (event) => {
+		element.addEventListener("dblclick", async (event) => {
 			event.stopPropagation()
-			const value = prompt("Edit step", node.text)
+			const value = await showTextPromptModal({
+				title: "Edit step",
+				initialValue: node.text
+			})
 			if (value !== null) {
 				node.text = value
 				node.textElement.textContent = value
