@@ -1,6 +1,14 @@
 import { UiComponent, VList } from "./ui"
 
-type FlowchartShape = "startEnd" | "process" | "decision" | "inputOutput"
+type FlowchartShape =
+	| "startEnd"
+	| "process"
+	| "decision"
+	| "inputOutput"
+	| "predefinedProcess"
+	| "manualInput"
+	| "document"
+	| "database"
 
 interface FlowchartNode {
 	id: number
@@ -70,7 +78,11 @@ const SHAPE_CONFIG: Record<FlowchartShape, ShapeConfig> = {
 	startEnd: { label: "Start / End", width: 140, height: 60, defaultText: "Start" },
 	process: { label: "Process", width: 160, height: 80, defaultText: "Process" },
 	decision: { label: "Decision", width: 160, height: 160, defaultText: "Decision" },
-	inputOutput: { label: "Input / Output", width: 170, height: 80, defaultText: "Data" }
+	inputOutput: { label: "Input / Output", width: 170, height: 80, defaultText: "Data" },
+	predefinedProcess: { label: "Subprocess", width: 180, height: 80, defaultText: "Subprocess" },
+	manualInput: { label: "Manual Input", width: 180, height: 80, defaultText: "Manual Input" },
+	document: { label: "Document", width: 200, height: 120, defaultText: "Document" },
+	database: { label: "Database", width: 160, height: 110, defaultText: "Database" }
 }
 
 export class DiagramEditor extends UiComponent<HTMLDivElement> {
@@ -318,7 +330,16 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private isFlowchartShape(value: string | null | undefined): value is FlowchartShape {
-		return value === "startEnd" || value === "process" || value === "decision" || value === "inputOutput"
+		return (
+			value === "startEnd" ||
+			value === "process" ||
+			value === "decision" ||
+			value === "inputOutput" ||
+			value === "predefinedProcess" ||
+			value === "manualInput" ||
+			value === "document" ||
+			value === "database"
+		)
 	}
 
 	private getShapeConfig(shape: FlowchartShape): ShapeConfig {
@@ -459,6 +480,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		element.style.clipPath = "none"
 		element.style.transform = "none"
 		element.style.background = "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)"
+		element.style.backgroundSize = "auto"
+		element.style.backgroundPosition = "center"
+		element.style.backgroundRepeat = "no-repeat"
 
 		let borderColor = "#1f2937"
 
@@ -484,6 +508,37 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				element.style.clipPath = "polygon(12% 0%, 100% 0%, 88% 100%, 0% 100%)"
 				element.style.background = "linear-gradient(180deg, #cffafe 0%, #a5f3fc 100%)"
 				borderColor = "#0ea5e9"
+				break
+			}
+			case "predefinedProcess": {
+				element.style.background =
+					"linear-gradient(90deg, rgba(37, 99, 235, 0.18) 0px, rgba(37, 99, 235, 0.18) 12px, transparent 12px, transparent calc(100% - 12px), rgba(37, 99, 235, 0.18) calc(100% - 12px), rgba(37, 99, 235, 0.18) 100%), linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%)"
+				element.style.backgroundSize = "100% 100%, 100% 100%"
+				element.style.backgroundRepeat = "no-repeat"
+				borderColor = "#1d4ed8"
+				break
+			}
+			case "manualInput": {
+				element.style.clipPath = "polygon(0% 22%, 100% 0%, 100% 100%, 0% 100%)"
+				element.style.background = "linear-gradient(180deg, #ede9fe 0%, #ddd6fe 100%)"
+				borderColor = "#6d28d9"
+				break
+			}
+			case "document": {
+				element.style.borderRadius = "16px"
+				element.style.clipPath = "polygon(0 0, 100% 0, 100% 82%, 80% 100%, 0 100%)"
+				element.style.background = "linear-gradient(180deg, #fef9c3 0%, #fde68a 100%)"
+				borderColor = "#d97706"
+				break
+			}
+			case "database": {
+				element.style.borderRadius = "9999px / 20%"
+				element.style.background =
+					"radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, #c7d2fe 0%, #a5b4fc 100%)"
+				element.style.backgroundSize = "100% 65%, 100% 100%"
+				element.style.backgroundPosition = "center top, center"
+				element.style.backgroundRepeat = "no-repeat"
+				borderColor = "#4338ca"
 				break
 			}
 		}
