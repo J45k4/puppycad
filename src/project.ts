@@ -46,6 +46,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				onClick: (type) => {
 					console.log("createNew", type)
 					this.addItem(type)
+					this.modal.hide()
 				},
 				items: [
 					{ label: "Schemantic", value: "schemantic" },
