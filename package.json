@@ -4,7 +4,8 @@
 	"scripts": {
 		"lint": "bunx biome lint .",
 		"lint-fix": "bunx biome lint . --fix",
-		"format": "bunx biome format . --write",
+		"format": "bunx biome format",
+		"format-fix": "bunx biome format --write",
 		"check": "tsc --noEmit",
 		"test": "bun test"
 	},
