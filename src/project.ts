@@ -3,22 +3,13 @@ import { createDiagramEditor } from "./diagram"
 import { PartEditor } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor } from "./schemantic"
+import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
+import type { ProjectFile, ProjectFileItem, ProjectFileType } from "./project-file"
 import { ItemList, Modal, UiComponent, TreeList } from "./ui"
-
-export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
 
 export type ProjectItem = {
 	type: ProjectFileType
 	editor: UiComponent<HTMLDivElement>
-}
-
-type PersistedProjectItem = {
-	type: ProjectFileType
-}
-
-type PersistedProjectState = {
-	items: PersistedProjectItem[]
-	selectedIndex?: number | null
 }
 
 class ProjectTreeView extends UiComponent<HTMLDivElement> {
@@ -68,6 +59,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		newButton.textContent = "New"
 		newButton.onclick = this.newButtonClicked.bind(this)
 		this.root.appendChild(newButton)
+
+		const saveButton = document.createElement("button")
+		saveButton.textContent = "Save"
+		saveButton.onclick = () => this.saveProjectToFile()
+		this.root.appendChild(saveButton)
 
 		this.itemsListContainer = new TreeList<ProjectItem>({
 			items: [],
@@ -159,10 +155,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			const db = await this.getDatabase()
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
 			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
-			const state: PersistedProjectState = {
-				items: this.items.map((item) => ({ type: item.type })),
-				selectedIndex: this.selectedIndex
-			}
+			const state = this.buildProjectFile()
 			store.put(state, ProjectTreeView.STORE_KEY)
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
@@ -183,31 +176,19 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readonly")
 			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
 			const request = store.get(ProjectTreeView.STORE_KEY)
-			const result = await this.promisifyRequest<PersistedProjectState | undefined>(request)
+			const result = await this.promisifyRequest<ProjectFile | undefined>(request)
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
 				transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
 				transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"))
 			})
-			if (!result) {
+			const normalized = normalizeProjectFile(result)
+			if (!normalized) {
 				return
 			}
-			this.isRestoring = true
-			this.items = result.items.map((item) => this.createProjectItem(item.type))
-			this.selectedIndex = result.selectedIndex ?? null
-			this.renderItems()
-			if (this.selectedIndex !== null) {
-				const selectedItem = this.items[this.selectedIndex]
-				if (selectedItem) {
-					this.handleItemSelection(selectedItem)
-				} else {
-					this.selectedIndex = null
-				}
-			}
+			this.restoreFromProjectFile(normalized)
 		} catch (error) {
 			this.handlePersistenceError("Failed to load project items", error)
-		} finally {
-			this.isRestoring = false
 		}
 	}
 
@@ -236,6 +217,58 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			})
 		}
 		return this.databasePromise
+	}
+
+	private buildProjectFile(): ProjectFile {
+		const items: ProjectFileItem[] = this.items.map((item) => ({ type: item.type }))
+		return createProjectFile({
+			items,
+			selectedIndex: this.selectedIndex
+		})
+	}
+
+	private restoreFromProjectFile(projectFile: ProjectFile) {
+		this.isRestoring = true
+		try {
+			this.items = projectFile.items.map((item) => this.createProjectItem(item.type))
+			this.selectedIndex = projectFile.selectedIndex
+			if (this.selectedIndex !== null) {
+				if (this.selectedIndex < 0 || this.selectedIndex >= this.items.length) {
+					this.selectedIndex = null
+				}
+			}
+			this.renderItems()
+			if (this.selectedIndex !== null) {
+				const selectedItem = this.items[this.selectedIndex]
+				if (selectedItem) {
+					this.handleItemSelection(selectedItem)
+				} else {
+					this.selectedIndex = null
+				}
+			}
+		} finally {
+			this.isRestoring = false
+		}
+	}
+
+	private saveProjectToFile() {
+		try {
+			const projectFile = this.buildProjectFile()
+			const json = serializeProjectFile(projectFile)
+			const blob = new Blob([json], { type: PROJECT_FILE_MIME_TYPE })
+			const url = URL.createObjectURL(blob)
+			const anchor = document.createElement("a")
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+			anchor.href = url
+			anchor.download = `puppycad-project-${timestamp}.json`
+			anchor.style.display = "none"
+			document.body?.appendChild(anchor)
+			anchor.click()
+			anchor.remove()
+			URL.revokeObjectURL(url)
+		} catch (error) {
+			console.error("Failed to export project file", error)
+		}
 	}
 
 	private handlePersistenceError(message: string, error: unknown) {
