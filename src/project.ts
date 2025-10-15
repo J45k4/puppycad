@@ -65,6 +65,13 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		saveButton.onclick = () => this.saveProjectToFile()
 		this.root.appendChild(saveButton)
 
+		const serverSaveButton = document.createElement("button")
+		serverSaveButton.textContent = "Save to Server"
+		serverSaveButton.onclick = () => {
+			void this.saveProjectToServer()
+		}
+		this.root.appendChild(serverSaveButton)
+
 		this.itemsListContainer = new TreeList<ProjectItem>({
 			items: [],
 			onClick: (item) => this.handleItemSelection(item)
@@ -268,6 +275,51 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			URL.revokeObjectURL(url)
 		} catch (error) {
 			console.error("Failed to export project file", error)
+		}
+	}
+
+	private async saveProjectToServer() {
+		try {
+			const projectFile = this.buildProjectFile()
+			const response = await fetch("/api/projects", {
+				method: "POST",
+				headers: {
+					"Content-Type": PROJECT_FILE_MIME_TYPE
+				},
+				body: serializeProjectFile(projectFile)
+			})
+
+			if (!response.ok) {
+				let errorDetail = ""
+				try {
+					errorDetail = await response.text()
+				} catch {
+					// ignore response body parsing issues
+				}
+				const reason = errorDetail.trim() ? `: ${errorDetail}` : ""
+				throw new Error(`Server responded with ${response.status}${reason}`)
+			}
+
+			let message = "Project saved on server."
+			try {
+				const result = (await response.json()) as { fileName?: string } | null
+				if (result?.fileName) {
+					message = `Project saved on server as ${result.fileName}.`
+				}
+			} catch {
+				// ignore JSON parse issues, best-effort message only
+			}
+
+			console.log(message)
+			if (typeof window !== "undefined" && typeof window.alert === "function") {
+				window.alert(message)
+			}
+		} catch (error) {
+			console.error("Failed to save project to server", error)
+			if (typeof window !== "undefined" && typeof window.alert === "function") {
+				const description = error instanceof Error ? error.message : "Unknown error"
+				window.alert(`Failed to save project to server: ${description}`)
+			}
 		}
 	}
 
