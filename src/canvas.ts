@@ -81,6 +81,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
         private components: CanvasComponent<TData>[]
         private connections: Connection[]
         private selectedIds: number[] = []
+        private selectedConnectionIndex: number | null = null
         private isDraggingGroup = false
         private groupDragStartX = 0
         private groupDragStartY = 0
@@ -95,11 +96,32 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
         private connectionPreviewPoint: { x: number; y: number } | null = null
         private hoveredEdge: EdgeAnchor<TData> | null = null
         private readonly edgeHitPadding = 40
+        private readonly connectionHitPadding = 12
         private nextComponentId = 1
         private isPanning = false
         private panStartX = 0
         private panStartY = 0
         private movedDuringDrag = false
+
+        private readonly handleKeydown = (event: KeyboardEvent): void => {
+                if (event.key !== "Delete" && event.key !== "Backspace") {
+                        return
+                }
+
+                if (this.selectedIds.length > 0) {
+                        const ids = [...this.selectedIds]
+                        for (const id of ids) {
+                                this.removeComponent(id)
+                        }
+                        event.preventDefault()
+                        return
+                }
+
+                if (this.selectedConnectionIndex !== null) {
+                        this.removeConnectionAt(this.selectedConnectionIndex)
+                        event.preventDefault()
+                }
+        }
 
         public constructor(options?: EditorCanvasOptions<TData>) {
                 super(document.createElement("div"))
@@ -134,6 +156,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                 this.canvasElement.style.background = "#ffffff"
                 this.canvasElement.style.boxShadow = "0 10px 25px rgba(15, 23, 42, 0.12)"
                 this.canvasElement.style.cursor = "default"
+                this.canvasElement.tabIndex = 0
 
                 const context = this.canvasElement.getContext("2d")
                 if (!context) {
@@ -153,13 +176,19 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
                 this.drawScene()
                 this.setupEventHandlers()
+                this.canvasElement.addEventListener("keydown", this.handleKeydown)
         }
 
         public setComponents(components: CanvasComponent<TData>[]): void {
                 this.components = components.map((component) => cloneComponent(component))
                 this.nextComponentId = this.computeNextComponentId()
+                const hadConnectionSelection = this.selectedConnectionIndex !== null
+                this.selectedConnectionIndex = null
                 this.drawScene()
                 this.emitComponentsChange()
+                if (hadConnectionSelection) {
+                        this.emitSelectionChange()
+                }
         }
 
         public getComponents(): CanvasComponent<TData>[] {
@@ -168,8 +197,13 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
         public setConnections(connections: Connection[]): void {
                 this.connections = connections.map((connection) => cloneConnection(connection))
+                const hadConnectionSelection = this.selectedConnectionIndex !== null
+                this.selectedConnectionIndex = null
                 this.drawScene()
                 this.emitConnectionsChange()
+                if (hadConnectionSelection) {
+                        this.emitSelectionChange()
+                }
         }
 
         public getConnections(): Connection[] {
@@ -196,12 +230,44 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                                 (connection) => connection.from.componentId !== id && connection.to.componentId !== id
                         )
                         this.selectedIds = this.selectedIds.filter((selectedId) => selectedId !== id)
+                        this.selectedConnectionIndex = null
                         this.drawScene()
                         this.emitComponentsChange()
                         this.emitConnectionsChange()
                         this.emitSelectionChange()
                         this.nextComponentId = this.computeNextComponentId()
                 }
+        }
+
+        public removeConnectionAt(index: number): void {
+                if (index < 0 || index >= this.connections.length) {
+                        return
+                }
+
+                let selectionChanged = false
+                this.connections.splice(index, 1)
+
+                if (this.selectedConnectionIndex === index) {
+                        this.selectedConnectionIndex = null
+                        selectionChanged = true
+                } else if (this.selectedConnectionIndex !== null && this.selectedConnectionIndex > index) {
+                        this.selectedConnectionIndex -= 1
+                }
+
+                this.drawScene()
+                this.emitConnectionsChange()
+                if (selectionChanged) {
+                        this.emitSelectionChange()
+                }
+        }
+
+        public getSelectedConnection(): Connection | null {
+                if (this.selectedConnectionIndex === null) {
+                        return null
+                }
+
+                const connection = this.connections[this.selectedConnectionIndex]
+                return connection ? cloneConnection(connection) : null
         }
 
         public updateComponent(id: number, update: Partial<CanvasComponent<TData>>): CanvasComponent<TData> | null {
@@ -216,15 +282,17 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
         }
 
         public clearSelection(): void {
-                if (this.selectedIds.length === 0) {
+                if (this.selectedIds.length === 0 && this.selectedConnectionIndex === null) {
                         return
                 }
                 this.selectedIds = []
+                this.selectedConnectionIndex = null
                 this.drawScene()
                 this.emitSelectionChange()
         }
 
         public setSelection(ids: number[]): void {
+                this.selectedConnectionIndex = null
                 this.selectedIds = [...new Set(ids)]
                 this.drawScene()
                 this.emitSelectionChange()
@@ -235,19 +303,37 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
         }
 
         public toWorldPoint(clientX: number, clientY: number): { x: number; y: number } {
-                const rect = this.canvasElement.getBoundingClientRect()
+                const canvasPoint = this.clientToCanvasPoint(clientX, clientY)
                 return {
-                        x: (clientX - rect.left - this.originX) / this.scale,
-                        y: (clientY - rect.top - this.originY) / this.scale
+                        x: (canvasPoint.x - this.originX) / this.scale,
+                        y: (canvasPoint.y - this.originY) / this.scale
+                }
+        }
+
+        private clientToCanvasPoint(clientX: number, clientY: number): { x: number; y: number } {
+                const rect = this.canvasElement.getBoundingClientRect()
+                const scaleX = rect.width === 0 ? 1 : this.canvasElement.width / rect.width
+                const scaleY = rect.height === 0 ? 1 : this.canvasElement.height / rect.height
+                return {
+                        x: (clientX - rect.left) * scaleX,
+                        y: (clientY - rect.top) * scaleY
+                }
+        }
+
+        private clientDeltaToCanvas(deltaX: number, deltaY: number): { x: number; y: number } {
+                const rect = this.canvasElement.getBoundingClientRect()
+                const scaleX = rect.width === 0 ? 1 : this.canvasElement.width / rect.width
+                const scaleY = rect.height === 0 ? 1 : this.canvasElement.height / rect.height
+                return {
+                        x: deltaX * scaleX,
+                        y: deltaY * scaleY
                 }
         }
 
         private setupEventHandlers(): void {
                 this.canvasElement.addEventListener("wheel", (event) => {
                         event.preventDefault()
-                        const rect = this.canvasElement.getBoundingClientRect()
-                        const mouseX = (event.clientX - rect.left - this.originX) / this.scale
-                        const mouseY = (event.clientY - rect.top - this.originY) / this.scale
+                        const { x: mouseX, y: mouseY } = this.toWorldPoint(event.clientX, event.clientY)
                         const zoomFactor = 1 - event.deltaY * 0.001
                         this.originX -= mouseX * (zoomFactor - 1) * this.scale
                         this.originY -= mouseY * (zoomFactor - 1) * this.scale
@@ -268,6 +354,8 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                                 return
                         }
 
+                        this.canvasElement.focus({ preventScroll: true })
+
                         const { x, y } = this.toWorldPoint(event.clientX, event.clientY)
                         this.movedDuringDrag = false
                         const clicked = this.components.find((component) => this.isPointInsideComponent(component, x, y))
@@ -276,17 +364,41 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                                 hoveredEdge !== null && (!clicked || this.isNearComponentEdge(clicked, x, y))
 
                         if (shouldStartConnection && hoveredEdge) {
+                                const hadConnectionSelection = this.selectedConnectionIndex !== null
                                 this.isConnecting = true
                                 this.connectionStartAnchor = hoveredEdge
                                 this.connectionPreviewPoint = hoveredEdge.point
                                 this.hoveredEdge = hoveredEdge
+                                this.selectedConnectionIndex = null
                                 this.canvasElement.style.cursor = "crosshair"
                                 this.drawScene()
+                                if (hadConnectionSelection) {
+                                        this.emitSelectionChange()
+                                }
+                                return
+                        }
+
+                        const connectionIndex = this.findConnectionNearPoint(x, y)
+
+                        if (connectionIndex !== null && !clicked) {
+                                const hadSelection =
+                                        this.selectedConnectionIndex !== connectionIndex || this.selectedIds.length > 0
+                                this.selectedIds = []
+                                this.selectedConnectionIndex = connectionIndex
+                                this.isDraggingGroup = false
+                                this.isSelecting = false
+                                this.hoveredEdge = null
+                                this.canvasElement.style.cursor = "default"
+                                this.drawScene()
+                                if (hadSelection) {
+                                        this.emitSelectionChange()
+                                }
                                 return
                         }
 
                         if (clicked) {
                                 this.hoveredEdge = null
+                                this.selectedConnectionIndex = null
                                 if (event.shiftKey) {
                                         if (this.selectedIds.includes(clicked.id)) {
                                                 this.selectedIds = this.selectedIds.filter((id) => id !== clicked.id)
@@ -312,6 +424,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                                         .filter((value): value is { id: number; x: number; y: number } => value !== null)
                         } else {
                                 this.selectedIds = []
+                                this.selectedConnectionIndex = null
                                 this.isSelecting = true
                                 this.selectStartX = x
                                 this.selectStartY = y
@@ -327,10 +440,12 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                 this.canvasElement.addEventListener("mousemove", (event) => {
                         if (this.isPanning) {
                                 event.preventDefault()
-                                const dx = event.clientX - this.panStartX
-                                const dy = event.clientY - this.panStartY
-                                this.originX += dx
-                                this.originY += dy
+                                const delta = this.clientDeltaToCanvas(
+                                        event.clientX - this.panStartX,
+                                        event.clientY - this.panStartY
+                                )
+                                this.originX += delta.x
+                                this.originY += delta.y
                                 this.panStartX = event.clientX
                                 this.panStartY = event.clientY
                                 this.drawScene()
@@ -552,18 +667,24 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
         private drawConnections(): void {
                 this.ctx.save()
-                this.ctx.strokeStyle = "#475569"
-                this.ctx.lineWidth = 2
-                for (const connection of this.connections) {
+                this.ctx.lineCap = "round"
+                for (let index = 0; index < this.connections.length; index += 1) {
+                        const connection = this.connections[index]
                         const fromPoint = this.pointFromEndpoint(connection.from)
                         const toPoint = this.pointFromEndpoint(connection.to)
                         if (!fromPoint || !toPoint) {
                                 continue
                         }
+                        const isSelected = index === this.selectedConnectionIndex
+                        this.ctx.strokeStyle = isSelected ? "#2563eb" : "#475569"
+                        this.ctx.lineWidth = isSelected ? 4 : 2
                         this.ctx.beginPath()
                         this.ctx.moveTo(fromPoint.x, fromPoint.y)
                         this.ctx.lineTo(toPoint.x, toPoint.y)
                         this.ctx.stroke()
+                        if (isSelected) {
+                                this.ctx.lineWidth = 2
+                        }
                 }
                 this.ctx.restore()
         }
@@ -661,6 +782,28 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
                         }
                 }
                 return closest
+        }
+
+        private findConnectionNearPoint(x: number, y: number): number | null {
+                let closestIndex: number | null = null
+                let closestDistance = Number.POSITIVE_INFINITY
+                const tolerance = this.connectionHitPadding / this.scale
+
+                for (let index = 0; index < this.connections.length; index += 1) {
+                        const connection = this.connections[index]
+                        const fromPoint = this.pointFromEndpoint(connection.from)
+                        const toPoint = this.pointFromEndpoint(connection.to)
+                        if (!fromPoint || !toPoint) {
+                                continue
+                        }
+                        const distance = this.distanceFromPointToSegment({ x, y }, fromPoint, toPoint)
+                        if (distance <= tolerance && distance < closestDistance) {
+                                closestDistance = distance
+                                closestIndex = index
+                        }
+                }
+
+                return closestIndex
         }
 
         private getEdgeAnchor(
@@ -816,6 +959,29 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
         private safeRatio(delta: number, size: number): number {
                 return size === 0 ? 0 : delta / size
+        }
+
+        private distanceFromPointToSegment(
+                point: { x: number; y: number },
+                start: { x: number; y: number },
+                end: { x: number; y: number }
+        ): number {
+                const segmentLengthSquared = Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
+                if (segmentLengthSquared === 0) {
+                        return this.distanceBetweenPoints(point, start)
+                }
+
+                let t =
+                        ((point.x - start.x) * (end.x - start.x) + (point.y - start.y) * (end.y - start.y)) /
+                        segmentLengthSquared
+                t = this.clamp(t, 0, 1)
+
+                const projection = {
+                        x: start.x + t * (end.x - start.x),
+                        y: start.y + t * (end.y - start.y)
+                }
+
+                return this.distanceBetweenPoints(point, projection)
         }
 
         private distanceBetweenPoints(a: { x: number; y: number }, b: { x: number; y: number }): number {
