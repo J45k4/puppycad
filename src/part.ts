@@ -189,6 +189,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.addEventListener("pointerup", this.handlePreviewPointerUp)
 		this.previewCanvas.addEventListener("pointerleave", this.handlePreviewPointerUp)
 		this.previewCanvas.addEventListener("pointercancel", this.handlePreviewPointerUp)
+		this.previewCanvas.addEventListener("contextmenu", (event) => {
+			event.preventDefault()
+		})
 
 		this.updateStatus()
 		this.updateControls()
@@ -307,6 +310,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerDown = (event: PointerEvent) => {
+		const isRightMouseClick =
+			event.pointerType === "mouse" ? event.button === 2 : event.isPrimary && event.button === 0
+		if (!isRightMouseClick) {
+			return
+		}
+		event.preventDefault()
 		this.isRotatingPreview = true
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
 		this.previewCanvas.setPointerCapture(event.pointerId)
@@ -320,8 +329,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const dx = event.clientX - this.lastRotationPointer.x
 		const dy = event.clientY - this.lastRotationPointer.y
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
-		this.previewRotation.yaw += dx * 0.01
-		this.previewRotation.pitch += dy * 0.01
+                this.previewRotation.yaw -= dx * 0.01
+                this.previewRotation.pitch -= dy * 0.01
 		const limit = Math.PI / 2 - 0.1
 		this.previewRotation.pitch = Math.min(limit, Math.max(-limit, this.previewRotation.pitch))
 		this.drawPreview()
