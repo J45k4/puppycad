@@ -1,4 +1,4 @@
-export const PROJECT_FILE_VERSION = 1 as const
+export const PROJECT_FILE_VERSION = 2 as const
 
 export const PROJECT_FILE_TYPES = ["schemantic", "pcb", "part", "assembly", "diagram"] as const
 
@@ -78,41 +78,30 @@ export type ProjectFileItem =
 			name: string
 	  }
 
+export type ProjectFileFolder = {
+	kind: "folder"
+	name: string
+	items: ProjectFileEntry[]
+}
+
+export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
+
 export type ProjectFile = {
 	version: typeof PROJECT_FILE_VERSION
-	items: ProjectFileItem[]
-	selectedIndex: number | null
+	items: ProjectFileEntry[]
+	selectedPath: number[] | null
 }
 
 export const PROJECT_FILE_MIME_TYPE = "application/json"
 
 export function createProjectFile(args: {
-	items: ProjectFileItem[]
-	selectedIndex: number | null
+	items: ProjectFileEntry[]
+	selectedPath: number[] | null
 }): ProjectFile {
 	return {
 		version: PROJECT_FILE_VERSION,
-		items: args.items.map((item) => {
-			if (item.type === "schemantic") {
-				return {
-					type: item.type,
-					name: item.name,
-					data: cloneSchemanticProjectItemData(item.data)
-				}
-			}
-			if (item.type === "part") {
-				return {
-					type: item.type,
-					name: item.name,
-					data: clonePartProjectItemData(item.data)
-				}
-			}
-			return {
-				type: item.type,
-				name: item.name
-			}
-		}),
-		selectedIndex: args.selectedIndex ?? null
+		items: args.items.map(cloneProjectFileEntry),
+		selectedPath: cloneSelectedPath(args.selectedPath)
 	}
 }
 
@@ -129,35 +118,63 @@ export function normalizeProjectFile(input: unknown): ProjectFile | null {
 		version: unknown
 		items: unknown
 		selectedIndex: unknown
+		selectedPath: unknown
 	}>
 
-	const version = typeof value.version === "number" ? value.version : PROJECT_FILE_VERSION
-	if (version !== PROJECT_FILE_VERSION) {
+	const rawVersion = typeof value.version === "number" ? value.version : 1
+	if (rawVersion !== 1 && rawVersion !== PROJECT_FILE_VERSION) {
 		return null
 	}
 
-	const itemsInput = Array.isArray(value.items) ? value.items : []
-	const items: ProjectFileItem[] = []
+	const items = normalizeProjectFileEntries(value.items)
+
+	let selectedPath: number[] | null = null
+	if (rawVersion === 1) {
+		const selectedInput = value.selectedIndex
+		if (typeof selectedInput === "number" && Number.isInteger(selectedInput)) {
+			selectedPath = validateSelectedPath([selectedInput], items)
+		}
+	} else if (Array.isArray(value.selectedPath)) {
+		const candidate = value.selectedPath.filter((index) => typeof index === "number" && Number.isInteger(index))
+		if (candidate.length === value.selectedPath.length) {
+			selectedPath = validateSelectedPath(candidate as number[], items)
+		}
+	}
+
+	return {
+		version: PROJECT_FILE_VERSION,
+		items,
+		selectedPath
+	}
+}
+
+function normalizeProjectFileEntries(input: unknown): ProjectFileEntry[] {
+	const itemsInput = Array.isArray(input) ? input : []
 	const usedNames = new Set<string>()
+	const items: ProjectFileEntry[] = []
 
 	for (const rawItem of itemsInput) {
 		if (!rawItem || typeof rawItem !== "object") {
 			continue
 		}
+
+		if (isFolderEntry(rawItem)) {
+			const folderName = normalizeEntryName(rawItem, usedNames, generateDefaultFolderName)
+			const children = normalizeProjectFileEntries((rawItem as { items?: unknown }).items)
+			items.push({
+				kind: "folder",
+				name: folderName,
+				items: children
+			})
+			continue
+		}
+
 		const type = (rawItem as { type?: unknown }).type
 		if (!isProjectFileType(type)) {
 			continue
 		}
 
-		const rawName = (rawItem as { name?: unknown }).name
-		let name = typeof rawName === "string" ? rawName.trim() : ""
-		if (!name) {
-			name = generateDefaultName(type, usedNames)
-		}
-		if (usedNames.has(name)) {
-			name = generateDefaultName(type, usedNames)
-		}
-		usedNames.add(name)
+		const name = normalizeEntryName(rawItem, usedNames, (names) => generateDefaultName(type, names))
 
 		if (type === "schemantic") {
 			const data = normalizeSchemanticProjectItemData((rawItem as { data?: unknown }).data)
@@ -182,22 +199,107 @@ export function normalizeProjectFile(input: unknown): ProjectFile | null {
 		items.push({ type, name })
 	}
 
-	let selectedIndex: number | null = null
-	const selectedInput = value.selectedIndex
-	if (typeof selectedInput === "number" && Number.isInteger(selectedInput)) {
-		selectedIndex = selectedInput
+	return items
+}
+
+function normalizeEntryName(rawItem: unknown, usedNames: Set<string>, generateDefault: (names: Set<string>) => string): string {
+	const rawName = (rawItem as { name?: unknown }).name
+	let name = typeof rawName === "string" ? rawName.trim() : ""
+	if (!name) {
+		name = generateDefault(usedNames)
 	}
-	if (selectedIndex !== null) {
-		if (selectedIndex < 0 || selectedIndex >= items.length) {
-			selectedIndex = null
+	if (usedNames.has(name)) {
+		name = generateDefault(usedNames)
+	}
+	usedNames.add(name)
+	return name
+}
+
+function isFolderEntry(rawItem: unknown): rawItem is { kind?: unknown; items?: unknown } {
+	if (!rawItem || typeof rawItem !== "object") {
+		return false
+	}
+	const kind = (rawItem as { kind?: unknown }).kind
+	if (kind === "folder") {
+		return true
+	}
+	const type = (rawItem as { type?: unknown }).type
+	return type === "folder"
+}
+
+function validateSelectedPath(path: number[] | null, items: ProjectFileEntry[]): number[] | null {
+	if (!path || path.length === 0) {
+		return null
+	}
+
+	const result: number[] = []
+	let currentItems: ProjectFileEntry[] = items
+
+	for (let i = 0; i < path.length; i += 1) {
+		const index = path[i]
+		if (typeof index !== "number" || !Number.isInteger(index)) {
+			return null
+		}
+		if (index < 0 || index >= currentItems.length) {
+			return null
+		}
+
+		result.push(index)
+		const entry = currentItems[index]
+		if (!entry) {
+			return null
+		}
+		if (i < path.length - 1) {
+			if (!isFolderProjectEntry(entry)) {
+				return null
+			}
+			currentItems = entry.items
+		}
+	}
+
+	return result
+}
+
+function isFolderProjectEntry(entry: ProjectFileEntry): entry is ProjectFileFolder {
+	return (entry as ProjectFileFolder).kind === "folder"
+}
+
+function cloneProjectFileEntry(entry: ProjectFileEntry): ProjectFileEntry {
+	if (isFolderProjectEntry(entry)) {
+		return {
+			kind: "folder",
+			name: entry.name,
+			items: entry.items.map(cloneProjectFileEntry)
+		}
+	}
+
+	if (entry.type === "schemantic") {
+		return {
+			type: entry.type,
+			name: entry.name,
+			data: cloneSchemanticProjectItemData(entry.data)
+		}
+	}
+
+	if (entry.type === "part") {
+		return {
+			type: entry.type,
+			name: entry.name,
+			data: clonePartProjectItemData(entry.data)
 		}
 	}
 
 	return {
-		version: PROJECT_FILE_VERSION,
-		items,
-		selectedIndex
+		type: entry.type,
+		name: entry.name
 	}
+}
+
+function cloneSelectedPath(path: number[] | null): number[] | null {
+	if (!path) {
+		return null
+	}
+	return path.slice()
 }
 
 function isProjectFileType(value: unknown): value is ProjectFileType {
@@ -209,6 +311,14 @@ function isProjectFileType(value: unknown): value is ProjectFileType {
 
 function generateDefaultName(type: ProjectFileType, usedNames: Set<string>): string {
 	const base = `${type.charAt(0).toUpperCase()}${type.slice(1)}`
+	return generateUniqueName(base, usedNames)
+}
+
+function generateDefaultFolderName(usedNames: Set<string>): string {
+	return generateUniqueName("Folder", usedNames)
+}
+
+function generateUniqueName(base: string, usedNames: Set<string>): string {
 	let suffix = 1
 	let candidate = `${base} ${suffix}`
 	while (usedNames.has(candidate)) {
@@ -400,7 +510,14 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 	if (!input || typeof input !== "object") {
 		return undefined
 	}
-	const value = input as Partial<PartProjectExtrudedModel>
+
+	const value = input as Partial<{
+		base: unknown
+		height: unknown
+		scale: unknown
+		rawHeight: unknown
+	}>
+
 	const baseInput = Array.isArray(value.base) ? value.base : []
 	const base: PartProjectPoint[] = []
 	for (const raw of baseInput) {
@@ -409,15 +526,15 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 			base.push(point)
 		}
 	}
+
 	if (base.length < 3) {
 		return undefined
 	}
-	const height = typeof value.height === "number" && Number.isFinite(value.height) ? value.height : null
-	const scale = typeof value.scale === "number" && Number.isFinite(value.scale) ? value.scale : null
-	const rawHeight = typeof value.rawHeight === "number" && Number.isFinite(value.rawHeight) ? value.rawHeight : null
-	if (height === null || scale === null || rawHeight === null) {
-		return undefined
-	}
+
+	const height = extractFiniteNumber(value.height, PART_PROJECT_DEFAULT_HEIGHT)
+	const scale = extractFiniteNumber(value.scale, 1)
+	const rawHeight = extractFiniteNumber(value.rawHeight, PART_PROJECT_DEFAULT_HEIGHT)
+
 	return {
 		base,
 		height,
@@ -430,18 +547,17 @@ function normalizePartProjectPoint(input: unknown): PartProjectPoint | null {
 	if (!input || typeof input !== "object") {
 		return null
 	}
-	const xValue = (input as { x?: unknown }).x
-	const yValue = (input as { y?: unknown }).y
-	const x = typeof xValue === "number" && Number.isFinite(xValue) ? xValue : null
-	const y = typeof yValue === "number" && Number.isFinite(yValue) ? yValue : null
+	const candidate = input as Partial<PartProjectPoint>
+	const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? candidate.x : null
+	const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? candidate.y : null
 	if (x === null || y === null) {
 		return null
 	}
 	return { x, y }
 }
 
-function extractFiniteNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : fallback
+function extractFiniteNumber(value: unknown, defaultValue: number): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : defaultValue
 }
 
 function createDefaultPartProjectItemData(): PartProjectItemData {
@@ -450,9 +566,6 @@ function createDefaultPartProjectItemData(): PartProjectItemData {
 		isSketchClosed: false,
 		extrudedModel: undefined,
 		height: PART_PROJECT_DEFAULT_HEIGHT,
-		previewRotation: {
-			yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
-			pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
-		}
+		previewRotation: { ...PART_PROJECT_DEFAULT_ROTATION }
 	}
 }
