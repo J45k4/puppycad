@@ -1,4 +1,5 @@
-import { CanvasComponent, EditorCanvas } from "./canvas"
+import { EditorCanvas } from "./canvas"
+import type { CanvasComponent } from "./canvas"
 import { UiComponent } from "./ui"
 
 type SchematicComponentData = {

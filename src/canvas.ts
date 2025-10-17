@@ -639,6 +639,9 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.ctx.lineCap = "round"
 		for (let index = 0; index < this.connections.length; index += 1) {
 			const connection = this.connections[index]
+			if (!connection) {
+				continue
+			}
 			const fromPoint = this.pointFromEndpoint(connection.from)
 			const toPoint = this.pointFromEndpoint(connection.to)
 			if (!fromPoint || !toPoint) {
@@ -760,6 +763,9 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
 		for (let index = 0; index < this.connections.length; index += 1) {
 			const connection = this.connections[index]
+			if (!connection) {
+				continue
+			}
 			const fromPoint = this.pointFromEndpoint(connection.from)
 			const toPoint = this.pointFromEndpoint(connection.to)
 			if (!fromPoint || !toPoint) {

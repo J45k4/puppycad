@@ -1,4 +1,5 @@
-import { CanvasComponent, Connection, EditorCanvas } from "./canvas"
+import { EditorCanvas } from "./canvas"
+import type { CanvasComponent, Connection } from "./canvas"
 import { UiComponent, VList, showTextPromptModal } from "./ui"
 
 type FlowchartShape = "startEnd" | "process" | "decision" | "inputOutput" | "predefinedProcess" | "manualInput" | "document" | "database" | "entity"
@@ -577,6 +578,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		const components = this.editor.getComponents()
 		for (let index = components.length - 1; index >= 0; index -= 1) {
 			const component = components[index]
+			if (!component) {
+				continue
+			}
 			if (x >= component.x && x <= component.x + component.width && y >= component.y && y <= component.y + component.height) {
 				return component
 			}
