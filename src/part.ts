@@ -1,14 +1,18 @@
+import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
+import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation } from "./project-file"
 import { UiComponent } from "./ui"
 
 type Point2D = { x: number; y: number }
 
 type Point3D = { x: number; y: number; z: number }
 
-type ExtrudedModel = {
-	base: Point2D[]
-	height: number
-	scale: number
-	rawHeight: number
+type ExtrudedModel = PartProjectExtrudedModel
+
+export type PartEditorState = PartProjectItemData
+
+type PartEditorOptions = {
+	initialState?: PartEditorState
+	onStateChange?: () => void
 }
 
 const SKETCH_CANVAS_SIZE = 360
@@ -30,17 +34,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private sketchPoints: Point2D[] = []
 	private isSketchClosed = false
 	private extrudedModel: ExtrudedModel | null = null
-	private readonly previewRotation = {
-		yaw: Math.PI / 4,
-		pitch: Math.PI / 5
+	private readonly previewRotation: PartProjectPreviewRotation = {
+		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
+		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
 	}
 	private isRotatingPreview = false
 	private lastRotationPointer: { x: number; y: number } | null = null
 	private previewScale = 180
 	private resizeObserver: ResizeObserver | null = null
+	private readonly onStateChange?: () => void
 
-	public constructor() {
+	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
+		this.onStateChange = options?.onStateChange
 		this.root.style.width = "100%"
 		this.root.style.height = "100%"
 		this.root.style.display = "flex"
@@ -129,13 +135,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.heightInput = document.createElement("input")
 		this.heightInput.type = "number"
 		this.heightInput.min = "1"
-		this.heightInput.value = "30"
+		this.heightInput.value = String(PART_PROJECT_DEFAULT_HEIGHT)
 		this.heightInput.step = "1"
 		this.heightInput.style.width = "80px"
 		this.heightInput.style.padding = "4px 6px"
 		this.heightInput.style.border = "1px solid #cbd5f5"
 		this.heightInput.style.borderRadius = "4px"
 		extrudeControls.appendChild(this.heightInput)
+		this.heightInput.addEventListener("input", this.handleHeightInputChange)
 
 		this.extrudeButton = this.createButton("Extrude", this.handleExtrude)
 		this.extrudeButton.style.gridColumn = "span 2"
@@ -193,10 +200,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			event.preventDefault()
 		})
 
-		this.updateStatus()
-		this.updateControls()
-		this.drawSketch()
-		this.drawPreview()
+		this.restoreState(options?.initialState)
 
 		if (typeof ResizeObserver === "function") {
 			this.resizeObserver = new ResizeObserver(() => {
@@ -212,6 +216,60 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		// Trigger size calculation once the element is attached.
 		requestAnimationFrame(() => this.updatePreviewSize())
+	}
+
+	public getState(): PartEditorState {
+		const heightValue = this.getHeightFromInput()
+		return {
+			sketchPoints: this.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
+			isSketchClosed: this.isSketchClosed,
+			extrudedModel:
+				this.extrudedModel === null
+					? undefined
+					: {
+							base: this.extrudedModel.base.map((point) => ({ x: point.x, y: point.y })),
+							height: this.extrudedModel.height,
+							scale: this.extrudedModel.scale,
+							rawHeight: this.extrudedModel.rawHeight
+						},
+			height: heightValue,
+			previewRotation: {
+				yaw: this.previewRotation.yaw,
+				pitch: this.previewRotation.pitch
+			}
+		}
+	}
+
+	private restoreState(state?: PartEditorState) {
+		const height = state && Number.isFinite(state.height) ? state.height : PART_PROJECT_DEFAULT_HEIGHT
+		const rotation = state?.previewRotation ?? PART_PROJECT_DEFAULT_ROTATION
+		this.sketchPoints = state?.sketchPoints?.map((point) => ({ x: point.x, y: point.y })) ?? []
+		this.isSketchClosed = state?.isSketchClosed ?? false
+		this.extrudedModel = state?.extrudedModel
+			? {
+					base: state.extrudedModel.base.map((point) => ({ x: point.x, y: point.y })),
+					height: state.extrudedModel.height,
+					scale: state.extrudedModel.scale,
+					rawHeight: state.extrudedModel.rawHeight
+				}
+			: null
+		this.heightInput.value = String(height)
+		this.previewRotation.yaw = rotation.yaw
+		this.previewRotation.pitch = rotation.pitch
+		this.drawSketch()
+		this.drawPreview()
+		this.updateStatus()
+		this.updateControls()
+		this.emitStateChange()
+	}
+
+	private getHeightFromInput(): number {
+		const parsed = Number.parseFloat(this.heightInput.value)
+		return Number.isFinite(parsed) ? parsed : PART_PROJECT_DEFAULT_HEIGHT
+	}
+
+	private emitStateChange() {
+		this.onStateChange?.()
 	}
 
 	private createButton(label: string, onClick: () => void): HTMLButtonElement {
@@ -240,6 +298,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return button
 	}
 
+	private handleHeightInputChange = () => {
+		this.emitStateChange()
+	}
+
 	private handleSketchCanvasClick = (event: MouseEvent) => {
 		if (this.isSketchClosed) {
 			return
@@ -251,6 +313,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawSketch()
 		this.updateStatus()
 		this.updateControls()
+		this.emitStateChange()
 	}
 
 	private handleSketchHover = (event: MouseEvent) => {
@@ -268,6 +331,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawSketch()
 		this.updateStatus()
 		this.updateControls()
+		this.emitStateChange()
 	}
 
 	private handleReset = () => {
@@ -278,6 +342,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
+		this.emitStateChange()
 	}
 
 	private handleFinishSketch = () => {
@@ -288,6 +353,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawSketch()
 		this.updateStatus()
 		this.updateControls()
+		this.emitStateChange()
 	}
 
 	private handleExtrude = () => {
@@ -307,6 +373,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
+		this.emitStateChange()
 	}
 
 	private handlePreviewPointerDown = (event: PointerEvent) => {
@@ -345,6 +412,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isRotatingPreview = false
 		this.lastRotationPointer = null
 		this.previewCanvas.style.cursor = "grab"
+		this.emitStateChange()
 	}
 
 	private updateStatus() {

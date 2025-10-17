@@ -1,9 +1,10 @@
 import { EditorCanvas } from "./canvas"
 import type { CanvasComponent } from "./canvas"
 import { UiComponent } from "./ui"
+import type { SchemanticProjectItemData } from "./project-file"
 
 type SchematicComponentData = {
-	type: string
+	type?: string
 }
 
 class ComponentList extends UiComponent<HTMLDivElement> {
@@ -34,16 +35,27 @@ class ComponentList extends UiComponent<HTMLDivElement> {
 	}
 }
 
+export type SchemanticEditorState = SchemanticProjectItemData
+
+type SchemanticEditorOptions = {
+	initialState?: SchemanticEditorState
+	onStateChange?: () => void
+}
+
 export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 	private editor: EditorCanvas<SchematicComponentData>
+	private readonly onStateChange?: () => void
 
-	public constructor() {
+	public constructor(options?: SchemanticEditorOptions) {
 		super(document.createElement("div"))
 		this.root.style.display = "flex"
 		this.root.style.flexDirection = "row"
 
+		this.onStateChange = options?.onStateChange
+
 		this.editor = new EditorCanvas<SchematicComponentData>({
-			initialComponents: [],
+			initialComponents: options?.initialState?.components ?? [],
+			initialConnections: options?.initialState?.connections ?? [],
 			getComponentLabel: (component) => component.data?.type?.toUpperCase() ?? `C${component.id}`,
 			createComponent: (type, position, helpers) => {
 				const size = this.getComponentSize(type)
@@ -62,12 +74,21 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 					data: { type }
 				}
 				return component
-			}
+			},
+			onComponentsChange: () => this.handleStateChange(),
+			onConnectionsChange: () => this.handleStateChange()
 		})
 		this.root.appendChild(this.editor.root)
 
 		const componentList = new ComponentList()
 		this.root.appendChild(componentList.root)
+	}
+
+	public getState(): SchemanticEditorState {
+		return {
+			components: this.editor.getComponents(),
+			connections: this.editor.getConnections()
+		}
 	}
 
 	private getComponentSize(type: string): { width: number; height: number } | null {
@@ -82,5 +103,9 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 				console.warn(`Unknown schemantic component: ${type}`)
 				return null
 		}
+	}
+
+	private handleStateChange() {
+		this.onStateChange?.()
 	}
 }

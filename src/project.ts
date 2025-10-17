@@ -1,17 +1,36 @@
 import { AssemblyEditor } from "./assembly"
 import { createDiagramEditor } from "./diagram"
 import { PartEditor } from "./part"
+import type { PartEditorState } from "./part"
 import { PCBEditor } from "./pcb"
-import { SchemanticEditor } from "./schemantic"
+import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
 import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
 import type { ProjectFile, ProjectFileItem, ProjectFileType } from "./project-file"
 import { ItemList, Modal, UiComponent, TreeList } from "./ui"
 
-export type ProjectItem = {
+type BaseProjectItem = {
 	type: ProjectFileType
 	name: string
 	editor: UiComponent<HTMLDivElement>
 }
+
+type SchemanticProjectItem = BaseProjectItem & {
+	type: "schemantic"
+	editor: SchemanticEditor
+	getState: () => SchemanticEditorState
+}
+
+type PartProjectItem = BaseProjectItem & {
+	type: "part"
+	editor: PartEditor
+	getState: () => PartEditorState
+}
+
+type OtherProjectItem = BaseProjectItem & {
+	type: Exclude<ProjectFileType, "schemantic" | "part">
+}
+
+export type ProjectItem = SchemanticProjectItem | PartProjectItem | OtherProjectItem
 
 class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private items: ProjectItem[] = []
@@ -165,15 +184,35 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private createProjectItem(type: ProjectFileType, name?: string, existingItems: ProjectItem[] = this.items): ProjectItem {
+	private createProjectItem(type: ProjectFileType, name?: string, existingItems: ProjectItem[] = this.items, schemanticState?: SchemanticEditorState, partState?: PartEditorState): ProjectItem {
 		const resolvedName = this.resolveInitialName(type, name, existingItems)
 		switch (type) {
-			case "schemantic":
-				return { type, name: resolvedName, editor: new SchemanticEditor() }
+			case "schemantic": {
+				const editor = new SchemanticEditor({
+					initialState: schemanticState,
+					onStateChange: () => this.schedulePersist()
+				})
+				return {
+					type,
+					name: resolvedName,
+					editor,
+					getState: () => editor.getState()
+				}
+			}
 			case "pcb":
 				return { type, name: resolvedName, editor: new PCBEditor() }
-			case "part":
-				return { type, name: resolvedName, editor: new PartEditor() }
+			case "part": {
+				const editor = new PartEditor({
+					initialState: partState,
+					onStateChange: () => this.schedulePersist()
+				})
+				return {
+					type,
+					name: resolvedName,
+					editor,
+					getState: () => editor.getState()
+				}
+			}
 			case "assembly":
 				return { type, name: resolvedName, editor: new AssemblyEditor() }
 			case "diagram":
@@ -296,7 +335,23 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private buildProjectFile(): ProjectFile {
-		const items: ProjectFileItem[] = this.items.map((item) => ({ type: item.type, name: item.name }))
+		const items: ProjectFileItem[] = this.items.map((item) => {
+			if (item.type === "schemantic") {
+				return {
+					type: item.type,
+					name: item.name,
+					data: item.getState()
+				}
+			}
+			if (item.type === "part") {
+				return {
+					type: item.type,
+					name: item.name,
+					data: item.getState()
+				}
+			}
+			return { type: item.type, name: item.name }
+		})
 		return createProjectFile({
 			items,
 			selectedIndex: this.selectedIndex
@@ -308,7 +363,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		try {
 			const restoredItems: ProjectItem[] = []
 			for (const item of projectFile.items) {
-				restoredItems.push(this.createProjectItem(item.type, item.name, restoredItems))
+				const schemanticState = item.type === "schemantic" ? item.data : undefined
+				const partState = item.type === "part" ? item.data : undefined
+				restoredItems.push(this.createProjectItem(item.type, item.name, restoredItems, schemanticState, partState))
 			}
 			this.items = restoredItems
 			this.selectedIndex = projectFile.selectedIndex
