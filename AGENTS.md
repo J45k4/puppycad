@@ -1,3 +1,6 @@
+Before changes run
+- bun install
+
 After changes run:
 - bun run check
 - bun run lint-fix and after you should add possible lint changes to the commit.
