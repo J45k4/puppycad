@@ -928,7 +928,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 	}
 
 	private distanceFromPointToSegment(point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }): number {
-		const segmentLengthSquared = Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
+		const segmentLengthSquared = (end.x - start.x) ** 2 + (end.y - start.y) ** 2
 		if (segmentLengthSquared === 0) {
 			return this.distanceBetweenPoints(point, start)
 		}
