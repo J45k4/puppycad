@@ -6,6 +6,7 @@ export type ProjectFileType = (typeof PROJECT_FILE_TYPES)[number]
 
 export type ProjectFileItem = {
 	type: ProjectFileType
+	name: string
 }
 
 export type ProjectFile = {
@@ -22,7 +23,10 @@ export function createProjectFile(args: {
 }): ProjectFile {
 	return {
 		version: PROJECT_FILE_VERSION,
-		items: args.items,
+		items: args.items.map((item) => ({
+			type: item.type,
+			name: item.name
+		})),
 		selectedIndex: args.selectedIndex ?? null
 	}
 }
@@ -49,6 +53,7 @@ export function normalizeProjectFile(input: unknown): ProjectFile | null {
 
 	const itemsInput = Array.isArray(value.items) ? value.items : []
 	const items: ProjectFileItem[] = []
+	const usedNames = new Set<string>()
 
 	for (const rawItem of itemsInput) {
 		if (!rawItem || typeof rawItem !== "object") {
@@ -56,7 +61,16 @@ export function normalizeProjectFile(input: unknown): ProjectFile | null {
 		}
 		const type = (rawItem as { type?: unknown }).type
 		if (isProjectFileType(type)) {
-			items.push({ type })
+			const rawName = (rawItem as { name?: unknown }).name
+			let name = typeof rawName === "string" ? rawName.trim() : ""
+			if (!name) {
+				name = generateDefaultName(type, usedNames)
+			}
+			if (usedNames.has(name)) {
+				name = generateDefaultName(type, usedNames)
+			}
+			usedNames.add(name)
+			items.push({ type, name })
 		}
 	}
 
@@ -83,4 +97,15 @@ function isProjectFileType(value: unknown): value is ProjectFileType {
 		return false
 	}
 	return (PROJECT_FILE_TYPES as readonly string[]).includes(value)
+}
+
+function generateDefaultName(type: ProjectFileType, usedNames: Set<string>): string {
+	const base = `${type.charAt(0).toUpperCase()}${type.slice(1)}`
+	let suffix = 1
+	let candidate = `${base} ${suffix}`
+	while (usedNames.has(candidate)) {
+		suffix += 1
+		candidate = `${base} ${suffix}`
+	}
+	return candidate
 }

@@ -9,6 +9,7 @@ import { ItemList, Modal, UiComponent, TreeList } from "./ui"
 
 export type ProjectItem = {
 	type: ProjectFileType
+	name: string
 	editor: UiComponent<HTMLDivElement>
 }
 
@@ -60,6 +61,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		newButton.onclick = this.newButtonClicked.bind(this)
 		this.root.appendChild(newButton)
 
+		const renameButton = document.createElement("button")
+		renameButton.textContent = "Rename"
+		renameButton.onclick = () => this.renameSelectedItem()
+		this.root.appendChild(renameButton)
+
 		const saveButton = document.createElement("button")
 		saveButton.textContent = "Save"
 		saveButton.onclick = () => this.saveProjectToFile()
@@ -85,7 +91,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private renderItems() {
 		this.itemsListContainer.setItems(
 			this.items.map((item) => ({
-				label: item.type,
+				label: `${item.name} (${item.type})`,
 				value: item
 			}))
 		)
@@ -111,6 +117,40 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.handleItemSelection(item)
 	}
 
+	private renameSelectedItem() {
+		if (this.selectedIndex === null) {
+			return
+		}
+		const currentItem = this.items[this.selectedIndex]
+		if (!currentItem) {
+			return
+		}
+		const promptFn = typeof window !== "undefined" ? window.prompt : null
+		if (!promptFn) {
+			return
+		}
+		const newName = promptFn("Enter a new name", currentItem.name)
+		if (!newName) {
+			return
+		}
+		const trimmed = newName.trim()
+		if (!trimmed) {
+			return
+		}
+		if (trimmed === currentItem.name) {
+			return
+		}
+		if (this.isNameTaken(trimmed, this.selectedIndex)) {
+			if (typeof window !== "undefined" && typeof window.alert === "function") {
+				window.alert("An item with that name already exists.")
+			}
+			return
+		}
+		currentItem.name = trimmed
+		this.renderItems()
+		this.schedulePersist()
+	}
+
 	private handleItemSelection(item: ProjectItem) {
 		const index = this.items.indexOf(item)
 		if (index === -1) {
@@ -125,20 +165,49 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private createProjectItem(type: ProjectFileType): ProjectItem {
+	private createProjectItem(type: ProjectFileType, name?: string, existingItems: ProjectItem[] = this.items): ProjectItem {
+		const resolvedName = this.resolveInitialName(type, name, existingItems)
 		switch (type) {
 			case "schemantic":
-				return { type, editor: new SchemanticEditor() }
+				return { type, name: resolvedName, editor: new SchemanticEditor() }
 			case "pcb":
-				return { type, editor: new PCBEditor() }
+				return { type, name: resolvedName, editor: new PCBEditor() }
 			case "part":
-				return { type, editor: new PartEditor() }
+				return { type, name: resolvedName, editor: new PartEditor() }
 			case "assembly":
-				return { type, editor: new AssemblyEditor() }
+				return { type, name: resolvedName, editor: new AssemblyEditor() }
 			case "diagram":
-				return { type, editor: createDiagramEditor() }
+				return { type, name: resolvedName, editor: createDiagramEditor() }
 		}
 		throw new Error(`Unsupported project item type: ${type}`)
+	}
+
+	private resolveInitialName(type: ProjectFileType, desiredName: string | undefined, existingItems: ProjectItem[]): string {
+		const trimmed = desiredName?.trim() ?? ""
+		if (trimmed && !existingItems.some((item) => item.name === trimmed)) {
+			return trimmed
+		}
+		return this.generateUniqueName(type, existingItems)
+	}
+
+	private generateUniqueName(type: ProjectFileType, existingItems: ProjectItem[]): string {
+		const base = `${type.charAt(0).toUpperCase()}${type.slice(1)}`
+		let index = 1
+		let candidate = `${base} ${index}`
+		while (existingItems.some((item) => item.name === candidate)) {
+			index += 1
+			candidate = `${base} ${index}`
+		}
+		return candidate
+	}
+
+	private isNameTaken(name: string, ignoreIndex?: number): boolean {
+		return this.items.some((item, idx) => {
+			if (ignoreIndex !== undefined && idx === ignoreIndex) {
+				return false
+			}
+			return item.name === name
+		})
 	}
 
 	private schedulePersist() {
@@ -227,7 +296,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private buildProjectFile(): ProjectFile {
-		const items: ProjectFileItem[] = this.items.map((item) => ({ type: item.type }))
+		const items: ProjectFileItem[] = this.items.map((item) => ({ type: item.type, name: item.name }))
 		return createProjectFile({
 			items,
 			selectedIndex: this.selectedIndex
@@ -237,7 +306,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private restoreFromProjectFile(projectFile: ProjectFile) {
 		this.isRestoring = true
 		try {
-			this.items = projectFile.items.map((item) => this.createProjectItem(item.type))
+			const restoredItems: ProjectItem[] = []
+			for (const item of projectFile.items) {
+				restoredItems.push(this.createProjectItem(item.type, item.name, restoredItems))
+			}
+			this.items = restoredItems
 			this.selectedIndex = projectFile.selectedIndex
 			if (this.selectedIndex !== null) {
 				if (this.selectedIndex < 0 || this.selectedIndex >= this.items.length) {
