@@ -57,7 +57,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private projectList: ProjectList
 	private selectedPath: number[] | null = null
 	private readonly onItemSelected?: (item: ProjectItem) => void
-	private databasePromise: Promise<IDBDatabase> | null = null
 	private persistTimeout: number | null = null
 	private isRestoring = false
 	private persistenceEnabled = typeof indexedDB !== "undefined"
@@ -70,14 +69,16 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private dragState: { node: ProjectNode; path: number[] } | null = null
 	private rootDropZone: HTMLDivElement
 	private exitDropZone: { element: HTMLDivElement; parent: ProjectFolder } | null = null
-	private static readonly DATABASE_NAME = "puppycad-project"
-	private static readonly STORE_NAME = "projectState"
-	private static readonly STORE_KEY = "items"
+	private readonly projectId: string
+	public static readonly DATABASE_NAME = "puppycad-project"
+	public static readonly STORE_NAME = "projectState"
+	public static readonly STORE_KEY_PREFIX = "project:"
+	public static readonly LEGACY_STORE_KEY = "items"
 	private static readonly PERSIST_DEBOUNCE_MS = 200
 
 	private log(...args: unknown[]): void {
 		if (typeof console !== "undefined") {
-			console.log("[ProjectTreeView]", ...args)
+			console.log("[ProjectTreeView]", `[${this.projectId}]`, ...args)
 		}
 	}
 
@@ -95,11 +96,17 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		return `[${path.join(",")}]`
 	}
 
+	private getStoreKey(): string {
+		return `${ProjectTreeView.STORE_KEY_PREFIX}${this.projectId}`
+	}
+
 	public constructor(args: {
 		onClick?: (item: ProjectItem) => void
+		projectId?: string
 	}) {
 		super(document.createElement("div"))
 		this.onItemSelected = args.onClick
+		this.projectId = args.projectId ?? "default"
 		this.modal = new Modal({
 			title: "New Item",
 			content: new ItemList<NewNodeType>({
@@ -1297,12 +1304,13 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return
 		}
 		try {
-			this.log("saveToIndexedDB:start")
+			const storeKey = this.getStoreKey()
+			this.log("saveToIndexedDB:start", { storeKey })
 			const db = await this.getDatabase()
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
 			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
 			const state = this.buildProjectFile()
-			store.put(state, ProjectTreeView.STORE_KEY)
+			store.put(state, storeKey)
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
 				transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
@@ -1320,12 +1328,18 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return
 		}
 		try {
-			this.log("loadFromIndexedDB:start")
+			const storeKey = this.getStoreKey()
+			this.log("loadFromIndexedDB:start", { storeKey })
 			const db = await this.getDatabase()
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readonly")
 			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
-			const request = store.get(ProjectTreeView.STORE_KEY)
-			const result = await this.promisifyRequest<ProjectFile | undefined>(request)
+			const request = store.get(storeKey)
+			let result = await this.promisifyRequest<ProjectFile | undefined>(request)
+			if (!result && this.projectId === "default") {
+				this.log("loadFromIndexedDB:legacy-fallback")
+				const legacyRequest = store.get(ProjectTreeView.LEGACY_STORE_KEY)
+				result = await this.promisifyRequest<ProjectFile | undefined>(legacyRequest)
+			}
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
 				transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
@@ -1354,20 +1368,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!this.persistenceEnabled) {
 			return Promise.reject(new Error("IndexedDB persistence disabled"))
 		}
-		if (!this.databasePromise) {
-			this.databasePromise = new Promise((resolve, reject) => {
-				const request = indexedDB.open(ProjectTreeView.DATABASE_NAME, 1)
-				request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB"))
-				request.onsuccess = () => resolve(request.result)
-				request.onupgradeneeded = () => {
-					const db = request.result
-					if (!db.objectStoreNames.contains(ProjectTreeView.STORE_NAME)) {
-						db.createObjectStore(ProjectTreeView.STORE_NAME)
-					}
-				}
-			})
-		}
-		return this.databasePromise
+		return openProjectDatabase()
 	}
 
 	private buildProjectFile(): ProjectFile {
@@ -1518,7 +1519,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return
 		}
 		this.persistenceEnabled = false
-		this.databasePromise = null
 		if (this.persistTimeout !== null) {
 			window.clearTimeout(this.persistTimeout)
 			this.persistTimeout = null
@@ -1526,22 +1526,156 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 }
 
+let sharedDatabasePromise: Promise<IDBDatabase> | null = null
+
+async function openProjectDatabase(): Promise<IDBDatabase> {
+	if (typeof indexedDB === "undefined") {
+		return Promise.reject(new Error("IndexedDB is not available"))
+	}
+	if (!sharedDatabasePromise) {
+		const databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open(ProjectTreeView.DATABASE_NAME, 1)
+			request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB"))
+			request.onsuccess = () => resolve(request.result)
+			request.onupgradeneeded = () => {
+				const db = request.result
+				if (!db.objectStoreNames.contains(ProjectTreeView.STORE_NAME)) {
+					db.createObjectStore(ProjectTreeView.STORE_NAME)
+				}
+			}
+		})
+		sharedDatabasePromise = databasePromise.catch((error) => {
+			sharedDatabasePromise = null
+			throw error
+		})
+	}
+	if (!sharedDatabasePromise) {
+		throw new Error("Failed to initialize project database")
+	}
+	return sharedDatabasePromise
+}
+
+export async function deleteProjectState(projectId: string): Promise<void> {
+	if (typeof indexedDB === "undefined") {
+		return
+	}
+	try {
+		const db = await openProjectDatabase()
+		await new Promise<void>((resolve, reject) => {
+			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
+			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
+			store.delete(`${ProjectTreeView.STORE_KEY_PREFIX}${projectId}`)
+			if (projectId === "default") {
+				store.delete(ProjectTreeView.LEGACY_STORE_KEY)
+			}
+			transaction.oncomplete = () => resolve()
+			transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
+			transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"))
+		})
+	} catch (error) {
+		console.error("Failed to delete project state", error)
+	}
+}
+
 export class ProjectView extends UiComponent<HTMLDivElement> {
 	private treeView: ProjectTreeView
 	private content: HTMLDivElement
-	public constructor() {
+	private titleElement: HTMLHeadingElement
+	private projectName: string
+	private readonly onBack: () => void
+	private readonly onRename?: (name: string) => Promise<string | null> | string | null
+
+	public constructor(args: {
+		projectId: string
+		projectName: string
+		onBack: () => void
+		onRename?: (name: string) => Promise<string | null> | string | null
+	}) {
 		super(document.createElement("div"))
+		this.projectName = args.projectName
+		this.onBack = args.onBack
+		this.onRename = args.onRename
+
 		this.root.style.display = "flex"
-		this.root.style.flexDirection = "row"
+		this.root.style.flexDirection = "column"
+		this.root.style.width = "100%"
+		this.root.style.height = "100%"
+
+		const header = document.createElement("div")
+		header.style.display = "flex"
+		header.style.alignItems = "center"
+		header.style.gap = "8px"
+		header.style.padding = "12px"
+		header.style.borderBottom = "1px solid #ccc"
+
+		const backButton = document.createElement("button")
+		backButton.textContent = "Back to Projects"
+		backButton.onclick = () => {
+			this.onBack()
+		}
+		header.appendChild(backButton)
+
+		this.titleElement = document.createElement("h1")
+		this.titleElement.textContent = this.projectName
+		this.titleElement.style.fontSize = "1.2rem"
+		this.titleElement.style.margin = "0"
+		this.titleElement.style.flexGrow = "1"
+		header.appendChild(this.titleElement)
+
+		const renameButton = document.createElement("button")
+		renameButton.textContent = "Rename Project"
+		renameButton.onclick = () => {
+			void this.requestRename()
+		}
+		header.appendChild(renameButton)
+
+		this.root.appendChild(header)
+
+		const main = document.createElement("div")
+		main.style.display = "flex"
+		main.style.flexDirection = "row"
+		main.style.flexGrow = "1"
+		main.style.minHeight = "0"
+
 		this.treeView = new ProjectTreeView({
+			projectId: args.projectId,
 			onClick: (item) => {
 				this.content.innerHTML = ""
 				this.content.appendChild(item.editor.root)
 			}
 		})
-		this.root.appendChild(this.treeView.root)
+		main.appendChild(this.treeView.root)
+
 		this.content = document.createElement("div")
 		this.content.style.flexGrow = "1"
-		this.root.appendChild(this.content)
+		this.content.style.overflow = "auto"
+		main.appendChild(this.content)
+
+		this.root.appendChild(main)
+	}
+
+	public setProjectName(name: string) {
+		this.projectName = name
+		this.titleElement.textContent = name
+	}
+
+	private async requestRename() {
+		const input = typeof window !== "undefined" ? window.prompt("Project name", this.projectName) : null
+		if (input === null || input === undefined) {
+			return
+		}
+		const trimmed = input.trim()
+		if (!trimmed) {
+			return
+		}
+		try {
+			const result = this.onRename ? await this.onRename(trimmed) : trimmed
+			const trimmedResult = result?.trim()
+			if (trimmedResult) {
+				this.setProjectName(trimmedResult)
+			}
+		} catch (error) {
+			console.error("Failed to rename project", error)
+		}
 	}
 }
