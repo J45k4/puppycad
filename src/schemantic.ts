@@ -1,5 +1,5 @@
 import { EditorCanvas } from "./canvas"
-import type { CanvasComponent } from "./canvas"
+import type { CanvasComponent, EditorCanvasOptions } from "./canvas"
 import { UiComponent } from "./ui"
 import type { SchemanticProjectItemData } from "./project-file"
 
@@ -37,13 +37,16 @@ class ComponentList extends UiComponent<HTMLDivElement> {
 
 export type SchemanticEditorState = SchemanticProjectItemData
 
+type EditorCanvasLike = Pick<EditorCanvas<SchematicComponentData>, "root" | "getComponents" | "getConnections">
+
 type SchemanticEditorOptions = {
 	initialState?: SchemanticEditorState
 	onStateChange?: () => void
+	createEditorCanvas?: (options: EditorCanvasOptions<SchematicComponentData>) => EditorCanvasLike
 }
 
 export class SchemanticEditor extends UiComponent<HTMLDivElement> {
-	private editor: EditorCanvas<SchematicComponentData>
+	private editor: EditorCanvasLike
 	private readonly onStateChange?: () => void
 
 	public constructor(options?: SchemanticEditorOptions) {
@@ -53,7 +56,9 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 
 		this.onStateChange = options?.onStateChange
 
-		this.editor = new EditorCanvas<SchematicComponentData>({
+		const createEditorCanvas = options?.createEditorCanvas ?? ((editorOptions: EditorCanvasOptions<SchematicComponentData>) => new EditorCanvas(editorOptions))
+
+		this.editor = createEditorCanvas({
 			initialComponents: options?.initialState?.components ?? [],
 			initialConnections: options?.initialState?.connections ?? [],
 			getComponentLabel: (component) => component.data?.type?.toUpperCase() ?? `C${component.id}`,
