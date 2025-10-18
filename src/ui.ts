@@ -764,24 +764,37 @@ export type TreeNode<T> = {
 	children?: TreeNode<T>[]
 }
 
+type TreeListRenderCallback<T> = (value: T, elements: { header: HTMLDivElement; container?: HTMLDivElement }) => void
+
 export class TreeList<T> extends UiComponent<HTMLDivElement> {
 	private onClick?: (value: T) => void
 	private headers: Map<T, HTMLDivElement> = new Map()
+	private childContainers: Map<T, HTMLDivElement> = new Map()
 	private selectedValue?: T
+	private onRenderNode?: TreeListRenderCallback<T>
 
 	public constructor(args: {
 		items: TreeNode<T>[]
 		onClick?: (value: T) => void
+		onRenderNode?: TreeListRenderCallback<T>
 	}) {
 		super(document.createElement("div"))
 		this.root.style.display = "flex"
 		this.root.style.flexDirection = "column"
 		this.root.style.gap = "5px"
 		this.onClick = args.onClick
+		this.onRenderNode = args.onRenderNode
 		this.setItems(args.items)
 	}
 
 	private createNode(item: TreeNode<T>, level: number) {
+		if (typeof console !== "undefined") {
+			console.log("[TreeList] createNode", {
+				label: item.label,
+				level,
+				hasChildren: Boolean(item.children?.length)
+			})
+		}
 		const container = document.createElement("div")
 		container.style.display = "flex"
 		container.style.flexDirection = "column"
@@ -812,7 +825,7 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 		container.appendChild(header)
 		this.headers.set(item.value, header)
 
-		let childrenContainer: HTMLDivElement | null = null
+		let childrenContainer: HTMLDivElement | undefined
 		if (item.children && item.children.length > 0) {
 			childrenContainer = document.createElement("div")
 			childrenContainer.style.display = "flex"
@@ -821,6 +834,7 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 				childrenContainer.appendChild(this.createNode(child, level + 1))
 			}
 			container.appendChild(childrenContainer)
+			this.childContainers.set(item.value, childrenContainer)
 
 			header.onclick = (e: MouseEvent) => {
 				e.stopPropagation()
@@ -838,17 +852,29 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 			header.onclick = () => onClick(item.value)
 		}
 
+		this.onRenderNode?.(item.value, { header, container: childrenContainer })
+
 		return container
 	}
 
 	public setItems(items: TreeNode<T>[]): void {
+		if (typeof console !== "undefined") {
+			console.log("[TreeList] setItems:start", { count: items.length })
+		}
 		this.headers.clear()
+		this.childContainers.clear()
 		this.selectedValue = undefined
 		// Clear existing nodes
 		this.root.innerHTML = ""
 		// Render new tree nodes
 		for (const item of items) {
 			this.root.appendChild(this.createNode(item, 0))
+		}
+		if (typeof console !== "undefined") {
+			console.log("[TreeList] setItems:complete", {
+				headers: this.headers.size,
+				childContainers: this.childContainers.size
+			})
 		}
 	}
 
@@ -864,5 +890,13 @@ export class TreeList<T> extends UiComponent<HTMLDivElement> {
 			header.style.backgroundColor = "#e0e0e0"
 			this.selectedValue = value
 		}
+	}
+
+	public getHeader(value: T): HTMLDivElement | undefined {
+		return this.headers.get(value)
+	}
+
+	public getChildContainer(value: T): HTMLDivElement | undefined {
+		return this.childContainers.get(value)
 	}
 }
