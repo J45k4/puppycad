@@ -9,3 +9,5 @@ After changes run:
 
 
 Dont update readme unless specifically instructed
+
+When making changes always think about unit tests you could implement but always prioritize finding relevant unit tests and updating them first.
