@@ -135,11 +135,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		newButton.onclick = this.newButtonClicked.bind(this)
 		this.root.appendChild(newButton)
 
-		const renameButton = document.createElement("button")
-		renameButton.textContent = "Rename"
-		renameButton.onclick = () => this.renameSelectedItem()
-		this.root.appendChild(renameButton)
-
 		const saveButton = document.createElement("button")
 		saveButton.textContent = "Save"
 		saveButton.onclick = () => this.saveProjectToFile()
@@ -166,7 +161,21 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.projectList = new ProjectList(document, {
 			onMove: ({ sourceId, destinationId }) => this.handleMoveRequest(sourceId, destinationId),
 			canMove: ({ sourceId, destinationId }) => this.canMoveNodes(sourceId, destinationId),
-			onSelect: ({ id }) => this.handleSelectionById(id)
+			onSelect: ({ id }) => this.handleSelectionById(id),
+			getActions: ({ id }) => {
+				const node = this.idNodeMap.get(id)
+				if (!node) {
+					return []
+				}
+				return [
+					{
+						label: "Rename",
+						onSelect: () => {
+							this.renameNode(node)
+						}
+					}
+				]
+			}
 		})
 		this.projectList.root.style.marginTop = "12px"
 		this.root.appendChild(this.projectList.root)
@@ -1071,7 +1080,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!currentItem) {
 			return
 		}
-		const siblings = this.getSiblingsForPath(this.selectedPath)
+		this.renameNode(currentItem)
+	}
+
+	private renameNode(node: ProjectNode) {
+		const path = this.nodePaths.get(node)
+		if (!path) {
+			return
+		}
+		const siblings = this.getSiblingsForPath(path)
 		if (!siblings) {
 			return
 		}
@@ -1079,21 +1096,22 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!promptFn) {
 			return
 		}
-		const newName = promptFn("Enter a new name", currentItem.name)
+		const newName = promptFn("Enter a new name", node.name)
 		if (!newName) {
 			return
 		}
 		const trimmed = newName.trim()
-		if (!trimmed || trimmed === currentItem.name) {
+		if (!trimmed || trimmed === node.name) {
 			return
 		}
-		if (this.isNameTaken(trimmed, siblings, currentItem)) {
+		if (this.isNameTaken(trimmed, siblings, node)) {
 			if (typeof window !== "undefined" && typeof window.alert === "function") {
 				window.alert("An item with that name already exists.")
 			}
 			return
 		}
-		currentItem.name = trimmed
+		node.name = trimmed
+		this.selectedPath = path.slice()
 		this.renderItems()
 		this.schedulePersist()
 	}

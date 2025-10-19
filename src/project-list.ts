@@ -15,10 +15,16 @@ export type ProjectListFolderEntry = {
 	metadata?: unknown
 }
 
+type ProjectListAction = {
+	label: string
+	onSelect: () => void
+}
+
 type ProjectListOptions = {
 	onMove?: (args: { sourceId: string; destinationId: string | null }) => void
 	canMove?: (args: { sourceId: string; destinationId: string | null }) => boolean
 	onSelect?: (args: { id: string }) => void
+	getActions?: (entry: ProjectListEntry) => ProjectListAction[]
 }
 
 abstract class ProjectItemView<T extends ProjectListEntry> {
@@ -62,7 +68,7 @@ class ProjectFileView extends ProjectItemView<ProjectListFileEntry> {
 		})
 		root.addEventListener("click", (event) => {
 			event.stopPropagation()
-			this.list.selectItem(this)
+			this.list.handleItemLeftClick(this)
 		})
 		return root
 	}
@@ -117,14 +123,12 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 		})
 		this.titleElement.addEventListener("click", (event) => {
 			event.stopPropagation()
-			if (event.detail === 1) {
-				this.list.selectItem(this)
-			}
 			if (event.detail === 2) {
 				this.toggleExpanded()
+				return
 			}
+			this.list.handleItemLeftClick(this)
 		})
-
 		this.itemsContainer = this.list.doc.createElement("div")
 		this.itemsContainer.style.paddingLeft = "16px"
 		this.itemsContainer.style.display = "block"
@@ -248,6 +252,47 @@ export class ProjectList {
 	private readonly views = new Map<string, ProjectItemView<ProjectListEntry>>()
 	private draggedView: ProjectItemView<ProjectListEntry> | null = null
 	private selectedView: ProjectItemView<ProjectListEntry> | null = null
+	private readonly menu: HTMLDivElement
+	private menuVisibleForId: string | null = null
+	private readonly onDocumentClick = (event: MouseEvent) => {
+		if (!this.menuVisibleForId) {
+			return
+		}
+		const target = event.target as Node | null
+		if (!target) {
+			return
+		}
+		if (!this.root.contains(target)) {
+			this.hideMenu()
+		}
+	}
+	private readonly onRootContextMenu = (event: MouseEvent) => {
+		const target = event.target as HTMLElement | null
+		if (!target) {
+			return
+		}
+		if (this.menu.contains(target)) {
+			return
+		}
+		const itemElement = target.closest<HTMLElement>("[data-project-item-id]")
+		if (!itemElement) {
+			this.hideMenu()
+			return
+		}
+		const itemId = itemElement.dataset.projectItemId
+		if (!itemId) {
+			this.hideMenu()
+			return
+		}
+		const view = this.views.get(itemId)
+		if (!view) {
+			this.hideMenu()
+			return
+		}
+		event.preventDefault()
+		event.stopPropagation()
+		this.handleItemContextMenu(view, event)
+	}
 
 	constructor(doc: Document = document, options: ProjectListOptions = {}) {
 		if (!doc) {
@@ -259,14 +304,42 @@ export class ProjectList {
 		this.root.style.display = "flex"
 		this.root.style.flexDirection = "column"
 		this.root.style.gap = "4px"
+		this.root.style.position = "relative"
 		this.root.addEventListener("dragover", (event) => this.onRootDragOver(event))
 		this.root.addEventListener("dragleave", (event) => this.onRootDragLeave(event))
 		this.root.addEventListener("drop", (event) => this.onRootDrop(event))
+		this.root.addEventListener("contextmenu", this.onRootContextMenu)
+		this.root.addEventListener("click", () => {
+			if (!this.menuVisibleForId) {
+				return
+			}
+			this.hideMenu()
+		})
+
+		this.menu = doc.createElement("div")
+		this.menu.style.position = "absolute"
+		this.menu.style.display = "none"
+		this.menu.style.flexDirection = "column"
+		this.menu.style.background = "#ffffff"
+		this.menu.style.border = "1px solid #cbd5e1"
+		this.menu.style.borderRadius = "8px"
+		this.menu.style.boxShadow = "0 10px 25px rgba(15, 23, 42, 0.15)"
+		this.menu.style.padding = "4px"
+		this.menu.style.minWidth = "140px"
+		this.menu.style.zIndex = "10"
+		this.menu.addEventListener("click", (event) => {
+			event.stopPropagation()
+		})
+		this.root.appendChild(this.menu)
+
+		this.doc.addEventListener("click", this.onDocumentClick)
 	}
 
 	public setItems(items: ProjectListEntry[], selectedId: string | null = null) {
 		this.views.clear()
 		this.root.innerHTML = ""
+		this.root.appendChild(this.menu)
+		this.hideMenu()
 		for (const item of items) {
 			const view = this.createView(item)
 			this.views.set(item.id, view)
@@ -359,6 +432,78 @@ export class ProjectList {
 			ancestor.expand()
 			ancestor = ancestor.parentFolder
 		}
+	}
+
+	public handleItemLeftClick(view: ProjectItemView<ProjectListEntry>) {
+		this.selectItem(view)
+		this.hideMenu()
+	}
+
+	public handleItemContextMenu(view: ProjectItemView<ProjectListEntry>, event: MouseEvent) {
+		event.preventDefault()
+		event.stopPropagation()
+		this.selectItem(view)
+		const actions = this.options.getActions?.(view.entry) ?? []
+		if (!actions.length) {
+			this.hideMenu()
+			return
+		}
+		this.showMenu(view, actions, event)
+	}
+
+	private showMenu(view: ProjectItemView<ProjectListEntry>, actions: ProjectListAction[], event: MouseEvent) {
+		this.menu.innerHTML = ""
+		for (const action of actions) {
+			const button = this.doc.createElement("button")
+			button.textContent = action.label
+			button.style.background = "none"
+			button.style.border = "none"
+			button.style.padding = "8px 12px"
+			button.style.textAlign = "left"
+			button.style.cursor = "pointer"
+			button.style.fontSize = "14px"
+			button.style.borderRadius = "6px"
+			button.addEventListener("mouseenter", () => {
+				button.style.backgroundColor = "#e7f5ff"
+			})
+			button.addEventListener("mouseleave", () => {
+				button.style.backgroundColor = ""
+			})
+			button.addEventListener("click", (clickEvent) => {
+				clickEvent.stopPropagation()
+				this.hideMenu()
+				action.onSelect()
+			})
+			this.menu.appendChild(button)
+		}
+		this.menu.style.display = "flex"
+		this.menuVisibleForId = view.entry.id
+
+		const rootRect = this.root.getBoundingClientRect()
+		const itemRect = view.root.getBoundingClientRect()
+		const scrollTop = this.root.scrollTop
+		const scrollLeft = this.root.scrollLeft
+		const top = itemRect.top - rootRect.top + scrollTop
+		const preferredLeft = event.clientX - rootRect.left + scrollLeft
+
+		this.menu.style.top = `${Math.max(0, top)}px`
+		this.menu.style.left = "0px"
+
+		const menuWidth = this.menu.offsetWidth
+		let left = preferredLeft
+		const maxLeft = Math.max(0, this.root.clientWidth - menuWidth - 4)
+		if (left > maxLeft) {
+			left = maxLeft
+		}
+		if (left < 0) {
+			left = 0
+		}
+		this.menu.style.left = `${left}px`
+	}
+
+	private hideMenu() {
+		this.menuVisibleForId = null
+		this.menu.style.display = "none"
 	}
 
 	private clearSelection() {
