@@ -66,6 +66,14 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.root.style.height = "100%"
 		this.root.style.boxSizing = "border-box"
 
+		const canvasContainer = document.createElement("div")
+		canvasContainer.style.flex = "1 1 auto"
+		canvasContainer.style.display = "flex"
+		canvasContainer.style.flexDirection = "column"
+		canvasContainer.style.minHeight = "640px"
+		canvasContainer.style.maxHeight = "100%"
+		this.root.appendChild(canvasContainer)
+
 		this.palette = new VList({
 			style: {
 				width: "240px",
@@ -79,14 +87,6 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			}
 		})
 		this.root.appendChild(this.palette.root)
-
-		const canvasContainer = document.createElement("div")
-		canvasContainer.style.flex = "1 1 auto"
-		canvasContainer.style.display = "flex"
-		canvasContainer.style.flexDirection = "column"
-		canvasContainer.style.minHeight = "640px"
-		canvasContainer.style.maxHeight = "100%"
-		this.root.appendChild(canvasContainer)
 
 		this.editor = new EditorCanvas<DiagramNodeData>({
 			initialComponents: [],
