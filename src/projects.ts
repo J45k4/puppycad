@@ -1,4 +1,4 @@
-import { UiComponent } from "./ui"
+import { UiComponent, showTextPromptModal } from "./ui"
 import { deleteProjectState } from "./project"
 
 export type ProjectMetadata = {
@@ -339,8 +339,16 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 
 		const renameButton = document.createElement("button")
 		renameButton.textContent = "Rename"
-		renameButton.onclick = () => {
-			const input = typeof window !== "undefined" ? window.prompt("Project name", project.name) : null
+		renameButton.onclick = async () => {
+			if (typeof window === "undefined") {
+				return
+			}
+			const input = await showTextPromptModal({
+				title: "Rename Project",
+				initialValue: project.name,
+				confirmText: "Save",
+				cancelText: "Cancel"
+			})
 			if (input === null || input === undefined) {
 				return
 			}

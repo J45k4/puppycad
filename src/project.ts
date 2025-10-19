@@ -6,7 +6,7 @@ import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
 import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
 import type { ProjectFile, ProjectFileEntry, ProjectFileFolder, ProjectFileType } from "./project-file"
-import { ItemList, Modal, UiComponent, TreeList, type TreeNode } from "./ui"
+import { ItemList, Modal, UiComponent, TreeList, showTextPromptModal, type TreeNode } from "./ui"
 import { ProjectList, type ProjectListEntry } from "./project-list"
 
 type BaseProjectItem = {
@@ -171,7 +171,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					{
 						label: "Rename",
 						onSelect: () => {
-							this.renameNode(node)
+							void this.renameNode(node)
 						}
 					}
 				]
@@ -1080,10 +1080,10 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!currentItem) {
 			return
 		}
-		this.renameNode(currentItem)
+		void this.renameNode(currentItem)
 	}
 
-	private renameNode(node: ProjectNode) {
+	private async renameNode(node: ProjectNode) {
 		const path = this.nodePaths.get(node)
 		if (!path) {
 			return
@@ -1092,11 +1092,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!siblings) {
 			return
 		}
-		const promptFn = typeof window !== "undefined" ? window.prompt : null
-		if (!promptFn) {
+		if (typeof window === "undefined") {
 			return
 		}
-		const newName = promptFn("Enter a new name", node.name)
+		const newName = await showTextPromptModal({
+			title: "Rename Item",
+			initialValue: node.name,
+			confirmText: "Save",
+			cancelText: "Cancel"
+		})
 		if (!newName) {
 			return
 		}
@@ -1678,7 +1682,15 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 	}
 
 	private async requestRename() {
-		const input = typeof window !== "undefined" ? window.prompt("Project name", this.projectName) : null
+		if (typeof window === "undefined") {
+			return
+		}
+		const input = await showTextPromptModal({
+			title: "Rename Project",
+			initialValue: this.projectName,
+			confirmText: "Save",
+			cancelText: "Cancel"
+		})
 		if (input === null || input === undefined) {
 			return
 		}
