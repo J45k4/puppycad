@@ -192,6 +192,6 @@ describe("SchemanticEditor", () => {
 		select.value = "120"
 		select.dispatchEvent(new Event("change"))
 
-		expect(fakeCanvas.gridSpacing).toBe(120)
+		expect(editor.getGridSpacing()).toBe(120)
 	})
 })
