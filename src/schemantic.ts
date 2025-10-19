@@ -1,6 +1,6 @@
 import { EditorCanvas } from "./canvas"
 import type { CanvasComponent, EditorCanvasOptions } from "./canvas"
-import { UiComponent } from "./ui"
+import { SelectGroup, UiComponent } from "./ui"
 import type { SchemanticProjectItemData } from "./project-file"
 
 type SchematicComponentData = {
@@ -37,7 +37,7 @@ class ComponentList extends UiComponent<HTMLDivElement> {
 
 export type SchemanticEditorState = SchemanticProjectItemData
 
-type EditorCanvasLike = Pick<EditorCanvas<SchematicComponentData>, "root" | "getComponents" | "getConnections">
+type EditorCanvasLike = Pick<EditorCanvas<SchematicComponentData>, "root" | "getComponents" | "getConnections" | "setGridSpacing" | "getGridSpacing">
 
 type SchemanticEditorOptions = {
 	initialState?: SchemanticEditorState
@@ -61,6 +61,7 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 		this.editor = createEditorCanvas({
 			initialComponents: options?.initialState?.components ?? [],
 			initialConnections: options?.initialState?.connections ?? [],
+			gridSpacing: 80,
 			getComponentLabel: (component) => component.data?.type?.toUpperCase() ?? `C${component.id}`,
 			createComponent: (type, position, helpers) => {
 				const size = this.getComponentSize(type)
@@ -89,11 +90,23 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 		this.root.appendChild(componentList.root)
 	}
 
+	public createToolbar(): UiComponent<HTMLElement> {
+		return new SchemanticToolbar({ editor: this })
+	}
+
 	public getState(): SchemanticEditorState {
 		return {
 			components: this.editor.getComponents(),
 			connections: this.editor.getConnections()
 		}
+	}
+
+	public setGridSpacing(spacing: number): void {
+		this.editor.setGridSpacing(spacing)
+	}
+
+	public getGridSpacing(): number {
+		return this.editor.getGridSpacing()
 	}
 
 	private getComponentSize(type: string): { width: number; height: number } | null {
@@ -112,5 +125,36 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 
 	private handleStateChange() {
 		this.onStateChange?.()
+	}
+}
+
+type SchemanticToolbarOptions = {
+	editor: SchemanticEditor
+}
+
+class SchemanticToolbar extends UiComponent<HTMLDivElement> {
+	public constructor({ editor }: SchemanticToolbarOptions) {
+		super(document.createElement("div"))
+		this.root.style.display = "flex"
+		this.root.style.gap = "16px"
+		this.root.style.alignItems = "center"
+
+		const gridSpacingControl = new SelectGroup({
+			label: "Grid Spacing",
+			value: String(editor.getGridSpacing()),
+			options: [
+				{ value: "40", text: "Compact (40px)" },
+				{ value: "80", text: "Comfortable (80px)" },
+				{ value: "120", text: "Spacious (120px)" }
+			]
+		})
+		gridSpacingControl.onChange = (value) => {
+			const spacing = Number.parseInt(value, 10)
+			if (!Number.isNaN(spacing)) {
+				editor.setGridSpacing(spacing)
+			}
+		}
+
+		this.root.appendChild(gridSpacingControl.root)
 	}
 }

@@ -1,6 +1,6 @@
 import { EditorCanvas } from "./canvas"
 import type { CanvasComponent, Connection } from "./canvas"
-import { UiComponent, VList, showTextPromptModal } from "./ui"
+import { SelectGroup, UiComponent, VList, showTextPromptModal } from "./ui"
 
 type FlowchartShape = "startEnd" | "process" | "decision" | "inputOutput" | "predefinedProcess" | "manualInput" | "document" | "database" | "entity"
 
@@ -25,6 +25,8 @@ type PersistedDiagramState = {
 	components: DiagramComponent[]
 	connections: Connection[]
 }
+
+type DiagramConnectionStyle = "solid" | "dashed"
 
 type ShapeConfig = {
 	label: string
@@ -58,6 +60,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	private readonly palette: VList
 	private readonly editor: EditorCanvas<DiagramNodeData>
 	private persistHandle: number | null = null
+	private connectionStyle: DiagramConnectionStyle = "solid"
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -95,7 +98,8 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 			createComponent: this.createComponentFromPalette.bind(this),
 			renderComponent: this.renderComponent.bind(this),
 			onComponentsChange: () => this.schedulePersist(),
-			onConnectionsChange: () => this.schedulePersist()
+			onConnectionsChange: () => this.schedulePersist(),
+			renderConnection: (ctx, connection, state) => this.renderConnection(ctx, connection, state)
 		})
 		this.editor.root.style.flex = "1 1 auto"
 		this.editor.root.style.minHeight = "0"
@@ -106,10 +110,40 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.restoreState()
 	}
 
+	public createToolbar(): UiComponent<HTMLElement> {
+		return new DiagramToolbar({ editor: this })
+	}
+
+	public setConnectionStyle(style: DiagramConnectionStyle): void {
+		if (this.connectionStyle === style) {
+			return
+		}
+		this.connectionStyle = style
+		this.editor.redraw()
+	}
+
+	public getConnectionStyle(): DiagramConnectionStyle {
+		return this.connectionStyle
+	}
+
 	private buildPalette(): void {
 		this.palette.root.innerHTML = ""
 		this.addPaletteSection("Flowchart Shapes", FLOWCHART_SHAPES)
 		this.addPaletteSection("ER Model", ER_MODEL_SHAPES)
+	}
+
+	private renderConnection(ctx: CanvasRenderingContext2D, _connection: Connection, state: { selected: boolean; from: { x: number; y: number }; to: { x: number; y: number } }): void {
+		ctx.strokeStyle = state.selected ? "#2563eb" : "#475569"
+		ctx.lineWidth = state.selected ? 4 : 2
+		if (this.connectionStyle === "dashed") {
+			ctx.setLineDash([10, 6])
+		} else {
+			ctx.setLineDash([])
+		}
+		ctx.beginPath()
+		ctx.moveTo(state.from.x, state.from.y)
+		ctx.lineTo(state.to.x, state.to.y)
+		ctx.stroke()
 	}
 
 	private addPaletteSection(title: string, shapes: FlowchartShape[]): void {
@@ -640,6 +674,35 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		} catch (error) {
 			console.warn("Failed to restore diagram state", error)
 		}
+	}
+}
+
+type DiagramToolbarOptions = {
+	editor: DiagramEditor
+}
+
+class DiagramToolbar extends UiComponent<HTMLDivElement> {
+	public constructor({ editor }: DiagramToolbarOptions) {
+		super(document.createElement("div"))
+		this.root.style.display = "flex"
+		this.root.style.gap = "16px"
+		this.root.style.alignItems = "center"
+
+		const connectionStyle = new SelectGroup({
+			label: "Connection Style",
+			value: editor.getConnectionStyle(),
+			options: [
+				{ value: "solid", text: "Solid" },
+				{ value: "dashed", text: "Dashed" }
+			]
+		})
+		connectionStyle.onChange = (value) => {
+			if (value === "solid" || value === "dashed") {
+				editor.setConnectionStyle(value)
+			}
+		}
+
+		this.root.appendChild(connectionStyle.root)
 	}
 }
 

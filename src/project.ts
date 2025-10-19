@@ -13,6 +13,7 @@ type BaseProjectItem = {
 	type: ProjectFileType
 	name: string
 	editor: UiComponent<HTMLDivElement>
+	toolbar?: UiComponent<HTMLElement>
 }
 
 type SchemanticProjectItem = BaseProjectItem & {
@@ -1155,6 +1156,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					type,
 					name: resolvedName,
 					editor,
+					toolbar: editor.createToolbar(),
 					getState: () => editor.getState()
 				}
 			}
@@ -1174,8 +1176,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			}
 			case "assembly":
 				return { type, name: resolvedName, editor: new AssemblyEditor() }
-			case "diagram":
-				return { type, name: resolvedName, editor: createDiagramEditor() }
+			case "diagram": {
+				const editor = createDiagramEditor()
+				return {
+					type,
+					name: resolvedName,
+					editor,
+					toolbar: editor.createToolbar()
+				}
+			}
 		}
 		throw new Error(`Unsupported project item type: ${type}`)
 	}
@@ -1602,10 +1611,13 @@ export async function deleteProjectState(projectId: string): Promise<void> {
 export class ProjectView extends UiComponent<HTMLDivElement> {
 	private treeView: ProjectTreeView
 	private content: HTMLDivElement
+	private toolbarContainer: HTMLDivElement
+	private editorContainer: HTMLDivElement
 	private titleElement: HTMLHeadingElement
 	private projectName: string
 	private readonly onBack: () => void
 	private readonly onRename?: (name: string) => Promise<string | null> | string | null
+	private activeToolbar: UiComponent<HTMLElement> | null = null
 
 	public constructor(args: {
 		projectId: string
@@ -1662,18 +1674,58 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.treeView = new ProjectTreeView({
 			projectId: args.projectId,
 			onClick: (item) => {
-				this.content.innerHTML = ""
-				this.content.appendChild(item.editor.root)
+				this.showProjectItem(item)
 			}
 		})
 		main.appendChild(this.treeView.root)
 
 		this.content = document.createElement("div")
+		this.content.style.display = "flex"
+		this.content.style.flexDirection = "column"
 		this.content.style.flexGrow = "1"
-		this.content.style.overflow = "auto"
+		this.content.style.minHeight = "0"
+
+		this.toolbarContainer = document.createElement("div")
+		this.toolbarContainer.style.display = "none"
+		this.toolbarContainer.style.padding = "12px 16px"
+		this.toolbarContainer.style.borderBottom = "1px solid #e2e8f0"
+		this.toolbarContainer.style.gap = "12px"
+		this.toolbarContainer.style.alignItems = "center"
+		this.toolbarContainer.style.backgroundColor = "#f8fafc"
+		this.toolbarContainer.style.boxSizing = "border-box"
+
+		this.editorContainer = document.createElement("div")
+		this.editorContainer.style.flexGrow = "1"
+		this.editorContainer.style.overflow = "auto"
+		this.editorContainer.style.display = "flex"
+		this.editorContainer.style.flexDirection = "column"
+		this.editorContainer.style.minHeight = "0"
+
+		this.content.appendChild(this.toolbarContainer)
+		this.content.appendChild(this.editorContainer)
 		main.appendChild(this.content)
 
 		this.root.appendChild(main)
+	}
+
+	private showProjectItem(item: ProjectItem) {
+		this.editorContainer.innerHTML = ""
+		this.editorContainer.appendChild(item.editor.root)
+		this.setToolbar(item.toolbar ?? null)
+	}
+
+	private setToolbar(toolbar: UiComponent<HTMLElement> | null) {
+		if (this.activeToolbar === toolbar && this.toolbarContainer.childElementCount > 0) {
+			return
+		}
+		this.toolbarContainer.innerHTML = ""
+		this.activeToolbar = toolbar
+		if (!toolbar) {
+			this.toolbarContainer.style.display = "none"
+			return
+		}
+		this.toolbarContainer.style.display = "flex"
+		this.toolbarContainer.appendChild(toolbar.root)
 	}
 
 	public setProjectName(name: string) {

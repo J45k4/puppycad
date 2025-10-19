@@ -12,6 +12,8 @@ type EditorCanvasMinimal = {
 	root: HTMLDivElement
 	getComponents: () => CanvasComponent<SchematicComponentData>[]
 	getConnections: () => Connection[]
+	setGridSpacing: (spacing: number) => void
+	getGridSpacing: () => number
 }
 
 class FakeEditorCanvas implements EditorCanvasMinimal {
@@ -19,6 +21,7 @@ class FakeEditorCanvas implements EditorCanvasMinimal {
 	public options: FakeEditorCanvasOptions
 	public components: CanvasComponent<SchematicComponentData>[]
 	public connections: Connection[]
+	public gridSpacing: number
 
 	public constructor(options: FakeEditorCanvasOptions = {}) {
 		this.root = document.createElement("div") as HTMLDivElement
@@ -28,6 +31,7 @@ class FakeEditorCanvas implements EditorCanvasMinimal {
 			from: { ...connection.from },
 			to: { ...connection.to }
 		}))
+		this.gridSpacing = options.gridSpacing ?? 100
 	}
 
 	public getComponents(): CanvasComponent<SchematicComponentData>[] {
@@ -39,6 +43,14 @@ class FakeEditorCanvas implements EditorCanvasMinimal {
 			from: { ...connection.from },
 			to: { ...connection.to }
 		}))
+	}
+
+	public setGridSpacing(spacing: number): void {
+		this.gridSpacing = spacing
+	}
+
+	public getGridSpacing(): number {
+		return this.gridSpacing
 	}
 }
 
@@ -71,6 +83,7 @@ describe("SchemanticEditor", () => {
 
 		expect(capturedOptions?.initialComponents).toEqual(initialState.components)
 		expect(capturedOptions?.initialConnections).toEqual(initialState.connections)
+		expect(capturedOptions?.gridSpacing).toBe(80)
 
 		const label = capturedOptions?.getComponentLabel?.({
 			id: 1,
@@ -152,5 +165,33 @@ describe("SchemanticEditor", () => {
 		capturedOptions?.onConnectionsChange?.([])
 
 		expect(notifications).toHaveLength(2)
+	})
+
+	it("provides a toolbar to adjust grid spacing", () => {
+		let fakeCanvas: FakeEditorCanvas | null = null
+		const editor = new SchemanticEditor({
+			createEditorCanvas: (options) => {
+				fakeCanvas = new FakeEditorCanvas(options)
+				return fakeCanvas
+			}
+		})
+
+		if (!fakeCanvas) {
+			throw new Error("Expected canvas to be created")
+		}
+
+		const toolbar = editor.createToolbar()
+		const select = toolbar.root.querySelector("select") as HTMLSelectElement | null
+		expect(select).not.toBeNull()
+		if (!select) {
+			throw new Error("Expected toolbar to provide a select element")
+		}
+
+		expect(select.value).toBe("80")
+
+		select.value = "120"
+		select.dispatchEvent(new Event("change"))
+
+		expect(fakeCanvas.gridSpacing).toBe(120)
 	})
 })

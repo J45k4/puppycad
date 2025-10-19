@@ -40,6 +40,15 @@ export interface EditorCanvasOptions<TData = unknown> {
 	onSelectionChange?: (ids: number[]) => void
 	onComponentsChange?: (components: CanvasComponent<TData>[]) => void
 	onConnectionsChange?: (connections: Connection[]) => void
+	renderConnection?: (
+		ctx: CanvasRenderingContext2D,
+		connection: Connection,
+		state: {
+			selected: boolean
+			from: { x: number; y: number }
+			to: { x: number; y: number }
+		}
+	) => void
 }
 
 const cloneValue = <T>(value: T): T => {
@@ -167,6 +176,22 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.drawScene()
 		this.setupEventHandlers()
 		this.canvasElement.addEventListener("keydown", this.handleKeydown)
+	}
+
+	public redraw(): void {
+		this.drawScene()
+	}
+
+	public setGridSpacing(spacing: number): void {
+		if (!Number.isFinite(spacing) || spacing <= 0) {
+			return
+		}
+		this.options.gridSpacing = spacing
+		this.drawScene()
+	}
+
+	public getGridSpacing(): number {
+		return this.options.gridSpacing ?? 100
 	}
 
 	public setComponents(components: CanvasComponent<TData>[]): void {
@@ -600,7 +625,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 	}
 
 	private drawGrid(): void {
-		const gridSpacing = this.options.gridSpacing ?? 100
+		const gridSpacing = this.getGridSpacing()
 		const worldLeft = -this.originX / this.scale
 		const worldRight = (this.canvasElement.width - this.originX) / this.scale
 		const worldTop = -this.originY / this.scale
@@ -648,6 +673,16 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 				continue
 			}
 			const isSelected = index === this.selectedConnectionIndex
+			if (this.options.renderConnection) {
+				this.ctx.save()
+				this.options.renderConnection(this.ctx, connection, {
+					selected: isSelected,
+					from: fromPoint,
+					to: toPoint
+				})
+				this.ctx.restore()
+				continue
+			}
 			this.ctx.strokeStyle = isSelected ? "#2563eb" : "#475569"
 			this.ctx.lineWidth = isSelected ? 4 : 2
 			this.ctx.beginPath()
