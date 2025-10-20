@@ -1872,6 +1872,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 	private createSplitButton(orientation: DockOrientation): HTMLButtonElement {
 		const button = document.createElement("button")
 		const label = orientation === "horizontal" ? "Split horizontally" : "Split vertically"
+		const splitDirection: DockOrientation = orientation === "horizontal" ? "vertical" : "horizontal"
 		const defaultBackground = "#ffffff"
 		const hoverBackground = "#f1f5f9"
 		const activeBackground = "#e2e8f0"
@@ -1915,7 +1916,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		})
 
 		button.onclick = () => {
-			this.handleSplitRequest(orientation)
+			this.handleSplitRequest(splitDirection)
 		}
 
 		return button
