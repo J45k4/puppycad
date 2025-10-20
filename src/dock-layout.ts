@@ -20,6 +20,8 @@ export type DockLayoutState = {
 	activePaneId: string | null
 }
 
+export type DockDropPosition = "left" | "right" | "top" | "bottom" | "center"
+
 type DockSplit = {
 	type: "split"
 	orientation: DockOrientation
@@ -47,6 +49,11 @@ type DockNode = DockSplit | DockLeaf
 
 let paneIdCounter = 0
 
+type DragState = {
+	source: DockLeaf
+	overlay: HTMLDivElement
+}
+
 export class DockLayout extends UiComponent<HTMLDivElement> {
 	private rootNode: DockNode
 	private readonly parentMap = new Map<DockNode, DockSplit | null>()
@@ -54,6 +61,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	private activePaneId: string | null = null
 	public onActivePaneChange: ((paneId: string) => void) | null = null
 	public onPaneClosed: ((closedPaneId: string, nextActivePaneId: string | null) => void) | null = null
+	private dragState: DragState | null = null
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -62,6 +70,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.root.style.flexGrow = "1"
 		this.root.style.minHeight = "0"
 		this.root.style.minWidth = "0"
+		this.root.style.position = "relative"
 
 		const initialLeaf = this.createLeaf()
 		this.rootNode = initialLeaf
@@ -270,6 +279,35 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		leaf.pane.placeholder.textContent = text
 	}
 
+	public movePane(paneId: string, targetPaneId: string | null, position: DockDropPosition): void {
+		const source = this.panes.get(paneId)
+		if (!source) {
+			return
+		}
+
+		if (position === "center") {
+			return
+		}
+
+		if (!targetPaneId) {
+			if (this.panes.size <= 1) {
+				return
+			}
+
+			this.moveLeafToRoot(source, position)
+			this.setActivePane(paneId)
+			return
+		}
+
+		const target = this.panes.get(targetPaneId)
+		if (!target || target === source) {
+			return
+		}
+
+		this.moveLeafRelative(source, target, position)
+		this.setActivePane(paneId)
+	}
+
 	private createLeaf(presetId?: string): DockLeaf {
 		const element = document.createElement("div")
 		element.style.display = "flex"
@@ -406,6 +444,23 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			this.closePane(paneState.id)
 		})
 
+		header.draggable = true
+		closeButton.draggable = false
+
+		header.addEventListener("dragstart", (event) => {
+			if (this.panes.size <= 1) {
+				event.preventDefault()
+				return
+			}
+			event.dataTransfer?.setData("text/plain", paneState.id)
+			event.dataTransfer?.setDragImage(paneState.header, 0, 0)
+			this.startDrag(leaf)
+		})
+
+		header.addEventListener("dragend", () => {
+			this.endDrag()
+		})
+
 		this.panes.set(paneState.id, leaf)
 		this.parentMap.set(leaf, null)
 
@@ -493,10 +548,327 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		return node.children.reduce((max, child) => Math.max(max, this.getMaxPaneNumber(child)), -1)
 	}
 
-	private removeLeaf(leaf: DockLeaf): void {
-		const paneElement = leaf.pane.element
-		const parent = this.parentMap.get(leaf)
-		paneElement.remove()
+	private startDrag(source: DockLeaf): void {
+		this.endDrag()
+
+		const overlay = document.createElement("div")
+		overlay.style.position = "absolute"
+		overlay.style.top = "0"
+		overlay.style.left = "0"
+		overlay.style.right = "0"
+		overlay.style.bottom = "0"
+		overlay.style.pointerEvents = "none"
+		overlay.style.zIndex = "1000"
+
+		this.root.appendChild(overlay)
+		this.dragState = { source, overlay }
+
+		this.buildDropTargets(overlay, source)
+	}
+
+	private endDrag(): void {
+		if (!this.dragState) {
+			return
+		}
+
+		this.dragState.overlay.remove()
+		this.dragState = null
+	}
+
+	private buildDropTargets(overlay: HTMLDivElement, source: DockLeaf): void {
+		if (this.panes.size <= 1) {
+			return
+		}
+
+		const rootRect = this.root.getBoundingClientRect()
+		const edgeRatio = 0.35
+
+		for (const leaf of this.panes.values()) {
+			if (leaf === source) {
+				continue
+			}
+
+			const rect = leaf.pane.element.getBoundingClientRect()
+			const container = document.createElement("div")
+			container.style.position = "absolute"
+			container.style.left = `${rect.left - rootRect.left}px`
+			container.style.top = `${rect.top - rootRect.top}px`
+			container.style.width = `${rect.width}px`
+			container.style.height = `${rect.height}px`
+			container.style.pointerEvents = "none"
+
+			overlay.appendChild(container)
+
+			this.createDropZone(container, "left", () => this.handleDrop(leaf, "left"), {
+				left: 0,
+				top: 0,
+				width: rect.width * edgeRatio,
+				height: rect.height
+			})
+
+			this.createDropZone(container, "right", () => this.handleDrop(leaf, "right"), {
+				left: rect.width * (1 - edgeRatio),
+				top: 0,
+				width: rect.width * edgeRatio,
+				height: rect.height
+			})
+
+			this.createDropZone(container, "top", () => this.handleDrop(leaf, "top"), {
+				left: 0,
+				top: 0,
+				width: rect.width,
+				height: rect.height * edgeRatio
+			})
+
+			this.createDropZone(container, "bottom", () => this.handleDrop(leaf, "bottom"), {
+				left: 0,
+				top: rect.height * (1 - edgeRatio),
+				width: rect.width,
+				height: rect.height * edgeRatio
+			})
+		}
+
+		const container = document.createElement("div")
+		container.style.position = "absolute"
+		container.style.left = "0"
+		container.style.top = "0"
+		container.style.right = "0"
+		container.style.bottom = "0"
+		container.style.pointerEvents = "none"
+
+		overlay.appendChild(container)
+
+		const rootWidth = rootRect.width
+		const rootHeight = rootRect.height
+		const rootEdgeWidth = Math.min(rootWidth * edgeRatio, 200)
+		const rootEdgeHeight = Math.min(rootHeight * edgeRatio, 200)
+
+		this.createDropZone(container, "left", () => this.handleDrop(null, "left"), {
+			left: 0,
+			top: 0,
+			width: rootEdgeWidth,
+			height: rootHeight
+		})
+
+		this.createDropZone(container, "right", () => this.handleDrop(null, "right"), {
+			left: Math.max(rootWidth - rootEdgeWidth, 0),
+			top: 0,
+			width: rootEdgeWidth,
+			height: rootHeight
+		})
+
+		this.createDropZone(container, "top", () => this.handleDrop(null, "top"), {
+			left: 0,
+			top: 0,
+			width: rootWidth,
+			height: rootEdgeHeight
+		})
+
+		this.createDropZone(container, "bottom", () => this.handleDrop(null, "bottom"), {
+			left: 0,
+			top: Math.max(rootHeight - rootEdgeHeight, 0),
+			width: rootWidth,
+			height: rootEdgeHeight
+		})
+	}
+
+	private createDropZone(
+		container: HTMLDivElement,
+		position: Exclude<DockDropPosition, "center">,
+		onDrop: () => void,
+		dimensions: { left: number; top: number; width: number; height: number }
+	): void {
+		if (dimensions.width <= 0 || dimensions.height <= 0) {
+			return
+		}
+
+		const zone = document.createElement("div")
+		zone.style.position = "absolute"
+		zone.style.left = `${dimensions.left}px`
+		zone.style.top = `${dimensions.top}px`
+		zone.style.width = `${dimensions.width}px`
+		zone.style.height = `${dimensions.height}px`
+		zone.style.border = "2px solid transparent"
+		zone.style.backgroundColor = "rgba(59, 130, 246, 0.15)"
+		zone.style.opacity = "0"
+		zone.style.transition = "opacity 0.1s ease"
+		zone.style.pointerEvents = "auto"
+		zone.style.borderRadius = "4px"
+
+		zone.addEventListener("dragenter", (event) => {
+			event.preventDefault()
+			zone.style.opacity = "1"
+			zone.style.borderColor = "rgba(59, 130, 246, 0.6)"
+		})
+
+		zone.addEventListener("dragleave", () => {
+			zone.style.opacity = "0"
+			zone.style.borderColor = "transparent"
+		})
+
+		zone.addEventListener("dragover", (event) => {
+			event.preventDefault()
+			if (event.dataTransfer) {
+				event.dataTransfer.dropEffect = "move"
+			}
+		})
+
+		zone.addEventListener("drop", (event) => {
+			event.preventDefault()
+			zone.style.opacity = "0"
+			zone.style.borderColor = "transparent"
+			onDrop()
+		})
+
+		container.appendChild(zone)
+	}
+
+	private handleDrop(target: DockLeaf | null, position: DockDropPosition): void {
+		const dragState = this.dragState
+		if (!dragState) {
+			return
+		}
+
+		const source = dragState.source
+		this.endDrag()
+
+		if (target) {
+			this.movePane(source.pane.id, target.pane.id, position)
+		} else {
+			this.movePane(source.pane.id, null, position)
+		}
+	}
+
+	private getOrientationForPosition(position: DockDropPosition): DockOrientation | null {
+		switch (position) {
+			case "left":
+			case "right":
+				return "horizontal"
+			case "top":
+			case "bottom":
+				return "vertical"
+			default:
+				return null
+		}
+	}
+
+	private moveLeafRelative(source: DockLeaf, target: DockLeaf, position: DockDropPosition): void {
+		const orientation = this.getOrientationForPosition(position)
+		if (!orientation) {
+			return
+		}
+
+		const insertBefore = position === "left" || position === "top"
+
+		this.detachLeaf(source)
+
+		const parent = this.parentMap.get(target) ?? null
+
+		if (parent && parent.orientation === orientation) {
+			const targetIndex = parent.children.indexOf(target)
+			const insertIndex = insertBefore ? targetIndex : targetIndex + 1
+			const reference = parent.element.children[insertIndex] ?? null
+
+			parent.children.splice(insertIndex, 0, source)
+			parent.element.insertBefore(source.pane.element, reference)
+			this.parentMap.set(source, parent)
+			return
+		}
+
+		const splitNode: DockSplit = {
+			type: "split",
+			orientation,
+			element: this.createSplitElement(orientation),
+			children: []
+		}
+
+		const order: DockNode[] = insertBefore ? [source, target] : [target, source]
+
+		if (!parent) {
+			this.parentMap.set(splitNode, null)
+			this.parentMap.set(target, splitNode)
+			this.parentMap.set(source, splitNode)
+			this.rootNode = splitNode
+			this.root.innerHTML = ""
+			this.root.appendChild(splitNode.element)
+		} else {
+			const index = parent.children.indexOf(target)
+			if (index >= 0) {
+				parent.children.splice(index, 1, splitNode)
+			}
+			this.parentMap.set(splitNode, parent)
+			this.parentMap.set(target, splitNode)
+			this.parentMap.set(source, splitNode)
+			parent.element.replaceChild(splitNode.element, target.pane.element)
+		}
+
+		for (const child of order) {
+			splitNode.children.push(child)
+			if (child.type === "leaf") {
+				splitNode.element.appendChild(child.pane.element)
+			} else {
+				splitNode.element.appendChild(child.element)
+				this.parentMap.set(child, splitNode)
+			}
+		}
+	}
+
+	private moveLeafToRoot(source: DockLeaf, position: DockDropPosition): void {
+		const orientation = this.getOrientationForPosition(position)
+		if (!orientation) {
+			return
+		}
+
+		this.detachLeaf(source)
+
+		if (this.rootNode.type === "split" && this.rootNode.orientation === orientation) {
+			const insertBefore = position === "left" || position === "top"
+			if (insertBefore) {
+				this.rootNode.children.unshift(source)
+				this.rootNode.element.insertBefore(source.pane.element, this.rootNode.element.firstChild)
+			} else {
+				this.rootNode.children.push(source)
+				this.rootNode.element.appendChild(source.pane.element)
+			}
+			this.parentMap.set(source, this.rootNode)
+			return
+		}
+
+		const existingRoot = this.rootNode
+		const splitNode: DockSplit = {
+			type: "split",
+			orientation,
+			element: this.createSplitElement(orientation),
+			children: []
+		}
+
+		this.parentMap.set(splitNode, null)
+
+		const order: DockNode[] = position === "left" || position === "top" ? [source, existingRoot] : [existingRoot, source]
+
+		this.rootNode = splitNode
+		this.root.innerHTML = ""
+		this.root.appendChild(splitNode.element)
+
+		for (const child of order) {
+			splitNode.children.push(child)
+			if (child.type === "leaf") {
+				splitNode.element.appendChild(child.pane.element)
+				this.parentMap.set(child, splitNode)
+			} else {
+				splitNode.element.appendChild(child.element)
+				this.parentMap.set(child, splitNode)
+			}
+		}
+
+		this.parentMap.set(source, splitNode)
+	}
+
+	private detachLeaf(leaf: DockLeaf): void {
+		const parent = this.parentMap.get(leaf) ?? null
+
+		leaf.pane.element.remove()
+		this.parentMap.set(leaf, null)
 
 		if (!parent) {
 			return
@@ -508,6 +880,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		}
 
 		this.trimSplit(parent)
+	}
+
+	private removeLeaf(leaf: DockLeaf): void {
+		this.detachLeaf(leaf)
 	}
 
 	private trimSplit(split: DockSplit): void {
