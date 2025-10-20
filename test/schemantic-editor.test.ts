@@ -27,10 +27,16 @@ class FakeEditorCanvas implements EditorCanvasMinimal {
 		this.root = document.createElement("div") as HTMLDivElement
 		this.options = options
 		this.components = (options.initialComponents as CanvasComponent<SchematicComponentData>[] | undefined)?.map((component) => ({ ...component })) ?? []
-		this.connections = (options.initialConnections ?? []).map((connection) => ({
-			from: { ...connection.from },
-			to: { ...connection.to }
-		}))
+		this.connections = (options.initialConnections ?? []).map((connection) => {
+			const cloned: Connection = {
+				from: { ...connection.from },
+				to: { ...connection.to }
+			}
+			if (connection.style) {
+				cloned.style = connection.style
+			}
+			return cloned
+		})
 		this.gridSpacing = options.gridSpacing ?? 100
 	}
 
@@ -39,10 +45,16 @@ class FakeEditorCanvas implements EditorCanvasMinimal {
 	}
 
 	public getConnections(): Connection[] {
-		return this.connections.map((connection) => ({
-			from: { ...connection.from },
-			to: { ...connection.to }
-		}))
+		return this.connections.map((connection) => {
+			const cloned: Connection = {
+				from: { ...connection.from },
+				to: { ...connection.to }
+			}
+			if (connection.style) {
+				cloned.style = connection.style
+			}
+			return cloned
+		})
 	}
 
 	public setGridSpacing(spacing: number): void {
@@ -180,6 +192,8 @@ describe("SchemanticEditor", () => {
 			throw new Error("Expected canvas to be created")
 		}
 		const canvas = fakeCanvas as FakeEditorCanvas
+
+		const createdCanvas = fakeCanvas as FakeEditorCanvas
 
 		const toolbar = editor.createToolbar()
 		const select = toolbar.root.querySelector("select") as HTMLSelectElement | null

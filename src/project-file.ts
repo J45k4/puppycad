@@ -26,6 +26,7 @@ export type SchemanticProjectConnectionEndpoint = {
 export type SchemanticProjectConnection = {
 	from: SchemanticProjectConnectionEndpoint
 	to: SchemanticProjectConnectionEndpoint
+	style?: "solid" | "dashed"
 }
 
 export type SchemanticProjectItemData = {
@@ -345,10 +346,10 @@ function cloneSchemanticProjectItemData(data: SchemanticProjectItemData | undefi
 				data: normalizedType === undefined ? undefined : { type: normalizedType }
 			}
 		}),
-		connections: data.connections.map((connection) => ({
-			from: { ...connection.from },
-			to: { ...connection.to }
-		}))
+		connections: data.connections.map((connection) => {
+			const style = connection.style === "dashed" ? "dashed" : connection.style === "solid" ? "solid" : undefined
+			return style ? { from: { ...connection.from }, to: { ...connection.to }, style } : { from: { ...connection.from }, to: { ...connection.to } }
+		})
 	}
 }
 
@@ -410,7 +411,12 @@ function normalizeSchemanticProjectItemData(input: unknown): SchemanticProjectIt
 		if (!from || !to) {
 			continue
 		}
-		connections.push({ from, to })
+		const style = candidate.style === "dashed" ? "dashed" : candidate.style === "solid" ? "solid" : undefined
+		const connection: SchemanticProjectConnection = { from, to }
+		if (style) {
+			connection.style = style
+		}
+		connections.push(connection)
 	}
 
 	return { components, connections }

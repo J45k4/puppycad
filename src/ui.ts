@@ -87,6 +87,10 @@ export class Select extends UiComponent<HTMLSelectElement> {
 		return this.root.value
 	}
 
+	public set value(value: string) {
+		this.root.value = value
+	}
+
 	public set onChange(callback: (value: string) => void) {
 		this.root.onchange = () => callback(this.root.value)
 	}
@@ -115,6 +119,10 @@ export class SelectGroup extends UiComponent<HTMLDivElement> {
 
 	public get value(): string {
 		return this.select.value
+	}
+
+	public set value(value: string) {
+		this.select.value = value
 	}
 
 	public set onChange(callback: (value: string) => void) {

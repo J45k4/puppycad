@@ -17,9 +17,12 @@ export interface ConnectionEndpoint {
 	ratio: number
 }
 
+export type ConnectionStyle = "solid" | "dashed"
+
 export interface Connection {
 	from: ConnectionEndpoint
 	to: ConnectionEndpoint
+	style?: ConnectionStyle
 }
 
 type EdgeAnchor<TData> = {
@@ -33,6 +36,7 @@ type NewComponent<TData> = Omit<CanvasComponent<TData>, "id"> & Partial<Pick<Can
 export interface EditorCanvasOptions<TData = unknown> {
 	initialComponents?: CanvasComponent<TData>[]
 	initialConnections?: Connection[]
+	createConnection?: (from: ConnectionEndpoint, to: ConnectionEndpoint) => Connection
 	createComponent?: (type: string, position: { x: number; y: number }, helpers: { createId: () => number }) => NewComponent<TData> | null | undefined
 	renderComponent?: (ctx: CanvasRenderingContext2D, component: CanvasComponent<TData>, state: { selected: boolean }) => void
 	getComponentLabel?: (component: CanvasComponent<TData>) => string
@@ -68,8 +72,13 @@ const cloneComponent = <TData>(component: CanvasComponent<TData>): CanvasCompone
 
 const cloneConnection = (connection: Connection): Connection => ({
 	from: { ...connection.from },
-	to: { ...connection.to }
+	to: { ...connection.to },
+	style: connection.style
 })
+
+const connectionEndpointsEqual = (a: ConnectionEndpoint, b: ConnectionEndpoint): boolean => a.componentId === b.componentId && a.edge === b.edge && a.ratio === b.ratio
+
+const connectionsEqual = (a: Connection, b: Connection): boolean => connectionEndpointsEqual(a.from, b.from) && connectionEndpointsEqual(a.to, b.to) && a.style === b.style
 
 export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 	public readonly canvasElement: HTMLCanvasElement
@@ -281,6 +290,26 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
 		const connection = this.connections[this.selectedConnectionIndex]
 		return connection ? cloneConnection(connection) : null
+	}
+
+	public updateSelectedConnection(updater: (connection: Connection) => void): Connection | null {
+		if (this.selectedConnectionIndex === null) {
+			return null
+		}
+
+		const connection = this.connections[this.selectedConnectionIndex]
+		if (!connection) {
+			return null
+		}
+
+		const before = cloneConnection(connection)
+		updater(connection)
+		const changed = !connectionsEqual(before, connection)
+		if (changed) {
+			this.drawScene()
+			this.emitConnectionsChange()
+		}
+		return cloneConnection(connection)
 	}
 
 	public updateComponent(id: number, update: Partial<CanvasComponent<TData>>): CanvasComponent<TData> | null {
@@ -527,10 +556,10 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 				this.connectionStartAnchor = null
 				this.connectionPreviewPoint = null
 				if (startAnchor && dropAnchor && dropAnchor.component.id !== startAnchor.component.id) {
-					this.connections.push({
-						from: this.endpointFromAnchor(startAnchor),
-						to: this.endpointFromAnchor(dropAnchor)
-					})
+					const from = this.endpointFromAnchor(startAnchor)
+					const to = this.endpointFromAnchor(dropAnchor)
+					const created = this.options.createConnection?.(from, to) ?? { from, to }
+					this.connections.push(cloneConnection(created))
 					this.emitConnectionsChange()
 				}
 				this.hoveredEdge = this.findHoveredEdge(x, y)
@@ -685,10 +714,16 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 			}
 			this.ctx.strokeStyle = isSelected ? "#2563eb" : "#475569"
 			this.ctx.lineWidth = isSelected ? 4 : 2
+			if (connection.style === "dashed") {
+				this.ctx.setLineDash([10, 6])
+			} else {
+				this.ctx.setLineDash([])
+			}
 			this.ctx.beginPath()
 			this.ctx.moveTo(fromPoint.x, fromPoint.y)
 			this.ctx.lineTo(toPoint.x, toPoint.y)
 			this.ctx.stroke()
+			this.ctx.setLineDash([])
 			if (isSelected) {
 				this.ctx.lineWidth = 2
 			}

@@ -61,6 +61,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	private readonly editor: EditorCanvas<DiagramNodeData>
 	private persistHandle: number | null = null
 	private connectionStyle: DiagramConnectionStyle = "solid"
+	private readonly connectionStyleListeners = new Set<(style: DiagramConnectionStyle, context: { hasSelection: boolean }) => void>()
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -94,11 +95,13 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.editor = new EditorCanvas<DiagramNodeData>({
 			initialComponents: [],
 			gridSpacing: 80,
+			createConnection: (from, to) => (this.connectionStyle === "solid" ? { from, to } : { from, to, style: this.connectionStyle }),
 			getComponentLabel: (component) => component.data?.text ?? `Node ${component.id}`,
 			createComponent: this.createComponentFromPalette.bind(this),
 			renderComponent: this.renderComponent.bind(this),
 			onComponentsChange: () => this.schedulePersist(),
 			onConnectionsChange: () => this.schedulePersist(),
+			onSelectionChange: () => this.handleSelectionChange(),
 			renderConnection: (ctx, connection, state) => this.renderConnection(ctx, connection, state)
 		})
 		this.editor.root.style.flex = "1 1 auto"
@@ -115,15 +118,37 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	public setConnectionStyle(style: DiagramConnectionStyle): void {
-		if (this.connectionStyle === style) {
-			return
+		let hasSelection = false
+		this.editor.updateSelectedConnection((connection) => {
+			hasSelection = true
+			if ((connection.style ?? "solid") !== style) {
+				if (style === "solid") {
+					connection.style = undefined
+				} else {
+					connection.style = style
+				}
+			}
+		})
+
+		if (!hasSelection) {
+			if (this.connectionStyle === style) {
+				return
+			}
+			this.connectionStyle = style
 		}
-		this.connectionStyle = style
-		this.editor.redraw()
+		this.notifySelectedConnectionStyleChange()
 	}
 
 	public getConnectionStyle(): DiagramConnectionStyle {
 		return this.connectionStyle
+	}
+
+	public subscribeToConnectionStyleChanges(listener: (style: DiagramConnectionStyle, context: { hasSelection: boolean }) => void): () => void {
+		this.connectionStyleListeners.add(listener)
+		listener(this.getActiveConnectionStyle(), { hasSelection: this.editor.getSelectedConnection() !== null })
+		return () => {
+			this.connectionStyleListeners.delete(listener)
+		}
 	}
 
 	private buildPalette(): void {
@@ -132,10 +157,11 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.addPaletteSection("ER Model", ER_MODEL_SHAPES)
 	}
 
-	private renderConnection(ctx: CanvasRenderingContext2D, _connection: Connection, state: { selected: boolean; from: { x: number; y: number }; to: { x: number; y: number } }): void {
+	private renderConnection(ctx: CanvasRenderingContext2D, connection: Connection, state: { selected: boolean; from: { x: number; y: number }; to: { x: number; y: number } }): void {
 		ctx.strokeStyle = state.selected ? "#2563eb" : "#475569"
 		ctx.lineWidth = state.selected ? 4 : 2
-		if (this.connectionStyle === "dashed") {
+		const style = connection.style ?? "solid"
+		if (style === "dashed") {
 			ctx.setLineDash([10, 6])
 		} else {
 			ctx.setLineDash([])
@@ -144,6 +170,7 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		ctx.moveTo(state.from.x, state.from.y)
 		ctx.lineTo(state.to.x, state.to.y)
 		ctx.stroke()
+		ctx.setLineDash([])
 	}
 
 	private addPaletteSection(title: string, shapes: FlowchartShape[]): void {
@@ -650,6 +677,27 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private handleSelectionChange(): void {
+		this.notifySelectedConnectionStyleChange()
+	}
+
+	private getActiveConnectionStyle(): DiagramConnectionStyle {
+		const selected = this.editor.getSelectedConnection()
+		if (selected) {
+			return selected.style === "dashed" ? "dashed" : "solid"
+		}
+		return this.connectionStyle
+	}
+
+	private notifySelectedConnectionStyleChange(): void {
+		const selected = this.editor.getSelectedConnection()
+		const hasSelection = selected !== null
+		const style: DiagramConnectionStyle = selected ? (selected.style === "dashed" ? "dashed" : "solid") : this.connectionStyle
+		for (const listener of this.connectionStyleListeners) {
+			listener(style, { hasSelection })
+		}
+	}
+
 	private restoreState(): void {
 		try {
 			const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -701,6 +749,10 @@ class DiagramToolbar extends UiComponent<HTMLDivElement> {
 				editor.setConnectionStyle(value)
 			}
 		}
+
+		editor.subscribeToConnectionStyleChanges((style) => {
+			connectionStyle.value = style
+		})
 
 		this.root.appendChild(connectionStyle.root)
 	}
