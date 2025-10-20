@@ -147,6 +147,9 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.root.style.borderRadius = "12px"
 		this.root.style.padding = "12px"
 		this.root.style.boxSizing = "border-box"
+		this.root.style.flex = "1 1 auto"
+		this.root.style.minWidth = "0"
+		this.root.style.minHeight = "0"
 
 		const topButtonRow = new HList()
 		const fitButton = document.createElement("button")
@@ -160,6 +163,8 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.canvasElement.height = 800
 		this.canvasElement.style.width = "100%"
 		this.canvasElement.style.maxHeight = "100%"
+		this.canvasElement.style.flex = "1 1 auto"
+		this.canvasElement.style.minWidth = "0"
 		this.canvasElement.style.borderRadius = "8px"
 		this.canvasElement.style.background = "#ffffff"
 		this.canvasElement.style.boxShadow = "0 10px 25px rgba(15, 23, 42, 0.12)"
@@ -173,12 +178,17 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.ctx = context
 
 		const canvasRow = new HList()
+		canvasRow.root.style.flex = "1 1 auto"
+		canvasRow.root.style.minWidth = "0"
+		canvasRow.root.style.minHeight = "0"
+		canvasRow.root.style.alignItems = "stretch"
 		const rightButtonRow = new VList({
 			style: {
 				gap: "8px",
 				alignItems: "stretch"
 			}
 		})
+		rightButtonRow.root.style.flex = "0 0 auto"
 		canvasRow.add(this.canvasElement, rightButtonRow)
 		this.root.appendChild(canvasRow.root)
 

@@ -53,6 +53,8 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 		super(document.createElement("div"))
 		this.root.style.display = "flex"
 		this.root.style.flexDirection = "row"
+		this.root.style.flex = "1 1 auto"
+		this.root.style.minWidth = "0"
 
 		this.onStateChange = options?.onStateChange
 
@@ -84,9 +86,17 @@ export class SchemanticEditor extends UiComponent<HTMLDivElement> {
 			onComponentsChange: () => this.handleStateChange(),
 			onConnectionsChange: () => this.handleStateChange()
 		})
-		this.root.appendChild(this.editor.root)
+		const editorElement = this.editor.root
+		editorElement.style.flex = "1 1 0"
+		editorElement.style.minWidth = "0"
+		editorElement.style.maxWidth = "100%"
+		editorElement.style.overflow = "hidden"
+		this.root.appendChild(editorElement)
 
 		const componentList = new ComponentList()
+		componentList.root.style.flex = "0 0 200px"
+		componentList.root.style.minWidth = "200px"
+		componentList.root.style.maxWidth = "200px"
 		this.root.appendChild(componentList.root)
 	}
 
