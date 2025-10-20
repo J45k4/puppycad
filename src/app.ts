@@ -57,17 +57,11 @@ window.onload = () => {
 		throw new Error("document.body is not available")
 	}
 
-	body.style.margin = "0"
-	body.style.height = "100vh"
-	body.style.display = "flex"
-	body.style.flexDirection = "column"
+	body.classList.add("app-body")
 
 	const container = new Container(body)
 	const root = document.createElement("div")
-	root.style.display = "flex"
-	root.style.flexDirection = "column"
-	root.style.flexGrow = "1"
-	root.style.minHeight = "0"
+	root.classList.add("app-shell", "app-container")
 	container.root.appendChild(root)
 
 	const setActiveView = (view: UiComponent<HTMLElement>) => {

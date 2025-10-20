@@ -180,45 +180,19 @@ export class Modal extends UiComponent<HTMLDivElement> {
 		super(document.createElement("div"))
 
 		this.root.className = "modal-backdrop"
-		this.root.style.position = "fixed"
-		this.root.style.inset = "0"
-		this.root.style.backgroundColor = "rgba(15, 23, 42, 0.55)"
-		this.root.style.display = "flex"
-		this.root.style.alignItems = "center"
-		this.root.style.justifyContent = "center"
-		this.root.style.padding = "24px"
-		this.root.style.zIndex = "1000"
 
 		this.dialog = document.createElement("div")
 		this.dialog.className = "modal-dialog"
-		this.dialog.style.minWidth = "280px"
-		this.dialog.style.maxWidth = "560px"
-		this.dialog.style.width = "100%"
-		this.dialog.style.backgroundColor = "#ffffff"
-		this.dialog.style.borderRadius = "12px"
-		this.dialog.style.boxShadow = "0 20px 45px rgba(15, 23, 42, 0.25)"
-		this.dialog.style.padding = "24px"
-		this.dialog.style.display = "flex"
-		this.dialog.style.flexDirection = "column"
-		this.dialog.style.gap = "16px"
-		this.dialog.style.position = "relative"
 
 		if (args?.title) {
 			const titleEl = document.createElement("h2")
 			titleEl.textContent = args.title
 			titleEl.className = "modal-title"
-			titleEl.style.margin = "0"
-			titleEl.style.fontSize = "20px"
-			titleEl.style.fontWeight = "600"
-			titleEl.style.color = "#0f172a"
 			this.dialog.appendChild(titleEl)
 		}
 
 		this.body = document.createElement("div")
 		this.body.className = "modal-body"
-		this.body.style.display = "flex"
-		this.body.style.flexDirection = "column"
-		this.body.style.gap = "12px"
 		if (args?.content) {
 			this.setContent(args.content)
 		}
@@ -226,9 +200,6 @@ export class Modal extends UiComponent<HTMLDivElement> {
 
 		this.actionsContainer = document.createElement("div")
 		this.actionsContainer.className = "modal-actions"
-		this.actionsContainer.style.display = "flex"
-		this.actionsContainer.style.justifyContent = "flex-end"
-		this.actionsContainer.style.gap = "8px"
 		this.dialog.appendChild(this.actionsContainer)
 
 		this.root.appendChild(this.dialog)
@@ -292,46 +263,22 @@ export class Modal extends UiComponent<HTMLDivElement> {
 
 	public addAction(action: ModalAction) {
 		const button = document.createElement("button")
+		button.type = "button"
 		button.textContent = action.label
-		button.className = "modal-button"
-		button.style.padding = "8px 16px"
-		button.style.borderRadius = "8px"
-		button.style.border = "none"
-		button.style.fontWeight = "600"
-		button.style.cursor = "pointer"
-		button.style.fontSize = "14px"
-		button.style.transition = "background-color 0.2s ease, color 0.2s ease"
+		button.classList.add("button", "modal-button")
 
 		switch (action.type) {
 			case "primary":
-				button.style.backgroundColor = "#2563eb"
-				button.style.color = "#ffffff"
-				button.onmouseenter = () => {
-					button.style.backgroundColor = "#1d4ed8"
-				}
-				button.onmouseleave = () => {
-					button.style.backgroundColor = "#2563eb"
-				}
+				button.classList.add("button--primary")
 				break
 			case "danger":
-				button.style.backgroundColor = "#ef4444"
-				button.style.color = "#ffffff"
-				button.onmouseenter = () => {
-					button.style.backgroundColor = "#dc2626"
-				}
-				button.onmouseleave = () => {
-					button.style.backgroundColor = "#ef4444"
-				}
+				button.classList.add("button--danger")
+				break
+			case "secondary":
+				button.classList.add("button--secondary")
 				break
 			default:
-				button.style.backgroundColor = "#e2e8f0"
-				button.style.color = "#0f172a"
-				button.onmouseenter = () => {
-					button.style.backgroundColor = "#cbd5f5"
-				}
-				button.onmouseleave = () => {
-					button.style.backgroundColor = "#e2e8f0"
-				}
+				button.classList.add("button--ghost")
 		}
 
 		button.onclick = () => action.onClick()
@@ -358,16 +305,12 @@ export function showTextPromptModal(args: {
 		}
 
 		const container = document.createElement("form")
-		container.style.display = "flex"
-		container.style.flexDirection = "column"
-		container.style.gap = "12px"
+		container.className = "modal-form"
 
 		if (args.description) {
 			const descriptionEl = document.createElement("p")
 			descriptionEl.textContent = args.description
-			descriptionEl.style.margin = "0"
-			descriptionEl.style.fontSize = "14px"
-			descriptionEl.style.color = "#475569"
+			descriptionEl.className = "modal-description"
 			container.appendChild(descriptionEl)
 		}
 
@@ -375,19 +318,7 @@ export function showTextPromptModal(args: {
 		input.type = "text"
 		input.value = args.initialValue ?? ""
 		input.placeholder = args.placeholder ?? ""
-		input.style.padding = "10px 12px"
-		input.style.borderRadius = "8px"
-		input.style.border = "1px solid #cbd5e1"
-		input.style.fontSize = "14px"
-		input.style.outline = "none"
-		input.onfocus = () => {
-			input.style.borderColor = "#2563eb"
-			input.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.2)"
-		}
-		input.onblur = () => {
-			input.style.borderColor = "#cbd5e1"
-			input.style.boxShadow = "none"
-		}
+		input.classList.add("modal-input")
 
 		container.appendChild(input)
 

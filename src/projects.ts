@@ -246,25 +246,20 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 	constructor(args: { onOpenProject: (project: ProjectMetadata) => void }) {
 		super(document.createElement("div"))
 		this.onOpenProject = args.onOpenProject
-		this.root.style.display = "flex"
-		this.root.style.flexDirection = "column"
-		this.root.style.gap = "16px"
-		this.root.style.padding = "24px"
-		this.root.style.boxSizing = "border-box"
-		this.root.style.flexGrow = "1"
+		this.root.classList.add("view", "projects-view")
 
 		const header = document.createElement("div")
-		header.style.display = "flex"
-		header.style.alignItems = "center"
-		header.style.justifyContent = "space-between"
+		header.classList.add("view-header")
 
 		const title = document.createElement("h1")
 		title.textContent = "Projects"
-		title.style.margin = "0"
+		title.classList.add("view-title")
 		header.appendChild(title)
 
 		const createButton = document.createElement("button")
 		createButton.textContent = "New Project"
+		createButton.type = "button"
+		createButton.classList.add("button", "button--primary")
 		createButton.onclick = () => {
 			const project = createProject()
 			this.refresh()
@@ -275,9 +270,7 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 		this.root.appendChild(header)
 
 		this.list = document.createElement("div")
-		this.list.style.display = "flex"
-		this.list.style.flexDirection = "column"
-		this.list.style.gap = "12px"
+		this.list.classList.add("projects-list")
 		this.root.appendChild(this.list)
 
 		this.refresh()
@@ -293,7 +286,7 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 		if (this.projects.length === 0) {
 			const empty = document.createElement("div")
 			empty.textContent = "Create your first project to get started."
-			empty.style.color = "#555"
+			empty.classList.add("empty-state")
 			this.list.appendChild(empty)
 			return
 		}
@@ -304,41 +297,40 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 
 	private createProjectItem(project: ProjectMetadata): HTMLElement {
 		const container = document.createElement("div")
-		container.style.display = "flex"
-		container.style.alignItems = "center"
-		container.style.padding = "12px"
-		container.style.border = "1px solid #ddd"
-		container.style.borderRadius = "8px"
-		container.style.gap = "12px"
+		container.classList.add("projects-item")
 
 		const info = document.createElement("div")
-		info.style.display = "flex"
-		info.style.flexDirection = "column"
-		info.style.flexGrow = "1"
+		info.classList.add("projects-item__info")
 
 		const name = document.createElement("span")
 		name.textContent = project.name
-		name.style.fontWeight = "bold"
+		name.classList.add("projects-item__name")
 		info.appendChild(name)
 
 		const detail = document.createElement("span")
 		const updated = new Date(project.updatedAt)
 		detail.textContent = `Last opened: ${updated.toLocaleString()}`
-		detail.style.fontSize = "0.85rem"
-		detail.style.color = "#666"
+		detail.classList.add("projects-item__meta")
 		info.appendChild(detail)
 
 		container.appendChild(info)
 
+		const actions = document.createElement("div")
+		actions.classList.add("projects-item__actions")
+
 		const openButton = document.createElement("button")
 		openButton.textContent = "Open"
+		openButton.type = "button"
+		openButton.classList.add("button", "button--primary", "button--sm")
 		openButton.onclick = () => {
 			this.onOpenProject(project)
 		}
-		container.appendChild(openButton)
+		actions.appendChild(openButton)
 
 		const renameButton = document.createElement("button")
 		renameButton.textContent = "Rename"
+		renameButton.type = "button"
+		renameButton.classList.add("button", "button--ghost", "button--sm")
 		renameButton.onclick = async () => {
 			if (typeof window === "undefined") {
 				return
@@ -357,10 +349,12 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 				this.refresh()
 			}
 		}
-		container.appendChild(renameButton)
+		actions.appendChild(renameButton)
 
 		const deleteButton = document.createElement("button")
 		deleteButton.textContent = "Delete"
+		deleteButton.type = "button"
+		deleteButton.classList.add("button", "button--danger", "button--sm")
 		deleteButton.onclick = async () => {
 			const confirmed = typeof window === "undefined" ? true : window.confirm(`Delete project "${project.name}"?`)
 			if (!confirmed) {
@@ -369,7 +363,9 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 			await deleteProject(project.id)
 			this.refresh()
 		}
-		container.appendChild(deleteButton)
+		actions.appendChild(deleteButton)
+
+		container.appendChild(actions)
 
 		return container
 	}
