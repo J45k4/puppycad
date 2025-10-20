@@ -179,6 +179,7 @@ describe("SchemanticEditor", () => {
 		if (!fakeCanvas) {
 			throw new Error("Expected canvas to be created")
 		}
+		const canvas = fakeCanvas as FakeEditorCanvas
 
 		const toolbar = editor.createToolbar()
 		const select = toolbar.root.querySelector("select") as HTMLSelectElement | null
@@ -193,5 +194,6 @@ describe("SchemanticEditor", () => {
 		select.dispatchEvent(new Event("change"))
 
 		expect(editor.getGridSpacing()).toBe(120)
+		expect(canvas.gridSpacing).toBe(120)
 	})
 })

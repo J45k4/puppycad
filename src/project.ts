@@ -6,6 +6,7 @@ import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
 import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
 import type { ProjectFile, ProjectFileEntry, ProjectFileFolder, ProjectFileType } from "./project-file"
+import { DockLayout, type DockOrientation, type DockLayoutState } from "./dock-layout"
 import { ItemList, Modal, UiComponent, TreeList, showTextPromptModal, type TreeNode } from "./ui"
 import { ProjectList, type ProjectListEntry } from "./project-list"
 
@@ -1612,12 +1613,20 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 	private treeView: ProjectTreeView
 	private content: HTMLDivElement
 	private toolbarContainer: HTMLDivElement
-	private editorContainer: HTMLDivElement
+	private dockLayout: DockLayout
+	private readonly layoutStorageKey: string
 	private titleElement: HTMLHeadingElement
 	private projectName: string
 	private readonly onBack: () => void
 	private readonly onRename?: (name: string) => Promise<string | null> | string | null
 	private activeToolbar: UiComponent<HTMLElement> | null = null
+	private readonly paneItems: Map<string, ProjectItem | null> = new Map()
+	private static readonly EMPTY_PANE_MESSAGE = "Select a file from the project tree to open it in this pane."
+	private static readonly LAYOUT_STORAGE_PREFIX = "projectLayout:"
+
+	private static getLayoutStorageKey(projectId: string): string {
+		return `${ProjectView.LAYOUT_STORAGE_PREFIX}${projectId}`
+	}
 
 	public constructor(args: {
 		projectId: string
@@ -1629,6 +1638,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.projectName = args.projectName
 		this.onBack = args.onBack
 		this.onRename = args.onRename
+		this.layoutStorageKey = ProjectView.getLayoutStorageKey(args.projectId)
 
 		this.root.style.display = "flex"
 		this.root.style.flexDirection = "column"
@@ -1685,6 +1695,25 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.content.style.flexGrow = "1"
 		this.content.style.minHeight = "0"
 
+		const layoutControls = document.createElement("div")
+		layoutControls.style.display = "flex"
+		layoutControls.style.alignItems = "center"
+		layoutControls.style.gap = "8px"
+		layoutControls.style.padding = "8px 16px"
+		layoutControls.style.borderBottom = "1px solid #e2e8f0"
+		layoutControls.style.backgroundColor = "#f1f5f9"
+
+		const layoutLabel = document.createElement("span")
+		layoutLabel.textContent = "Layout"
+		layoutLabel.style.fontWeight = "600"
+		layoutControls.appendChild(layoutLabel)
+
+		const splitHorizontalButton = this.createSplitButton("horizontal")
+		layoutControls.appendChild(splitHorizontalButton)
+
+		const splitVerticalButton = this.createSplitButton("vertical")
+		layoutControls.appendChild(splitVerticalButton)
+
 		this.toolbarContainer = document.createElement("div")
 		this.toolbarContainer.style.display = "none"
 		this.toolbarContainer.style.padding = "12px 16px"
@@ -1694,24 +1723,46 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.toolbarContainer.style.backgroundColor = "#f8fafc"
 		this.toolbarContainer.style.boxSizing = "border-box"
 
-		this.editorContainer = document.createElement("div")
-		this.editorContainer.style.flexGrow = "1"
-		this.editorContainer.style.overflow = "auto"
-		this.editorContainer.style.display = "flex"
-		this.editorContainer.style.flexDirection = "column"
-		this.editorContainer.style.minHeight = "0"
+		this.dockLayout = new DockLayout()
+		this.dockLayout.onActivePaneChange = (paneId) => {
+			this.handleActivePaneChange(paneId)
+		}
+		this.dockLayout.onPaneClosed = (paneId, nextActivePaneId) => {
+			this.handlePaneClosed(paneId, nextActivePaneId)
+		}
 
+		const restoredLayout = this.restoreDockLayoutState()
+
+		this.ensureExistingPanesRegistered()
+
+		const initialPaneId = this.dockLayout.getActivePaneId()
+		if (initialPaneId) {
+			this.ensurePaneRegistration(initialPaneId)
+			this.updateToolbarForPane(initialPaneId)
+		}
+
+		if (!restoredLayout) {
+			this.persistLayoutState()
+		}
+
+		this.content.appendChild(layoutControls)
 		this.content.appendChild(this.toolbarContainer)
-		this.content.appendChild(this.editorContainer)
+		this.content.appendChild(this.dockLayout.root)
 		main.appendChild(this.content)
 
 		this.root.appendChild(main)
 	}
 
 	private showProjectItem(item: ProjectItem) {
-		this.editorContainer.innerHTML = ""
-		this.editorContainer.appendChild(item.editor.root)
-		this.setToolbar(item.toolbar ?? null)
+		const activePaneId = this.dockLayout.getActivePaneId()
+		if (!activePaneId) {
+			return
+		}
+
+		this.dockLayout.setPaneContent(activePaneId, item.editor)
+		this.dockLayout.setPaneTitle(activePaneId, item.name)
+		this.paneItems.set(activePaneId, item)
+		this.updateToolbarForPane(activePaneId)
 	}
 
 	private setToolbar(toolbar: UiComponent<HTMLElement> | null) {
@@ -1726,6 +1777,197 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		}
 		this.toolbarContainer.style.display = "flex"
 		this.toolbarContainer.appendChild(toolbar.root)
+	}
+
+	private handleSplitRequest(orientation: DockOrientation) {
+		const activePaneId = this.dockLayout.getActivePaneId()
+		if (!activePaneId) {
+			return
+		}
+
+		const newPaneId = this.dockLayout.splitPane(activePaneId, orientation)
+		if (!newPaneId) {
+			return
+		}
+
+		this.ensurePaneRegistration(newPaneId)
+		this.updateToolbarForPane(newPaneId)
+	}
+
+	private handleActivePaneChange(paneId: string) {
+		this.ensurePaneRegistration(paneId)
+		this.updateToolbarForPane(paneId)
+		this.persistLayoutState()
+	}
+
+	private handlePaneClosed(paneId: string, nextActivePaneId: string | null) {
+		this.paneItems.delete(paneId)
+
+		if (nextActivePaneId) {
+			this.ensurePaneRegistration(nextActivePaneId)
+			this.updateToolbarForPane(nextActivePaneId)
+		} else {
+			this.updateToolbarForPane(null)
+		}
+
+		this.persistLayoutState()
+	}
+
+	private ensurePaneRegistration(paneId: string) {
+		if (!this.paneItems.has(paneId)) {
+			this.paneItems.set(paneId, null)
+			this.dockLayout.setPaneTitle(paneId, "Empty Pane")
+			this.dockLayout.setPanePlaceholder(paneId, ProjectView.EMPTY_PANE_MESSAGE)
+		}
+	}
+
+	private ensureExistingPanesRegistered() {
+		for (const paneId of this.dockLayout.getPaneIds()) {
+			this.ensurePaneRegistration(paneId)
+		}
+	}
+
+	private persistLayoutState() {
+		if (typeof window === "undefined") {
+			return
+		}
+
+		try {
+			const serialized = JSON.stringify(this.dockLayout.getState())
+			window.localStorage?.setItem(this.layoutStorageKey, serialized)
+		} catch (error) {
+			console.error("Failed to persist dock layout state", error)
+		}
+	}
+
+	private restoreDockLayoutState(): boolean {
+		if (typeof window === "undefined") {
+			return false
+		}
+
+		try {
+			const stored = window.localStorage?.getItem(this.layoutStorageKey)
+			if (!stored) {
+				return false
+			}
+
+			const parsed = JSON.parse(stored) as DockLayoutState
+			if (!parsed || typeof parsed !== "object" || !("root" in parsed)) {
+				return false
+			}
+
+			this.dockLayout.restoreState(parsed)
+			return true
+		} catch (error) {
+			console.error("Failed to restore dock layout state", error)
+			try {
+				window.localStorage?.removeItem(this.layoutStorageKey)
+			} catch (cleanupError) {
+				console.error("Failed to clear invalid dock layout state", cleanupError)
+			}
+			return false
+		}
+	}
+
+	private createSplitButton(orientation: DockOrientation): HTMLButtonElement {
+		const button = document.createElement("button")
+		const label = orientation === "horizontal" ? "Split horizontally" : "Split vertically"
+		const defaultBackground = "#ffffff"
+		const hoverBackground = "#f1f5f9"
+		const activeBackground = "#e2e8f0"
+		const defaultBorder = "#cbd5f5"
+		const hoverBorder = "#94a3b8"
+
+		button.type = "button"
+		button.title = label
+		button.setAttribute("aria-label", label)
+		button.style.display = "flex"
+		button.style.alignItems = "center"
+		button.style.justifyContent = "center"
+		button.style.width = "32px"
+		button.style.height = "32px"
+		button.style.border = `1px solid ${defaultBorder}`
+		button.style.borderRadius = "6px"
+		button.style.backgroundColor = defaultBackground
+		button.style.cursor = "pointer"
+		button.style.padding = "4px"
+		button.style.transition = "background-color 120ms ease, border-color 120ms ease"
+
+		button.appendChild(this.createSplitIcon(orientation))
+
+		button.addEventListener("mouseenter", () => {
+			button.style.backgroundColor = hoverBackground
+			button.style.borderColor = hoverBorder
+		})
+		button.addEventListener("mouseleave", () => {
+			button.style.backgroundColor = defaultBackground
+			button.style.borderColor = defaultBorder
+		})
+		button.addEventListener("mousedown", () => {
+			button.style.backgroundColor = activeBackground
+		})
+		button.addEventListener("mouseup", () => {
+			button.style.backgroundColor = hoverBackground
+		})
+		button.addEventListener("blur", () => {
+			button.style.backgroundColor = defaultBackground
+			button.style.borderColor = defaultBorder
+		})
+
+		button.onclick = () => {
+			this.handleSplitRequest(orientation)
+		}
+
+		return button
+	}
+
+	private createSplitIcon(orientation: DockOrientation): SVGSVGElement {
+		const svgNamespace = "http://www.w3.org/2000/svg"
+		const svg = document.createElementNS(svgNamespace, "svg")
+		svg.setAttribute("viewBox", "0 0 20 20")
+		svg.setAttribute("width", "20")
+		svg.setAttribute("height", "20")
+
+		const frame = document.createElementNS(svgNamespace, "rect")
+		frame.setAttribute("x", "3")
+		frame.setAttribute("y", "3")
+		frame.setAttribute("width", "14")
+		frame.setAttribute("height", "14")
+		frame.setAttribute("rx", "2")
+		frame.setAttribute("ry", "2")
+		frame.setAttribute("fill", "none")
+		frame.setAttribute("stroke", "#475569")
+		frame.setAttribute("stroke-width", "1.5")
+		svg.appendChild(frame)
+
+		const divider = document.createElementNS(svgNamespace, "line")
+		if (orientation === "horizontal") {
+			divider.setAttribute("x1", "3")
+			divider.setAttribute("y1", "10")
+			divider.setAttribute("x2", "17")
+			divider.setAttribute("y2", "10")
+		} else {
+			divider.setAttribute("x1", "10")
+			divider.setAttribute("y1", "3")
+			divider.setAttribute("x2", "10")
+			divider.setAttribute("y2", "17")
+		}
+		divider.setAttribute("stroke", "#475569")
+		divider.setAttribute("stroke-width", "1.5")
+		divider.setAttribute("stroke-linecap", "round")
+		svg.appendChild(divider)
+
+		return svg
+	}
+
+	private updateToolbarForPane(paneId: string | null) {
+		if (!paneId) {
+			this.setToolbar(null)
+			return
+		}
+
+		const item = this.paneItems.get(paneId) ?? null
+		this.setToolbar(item?.toolbar ?? null)
 	}
 
 	public setProjectName(name: string) {
