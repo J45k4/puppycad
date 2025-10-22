@@ -298,6 +298,29 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 	private createProjectItem(project: ProjectMetadata): HTMLElement {
 		const container = document.createElement("div")
 		container.classList.add("projects-item")
+		container.tabIndex = 0
+		container.setAttribute("role", "button")
+		container.setAttribute("aria-label", `Open project ${project.name}`)
+
+		container.addEventListener("click", (event) => {
+			const target = event.target as HTMLElement | null
+			if (target?.closest("button")) {
+				return
+			}
+			this.onOpenProject(project)
+		})
+
+		container.addEventListener("keydown", (event) => {
+			const target = event.target as HTMLElement | null
+			if (target?.closest("button")) {
+				return
+			}
+			if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar" && event.key !== "Space") {
+				return
+			}
+			event.preventDefault()
+			this.onOpenProject(project)
+		})
 
 		const info = document.createElement("div")
 		info.classList.add("projects-item__info")
@@ -318,20 +341,12 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 		const actions = document.createElement("div")
 		actions.classList.add("projects-item__actions")
 
-		const openButton = document.createElement("button")
-		openButton.textContent = "Open"
-		openButton.type = "button"
-		openButton.classList.add("button", "button--primary", "button--sm")
-		openButton.onclick = () => {
-			this.onOpenProject(project)
-		}
-		actions.appendChild(openButton)
-
 		const renameButton = document.createElement("button")
 		renameButton.textContent = "Rename"
 		renameButton.type = "button"
 		renameButton.classList.add("button", "button--ghost", "button--sm")
-		renameButton.onclick = async () => {
+		renameButton.onclick = async (event) => {
+			event.stopPropagation()
 			if (typeof window === "undefined") {
 				return
 			}
@@ -355,7 +370,8 @@ export class ProjectsView extends UiComponent<HTMLDivElement> {
 		deleteButton.textContent = "Delete"
 		deleteButton.type = "button"
 		deleteButton.classList.add("button", "button--danger", "button--sm")
-		deleteButton.onclick = async () => {
+		deleteButton.onclick = async (event) => {
+			event.stopPropagation()
 			const confirmed = typeof window === "undefined" ? true : window.confirm(`Delete project "${project.name}"?`)
 			if (!confirmed) {
 				return
