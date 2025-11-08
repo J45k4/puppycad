@@ -109,6 +109,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		super(document.createElement("div"))
 		this.onItemSelected = args.onClick
 		this.projectId = args.projectId ?? "default"
+		this.root.classList.add("project-tree-panel")
 		this.modal = new Modal({
 			title: "New Item",
 			content: new ItemList<NewNodeType>({
@@ -126,24 +127,22 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				]
 			})
 		})
-		this.root.style.width = "200px"
-		this.root.style.overflowY = "auto"
-		this.root.style.borderRight = "1px solid #ccc"
-		this.root.style.padding = "10px"
-		this.root.style.boxSizing = "border-box"
 
 		const newButton = document.createElement("button")
 		newButton.textContent = "New"
+		newButton.classList.add("button", "button--primary")
 		newButton.onclick = this.newButtonClicked.bind(this)
 		this.root.appendChild(newButton)
 
 		const saveButton = document.createElement("button")
 		saveButton.textContent = "Save"
+		saveButton.classList.add("button", "button--secondary")
 		saveButton.onclick = () => this.saveProjectToFile()
 		this.root.appendChild(saveButton)
 
 		const serverSaveButton = document.createElement("button")
 		serverSaveButton.textContent = "Save to Server"
+		serverSaveButton.classList.add("button", "button--ghost")
 		serverSaveButton.onclick = () => {
 			void this.saveProjectToServer()
 		}
@@ -179,7 +178,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				]
 			}
 		})
-		this.projectList.root.style.marginTop = "12px"
 		this.root.appendChild(this.projectList.root)
 		// Allow drops anywhere within the tree container so nested targets receive drop
 		this.itemsListContainer.root.addEventListener("dragover", (event) => {
@@ -225,16 +223,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	private createRootDropZone(): HTMLDivElement {
 		const dropZone = document.createElement("div")
+		dropZone.classList.add("project-tree-drop-zone")
 		dropZone.textContent = "Drop here to move to root"
-		dropZone.style.display = "none"
-		dropZone.style.padding = "8px"
-		dropZone.style.margin = "8px 0"
-		dropZone.style.border = "2px dashed #cbd5e1"
-		dropZone.style.borderRadius = "8px"
-		dropZone.style.color = "#475569"
-		dropZone.style.fontSize = "12px"
-		dropZone.style.textAlign = "center"
-		dropZone.style.userSelect = "none"
 		dropZone.addEventListener("dragenter", (event) => this.handleRootDropZoneDragEnter(event))
 		dropZone.addEventListener("dragleave", (event) => this.handleRootDropZoneDragLeave(event))
 		dropZone.addEventListener("dragover", (event) => this.handleRootDropZoneDragOver(event))
@@ -455,16 +445,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return existing
 		}
 		const dropZone = document.createElement("div")
-		dropZone.className = "project-tree-exit-drop-zone"
-		dropZone.style.display = "none"
-		dropZone.style.padding = "6px"
-		dropZone.style.margin = "4px"
-		dropZone.style.border = "2px dashed #cbd5e1"
-		dropZone.style.borderRadius = "8px"
-		dropZone.style.color = "#475569"
-		dropZone.style.fontSize = "12px"
-		dropZone.style.textAlign = "center"
-		dropZone.style.userSelect = "none"
+		dropZone.className = "project-tree-drop-zone project-tree-exit-drop-zone"
 		dropZone.style.pointerEvents = "none"
 		dropZone.addEventListener("dragenter", (event) => this.handleExitDropZoneDragEnter(event, parentNode))
 		dropZone.addEventListener("dragleave", (event) => this.handleExitDropZoneDragLeave(event))
@@ -644,8 +625,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.log("handleRootDropZoneDragEnter", {
 			dragging: this.dragState ? this.describeNode(this.dragState.node) : null
 		})
-		this.rootDropZone.style.backgroundColor = "#bfdbfe"
-		this.rootDropZone.style.color = "#1e293b"
+		this.rootDropZone.classList.add("project-tree-drop-zone--active")
 	}
 
 	private handleRootDropZoneDragLeave(event: DragEvent): void {
@@ -711,8 +691,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		dropZone.textContent = `Drop here to move out of ${parentNode.name}`
 		dropZone.style.display = "block"
 		dropZone.style.pointerEvents = "auto"
-		dropZone.style.backgroundColor = ""
-		dropZone.style.color = "#475569"
+		dropZone.classList.remove("project-tree-drop-zone--active")
 		this.exitDropZone = { element: dropZone, parent: parentNode }
 		this.log("showExitDropZone", {
 			parent: this.describeNode(parentNode),
@@ -728,6 +707,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		const { element } = this.exitDropZone
 		element.style.display = "none"
 		element.style.pointerEvents = "none"
+		element.classList.remove("project-tree-drop-zone--active")
 		this.exitDropZone = null
 		this.log("removeExitDropZone:removed")
 	}
@@ -742,8 +722,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		event.preventDefault()
 		event.stopPropagation()
 		if (this.exitDropZone) {
-			this.exitDropZone.element.style.backgroundColor = "#bfdbfe"
-			this.exitDropZone.element.style.color = "#1e293b"
+			this.exitDropZone.element.classList.add("project-tree-drop-zone--active")
 		}
 		this.log("handleExitDropZoneDragEnter", {
 			parent: this.describeNode(parent)
@@ -774,8 +753,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			event.dataTransfer.dropEffect = "move"
 		}
 		if (this.exitDropZone) {
-			this.exitDropZone.element.style.backgroundColor = "#bfdbfe"
-			this.exitDropZone.element.style.color = "#1e293b"
+			this.exitDropZone.element.classList.add("project-tree-drop-zone--active")
 		}
 		this.log("handleExitDropZoneDragOver", {
 			parent: this.describeNode(parent)
@@ -805,8 +783,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return
 		}
 		const { element } = this.exitDropZone
-		element.style.backgroundColor = ""
-		element.style.color = "#475569"
+		element.classList.remove("project-tree-drop-zone--active")
 		this.log("resetExitDropZoneStyles:reset")
 	}
 
@@ -892,7 +869,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!header) {
 			return
 		}
-		header.style.outline = isActive ? "2px dashed #2563eb" : ""
+		header.classList.toggle("project-folder__title--droppable", isActive)
 	}
 
 	private clearDropHighlights(): void {
@@ -900,7 +877,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			if (isFolder(node)) {
 				const header = this.getNodeHeader(node)
 				if (header) {
-					header.style.outline = ""
+					header.classList.remove("project-folder__title--droppable")
 				}
 			}
 		}
@@ -921,8 +898,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private resetRootDropZoneStyles(): void {
-		this.rootDropZone.style.backgroundColor = ""
-		this.rootDropZone.style.color = "#475569"
+		this.rootDropZone.classList.remove("project-tree-drop-zone--active")
 	}
 
 	// Returns true if the given target node is inside any header element (for any node)

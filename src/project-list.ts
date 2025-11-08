@@ -39,18 +39,13 @@ abstract class ProjectItemView<T extends ProjectListEntry> {
 		this.entry = entry
 		this.root = this.createRoot()
 		this.root.dataset.projectItemId = entry.id
+		this.root.classList.add("project-item")
 	}
 
 	protected abstract createRoot(): HTMLElement
 
 	public setSelected(isSelected: boolean) {
-		if (isSelected) {
-			this.root.style.outline = "2px solid #1c7ed6"
-			this.root.style.backgroundColor = "#edf2ff"
-		} else {
-			this.root.style.outline = ""
-			this.root.style.backgroundColor = ""
-		}
+		this.root.classList.toggle("project-item--selected", isSelected)
 	}
 }
 
@@ -91,15 +86,11 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 		root.addEventListener("drop", (event) => this.onDrop(event))
 
 		this.titleElement = this.list.doc.createElement("div")
-		this.titleElement.style.display = "flex"
-		this.titleElement.style.alignItems = "center"
+		this.titleElement.classList.add("project-folder__title")
 
 		this.expandIcon = this.list.doc.createElement("span")
-		this.expandIcon.textContent = this.expanded ? "[-]" : "[+]"
-		this.expandIcon.style.display = "inline-block"
-		this.expandIcon.style.width = "20px"
-		this.expandIcon.style.cursor = "pointer"
-		this.expandIcon.style.userSelect = "none"
+		this.expandIcon.textContent = this.expanded ? "▾" : "▸"
+		this.expandIcon.classList.add("project-folder__toggle")
 		this.expandIcon.addEventListener("click", (event) => {
 			event.stopPropagation()
 			this.toggleExpanded()
@@ -130,8 +121,7 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 			this.list.handleItemLeftClick(this)
 		})
 		this.itemsContainer = this.list.doc.createElement("div")
-		this.itemsContainer.style.paddingLeft = "16px"
-		this.itemsContainer.style.display = "block"
+		this.itemsContainer.classList.add("project-folder__children")
 
 		this.titleElement.appendChild(this.expandIcon)
 		this.titleElement.appendChild(titleText)
@@ -222,24 +212,16 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 	}
 
 	private updateDropHintStyles() {
-		if (!this.dropHintActive) {
-			this.root.style.backgroundColor = ""
-			this.root.style.outline = ""
-			return
-		}
-		if (this.dropHintDirect) {
-			this.root.style.backgroundColor = "#74c0fc"
-			this.root.style.outline = "2px solid #1c7ed6"
-		} else {
-			this.root.style.backgroundColor = ""
-			this.root.style.outline = "2px dashed #4dabf7"
-		}
+		const isActive = this.dropHintActive
+		const isDirect = this.dropHintActive && this.dropHintDirect
+		this.root.classList.toggle("project-folder--drop-target", isActive)
+		this.root.classList.toggle("project-folder--drop-target-direct", isDirect)
 	}
 
 	private updateExpandState() {
-		this.itemsContainer.style.display = this.expanded ? "block" : "none"
+		this.itemsContainer.style.display = this.expanded ? "" : "none"
 		if (this.expandIcon) {
-			this.expandIcon.textContent = this.expanded ? "[-]" : "[+]"
+			this.expandIcon.textContent = this.expanded ? "▾" : "▸"
 		}
 	}
 }
@@ -301,10 +283,7 @@ export class ProjectList {
 		this.doc = doc
 		this.options = options
 		this.root = doc.createElement("div")
-		this.root.style.display = "flex"
-		this.root.style.flexDirection = "column"
-		this.root.style.gap = "4px"
-		this.root.style.position = "relative"
+		this.root.classList.add("project-tree")
 		this.root.addEventListener("dragover", (event) => this.onRootDragOver(event))
 		this.root.addEventListener("dragleave", (event) => this.onRootDragLeave(event))
 		this.root.addEventListener("drop", (event) => this.onRootDrop(event))
@@ -317,16 +296,7 @@ export class ProjectList {
 		})
 
 		this.menu = doc.createElement("div")
-		this.menu.style.position = "absolute"
-		this.menu.style.display = "none"
-		this.menu.style.flexDirection = "column"
-		this.menu.style.background = "#ffffff"
-		this.menu.style.border = "1px solid #cbd5e1"
-		this.menu.style.borderRadius = "8px"
-		this.menu.style.boxShadow = "0 10px 25px rgba(15, 23, 42, 0.15)"
-		this.menu.style.padding = "4px"
-		this.menu.style.minWidth = "140px"
-		this.menu.style.zIndex = "10"
+		this.menu.className = "project-tree-menu"
 		this.menu.addEventListener("click", (event) => {
 			event.stopPropagation()
 		})
@@ -456,19 +426,8 @@ export class ProjectList {
 		for (const action of actions) {
 			const button = this.doc.createElement("button")
 			button.textContent = action.label
-			button.style.background = "none"
-			button.style.border = "none"
-			button.style.padding = "8px 12px"
-			button.style.textAlign = "left"
-			button.style.cursor = "pointer"
-			button.style.fontSize = "14px"
-			button.style.borderRadius = "6px"
-			button.addEventListener("mouseenter", () => {
-				button.style.backgroundColor = "#e7f5ff"
-			})
-			button.addEventListener("mouseleave", () => {
-				button.style.backgroundColor = ""
-			})
+			button.type = "button"
+			button.className = "project-tree-menu__action"
 			button.addEventListener("click", (clickEvent) => {
 				clickEvent.stopPropagation()
 				this.hideMenu()
@@ -562,11 +521,11 @@ export class ProjectList {
 	}
 
 	private showRootDropHint() {
-		this.root.style.outline = "2px dashed #4dabf7"
+		this.root.classList.add("project-tree--root-drop-target")
 	}
 
 	private hideRootDropHint() {
-		this.root.style.outline = ""
+		this.root.classList.remove("project-tree--root-drop-target")
 	}
 
 	public getCollapsedFolderIds(): Set<string> {

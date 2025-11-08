@@ -30,14 +30,17 @@
 
 body {
 	margin: 0;
-	min-height: 100vh;
-	display: flex;
-	flex-direction: column;
 	background: var(--color-background);
 	color: var(--color-text);
 	font-family: var(--font-family-sans);
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+}
+
+body.app-body {
+	min-height: 100vh;
+	display: flex;
+	flex-direction: column;
 }
 
 h1,
@@ -209,6 +212,21 @@ textarea:focus-visible {
 	min-height: 0;
 }
 
+.page-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	padding-bottom: var(--space-2);
+	border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+	flex-wrap: wrap;
+}
+
+.page-header h1 {
+	margin: 0;
+	font-size: 1.5rem;
+}
+
 .view-header {
 	display: flex;
 	align-items: center;
@@ -307,6 +325,166 @@ textarea:focus-visible {
 .itemlistItem:hover {
 	background-color: rgba(148, 163, 184, 0.12);
 	border-color: var(--color-border);
+}
+
+.project-tree-panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	width: 260px;
+	min-width: 200px;
+	max-width: 320px;
+	border-right: 1px solid var(--color-border);
+	padding: var(--space-4);
+	box-sizing: border-box;
+	background-color: var(--color-surface);
+}
+
+.project-tree-panel > button {
+	width: 100%;
+}
+
+.project-tree {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	position: relative;
+}
+
+.project-tree--root-drop-target {
+	outline: 2px dashed rgba(37, 99, 235, 0.35);
+	border-radius: var(--radius-sm);
+}
+
+.project-tree-panel .project-tree {
+	margin-top: var(--space-3);
+}
+
+.project-item {
+	border-radius: var(--radius-sm);
+	padding: var(--space-2);
+	transition: background-color 0.2s ease, outline-color 0.2s ease;
+}
+
+.project-item--selected {
+	background-color: rgba(37, 99, 235, 0.08);
+	outline: 2px solid rgba(37, 99, 235, 0.35);
+}
+
+.project-file {
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+	transition: background-color 0.2s ease;
+}
+
+.project-file:hover,
+.project-folder__title:hover {
+	background-color: rgba(148, 163, 184, 0.12);
+}
+
+.project-folder {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.project-folder__title {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	cursor: pointer;
+	user-select: none;
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+	font-weight: 500;
+}
+
+.project-folder__title--droppable {
+	outline: 2px dashed rgba(37, 99, 235, 0.4);
+	outline-offset: -2px;
+	background-color: rgba(37, 99, 235, 0.08);
+}
+
+.project-folder__toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	color: var(--color-muted);
+	font-size: 0.85rem;
+}
+
+.project-folder__children {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	margin-left: var(--space-3);
+	padding-left: var(--space-3);
+	border-left: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.project-folder--drop-target {
+	outline: 2px dashed rgba(37, 99, 235, 0.4);
+	outline-offset: -4px;
+}
+
+.project-folder--drop-target-direct {
+	background-color: rgba(37, 99, 235, 0.08);
+}
+
+.project-tree-menu {
+	position: absolute;
+	display: none;
+	flex-direction: column;
+	background-color: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--color-shadow);
+	padding: var(--space-1);
+	z-index: 10;
+	min-width: 140px;
+}
+
+.project-tree-menu__action {
+	background: none;
+	border: none;
+	padding: var(--space-2) var(--space-3);
+	text-align: left;
+	cursor: pointer;
+	border-radius: var(--radius-sm);
+	font-size: 0.9rem;
+}
+
+.project-tree-menu__action:hover,
+.project-tree-menu__action:focus-visible {
+	background-color: rgba(37, 99, 235, 0.08);
+	outline: none;
+}
+
+.project-tree-drop-zone {
+	display: none;
+	padding: var(--space-2);
+	margin: var(--space-2) 0;
+	border: 2px dashed var(--color-border);
+	border-radius: var(--radius-md);
+	color: var(--color-muted);
+	font-size: 0.85rem;
+	text-align: center;
+	user-select: none;
+	transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.project-tree-drop-zone--active {
+	background-color: rgba(37, 99, 235, 0.1);
+	border-color: var(--color-primary);
+	color: var(--color-heading);
+}
+
+.project-tree-exit-drop-zone {
+	margin-top: var(--space-1);
 }
 
 .modal-backdrop {
