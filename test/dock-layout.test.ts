@@ -163,4 +163,75 @@ describe("DockLayout", () => {
 		}
 		expect(topPane.paneId).toBe(secondPane)
 	})
+
+	it("detects all edge positions and center for external drops", () => {
+		const layout = new DockLayout()
+		const paneId = layout.getActivePaneId()
+		expect(paneId).toBeTruthy()
+		if (!paneId) {
+			throw new Error("Expected pane to exist")
+		}
+
+		const pane = layout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		expect(pane).not.toBeNull()
+		if (!pane) {
+			throw new Error("Expected pane element to be present")
+		}
+		const content = pane.children[1] as HTMLDivElement | undefined
+		if (!content) {
+			throw new Error("Expected pane content element")
+		}
+
+		Object.defineProperty(content, "clientHeight", { value: 300, configurable: true })
+		content.getBoundingClientRect = () =>
+			({
+				x: 0,
+				y: 0,
+				left: 0,
+				top: 0,
+				right: 300,
+				bottom: 300,
+				width: 300,
+				height: 300,
+				toJSON: () => ({})
+			}) as DOMRect
+
+		layout.canAcceptExternalDrop = () => true
+		const positions: string[] = []
+		layout.onExternalDrop = ({ position }) => {
+			positions.push(position)
+		}
+
+		const createDragEvent = (type: string, clientX: number, clientY: number): DragEvent => {
+			const event = new window.Event(type, { bubbles: true, cancelable: true }) as DragEvent
+			Object.defineProperty(event, "clientX", { value: clientX, configurable: true })
+			Object.defineProperty(event, "clientY", { value: clientY, configurable: true })
+			Object.defineProperty(event, "dataTransfer", {
+				value: {
+					dropEffect: "move",
+					getData: () => "",
+					setData: () => undefined
+				},
+				configurable: true
+			})
+			return event
+		}
+
+		content.dispatchEvent(createDragEvent("dragover", 150, 10))
+		content.dispatchEvent(createDragEvent("drop", 150, 10))
+
+		content.dispatchEvent(createDragEvent("dragover", 10, 150))
+		content.dispatchEvent(createDragEvent("drop", 10, 150))
+
+		content.dispatchEvent(createDragEvent("dragover", 150, 150))
+		content.dispatchEvent(createDragEvent("drop", 150, 150))
+
+		content.dispatchEvent(createDragEvent("dragover", 290, 150))
+		content.dispatchEvent(createDragEvent("drop", 290, 150))
+
+		content.dispatchEvent(createDragEvent("dragover", 150, 290))
+		content.dispatchEvent(createDragEvent("drop", 150, 290))
+
+		expect(positions).toEqual(["top", "left", "center", "right", "bottom"])
+	})
 })

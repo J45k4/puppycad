@@ -366,6 +366,14 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.handleNodeSelection(node)
 	}
 
+	public getProjectItemByNodeId(id: string): ProjectItem | null {
+		const node = this.idNodeMap.get(id)
+		if (!node || !isProjectItem(node)) {
+			return null
+		}
+		return node
+	}
+
 	private canMoveNodes(sourceId: string, destinationId: string | null): boolean {
 		const sourceNode = this.idNodeMap.get(sourceId)
 		if (!sourceNode) {
@@ -499,7 +507,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		})
 		if (event.dataTransfer) {
 			event.dataTransfer.effectAllowed = "move"
-			event.dataTransfer.setData("text/plain", node.name)
+			const nodeId = this.getNodeId(node)
+			event.dataTransfer.setData("text/plain", nodeId)
+			event.dataTransfer.setData("application/x-puppycad-project-node", nodeId)
 			if (event.dataTransfer.setDragImage) {
 				const preview = this.createDragPreview(node)
 				event.dataTransfer.setDragImage(preview, 10, 10)
@@ -1133,7 +1143,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					type,
 					name: resolvedName,
 					editor,
-					toolbar: editor.createToolbar(),
 					getState: () => editor.getState()
 				}
 			}
@@ -1624,6 +1633,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		const header = document.createElement("div")
 		header.style.display = "flex"
 		header.style.alignItems = "center"
+		header.style.flexWrap = "wrap"
 		header.style.gap = "8px"
 		header.style.padding = "12px"
 		header.style.borderBottom = "1px solid #ccc"
@@ -1634,6 +1644,35 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 			this.onBack()
 		}
 		header.appendChild(backButton)
+
+		const layoutControls = document.createElement("div")
+		layoutControls.style.display = "flex"
+		layoutControls.style.alignItems = "center"
+		layoutControls.style.gap = "8px"
+		layoutControls.style.flexWrap = "wrap"
+		layoutControls.style.padding = "0"
+		layoutControls.style.borderBottom = "none"
+		layoutControls.style.backgroundColor = "transparent"
+
+		const layoutLabel = document.createElement("span")
+		layoutLabel.textContent = "Layout"
+		layoutLabel.style.fontWeight = "600"
+		layoutControls.appendChild(layoutLabel)
+
+		const splitHorizontalButton = this.createSplitButton("horizontal")
+		layoutControls.appendChild(splitHorizontalButton)
+
+		const splitVerticalButton = this.createSplitButton("vertical")
+		layoutControls.appendChild(splitVerticalButton)
+
+		this.toolbarContainer = document.createElement("div")
+		this.toolbarContainer.style.display = "none"
+		this.toolbarContainer.style.marginLeft = "12px"
+		this.toolbarContainer.style.gap = "12px"
+		this.toolbarContainer.style.alignItems = "center"
+		this.toolbarContainer.style.boxSizing = "border-box"
+		layoutControls.appendChild(this.toolbarContainer)
+		header.appendChild(layoutControls)
 
 		this.titleElement = document.createElement("h1")
 		this.titleElement.textContent = this.projectName
@@ -1671,40 +1710,35 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.content.style.flexGrow = "1"
 		this.content.style.minHeight = "0"
 
-		const layoutControls = document.createElement("div")
-		layoutControls.style.display = "flex"
-		layoutControls.style.alignItems = "center"
-		layoutControls.style.gap = "8px"
-		layoutControls.style.flexWrap = "wrap"
-		layoutControls.style.padding = "8px 16px"
-		layoutControls.style.borderBottom = "1px solid #e2e8f0"
-		layoutControls.style.backgroundColor = "#f1f5f9"
-
-		const layoutLabel = document.createElement("span")
-		layoutLabel.textContent = "Layout"
-		layoutLabel.style.fontWeight = "600"
-		layoutControls.appendChild(layoutLabel)
-
-		const splitHorizontalButton = this.createSplitButton("horizontal")
-		layoutControls.appendChild(splitHorizontalButton)
-
-		const splitVerticalButton = this.createSplitButton("vertical")
-		layoutControls.appendChild(splitVerticalButton)
-
-		this.toolbarContainer = document.createElement("div")
-		this.toolbarContainer.style.display = "none"
-		this.toolbarContainer.style.marginLeft = "12px"
-		this.toolbarContainer.style.gap = "12px"
-		this.toolbarContainer.style.alignItems = "center"
-		this.toolbarContainer.style.boxSizing = "border-box"
-		layoutControls.appendChild(this.toolbarContainer)
-
 		this.dockLayout = new DockLayout()
 		this.dockLayout.onActivePaneChange = (paneId) => {
 			this.handleActivePaneChange(paneId)
 		}
 		this.dockLayout.onPaneClosed = (paneId, nextActivePaneId) => {
 			this.handlePaneClosed(paneId, nextActivePaneId)
+		}
+		this.dockLayout.canAcceptExternalDrop = (event) => {
+			const dataTransfer = event.dataTransfer
+			if (!dataTransfer) {
+				return false
+			}
+			const types = Array.from(dataTransfer.types ?? [])
+			if (types.includes("application/x-puppycad-project-node")) {
+				return true
+			}
+			if (types.includes("text/plain")) {
+				return true
+			}
+			// Some environments don't expose drag types during dragover; allow hover indicator
+			// and validate the payload on drop.
+			return types.length === 0
+		}
+		this.dockLayout.onExternalDrop = ({ paneId, position, event }) => {
+			const item = this.getDraggedProjectItem(event)
+			if (!item) {
+				return
+			}
+			this.openDraggedItemInPane(item, paneId, position)
 		}
 
 		const restoredLayout = this.restoreDockLayoutState()
@@ -1721,7 +1755,6 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 			this.persistLayoutState()
 		}
 
-		this.content.appendChild(layoutControls)
 		this.content.appendChild(this.dockLayout.root)
 		main.appendChild(this.content)
 
@@ -1733,11 +1766,82 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		if (!activePaneId) {
 			return
 		}
+		this.openItemInPane(activePaneId, item)
+		this.dockLayout.setActivePane(activePaneId)
+	}
 
-		this.dockLayout.setPaneContent(activePaneId, item.editor)
-		this.dockLayout.setPaneTitle(activePaneId, item.name)
-		this.paneItems.set(activePaneId, item)
-		this.updateToolbarForPane(activePaneId)
+	private getDraggedProjectItem(event: DragEvent): ProjectItem | null {
+		const dataTransfer = event.dataTransfer
+		if (!dataTransfer) {
+			return null
+		}
+		const nodeId = dataTransfer.getData("application/x-puppycad-project-node") || dataTransfer.getData("text/plain")
+		if (!nodeId) {
+			return null
+		}
+		return this.treeView.getProjectItemByNodeId(nodeId)
+	}
+
+	private findPaneForItem(item: ProjectItem): string | null {
+		for (const [paneId, paneItem] of this.paneItems) {
+			if (paneItem === item) {
+				return paneId
+			}
+		}
+		return null
+	}
+
+	private clearPaneAssignment(paneId: string): void {
+		this.paneItems.set(paneId, null)
+		this.dockLayout.clearPane(paneId)
+		this.dockLayout.setPaneTitle(paneId, "Empty Pane")
+	}
+
+	private openItemInPane(paneId: string, item: ProjectItem): void {
+		this.ensurePaneRegistration(paneId)
+		const previousPaneId = this.findPaneForItem(item)
+		if (previousPaneId && previousPaneId !== paneId) {
+			this.clearPaneAssignment(previousPaneId)
+		}
+		this.dockLayout.setPaneContent(paneId, item.editor)
+		this.dockLayout.setPaneTitle(paneId, item.name)
+		this.paneItems.set(paneId, item)
+		this.updateToolbarForPane(this.dockLayout.getActivePaneId())
+		this.persistLayoutState()
+	}
+
+	private openDraggedItemInPane(item: ProjectItem, paneId: string, position: "top" | "bottom" | "center" | "left" | "right"): void {
+		if (position === "center") {
+			this.openItemInPane(paneId, item)
+			this.dockLayout.setActivePane(paneId)
+			return
+		}
+
+		const existing = this.paneItems.get(paneId) ?? null
+		this.dockLayout.setActivePane(paneId)
+		const orientation = position === "left" || position === "right" ? "horizontal" : "vertical"
+		const splitPaneId = this.dockLayout.splitPane(paneId, orientation)
+		if (!splitPaneId) {
+			this.openItemInPane(paneId, item)
+			this.dockLayout.setActivePane(paneId)
+			return
+		}
+		this.ensurePaneRegistration(splitPaneId)
+
+		if (position === "top" || position === "left") {
+			if (existing) {
+				this.openItemInPane(splitPaneId, existing)
+			}
+			this.openItemInPane(paneId, item)
+			this.dockLayout.setActivePane(paneId)
+			return
+		}
+
+		this.openItemInPane(splitPaneId, item)
+		if (existing) {
+			this.openItemInPane(paneId, existing)
+		}
+		this.dockLayout.setActivePane(splitPaneId)
 	}
 
 	private setToolbar(toolbar: UiComponent<HTMLElement> | null) {

@@ -36,6 +36,7 @@ type DockPaneState = {
 	title: HTMLSpanElement
 	content: HTMLDivElement
 	placeholder: HTMLDivElement
+	externalDropIndicator: HTMLDivElement
 	currentComponent: UiComponent<HTMLElement> | null
 	closeButton: HTMLButtonElement
 }
@@ -61,6 +62,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	private activePaneId: string | null = null
 	public onActivePaneChange: ((paneId: string) => void) | null = null
 	public onPaneClosed: ((closedPaneId: string, nextActivePaneId: string | null) => void) | null = null
+	public canAcceptExternalDrop: ((event: DragEvent) => boolean) | null = null
+	public onExternalDrop: ((args: { paneId: string; position: DockDropPosition; event: DragEvent }) => void) | null = null
 	private dragState: DragState | null = null
 
 	public constructor() {
@@ -71,6 +74,15 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.root.style.minHeight = "0"
 		this.root.style.minWidth = "0"
 		this.root.style.position = "relative"
+		this.root.addEventListener("dragleave", (event) => {
+			const related = event.relatedTarget as Node | null
+			if (!related || !this.root.contains(related)) {
+				this.hideAllExternalDropIndicators()
+			}
+		})
+		this.root.addEventListener("drop", () => {
+			this.hideAllExternalDropIndicators()
+		})
 
 		const initialLeaf = this.createLeaf()
 		this.rootNode = initialLeaf
@@ -206,8 +218,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		}
 
 		const pane = leaf.pane
+		this.hideExternalDropIndicator(pane)
 		pane.content.innerHTML = ""
 		pane.content.appendChild(component.root)
+		pane.content.appendChild(pane.externalDropIndicator)
 		pane.placeholder.style.display = "none"
 		pane.currentComponent = component
 	}
@@ -219,8 +233,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		}
 
 		const pane = leaf.pane
+		this.hideExternalDropIndicator(pane)
 		pane.content.innerHTML = ""
 		pane.content.appendChild(pane.placeholder)
+		pane.content.appendChild(pane.externalDropIndicator)
 		pane.placeholder.style.display = "flex"
 		pane.currentComponent = null
 	}
@@ -399,7 +415,17 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		placeholder.style.padding = "12px"
 		placeholder.style.textAlign = "center"
 
+		const externalDropIndicator = document.createElement("div")
+		externalDropIndicator.style.position = "absolute"
+		externalDropIndicator.style.display = "none"
+		externalDropIndicator.style.pointerEvents = "none"
+		externalDropIndicator.style.backgroundColor = "rgba(59, 130, 246, 0.2)"
+		externalDropIndicator.style.border = "2px solid rgba(59, 130, 246, 0.65)"
+		externalDropIndicator.style.borderRadius = "4px"
+		externalDropIndicator.style.zIndex = "2"
+
 		content.appendChild(placeholder)
+		content.appendChild(externalDropIndicator)
 
 		element.appendChild(header)
 		element.appendChild(content)
@@ -414,6 +440,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 				}
 			}
 		}
+		element.dataset.paneId = paneId
 
 		const paneState: DockPaneState = {
 			id: paneId,
@@ -422,6 +449,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			title,
 			content,
 			placeholder,
+			externalDropIndicator,
 			currentComponent: null,
 			closeButton
 		}
@@ -437,6 +465,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 		header.addEventListener("mousedown", activate)
 		content.addEventListener("mousedown", activate)
+		content.addEventListener("dragenter", (event) => this.handleExternalContentDragEnter(event, paneState))
+		content.addEventListener("dragover", (event) => this.handleExternalContentDragOver(event, paneState))
+		content.addEventListener("dragleave", (event) => this.handleExternalContentDragLeave(event, paneState))
+		content.addEventListener("drop", (event) => this.handleExternalContentDrop(event, paneState))
 
 		closeButton.addEventListener("click", (event) => {
 			event.stopPropagation()
@@ -467,6 +499,152 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.updatePaneCloseVisibility()
 
 		return leaf
+	}
+
+	private canHandleExternalDrop(event: DragEvent): boolean {
+		if (this.dragState) {
+			return false
+		}
+		if (!this.canAcceptExternalDrop) {
+			return false
+		}
+		return this.canAcceptExternalDrop(event)
+	}
+
+	private getExternalDropPosition(event: DragEvent, pane: DockPaneState): DockDropPosition {
+		const rect = pane.content.getBoundingClientRect()
+		const leftEdge = Math.min(Math.max(rect.width * 0.28, 40), 140)
+		const topEdge = Math.min(Math.max(rect.height * 0.28, 40), 120)
+		const offsetX = event.clientX - rect.left
+		const offsetY = event.clientY - rect.top
+		const distances: Array<{ position: DockDropPosition; score: number }> = []
+		if (offsetY <= topEdge) {
+			distances.push({ position: "top", score: offsetY / topEdge })
+		}
+		if (offsetY >= rect.height - topEdge) {
+			distances.push({ position: "bottom", score: (rect.height - offsetY) / topEdge })
+		}
+		if (offsetX <= leftEdge) {
+			distances.push({ position: "left", score: offsetX / leftEdge })
+		}
+		if (offsetX >= rect.width - leftEdge) {
+			distances.push({ position: "right", score: (rect.width - offsetX) / leftEdge })
+		}
+		if (distances.length === 0) {
+			return "center"
+		}
+		distances.sort((a, b) => a.score - b.score)
+		const nearest = distances[0]
+		return nearest?.position ?? "center"
+	}
+
+	private showExternalDropIndicator(pane: DockPaneState, position: DockDropPosition): void {
+		const indicator = pane.externalDropIndicator
+		const paneWidth = pane.content.clientWidth
+		const paneHeight = pane.content.clientHeight
+		const edgeWidth = Math.min(Math.max(paneWidth * 0.35, 48), 180)
+		const edgeHeight = Math.min(Math.max(paneHeight * 0.35, 48), 180)
+		indicator.style.display = "block"
+		indicator.style.left = ""
+		indicator.style.right = ""
+		indicator.style.width = ""
+		indicator.style.height = ""
+		indicator.style.top = ""
+		indicator.style.bottom = ""
+		switch (position) {
+			case "left":
+				indicator.style.left = "0"
+				indicator.style.top = "0"
+				indicator.style.bottom = "0"
+				indicator.style.width = `${Math.round(edgeWidth)}px`
+				break
+			case "right":
+				indicator.style.right = "0"
+				indicator.style.top = "0"
+				indicator.style.bottom = "0"
+				indicator.style.width = `${Math.round(edgeWidth)}px`
+				break
+			case "top":
+				indicator.style.left = "0"
+				indicator.style.right = "0"
+				indicator.style.top = "0"
+				indicator.style.height = `${Math.round(edgeHeight)}px`
+				break
+			case "bottom":
+				indicator.style.left = "0"
+				indicator.style.right = "0"
+				indicator.style.bottom = "0"
+				indicator.style.height = `${Math.round(edgeHeight)}px`
+				break
+			default:
+				indicator.style.left = "0"
+				indicator.style.right = "0"
+				indicator.style.top = "0"
+				indicator.style.bottom = "0"
+				break
+		}
+	}
+
+	private hideExternalDropIndicator(pane: DockPaneState): void {
+		pane.externalDropIndicator.style.display = "none"
+	}
+
+	private hideAllExternalDropIndicators(): void {
+		for (const leaf of this.panes.values()) {
+			this.hideExternalDropIndicator(leaf.pane)
+		}
+	}
+
+	private handleExternalContentDragEnter(event: DragEvent, pane: DockPaneState): void {
+		if (!this.canHandleExternalDrop(event)) {
+			this.hideExternalDropIndicator(pane)
+			return
+		}
+		event.preventDefault()
+		event.stopPropagation()
+		const position = this.getExternalDropPosition(event, pane)
+		this.hideAllExternalDropIndicators()
+		this.showExternalDropIndicator(pane, position)
+	}
+
+	private handleExternalContentDragOver(event: DragEvent, pane: DockPaneState): void {
+		if (!this.canHandleExternalDrop(event)) {
+			this.hideExternalDropIndicator(pane)
+			return
+		}
+		event.preventDefault()
+		event.stopPropagation()
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = "move"
+		}
+		const position = this.getExternalDropPosition(event, pane)
+		this.hideAllExternalDropIndicators()
+		this.showExternalDropIndicator(pane, position)
+	}
+
+	private handleExternalContentDragLeave(event: DragEvent, pane: DockPaneState): void {
+		const related = event.relatedTarget as Node | null
+		if (related && pane.content.contains(related)) {
+			return
+		}
+		this.hideExternalDropIndicator(pane)
+	}
+
+	private handleExternalContentDrop(event: DragEvent, pane: DockPaneState): void {
+		if (!this.canHandleExternalDrop(event)) {
+			this.hideExternalDropIndicator(pane)
+			return
+		}
+		event.preventDefault()
+		event.stopPropagation()
+		const position = this.getExternalDropPosition(event, pane)
+		this.hideAllExternalDropIndicators()
+		this.setActivePane(pane.id)
+		this.onExternalDrop?.({
+			paneId: pane.id,
+			position,
+			event
+		})
 	}
 
 	private createSplitElement(orientation: DockOrientation): HTMLDivElement {
@@ -549,6 +727,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	}
 
 	private startDrag(source: DockLeaf): void {
+		this.hideAllExternalDropIndicators()
 		this.endDrag()
 
 		const overlay = document.createElement("div")
@@ -573,6 +752,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 		this.dragState.overlay.remove()
 		this.dragState = null
+		this.hideAllExternalDropIndicators()
 	}
 
 	private buildDropTargets(overlay: HTMLDivElement, source: DockLeaf): void {

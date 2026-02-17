@@ -350,6 +350,7 @@ export class ProjectList {
 		if (dataTransfer) {
 			dataTransfer.effectAllowed = "move"
 			dataTransfer.setData("text/plain", view.entry.id)
+			dataTransfer.setData("application/x-puppycad-project-node", view.entry.id)
 		}
 	}
 
