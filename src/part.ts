@@ -54,6 +54,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.onStateChange = options?.onStateChange
 		this.root.style.width = "100%"
 		this.root.style.height = "100%"
+		this.root.style.minWidth = "0"
+		this.root.style.minHeight = "0"
 		this.root.style.display = "flex"
 		this.root.style.flexDirection = "column"
 		this.root.style.backgroundColor = "#f8fafc"
@@ -67,16 +69,21 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		const body = document.createElement("div")
 		body.style.display = "flex"
+		body.style.flexWrap = "wrap"
 		body.style.flex = "1"
+		body.style.minWidth = "0"
 		body.style.minHeight = "0"
+		body.style.alignItems = "flex-start"
 		body.style.gap = "16px"
 		body.style.padding = "16px"
 		body.style.boxSizing = "border-box"
+		body.style.overflow = "auto"
 		this.root.appendChild(body)
 
 		const sketchPanel = document.createElement("div")
-		sketchPanel.style.width = "320px"
-		sketchPanel.style.flexShrink = "0"
+		sketchPanel.style.flex = "1 1 360px"
+		sketchPanel.style.minWidth = "0"
+		sketchPanel.style.maxWidth = "420px"
 		sketchPanel.style.display = "flex"
 		sketchPanel.style.flexDirection = "column"
 		sketchPanel.style.gap = "12px"
@@ -97,8 +104,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchCanvas.style.cursor = "crosshair"
 		this.sketchCanvas.width = SKETCH_CANVAS_SIZE * window.devicePixelRatio
 		this.sketchCanvas.height = SKETCH_CANVAS_SIZE * window.devicePixelRatio
-		this.sketchCanvas.style.width = `${SKETCH_CANVAS_SIZE}px`
-		this.sketchCanvas.style.height = `${SKETCH_CANVAS_SIZE}px`
+		this.sketchCanvas.style.width = "100%"
+		this.sketchCanvas.style.maxWidth = `${SKETCH_CANVAS_SIZE}px`
+		this.sketchCanvas.style.aspectRatio = "1 / 1"
+		this.sketchCanvas.style.height = "auto"
 		sketchPanel.appendChild(this.sketchCanvas)
 
 		const sketchCtx = this.sketchCanvas.getContext("2d")
@@ -166,7 +175,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		sketchPanel.appendChild(this.extrudeSummary)
 
 		this.previewContainer = document.createElement("div")
-		this.previewContainer.style.flex = "1"
+		this.previewContainer.style.flex = "1 1 360px"
+		this.previewContainer.style.minWidth = "0"
+		this.previewContainer.style.maxWidth = `${SKETCH_CANVAS_SIZE}px`
+		this.previewContainer.style.aspectRatio = "1 / 1"
+		this.previewContainer.style.height = "auto"
+		this.previewContainer.style.minHeight = "260px"
 		this.previewContainer.style.backgroundColor = "#1f2937"
 		this.previewContainer.style.borderRadius = "12px"
 		this.previewContainer.style.position = "relative"
