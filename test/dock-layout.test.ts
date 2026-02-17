@@ -276,4 +276,202 @@ describe("DockLayout", () => {
 
 		expect(positions).toEqual(["top", "left", "center", "right", "bottom"])
 	})
+
+	it("toggles pane floating mode from the header button", () => {
+		const layout = new DockLayout()
+		const paneId = layout.getActivePaneId()
+		expect(paneId).toBeTruthy()
+		if (!paneId) {
+			throw new Error("Expected pane to exist")
+		}
+
+		const pane = layout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		expect(pane).not.toBeNull()
+		if (!pane) {
+			throw new Error("Expected pane element to exist")
+		}
+
+		const header = pane.children[0] as HTMLDivElement | undefined
+		if (!header) {
+			throw new Error("Expected header element")
+		}
+		const floatButton = header.querySelector('button[aria-label="Float pane"]') as HTMLButtonElement | null
+		expect(floatButton).not.toBeNull()
+		if (!floatButton) {
+			throw new Error("Expected float button")
+		}
+
+		floatButton.click()
+		expect(pane.style.position).toBe("absolute")
+		expect(header.draggable).toBe(false)
+		expect(floatButton.getAttribute("aria-label")).toBe("Dock pane")
+
+		floatButton.click()
+		expect(pane.style.position).toBe("")
+		expect(header.draggable).toBe(true)
+		expect(floatButton.getAttribute("aria-label")).toBe("Float pane")
+	})
+
+	it("moves floating panes immediately when dragging the header", () => {
+		const layout = new DockLayout()
+		const paneId = layout.getActivePaneId()
+		expect(paneId).toBeTruthy()
+		if (!paneId) {
+			throw new Error("Expected pane to exist")
+		}
+
+		const pane = layout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		expect(pane).not.toBeNull()
+		if (!pane) {
+			throw new Error("Expected pane element to exist")
+		}
+
+		const header = pane.children[0] as HTMLDivElement | undefined
+		if (!header) {
+			throw new Error("Expected header element")
+		}
+		const floatButton = header.querySelector('button[aria-label="Float pane"]') as HTMLButtonElement | null
+		expect(floatButton).not.toBeNull()
+		if (!floatButton) {
+			throw new Error("Expected float button")
+		}
+
+		layout.root.getBoundingClientRect = () =>
+			({
+				x: 100,
+				y: 50,
+				left: 100,
+				top: 50,
+				right: 1100,
+				bottom: 750,
+				width: 1000,
+				height: 700,
+				toJSON: () => ({})
+			}) as DOMRect
+		pane.getBoundingClientRect = () =>
+			({
+				x: 180,
+				y: 120,
+				left: 180,
+				top: 120,
+				right: 540,
+				bottom: 360,
+				width: 360,
+				height: 240,
+				toJSON: () => ({})
+			}) as DOMRect
+
+		floatButton.click()
+		expect(pane.style.left).toBe("80px")
+		expect(pane.style.top).toBe("70px")
+
+		header.dispatchEvent(
+			new window.MouseEvent("mousedown", {
+				bubbles: true,
+				button: 0,
+				clientX: 220,
+				clientY: 160
+			})
+		)
+		window.dispatchEvent(
+			new window.MouseEvent("mousemove", {
+				bubbles: true,
+				clientX: 400,
+				clientY: 260
+			})
+		)
+		window.dispatchEvent(
+			new window.MouseEvent("mouseup", {
+				bubbles: true
+			})
+		)
+
+		expect(pane.style.left).toBe("260px")
+		expect(pane.style.top).toBe("170px")
+	})
+
+	it("resizes floating panes from the corner handle", () => {
+		const layout = new DockLayout()
+		const paneId = layout.getActivePaneId()
+		expect(paneId).toBeTruthy()
+		if (!paneId) {
+			throw new Error("Expected pane to exist")
+		}
+
+		const pane = layout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		expect(pane).not.toBeNull()
+		if (!pane) {
+			throw new Error("Expected pane element to exist")
+		}
+
+		const header = pane.children[0] as HTMLDivElement | undefined
+		if (!header) {
+			throw new Error("Expected header element")
+		}
+		const floatButton = header.querySelector('button[aria-label="Float pane"]') as HTMLButtonElement | null
+		expect(floatButton).not.toBeNull()
+		if (!floatButton) {
+			throw new Error("Expected float button")
+		}
+		const resizeHandle = pane.querySelector('[data-dock-floating-resize-handle="corner"]') as HTMLDivElement | null
+		expect(resizeHandle).not.toBeNull()
+		if (!resizeHandle) {
+			throw new Error("Expected floating resize handle")
+		}
+
+		layout.root.getBoundingClientRect = () =>
+			({
+				x: 100,
+				y: 50,
+				left: 100,
+				top: 50,
+				right: 1100,
+				bottom: 750,
+				width: 1000,
+				height: 700,
+				toJSON: () => ({})
+			}) as DOMRect
+		pane.getBoundingClientRect = () =>
+			({
+				x: 180,
+				y: 120,
+				left: 180,
+				top: 120,
+				right: 540,
+				bottom: 360,
+				width: 360,
+				height: 240,
+				toJSON: () => ({})
+			}) as DOMRect
+
+		floatButton.click()
+		expect(resizeHandle.style.display).toBe("block")
+
+		resizeHandle.dispatchEvent(
+			new window.MouseEvent("mousedown", {
+				bubbles: true,
+				button: 0,
+				clientX: 540,
+				clientY: 360
+			})
+		)
+		window.dispatchEvent(
+			new window.MouseEvent("mousemove", {
+				bubbles: true,
+				clientX: 700,
+				clientY: 500
+			})
+		)
+		window.dispatchEvent(
+			new window.MouseEvent("mouseup", {
+				bubbles: true
+			})
+		)
+
+		expect(pane.style.width).toBe("520px")
+		expect(pane.style.height).toBe("380px")
+
+		floatButton.click()
+		expect(resizeHandle.style.display).toBe("none")
+	})
 })

@@ -35,10 +35,13 @@ type DockPaneState = {
 	header: HTMLDivElement
 	title: HTMLSpanElement
 	content: HTMLDivElement
+	resizeHandle: HTMLDivElement
 	placeholder: HTMLDivElement
 	externalDropIndicator: HTMLDivElement
 	currentComponent: UiComponent<HTMLElement> | null
+	floatButton: HTMLButtonElement
 	closeButton: HTMLButtonElement
+	isFloating: boolean
 }
 
 type DockLeaf = {
@@ -66,6 +69,18 @@ type PointerMoveState = {
 	upHandler: (event: MouseEvent) => void
 }
 
+type FloatingMoveState = {
+	pane: DockPaneState
+	moveHandler: (event: MouseEvent) => void
+	upHandler: (event: MouseEvent) => void
+}
+
+type FloatingResizeState = {
+	pane: DockPaneState
+	moveHandler: (event: MouseEvent) => void
+	upHandler: (event: MouseEvent) => void
+}
+
 export class DockLayout extends UiComponent<HTMLDivElement> {
 	private rootNode: DockNode
 	private readonly parentMap = new Map<DockNode, DockSplit | null>()
@@ -78,6 +93,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	private dragState: DragState | null = null
 	private pointerMoveState: PointerMoveState | null = null
 	private pendingPointerMoveCancel: (() => void) | null = null
+	private floatingMoveState: FloatingMoveState | null = null
+	private floatingResizeState: FloatingResizeState | null = null
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -198,6 +215,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	}
 
 	public restoreState(state: DockLayoutState): void {
+		this.endFloatingMove()
+		this.endFloatingResize()
 		this.root.innerHTML = ""
 		this.parentMap.clear()
 		this.panes.clear()
@@ -259,6 +278,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		if (!leaf) {
 			return this.activePaneId
 		}
+		this.endFloatingMove(leaf.pane)
+		this.endFloatingResize(leaf.pane)
 
 		if (this.panes.size <= 1) {
 			this.clearPane(paneId)
@@ -371,35 +392,72 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		title.style.userSelect = "none"
 		header.appendChild(title)
 
+		const styleHeaderButton = (button: HTMLButtonElement) => {
+			button.style.border = "none"
+			button.style.background = "transparent"
+			button.style.cursor = "pointer"
+			button.style.padding = "4px"
+			button.style.borderRadius = "4px"
+			button.style.display = "flex"
+			button.style.alignItems = "center"
+			button.style.justifyContent = "center"
+			button.addEventListener("mouseenter", () => {
+				button.style.backgroundColor = "#e2e8f0"
+			})
+			button.addEventListener("mouseleave", () => {
+				button.style.backgroundColor = "transparent"
+			})
+			button.addEventListener("mousedown", (event) => {
+				event.stopPropagation()
+				button.style.backgroundColor = "#cbd5f5"
+			})
+			button.addEventListener("mouseup", () => {
+				button.style.backgroundColor = "#e2e8f0"
+			})
+			button.addEventListener("blur", () => {
+				button.style.backgroundColor = "transparent"
+			})
+		}
+
+		const floatButton = document.createElement("button")
+		floatButton.type = "button"
+		styleHeaderButton(floatButton)
+
+		const floatIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+		floatIcon.setAttribute("viewBox", "0 0 20 20")
+		floatIcon.setAttribute("width", "16")
+		floatIcon.setAttribute("height", "16")
+
+		const floatOuter = document.createElementNS("http://www.w3.org/2000/svg", "rect")
+		floatOuter.setAttribute("x", "5")
+		floatOuter.setAttribute("y", "8")
+		floatOuter.setAttribute("width", "8")
+		floatOuter.setAttribute("height", "8")
+		floatOuter.setAttribute("fill", "none")
+		floatOuter.setAttribute("stroke", "#475569")
+		floatOuter.setAttribute("stroke-width", "1.5")
+		floatOuter.setAttribute("rx", "1")
+
+		const floatInner = document.createElementNS("http://www.w3.org/2000/svg", "rect")
+		floatInner.setAttribute("x", "7")
+		floatInner.setAttribute("y", "4")
+		floatInner.setAttribute("width", "8")
+		floatInner.setAttribute("height", "8")
+		floatInner.setAttribute("fill", "none")
+		floatInner.setAttribute("stroke", "#475569")
+		floatInner.setAttribute("stroke-width", "1.5")
+		floatInner.setAttribute("rx", "1")
+
+		floatIcon.appendChild(floatOuter)
+		floatIcon.appendChild(floatInner)
+		floatButton.appendChild(floatIcon)
+		header.appendChild(floatButton)
+
 		const closeButton = document.createElement("button")
 		closeButton.type = "button"
 		closeButton.title = "Close pane"
 		closeButton.setAttribute("aria-label", "Close pane")
-		closeButton.style.border = "none"
-		closeButton.style.background = "transparent"
-		closeButton.style.cursor = "pointer"
-		closeButton.style.padding = "4px"
-		closeButton.style.borderRadius = "4px"
-		closeButton.style.display = "flex"
-		closeButton.style.alignItems = "center"
-		closeButton.style.justifyContent = "center"
-
-		closeButton.addEventListener("mouseenter", () => {
-			closeButton.style.backgroundColor = "#e2e8f0"
-		})
-		closeButton.addEventListener("mouseleave", () => {
-			closeButton.style.backgroundColor = "transparent"
-		})
-		closeButton.addEventListener("mousedown", (event) => {
-			event.stopPropagation()
-			closeButton.style.backgroundColor = "#cbd5f5"
-		})
-		closeButton.addEventListener("mouseup", () => {
-			closeButton.style.backgroundColor = "#e2e8f0"
-		})
-		closeButton.addEventListener("blur", () => {
-			closeButton.style.backgroundColor = "transparent"
-		})
+		styleHeaderButton(closeButton)
 
 		const closeIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg")
 		closeIcon.setAttribute("viewBox", "0 0 20 20")
@@ -447,8 +505,24 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		content.appendChild(placeholder)
 		content.appendChild(externalDropIndicator)
 
+		const resizeHandle = document.createElement("div")
+		resizeHandle.style.position = "absolute"
+		resizeHandle.style.right = "2px"
+		resizeHandle.style.bottom = "2px"
+		resizeHandle.style.width = "14px"
+		resizeHandle.style.height = "14px"
+		resizeHandle.style.cursor = "nwse-resize"
+		resizeHandle.style.zIndex = "5"
+		resizeHandle.style.display = "none"
+		resizeHandle.style.pointerEvents = "auto"
+		resizeHandle.style.borderRight = "2px solid #94a3b8"
+		resizeHandle.style.borderBottom = "2px solid #94a3b8"
+		resizeHandle.style.borderBottomRightRadius = "2px"
+		resizeHandle.dataset.dockFloatingResizeHandle = "corner"
+
 		element.appendChild(header)
 		element.appendChild(content)
+		element.appendChild(resizeHandle)
 
 		const paneId = presetId ?? `pane-${++paneIdCounter}`
 		if (presetId) {
@@ -468,10 +542,13 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			header,
 			title,
 			content,
+			resizeHandle,
 			placeholder,
 			externalDropIndicator,
 			currentComponent: null,
-			closeButton
+			floatButton,
+			closeButton,
+			isFloating: false
 		}
 
 		const leaf: DockLeaf = {
@@ -496,13 +573,34 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			this.closePane(paneState.id)
 		})
 
-		header.draggable = true
-		title.draggable = true
+		resizeHandle.addEventListener("mousedown", (event) => {
+			if (event.button !== 0 || !paneState.isFloating) {
+				return
+			}
+			event.preventDefault()
+			event.stopPropagation()
+			this.setActivePane(paneState.id)
+			this.startFloatingResize(paneState, event.clientX, event.clientY)
+		})
+
+		floatButton.addEventListener("click", (event) => {
+			event.stopPropagation()
+			this.setActivePane(paneState.id)
+			this.setPaneFloating(paneState, !paneState.isFloating)
+		})
+
+		this.updateFloatingButtonState(paneState)
+		this.updatePaneDragMode(paneState)
+		floatButton.draggable = false
 		closeButton.draggable = false
 
 		const handlePaneDragStart = (event: DragEvent) => {
 			this.cancelPendingPointerMove()
 			this.endPointerMove()
+			if (paneState.isFloating) {
+				event.preventDefault()
+				return
+			}
 			if (this.panes.size <= 1) {
 				event.preventDefault()
 				return
@@ -528,11 +626,15 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			if (event.button !== 0) {
 				return
 			}
-			if (this.panes.size <= 1) {
+			const target = event.target as Node | null
+			if (target && (closeButton.contains(target) || floatButton.contains(target))) {
 				return
 			}
-			const target = event.target as Node | null
-			if (target && closeButton.contains(target)) {
+			if (paneState.isFloating) {
+				this.startFloatingMove(paneState, event.clientX, event.clientY)
+				return
+			}
+			if (this.panes.size <= 1) {
 				return
 			}
 			this.schedulePointerMoveStart(leaf, event.clientX, event.clientY)
@@ -851,6 +953,191 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.pointerMoveState = null
 	}
 
+	private updateFloatingButtonState(pane: DockPaneState): void {
+		const label = pane.isFloating ? "Dock pane" : "Float pane"
+		pane.floatButton.title = label
+		pane.floatButton.setAttribute("aria-label", label)
+	}
+
+	private updatePaneDragMode(pane: DockPaneState): void {
+		const draggable = !pane.isFloating
+		pane.header.draggable = draggable
+		pane.title.draggable = draggable
+	}
+
+	private setPaneFloating(pane: DockPaneState, floating: boolean): void {
+		if (pane.isFloating === floating) {
+			return
+		}
+		const minWidth = 240
+		const minHeight = 160
+		if (floating) {
+			this.cancelPendingPointerMove()
+			this.endPointerMove()
+			this.endDrag()
+			this.endFloatingResize(pane)
+			const rootRect = this.root.getBoundingClientRect()
+			const paneRect = pane.element.getBoundingClientRect()
+			const measuredWidth = paneRect.width > 0 ? paneRect.width : rootRect.width * 0.45
+			const measuredHeight = paneRect.height > 0 ? paneRect.height : rootRect.height * 0.6
+			const width = Math.max(Math.min(measuredWidth, Math.max(rootRect.width - 16, minWidth)), minWidth)
+			const height = Math.max(Math.min(measuredHeight, Math.max(rootRect.height - 16, minHeight)), minHeight)
+			pane.element.style.position = "absolute"
+			pane.element.style.flex = "0 0 auto"
+			pane.element.style.width = `${Math.round(width)}px`
+			pane.element.style.height = `${Math.round(height)}px`
+			pane.element.style.zIndex = "80"
+			pane.element.style.overflow = "hidden"
+			pane.resizeHandle.style.display = "block"
+			const left = paneRect.left - rootRect.left
+			const top = paneRect.top - rootRect.top
+			this.positionFloatingPane(pane, left, top)
+		} else {
+			this.endFloatingMove(pane)
+			this.endFloatingResize(pane)
+			pane.element.style.position = ""
+			pane.element.style.left = ""
+			pane.element.style.top = ""
+			pane.element.style.width = ""
+			pane.element.style.height = ""
+			pane.element.style.zIndex = ""
+			pane.element.style.flex = "1 1 0"
+			pane.element.style.overflow = ""
+			pane.resizeHandle.style.display = "none"
+		}
+		pane.isFloating = floating
+		this.updateFloatingButtonState(pane)
+		this.updatePaneDragMode(pane)
+		this.setPaneActive(pane, this.activePaneId === pane.id)
+	}
+
+	private positionFloatingPane(pane: DockPaneState, rawLeft: number, rawTop: number): void {
+		const rootRect = this.root.getBoundingClientRect()
+		const parsedWidth = Number.parseFloat(pane.element.style.width)
+		const parsedHeight = Number.parseFloat(pane.element.style.height)
+		const paneWidth = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : Math.max(pane.element.offsetWidth, 240)
+		const paneHeight = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : Math.max(pane.element.offsetHeight, 160)
+		const maxLeft = Math.max(rootRect.width - paneWidth, 0)
+		const maxTop = Math.max(rootRect.height - paneHeight, 0)
+		const left = this.clamp(rawLeft, 0, maxLeft)
+		const top = this.clamp(rawTop, 0, maxTop)
+		pane.element.style.left = `${Math.round(left)}px`
+		pane.element.style.top = `${Math.round(top)}px`
+	}
+
+	private startFloatingMove(pane: DockPaneState, startX: number, startY: number): void {
+		if (!pane.isFloating) {
+			return
+		}
+		this.cancelPendingPointerMove()
+		this.endPointerMove()
+		this.endDrag()
+		this.endFloatingResize()
+		this.endFloatingMove()
+		const paneRect = pane.element.getBoundingClientRect()
+		const offsetX = startX - paneRect.left
+		const offsetY = startY - paneRect.top
+		pane.header.style.cursor = "grabbing"
+		const moveHandler = (event: MouseEvent) => {
+			const rootRect = this.root.getBoundingClientRect()
+			this.positionFloatingPane(pane, event.clientX - rootRect.left - offsetX, event.clientY - rootRect.top - offsetY)
+		}
+		const upHandler = () => {
+			this.endFloatingMove(pane)
+		}
+		this.floatingMoveState = {
+			pane,
+			moveHandler,
+			upHandler
+		}
+		window.addEventListener("mousemove", moveHandler, true)
+		window.addEventListener("mouseup", upHandler, true)
+	}
+
+	private startFloatingResize(pane: DockPaneState, startX: number, startY: number): void {
+		if (!pane.isFloating) {
+			return
+		}
+		this.cancelPendingPointerMove()
+		this.endPointerMove()
+		this.endDrag()
+		this.endFloatingMove()
+		this.endFloatingResize()
+		const minWidth = 240
+		const minHeight = 160
+		const parsedWidth = Number.parseFloat(pane.element.style.width)
+		const parsedHeight = Number.parseFloat(pane.element.style.height)
+		const startWidth = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : Math.max(pane.element.offsetWidth, minWidth)
+		const startHeight = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : Math.max(pane.element.offsetHeight, minHeight)
+		const moveHandler = (event: MouseEvent) => {
+			this.resizeFloatingPane(pane, startWidth + (event.clientX - startX), startHeight + (event.clientY - startY))
+		}
+		const upHandler = () => {
+			this.endFloatingResize(pane)
+		}
+		this.floatingResizeState = {
+			pane,
+			moveHandler,
+			upHandler
+		}
+		window.addEventListener("mousemove", moveHandler, true)
+		window.addEventListener("mouseup", upHandler, true)
+	}
+
+	private resizeFloatingPane(pane: DockPaneState, rawWidth: number, rawHeight: number): void {
+		const minWidth = 240
+		const minHeight = 160
+		const rootRect = this.root.getBoundingClientRect()
+		const parsedLeft = Number.parseFloat(pane.element.style.left)
+		const parsedTop = Number.parseFloat(pane.element.style.top)
+		const paneRect = pane.element.getBoundingClientRect()
+		const left = Number.isFinite(parsedLeft) ? parsedLeft : paneRect.left - rootRect.left
+		const top = Number.isFinite(parsedTop) ? parsedTop : paneRect.top - rootRect.top
+		const maxWidth = Math.max(rootRect.width - left, minWidth)
+		const maxHeight = Math.max(rootRect.height - top, minHeight)
+		const width = this.clamp(rawWidth, minWidth, maxWidth)
+		const height = this.clamp(rawHeight, minHeight, maxHeight)
+		pane.element.style.width = `${Math.round(width)}px`
+		pane.element.style.height = `${Math.round(height)}px`
+	}
+
+	private endFloatingMove(targetPane?: DockPaneState): void {
+		const state = this.floatingMoveState
+		if (!state) {
+			return
+		}
+		if (targetPane && state.pane !== targetPane) {
+			return
+		}
+		window.removeEventListener("mousemove", state.moveHandler, true)
+		window.removeEventListener("mouseup", state.upHandler, true)
+		state.pane.header.style.cursor = "grab"
+		this.floatingMoveState = null
+	}
+
+	private endFloatingResize(targetPane?: DockPaneState): void {
+		const state = this.floatingResizeState
+		if (!state) {
+			return
+		}
+		if (targetPane && state.pane !== targetPane) {
+			return
+		}
+		window.removeEventListener("mousemove", state.moveHandler, true)
+		window.removeEventListener("mouseup", state.upHandler, true)
+		this.floatingResizeState = null
+	}
+
+	private clamp(value: number, min: number, max: number): number {
+		if (value < min) {
+			return min
+		}
+		if (value > max) {
+			return max
+		}
+		return value
+	}
+
 	private createSplitElement(orientation: DockOrientation): HTMLDivElement {
 		const element = document.createElement("div")
 		element.style.display = "flex"
@@ -863,10 +1150,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 	private setPaneActive(pane: DockPaneState, active: boolean): void {
 		if (active) {
-			pane.element.style.boxShadow = "0 0 0 2px #3b82f6"
+			pane.element.style.boxShadow = pane.isFloating ? "0 16px 40px rgba(15, 23, 42, 0.25), 0 0 0 2px #3b82f6" : "0 0 0 2px #3b82f6"
 			pane.element.style.borderColor = "#3b82f6"
 		} else {
-			pane.element.style.boxShadow = "none"
+			pane.element.style.boxShadow = pane.isFloating ? "0 16px 40px rgba(15, 23, 42, 0.2)" : "none"
 			pane.element.style.borderColor = "#cbd5f5"
 		}
 	}
