@@ -164,6 +164,48 @@ describe("DockLayout", () => {
 		expect(topPane.paneId).toBe(secondPane)
 	})
 
+	it("swaps pane positions when moved to the center of another pane", () => {
+		const layout = new DockLayout()
+		const firstPane = layout.getActivePaneId()
+		expect(firstPane).toBeTruthy()
+		if (!firstPane) {
+			throw new Error("Expected first pane to exist")
+		}
+
+		const secondPane = layout.splitPane(firstPane, "horizontal")
+		expect(secondPane).toBeTruthy()
+		if (!secondPane) {
+			throw new Error("Expected second pane to exist")
+		}
+
+		const before = layout.getState()
+		if (before.root.type !== "split") {
+			throw new Error("Expected split root before swap")
+		}
+		const firstBefore = before.root.children[0]
+		const secondBefore = before.root.children[1]
+		if (!firstBefore || !secondBefore || firstBefore.type !== "leaf" || secondBefore.type !== "leaf") {
+			throw new Error("Expected two leaf panes before swap")
+		}
+		expect(firstBefore.paneId).toBe(firstPane)
+		expect(secondBefore.paneId).toBe(secondPane)
+
+		layout.movePane(firstPane, secondPane, "center")
+
+		const after = layout.getState()
+		if (after.root.type !== "split") {
+			throw new Error("Expected split root after swap")
+		}
+		const firstAfter = after.root.children[0]
+		const secondAfter = after.root.children[1]
+		if (!firstAfter || !secondAfter || firstAfter.type !== "leaf" || secondAfter.type !== "leaf") {
+			throw new Error("Expected two leaf panes after swap")
+		}
+		expect(firstAfter.paneId).toBe(secondPane)
+		expect(secondAfter.paneId).toBe(firstPane)
+		expect(layout.getActivePaneId()).toBe(firstPane)
+	})
+
 	it("detects all edge positions and center for external drops", () => {
 		const layout = new DockLayout()
 		const paneId = layout.getActivePaneId()

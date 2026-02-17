@@ -53,6 +53,17 @@ let paneIdCounter = 0
 type DragState = {
 	source: DockLeaf
 	overlay: HTMLDivElement
+	ghost: HTMLDivElement
+	overlayDragHandler: (event: DragEvent) => void
+}
+
+type PointerMoveState = {
+	source: DockLeaf
+	overlay: HTMLDivElement
+	ghost: HTMLDivElement
+	hoveredZone: HTMLDivElement | null
+	moveHandler: (event: MouseEvent) => void
+	upHandler: (event: MouseEvent) => void
 }
 
 export class DockLayout extends UiComponent<HTMLDivElement> {
@@ -65,6 +76,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	public canAcceptExternalDrop: ((event: DragEvent) => boolean) | null = null
 	public onExternalDrop: ((args: { paneId: string; position: DockDropPosition; event: DragEvent }) => void) | null = null
 	private dragState: DragState | null = null
+	private pointerMoveState: PointerMoveState | null = null
+	private pendingPointerMoveCancel: (() => void) | null = null
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -302,6 +315,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		}
 
 		if (position === "center") {
+			if (targetPaneId) {
+				this.swapPanePositions(paneId, targetPaneId)
+				this.setActivePane(paneId)
+			}
 			return
 		}
 
@@ -345,10 +362,13 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		header.style.backgroundColor = "#f8fafc"
 		header.style.fontWeight = "500"
 		header.style.fontSize = "0.9rem"
+		header.style.userSelect = "none"
+		header.style.cursor = "grab"
 
 		const title = document.createElement("span")
 		title.textContent = "Empty Pane"
 		title.style.flexGrow = "1"
+		title.style.userSelect = "none"
 		header.appendChild(title)
 
 		const closeButton = document.createElement("button")
@@ -477,20 +497,45 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		})
 
 		header.draggable = true
+		title.draggable = true
 		closeButton.draggable = false
 
-		header.addEventListener("dragstart", (event) => {
+		const handlePaneDragStart = (event: DragEvent) => {
+			this.cancelPendingPointerMove()
+			this.endPointerMove()
 			if (this.panes.size <= 1) {
 				event.preventDefault()
 				return
 			}
 			event.dataTransfer?.setData("text/plain", paneState.id)
 			event.dataTransfer?.setDragImage(paneState.header, 0, 0)
-			this.startDrag(leaf)
-		})
+			header.style.cursor = "grabbing"
+			this.startDrag(leaf, event.clientX, event.clientY)
+		}
 
-		header.addEventListener("dragend", () => {
+		header.addEventListener("dragstart", handlePaneDragStart)
+		title.addEventListener("dragstart", handlePaneDragStart)
+
+		const handlePaneDragEnd = () => {
+			header.style.cursor = "grab"
 			this.endDrag()
+		}
+
+		header.addEventListener("dragend", handlePaneDragEnd)
+		title.addEventListener("dragend", handlePaneDragEnd)
+
+		header.addEventListener("mousedown", (event) => {
+			if (event.button !== 0) {
+				return
+			}
+			if (this.panes.size <= 1) {
+				return
+			}
+			const target = event.target as Node | null
+			if (target && closeButton.contains(target)) {
+				return
+			}
+			this.schedulePointerMoveStart(leaf, event.clientX, event.clientY)
 		})
 
 		this.panes.set(paneState.id, leaf)
@@ -647,6 +692,165 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		})
 	}
 
+	private createPaneDragGhost(source: DockLeaf): HTMLDivElement {
+		const ghost = document.createElement("div")
+		ghost.textContent = source.pane.title.textContent ?? "Pane"
+		ghost.style.position = "absolute"
+		ghost.style.pointerEvents = "none"
+		ghost.style.padding = "8px 12px"
+		ghost.style.borderRadius = "8px"
+		ghost.style.border = "1px solid rgba(59, 130, 246, 0.45)"
+		ghost.style.background = "rgba(248, 250, 252, 0.95)"
+		ghost.style.color = "#0f172a"
+		ghost.style.fontSize = "13px"
+		ghost.style.fontWeight = "600"
+		ghost.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.22)"
+		ghost.style.zIndex = "1002"
+		ghost.style.maxWidth = "240px"
+		ghost.style.whiteSpace = "nowrap"
+		ghost.style.overflow = "hidden"
+		ghost.style.textOverflow = "ellipsis"
+		return ghost
+	}
+
+	private positionPaneDragGhost(ghost: HTMLDivElement, clientX: number, clientY: number): void {
+		const rootRect = this.root.getBoundingClientRect()
+		ghost.style.left = `${Math.round(clientX - rootRect.left + 12)}px`
+		ghost.style.top = `${Math.round(clientY - rootRect.top + 12)}px`
+	}
+
+	private schedulePointerMoveStart(source: DockLeaf, startX: number, startY: number): void {
+		this.cancelPendingPointerMove()
+		const moveThreshold = 2
+		const moveGuard = (event: MouseEvent) => {
+			const distance = Math.hypot(event.clientX - startX, event.clientY - startY)
+			if (distance > moveThreshold) {
+				cleanup()
+				this.beginPointerMove(source, event.clientX, event.clientY)
+			}
+		}
+		const upGuard = () => {
+			cleanup()
+		}
+		const cleanup = () => {
+			window.removeEventListener("mousemove", moveGuard, true)
+			window.removeEventListener("mouseup", upGuard, true)
+			if (this.pendingPointerMoveCancel === cleanup) {
+				this.pendingPointerMoveCancel = null
+			}
+		}
+		this.pendingPointerMoveCancel = cleanup
+		window.addEventListener("mousemove", moveGuard, true)
+		window.addEventListener("mouseup", upGuard, true)
+	}
+
+	private cancelPendingPointerMove(): void {
+		if (!this.pendingPointerMoveCancel) {
+			return
+		}
+		const cancel = this.pendingPointerMoveCancel
+		this.pendingPointerMoveCancel = null
+		cancel()
+	}
+
+	private beginPointerMove(source: DockLeaf, clientX: number, clientY: number): void {
+		if (this.dragState || this.pointerMoveState) {
+			return
+		}
+		const overlay = document.createElement("div")
+		overlay.style.position = "absolute"
+		overlay.style.top = "0"
+		overlay.style.left = "0"
+		overlay.style.right = "0"
+		overlay.style.bottom = "0"
+		overlay.style.pointerEvents = "auto"
+		overlay.style.zIndex = "1000"
+		this.root.appendChild(overlay)
+		this.buildDropTargets(overlay, source)
+		const ghost = this.createPaneDragGhost(source)
+		overlay.appendChild(ghost)
+		this.positionPaneDragGhost(ghost, clientX, clientY)
+
+		const moveHandler = (event: MouseEvent) => {
+			this.updatePointerHoveredZone(event.clientX, event.clientY)
+			this.positionPaneDragGhost(ghost, event.clientX, event.clientY)
+		}
+		const upHandler = () => {
+			this.commitPointerMove()
+		}
+		this.pointerMoveState = {
+			source,
+			overlay,
+			ghost,
+			hoveredZone: null,
+			moveHandler,
+			upHandler
+		}
+		window.addEventListener("mousemove", moveHandler, true)
+		window.addEventListener("mouseup", upHandler, true)
+		this.updatePointerHoveredZone(clientX, clientY)
+	}
+
+	private updatePointerHoveredZone(clientX: number, clientY: number): void {
+		const state = this.pointerMoveState
+		if (!state) {
+			return
+		}
+		let zone: HTMLDivElement | null = null
+		const stackedElements = document.elementsFromPoint(clientX, clientY)
+		for (const stackedElement of stackedElements) {
+			const candidate = stackedElement.closest<HTMLDivElement>("[data-dock-drop-position]")
+			if (candidate && state.overlay.contains(candidate)) {
+				zone = candidate
+				break
+			}
+		}
+		if (!zone) {
+			const element = document.elementFromPoint(clientX, clientY) as HTMLElement | null
+			zone = element?.closest<HTMLDivElement>("[data-dock-drop-position]") ?? null
+		}
+		const hoveredZone = zone && state.overlay.contains(zone) ? zone : null
+		if (state.hoveredZone && state.hoveredZone !== hoveredZone) {
+			this.setDropZoneHighlight(state.hoveredZone, false)
+		}
+		state.hoveredZone = hoveredZone
+		if (state.hoveredZone) {
+			this.setDropZoneHighlight(state.hoveredZone, true)
+		}
+	}
+
+	private commitPointerMove(): void {
+		const state = this.pointerMoveState
+		if (!state) {
+			return
+		}
+		const zone = state.hoveredZone
+		this.endPointerMove()
+		if (!zone) {
+			return
+		}
+		const position = zone.dataset.dockDropPosition as DockDropPosition | undefined
+		const targetPaneId = zone.dataset.dockDropPaneId || null
+		if (!position) {
+			return
+		}
+		this.movePane(state.source.pane.id, targetPaneId, position)
+	}
+
+	private endPointerMove(): void {
+		const state = this.pointerMoveState
+		if (!state) {
+			return
+		}
+		if (state.hoveredZone) {
+			this.setDropZoneHighlight(state.hoveredZone, false)
+		}
+		window.removeEventListener("mousemove", state.moveHandler, true)
+		window.removeEventListener("mouseup", state.upHandler, true)
+		state.overlay.remove()
+		this.pointerMoveState = null
+	}
+
 	private createSplitElement(orientation: DockOrientation): HTMLDivElement {
 		const element = document.createElement("div")
 		element.style.display = "flex"
@@ -726,7 +930,9 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		return node.children.reduce((max, child) => Math.max(max, this.getMaxPaneNumber(child)), -1)
 	}
 
-	private startDrag(source: DockLeaf): void {
+	private startDrag(source: DockLeaf, initialClientX?: number, initialClientY?: number): void {
+		this.cancelPendingPointerMove()
+		this.endPointerMove()
 		this.hideAllExternalDropIndicators()
 		this.endDrag()
 
@@ -736,13 +942,29 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		overlay.style.left = "0"
 		overlay.style.right = "0"
 		overlay.style.bottom = "0"
-		overlay.style.pointerEvents = "none"
+		overlay.style.pointerEvents = "auto"
 		overlay.style.zIndex = "1000"
 
 		this.root.appendChild(overlay)
-		this.dragState = { source, overlay }
-
 		this.buildDropTargets(overlay, source)
+		const ghost = this.createPaneDragGhost(source)
+		overlay.appendChild(ghost)
+
+		const sourceRect = source.pane.element.getBoundingClientRect()
+		const ghostX = typeof initialClientX === "number" && Number.isFinite(initialClientX) && initialClientX > 0 ? initialClientX : sourceRect.left + sourceRect.width / 2
+		const ghostY = typeof initialClientY === "number" && Number.isFinite(initialClientY) && initialClientY > 0 ? initialClientY : sourceRect.top + sourceRect.height / 2
+		this.positionPaneDragGhost(ghost, ghostX, ghostY)
+
+		const overlayDragHandler = (event: DragEvent) => {
+			if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
+				return
+			}
+			this.positionPaneDragGhost(ghost, event.clientX, event.clientY)
+		}
+		overlay.addEventListener("dragover", overlayDragHandler, true)
+		overlay.addEventListener("dragenter", overlayDragHandler, true)
+
+		this.dragState = { source, overlay, ghost, overlayDragHandler }
 	}
 
 	private endDrag(): void {
@@ -750,6 +972,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			return
 		}
 
+		this.dragState.overlay.removeEventListener("dragover", this.dragState.overlayDragHandler, true)
+		this.dragState.overlay.removeEventListener("dragenter", this.dragState.overlayDragHandler, true)
 		this.dragState.overlay.remove()
 		this.dragState = null
 		this.hideAllExternalDropIndicators()
@@ -779,32 +1003,39 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 			overlay.appendChild(container)
 
-			this.createDropZone(container, "left", () => this.handleDrop(leaf, "left"), {
+			this.createDropZone(container, leaf.pane.id, "left", () => this.handleDrop(leaf, "left"), {
 				left: 0,
 				top: 0,
 				width: rect.width * edgeRatio,
 				height: rect.height
 			})
 
-			this.createDropZone(container, "right", () => this.handleDrop(leaf, "right"), {
+			this.createDropZone(container, leaf.pane.id, "right", () => this.handleDrop(leaf, "right"), {
 				left: rect.width * (1 - edgeRatio),
 				top: 0,
 				width: rect.width * edgeRatio,
 				height: rect.height
 			})
 
-			this.createDropZone(container, "top", () => this.handleDrop(leaf, "top"), {
+			this.createDropZone(container, leaf.pane.id, "top", () => this.handleDrop(leaf, "top"), {
 				left: 0,
 				top: 0,
 				width: rect.width,
 				height: rect.height * edgeRatio
 			})
 
-			this.createDropZone(container, "bottom", () => this.handleDrop(leaf, "bottom"), {
+			this.createDropZone(container, leaf.pane.id, "bottom", () => this.handleDrop(leaf, "bottom"), {
 				left: 0,
 				top: rect.height * (1 - edgeRatio),
 				width: rect.width,
 				height: rect.height * edgeRatio
+			})
+
+			this.createDropZone(container, leaf.pane.id, "center", () => this.handleDrop(leaf, "center"), {
+				left: rect.width * edgeRatio,
+				top: rect.height * edgeRatio,
+				width: rect.width * (1 - edgeRatio * 2),
+				height: rect.height * (1 - edgeRatio * 2)
 			})
 		}
 
@@ -823,28 +1054,28 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		const rootEdgeWidth = Math.min(rootWidth * edgeRatio, 200)
 		const rootEdgeHeight = Math.min(rootHeight * edgeRatio, 200)
 
-		this.createDropZone(container, "left", () => this.handleDrop(null, "left"), {
+		this.createDropZone(container, null, "left", () => this.handleDrop(null, "left"), {
 			left: 0,
 			top: 0,
 			width: rootEdgeWidth,
 			height: rootHeight
 		})
 
-		this.createDropZone(container, "right", () => this.handleDrop(null, "right"), {
+		this.createDropZone(container, null, "right", () => this.handleDrop(null, "right"), {
 			left: Math.max(rootWidth - rootEdgeWidth, 0),
 			top: 0,
 			width: rootEdgeWidth,
 			height: rootHeight
 		})
 
-		this.createDropZone(container, "top", () => this.handleDrop(null, "top"), {
+		this.createDropZone(container, null, "top", () => this.handleDrop(null, "top"), {
 			left: 0,
 			top: 0,
 			width: rootWidth,
 			height: rootEdgeHeight
 		})
 
-		this.createDropZone(container, "bottom", () => this.handleDrop(null, "bottom"), {
+		this.createDropZone(container, null, "bottom", () => this.handleDrop(null, "bottom"), {
 			left: 0,
 			top: Math.max(rootHeight - rootEdgeHeight, 0),
 			width: rootWidth,
@@ -854,7 +1085,8 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 	private createDropZone(
 		container: HTMLDivElement,
-		position: Exclude<DockDropPosition, "center">,
+		targetPaneId: string | null,
+		position: DockDropPosition,
 		onDrop: () => void,
 		dimensions: { left: number; top: number; width: number; height: number }
 	): void {
@@ -869,21 +1101,21 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		zone.style.width = `${dimensions.width}px`
 		zone.style.height = `${dimensions.height}px`
 		zone.style.border = "2px solid transparent"
-		zone.style.backgroundColor = "rgba(59, 130, 246, 0.15)"
+		zone.style.backgroundColor = position === "center" ? "rgba(59, 130, 246, 0.1)" : "rgba(59, 130, 246, 0.15)"
 		zone.style.opacity = "0"
 		zone.style.transition = "opacity 0.1s ease"
 		zone.style.pointerEvents = "auto"
 		zone.style.borderRadius = "4px"
+		zone.dataset.dockDropPosition = position
+		zone.dataset.dockDropPaneId = targetPaneId ?? ""
 
 		zone.addEventListener("dragenter", (event) => {
 			event.preventDefault()
-			zone.style.opacity = "1"
-			zone.style.borderColor = "rgba(59, 130, 246, 0.6)"
+			this.setDropZoneHighlight(zone, true)
 		})
 
 		zone.addEventListener("dragleave", () => {
-			zone.style.opacity = "0"
-			zone.style.borderColor = "transparent"
+			this.setDropZoneHighlight(zone, false)
 		})
 
 		zone.addEventListener("dragover", (event) => {
@@ -895,12 +1127,16 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 		zone.addEventListener("drop", (event) => {
 			event.preventDefault()
-			zone.style.opacity = "0"
-			zone.style.borderColor = "transparent"
+			this.setDropZoneHighlight(zone, false)
 			onDrop()
 		})
 
 		container.appendChild(zone)
+	}
+
+	private setDropZoneHighlight(zone: HTMLDivElement, isActive: boolean): void {
+		zone.style.opacity = isActive ? "1" : "0"
+		zone.style.borderColor = isActive ? "rgba(59, 130, 246, 0.6)" : "transparent"
 	}
 
 	private handleDrop(target: DockLeaf | null, position: DockDropPosition): void {
@@ -917,6 +1153,42 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		} else {
 			this.movePane(source.pane.id, null, position)
 		}
+	}
+
+	private swapPanePositions(sourcePaneId: string, targetPaneId: string): void {
+		if (sourcePaneId === targetPaneId) {
+			return
+		}
+		const source = this.panes.get(sourcePaneId)
+		const target = this.panes.get(targetPaneId)
+		if (!source || !target) {
+			return
+		}
+		const sourceParent = this.parentMap.get(source)
+		const targetParent = this.parentMap.get(target)
+		if (!sourceParent || !targetParent) {
+			return
+		}
+
+		const sourceIndex = sourceParent.children.indexOf(source)
+		const targetIndex = targetParent.children.indexOf(target)
+		if (sourceIndex < 0 || targetIndex < 0) {
+			return
+		}
+
+		sourceParent.children[sourceIndex] = target
+		targetParent.children[targetIndex] = source
+		this.parentMap.set(source, targetParent)
+		this.parentMap.set(target, sourceParent)
+
+		const sourceElement = source.pane.element
+		const targetElement = target.pane.element
+		const sourcePlaceholder = document.createElement("div")
+		const targetPlaceholder = document.createElement("div")
+		sourceParent.element.replaceChild(sourcePlaceholder, sourceElement)
+		targetParent.element.replaceChild(targetPlaceholder, targetElement)
+		sourceParent.element.replaceChild(targetElement, sourcePlaceholder)
+		targetParent.element.replaceChild(sourceElement, targetPlaceholder)
 	}
 
 	private getOrientationForPosition(position: DockDropPosition): DockOrientation | null {
