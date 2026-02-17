@@ -68,14 +68,18 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 		this.root.style.display = "flex"
 		this.root.style.gap = "16px"
 		this.root.style.height = "100%"
+		this.root.style.minHeight = "0"
+		this.root.style.minWidth = "0"
+		this.root.style.overflow = "hidden"
 		this.root.style.boxSizing = "border-box"
 
 		const canvasContainer = document.createElement("div")
 		canvasContainer.style.flex = "1 1 auto"
 		canvasContainer.style.display = "flex"
 		canvasContainer.style.flexDirection = "column"
-		canvasContainer.style.minHeight = "640px"
-		canvasContainer.style.maxHeight = "100%"
+		canvasContainer.style.minHeight = "0"
+		canvasContainer.style.minWidth = "0"
+		canvasContainer.style.overflow = "hidden"
 		this.root.appendChild(canvasContainer)
 
 		this.palette = new VList({
@@ -87,7 +91,9 @@ export class DiagramEditor extends UiComponent<HTMLDivElement> {
 				borderRadius: "16px",
 				boxSizing: "border-box",
 				overflowY: "auto",
-				maxHeight: "100%"
+				maxHeight: "100%",
+				flex: "0 0 240px",
+				minHeight: "0"
 			}
 		})
 		this.root.appendChild(this.palette.root)

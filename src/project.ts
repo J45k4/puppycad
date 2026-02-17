@@ -1675,6 +1675,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		layoutControls.style.display = "flex"
 		layoutControls.style.alignItems = "center"
 		layoutControls.style.gap = "8px"
+		layoutControls.style.flexWrap = "wrap"
 		layoutControls.style.padding = "8px 16px"
 		layoutControls.style.borderBottom = "1px solid #e2e8f0"
 		layoutControls.style.backgroundColor = "#f1f5f9"
@@ -1692,12 +1693,11 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 
 		this.toolbarContainer = document.createElement("div")
 		this.toolbarContainer.style.display = "none"
-		this.toolbarContainer.style.padding = "12px 16px"
-		this.toolbarContainer.style.borderBottom = "1px solid #e2e8f0"
+		this.toolbarContainer.style.marginLeft = "12px"
 		this.toolbarContainer.style.gap = "12px"
 		this.toolbarContainer.style.alignItems = "center"
-		this.toolbarContainer.style.backgroundColor = "#f8fafc"
 		this.toolbarContainer.style.boxSizing = "border-box"
+		layoutControls.appendChild(this.toolbarContainer)
 
 		this.dockLayout = new DockLayout()
 		this.dockLayout.onActivePaneChange = (paneId) => {
@@ -1722,7 +1722,6 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		}
 
 		this.content.appendChild(layoutControls)
-		this.content.appendChild(this.toolbarContainer)
 		this.content.appendChild(this.dockLayout.root)
 		main.appendChild(this.content)
 
