@@ -1,10 +1,9 @@
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
 import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation } from "./project-file"
 import { UiComponent } from "./ui"
+import * as THREE from "three"
 
 type Point2D = { x: number; y: number }
-
-type Point3D = { x: number; y: number; z: number }
 
 type ExtrudedModel = PartProjectExtrudedModel
 
@@ -16,13 +15,20 @@ type PartEditorOptions = {
 }
 
 const SKETCH_CANVAS_SIZE = 360
-const LIGHT_DIRECTION: Point3D = normalizeVector({ x: 0.4, y: 0.9, z: 0.6 })
 
 export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly sketchCanvas: HTMLCanvasElement
 	private readonly sketchCtx: CanvasRenderingContext2D
 	private readonly previewCanvas: HTMLCanvasElement
-	private readonly previewCtx: CanvasRenderingContext2D
+	private readonly previewRenderer: THREE.WebGLRenderer
+	private readonly previewScene: THREE.Scene
+	private readonly previewCamera: THREE.PerspectiveCamera
+	private readonly previewRootGroup: THREE.Group
+	private readonly previewContentGroup: THREE.Group
+	private readonly previewPlaceholderMesh: THREE.Mesh
+	private readonly previewPlaceholderText: HTMLParagraphElement
+	private previewMesh: THREE.Mesh | null = null
+	private previewEdges: THREE.LineSegments | null = null
 	private readonly heightInput: HTMLInputElement
 	private readonly statusText: HTMLParagraphElement
 	private readonly extrudeSummary: HTMLParagraphElement
@@ -40,7 +46,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 	private isRotatingPreview = false
 	private lastRotationPointer: { x: number; y: number } | null = null
-	private previewScale = 180
 	private resizeObserver: ResizeObserver | null = null
 	private readonly onStateChange?: () => void
 
@@ -177,11 +182,55 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.style.cursor = "grab"
 		this.previewContainer.appendChild(this.previewCanvas)
 
-		const previewCtx = this.previewCanvas.getContext("2d")
-		if (!previewCtx) {
-			throw new Error("Failed to initialize preview canvas context")
-		}
-		this.previewCtx = previewCtx
+		this.previewPlaceholderText = document.createElement("p")
+		this.previewPlaceholderText.textContent = "Sketch a profile and extrude to see it here"
+		this.previewPlaceholderText.style.position = "absolute"
+		this.previewPlaceholderText.style.left = "50%"
+		this.previewPlaceholderText.style.bottom = "12%"
+		this.previewPlaceholderText.style.transform = "translateX(-50%)"
+		this.previewPlaceholderText.style.margin = "0"
+		this.previewPlaceholderText.style.padding = "0 12px"
+		this.previewPlaceholderText.style.pointerEvents = "none"
+		this.previewPlaceholderText.style.color = "rgba(255,255,255,0.75)"
+		this.previewPlaceholderText.style.font = "14px Inter, system-ui, sans-serif"
+		this.previewContainer.appendChild(this.previewPlaceholderText)
+
+		this.previewRenderer = new THREE.WebGLRenderer({
+			canvas: this.previewCanvas,
+			antialias: true,
+			alpha: false
+		})
+		this.previewRenderer.setPixelRatio(Math.min(2, Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : 1))
+		this.previewRenderer.setClearColor(0x1f2937, 1)
+
+		this.previewScene = new THREE.Scene()
+		this.previewCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 50)
+		this.previewCamera.position.set(0, 0.15, 3)
+
+		this.previewRootGroup = new THREE.Group()
+		this.previewContentGroup = new THREE.Group()
+		this.previewRootGroup.add(this.previewContentGroup)
+		this.previewScene.add(this.previewRootGroup)
+
+		const ambientLight = new THREE.HemisphereLight(0xf8fafc, 0x0f172a, 0.8)
+		this.previewScene.add(ambientLight)
+		const keyLight = new THREE.DirectionalLight(0xffffff, 1.2)
+		keyLight.position.set(1.2, 2.5, 1.6)
+		this.previewScene.add(keyLight)
+		const fillLight = new THREE.DirectionalLight(0x93c5fd, 0.45)
+		fillLight.position.set(-1.8, -0.4, 1.1)
+		this.previewScene.add(fillLight)
+
+		const placeholderGeometry = new THREE.BoxGeometry(1.2, 0.8, 1.2)
+		const placeholderMaterial = new THREE.MeshStandardMaterial({
+			color: 0xffffff,
+			transparent: true,
+			opacity: 0.12,
+			roughness: 0.65,
+			metalness: 0
+		})
+		this.previewPlaceholderMesh = new THREE.Mesh(placeholderGeometry, placeholderMaterial)
+		this.previewContentGroup.add(this.previewPlaceholderMesh)
 
 		this.sketchCanvas.addEventListener("click", this.handleSketchCanvasClick)
 		this.sketchCanvas.addEventListener("mousemove", this.handleSketchHover)
@@ -257,6 +306,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewRotation.yaw = rotation.yaw
 		this.previewRotation.pitch = rotation.pitch
 		this.drawSketch()
+		this.syncPreviewGeometry()
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
@@ -339,6 +389,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isSketchClosed = false
 		this.extrudedModel = null
 		this.drawSketch()
+		this.syncPreviewGeometry()
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
@@ -370,6 +421,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		this.extrudedModel = normalized
+		this.syncPreviewGeometry()
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
@@ -549,224 +601,82 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (width === 0 || height === 0) {
 			return
 		}
-		const dpr = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
-		const targetW = Math.max(1, Math.round(width * dpr))
-		const targetH = Math.max(1, Math.round(height * dpr))
-		if (this.previewCanvas.width !== targetW || this.previewCanvas.height !== targetH) {
-			this.previewCanvas.width = targetW
-			this.previewCanvas.height = targetH
-		}
-		this.previewCtx.setTransform(1, 0, 0, 1, 0, 0)
-		this.previewCtx.scale(dpr, dpr)
-		this.previewScale = Math.min(width, height) * 0.35
+		this.previewRenderer.setPixelRatio(Math.min(2, Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : 1))
+		this.previewRenderer.setSize(width, height, false)
+		this.previewCamera.aspect = width / height
+		this.previewCamera.updateProjectionMatrix()
 		this.drawPreview()
 	}
 
 	private drawPreview() {
-		const rect = this.previewCanvas.getBoundingClientRect()
-		this.previewCtx.clearRect(0, 0, rect.width, rect.height)
+		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
+		this.previewRenderer.render(this.previewScene, this.previewCamera)
+	}
 
-		if (!this.extrudedModel) {
-			this.drawPreviewPlaceholder(rect)
+	private syncPreviewGeometry() {
+		if (this.previewMesh) {
+			this.previewContentGroup.remove(this.previewMesh)
+			this.previewMesh.geometry.dispose()
+			const meshMaterial = this.previewMesh.material
+			if (Array.isArray(meshMaterial)) {
+				for (const material of meshMaterial) {
+					material.dispose()
+				}
+			} else {
+				meshMaterial.dispose()
+			}
+			this.previewMesh = null
+		}
+
+		if (this.previewEdges) {
+			this.previewContentGroup.remove(this.previewEdges)
+			this.previewEdges.geometry.dispose()
+			const edgeMaterial = this.previewEdges.material
+			if (Array.isArray(edgeMaterial)) {
+				for (const material of edgeMaterial) {
+					material.dispose()
+				}
+			} else {
+				edgeMaterial.dispose()
+			}
+			this.previewEdges = null
+		}
+
+		if (!this.extrudedModel || this.extrudedModel.base.length < 3) {
+			this.previewPlaceholderMesh.visible = true
+			this.previewPlaceholderText.style.display = "block"
 			return
 		}
 
 		const { base, height } = this.extrudedModel
-		if (base.length < 3) {
-			this.drawPreviewPlaceholder(rect)
-			return
-		}
-		const bottom = base.map((point) => ({ x: point.x, y: point.y, z: -height / 2 }))
-		const top = base.map((point) => ({ x: point.x, y: point.y, z: height / 2 }))
+		const shapePoints = base.map((point) => new THREE.Vector2(point.x, point.y))
+		const shape = new THREE.Shape(shapePoints)
+		const geometry = new THREE.ExtrudeGeometry(shape, {
+			depth: height,
+			bevelEnabled: false,
+			steps: 1
+		})
+		geometry.translate(0, 0, -height / 2)
+		geometry.computeVertexNormals()
 
-		const faces: { vertices: Point3D[]; type: "side" | "top" | "bottom" }[] = []
-		for (let i = 0; i < base.length; i += 1) {
-			const next = (i + 1) % base.length
-			const bottomCurrent = bottom[i]
-			const bottomNext = bottom[next]
-			const topNext = top[next]
-			const topCurrent = top[i]
-			if (!bottomCurrent || !bottomNext || !topNext || !topCurrent) {
-				continue
-			}
-			faces.push({
-				vertices: [bottomCurrent, bottomNext, topNext, topCurrent],
-				type: "side"
-			})
-		}
-		faces.push({ vertices: top.slice().reverse(), type: "top" })
-		faces.push({ vertices: bottom, type: "bottom" })
+		const material = new THREE.MeshStandardMaterial({
+			color: 0x3b82f6,
+			roughness: 0.35,
+			metalness: 0.05
+		})
+		this.previewMesh = new THREE.Mesh(geometry, material)
+		this.previewContentGroup.add(this.previewMesh)
 
-		const rotatedFaces = faces
-			.map((face) => {
-				const rotated = face.vertices.map((vertex) => this.rotateVertex(vertex))
-				const projected = rotated.map((vertex) => this.projectVertex(vertex, rect))
-				const averageZ = rotated.reduce((sum, vertex) => sum + vertex.z, 0) / rotated.length
-				const normal = computeFaceNormal(rotated)
-				return { ...face, rotated, projected, averageZ, normal }
-			})
-			.sort((a, b) => a.averageZ - b.averageZ)
+		const edgeGeometry = new THREE.EdgesGeometry(geometry)
+		const edgeMaterial = new THREE.LineBasicMaterial({
+			color: 0xe2e8f0,
+			transparent: true,
+			opacity: 0.8
+		})
+		this.previewEdges = new THREE.LineSegments(edgeGeometry, edgeMaterial)
+		this.previewContentGroup.add(this.previewEdges)
 
-		for (const face of rotatedFaces) {
-			if (!face.projected.length) {
-				continue
-			}
-			let intensity = 0.6
-			if (face.normal) {
-				const dot = dotProduct(normalizeVector(face.normal), LIGHT_DIRECTION)
-				const clamped = Math.max(0.2, Math.min(1, dot))
-				intensity = Number.isFinite(clamped) ? clamped : 0.6
-			}
-			const baseColor: [number, number, number] = face.type === "top" ? [96, 165, 250] : [30, 64, 175]
-			const fillColor = `rgba(${Math.round(baseColor[0] * intensity)}, ${Math.round(
-				baseColor[1] * intensity
-			)}, ${Math.round(baseColor[2] * intensity)}, ${face.type === "bottom" ? 0.4 : 0.9})`
-			const firstPoint = face.projected[0]
-			if (!firstPoint) {
-				continue
-			}
-			this.previewCtx.beginPath()
-			this.previewCtx.moveTo(firstPoint.x, firstPoint.y)
-			for (let i = 1; i < face.projected.length; i += 1) {
-				const projectedPoint = face.projected[i]
-				if (!projectedPoint) {
-					continue
-				}
-				this.previewCtx.lineTo(projectedPoint.x, projectedPoint.y)
-			}
-			this.previewCtx.closePath()
-			this.previewCtx.fillStyle = fillColor
-			this.previewCtx.fill()
-			this.previewCtx.strokeStyle = "rgba(15,23,42,0.6)"
-			this.previewCtx.lineWidth = 1.5
-			this.previewCtx.stroke()
-		}
-
-		this.previewCtx.strokeStyle = "rgba(241,245,249,0.8)"
-		this.previewCtx.lineWidth = 1
-		for (const point of [...top, ...bottom]) {
-			const rotated = this.rotateVertex(point)
-			const projected = this.projectVertex(rotated, rect)
-			this.previewCtx.beginPath()
-			this.previewCtx.arc(projected.x, projected.y, 2.5, 0, Math.PI * 2)
-			this.previewCtx.stroke()
-		}
+		this.previewPlaceholderMesh.visible = false
+		this.previewPlaceholderText.style.display = "none"
 	}
-
-	private drawPreviewPlaceholder(rect: DOMRect) {
-		const baseSquare: Point3D[] = [
-			{ x: -0.6, y: -0.4, z: -0.6 },
-			{ x: 0.6, y: -0.4, z: -0.6 },
-			{ x: 0.6, y: -0.4, z: 0.6 },
-			{ x: -0.6, y: -0.4, z: 0.6 }
-		]
-		const topSquare = baseSquare.map((point) => ({ ...point, y: point.y + 0.8 }))
-		const faces: Point3D[][] = []
-		for (let i = 0; i < baseSquare.length; i += 1) {
-			const next = (i + 1) % baseSquare.length
-			const baseCurrent = baseSquare[i]
-			const baseNext = baseSquare[next]
-			const topNext = topSquare[next]
-			const topCurrent = topSquare[i]
-			if (!baseCurrent || !baseNext || !topNext || !topCurrent) {
-				continue
-			}
-			faces.push([baseCurrent, baseNext, topNext, topCurrent])
-		}
-		faces.push(topSquare.slice().reverse())
-		faces.push(baseSquare)
-
-		for (const face of faces) {
-			const rotated = face.map((vertex) => this.rotateVertex(vertex))
-			const projected = rotated.map((vertex) => this.projectVertex(vertex, rect))
-			const first = projected[0]
-			if (!first) {
-				continue
-			}
-			this.previewCtx.beginPath()
-			this.previewCtx.moveTo(first.x, first.y)
-			for (let i = 1; i < projected.length; i += 1) {
-				const point = projected[i]
-				if (!point) {
-					continue
-				}
-				this.previewCtx.lineTo(point.x, point.y)
-			}
-			this.previewCtx.closePath()
-			this.previewCtx.fillStyle = "rgba(255,255,255,0.1)"
-			this.previewCtx.fill()
-			this.previewCtx.strokeStyle = "rgba(255,255,255,0.25)"
-			this.previewCtx.lineWidth = 1.5
-			this.previewCtx.stroke()
-		}
-
-		this.previewCtx.fillStyle = "rgba(255,255,255,0.75)"
-		this.previewCtx.font = "14px Inter, system-ui, sans-serif"
-		this.previewCtx.textAlign = "center"
-		this.previewCtx.fillText("Sketch a profile and extrude to see it here", rect.width / 2, rect.height / 2 + Math.min(rect.width, rect.height) * 0.3)
-	}
-
-	private rotateVertex(vertex: Point3D): Point3D {
-		const cosYaw = Math.cos(this.previewRotation.yaw)
-		const sinYaw = Math.sin(this.previewRotation.yaw)
-		const cosPitch = Math.cos(this.previewRotation.pitch)
-		const sinPitch = Math.sin(this.previewRotation.pitch)
-
-		const xzRotatedX = vertex.x * cosYaw - vertex.z * sinYaw
-		const xzRotatedZ = vertex.x * sinYaw + vertex.z * cosYaw
-
-		const yRotatedY = vertex.y * cosPitch - xzRotatedZ * sinPitch
-		const yRotatedZ = vertex.y * sinPitch + xzRotatedZ * cosPitch
-
-		return {
-			x: xzRotatedX,
-			y: yRotatedY,
-			z: yRotatedZ
-		}
-	}
-
-	private projectVertex(vertex: Point3D, rect: DOMRect): Point2D {
-		const distance = 3
-		const perspective = distance / Math.max(0.01, distance - vertex.z)
-		const x = rect.width / 2 + vertex.x * this.previewScale * perspective
-		const y = rect.height / 2 - vertex.y * this.previewScale * perspective
-		return { x, y }
-	}
-}
-
-function normalizeVector(vector: Point3D): Point3D {
-	const length = Math.hypot(vector.x, vector.y, vector.z) || 1
-	return { x: vector.x / length, y: vector.y / length, z: vector.z / length }
-}
-
-function dotProduct(a: Point3D, b: Point3D): number {
-	return a.x * b.x + a.y * b.y + a.z * b.z
-}
-
-function computeFaceNormal(vertices: Point3D[]): Point3D | null {
-	if (vertices.length < 3) {
-		return null
-	}
-	const v0 = vertices[0]
-	const v1 = vertices[1]
-	const v2 = vertices[vertices.length - 1]
-	if (!v0 || !v1 || !v2) {
-		return null
-	}
-	const edge1 = {
-		x: v1.x - v0.x,
-		y: v1.y - v0.y,
-		z: v1.z - v0.z
-	}
-	const edge2 = {
-		x: v2.x - v0.x,
-		y: v2.y - v0.y,
-		z: v2.z - v0.z
-	}
-	const normal = {
-		x: edge1.y * edge2.z - edge1.z * edge2.y,
-		y: edge1.z * edge2.x - edge1.x * edge2.z,
-		z: edge1.x * edge2.y - edge1.y * edge2.x
-	}
-	return normal
 }
