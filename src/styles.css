@@ -201,6 +201,11 @@ textarea:focus-visible {
 	gap: var(--space-6);
 }
 
+.app-shell.app-shell--flush {
+	padding: 0;
+	gap: 0;
+}
+
 .view {
 	background: var(--color-surface);
 	border-radius: var(--radius-lg);

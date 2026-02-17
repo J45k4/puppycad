@@ -64,7 +64,8 @@ window.onload = () => {
 	root.classList.add("app-shell", "app-container")
 	container.root.appendChild(root)
 
-	const setActiveView = (view: UiComponent<HTMLElement>) => {
+	const setActiveView = (view: UiComponent<HTMLElement>, options?: { flushShell?: boolean }) => {
+		root.classList.toggle("app-shell--flush", options?.flushShell === true)
 		swapView(root, view)
 	}
 
@@ -75,7 +76,7 @@ window.onload = () => {
 	})
 
 	const showProjects = (options: NavigationOptions = {}) => {
-		setActiveView(projectsView)
+		setActiveView(projectsView, { flushShell: false })
 		updateHistoryState({ view: "projects" }, "/", { replace: options.replace, skip: options.skipHistory })
 	}
 
@@ -105,7 +106,7 @@ window.onload = () => {
 			}
 		})
 		projectsView.refresh()
-		setActiveView(projectView)
+		setActiveView(projectView, { flushShell: true })
 	}
 
 	const getProjectById = (id: string): ProjectMetadata | undefined => {
