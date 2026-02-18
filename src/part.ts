@@ -6,7 +6,10 @@ import * as THREE from "three"
 type Point2D = { x: number; y: number }
 
 type ExtrudedModel = PartProjectExtrudedModel
+type PartStudioTool = "view" | "sketch"
+type SketchTool = "line" | "rectangle"
 type ReferencePlaneVisual = {
+	name: "Front" | "Top" | "Right"
 	mesh: THREE.Mesh
 	edge: THREE.LineSegments
 	fillMaterial: THREE.MeshBasicMaterial
@@ -52,8 +55,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		depthTest: false
 	})
 	private readonly previewReferenceHandles: ReferencePlaneHandle[] = []
+	private readonly sketchOverlayGroup = new THREE.Group()
 	private previewMesh: THREE.Mesh | null = null
 	private previewEdges: THREE.LineSegments | null = null
+	private sketchOverlayCommittedLine: THREE.Line | THREE.LineLoop | null = null
+	private sketchOverlayPreviewLine: THREE.Line | THREE.LineLoop | null = null
+	private sketchOverlayPoints: THREE.Points | null = null
+	private sketchOverlayLabel: THREE.Sprite | null = null
+	private sketchOverlayParentPlane: THREE.Mesh | null = null
 	private readonly heightInput: HTMLInputElement
 	private readonly statusText: HTMLParagraphElement
 	private readonly extrudeSummary: HTMLParagraphElement
@@ -62,6 +71,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly resetButton: HTMLButtonElement
 	private readonly extrudeButton: HTMLButtonElement
 	private readonly previewContainer: HTMLDivElement
+	private readonly sketchPanel: HTMLDivElement
 	private sketchPoints: Point2D[] = []
 	private isSketchClosed = false
 	private extrudedModel: ExtrudedModel | null = null
@@ -79,9 +89,20 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewPointer = new THREE.Vector2()
 	private hoveredReferencePlane: THREE.Mesh | null = null
 	private selectedReferencePlane: THREE.Mesh | null = null
+	private pointerOverSelectedPlane = false
 	private activeResizeHandle: ReferencePlaneHandle | null = null
 	private resizingReferencePlane: THREE.Mesh | null = null
 	private readonly onStateChange?: () => void
+	private activeTool: PartStudioTool = "view"
+	private activeSketchTool: SketchTool | null = "line"
+	private sketchName = "Sketch 1"
+	private paneToolbar: UiComponent<HTMLElement> | null = null
+	private sketchToolButton: HTMLButtonElement | null = null
+	private sketchToolsBar: HTMLDivElement | null = null
+	private lineSketchToolButton: HTMLButtonElement | null = null
+	private rectangleSketchToolButton: HTMLButtonElement | null = null
+	private pendingRectangleStart: Point2D | null = null
+	private sketchHoverPoint: Point2D | null = null
 
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
@@ -114,20 +135,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		body.style.overflow = "hidden"
 		this.root.appendChild(body)
 
-		const sketchPanel = document.createElement("div")
-		sketchPanel.style.flex = "1 1 360px"
-		sketchPanel.style.minWidth = "0"
-		sketchPanel.style.maxWidth = "420px"
-		sketchPanel.style.display = "flex"
-		sketchPanel.style.flexDirection = "column"
-		sketchPanel.style.gap = "12px"
-		sketchPanel.style.display = "none"
-		body.appendChild(sketchPanel)
+		this.sketchPanel = document.createElement("div")
+		this.sketchPanel.style.flex = "1 1 auto"
+		this.sketchPanel.style.minWidth = "0"
+		this.sketchPanel.style.minHeight = "0"
+		this.sketchPanel.style.display = "none"
+		this.sketchPanel.style.flexDirection = "column"
+		this.sketchPanel.style.gap = "12px"
+		body.appendChild(this.sketchPanel)
 
 		const sketchHeader = document.createElement("div")
 		sketchHeader.innerHTML =
 			'<h3 style="margin:0;font-size:16px;">Sketch</h3><p style="margin:4px 0 0;color:#475569;font-size:13px;">Click inside the sketch area to create points. Add at least three points, then finish the sketch to extrude it.</p>'
-		sketchPanel.appendChild(sketchHeader)
+		this.sketchPanel.appendChild(sketchHeader)
 
 		this.sketchCanvas = document.createElement("canvas")
 		this.sketchCanvas.style.border = "1px solid #cbd5f5"
@@ -140,10 +160,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchCanvas.width = SKETCH_CANVAS_SIZE * window.devicePixelRatio
 		this.sketchCanvas.height = SKETCH_CANVAS_SIZE * window.devicePixelRatio
 		this.sketchCanvas.style.width = "100%"
-		this.sketchCanvas.style.maxWidth = `${SKETCH_CANVAS_SIZE}px`
+		this.sketchCanvas.style.maxWidth = "100%"
 		this.sketchCanvas.style.aspectRatio = "1 / 1"
 		this.sketchCanvas.style.height = "auto"
-		sketchPanel.appendChild(this.sketchCanvas)
+		this.sketchPanel.appendChild(this.sketchCanvas)
 
 		const sketchCtx = this.sketchCanvas.getContext("2d")
 		if (!sketchCtx) {
@@ -157,7 +177,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		controlsRow.style.display = "grid"
 		controlsRow.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))"
 		controlsRow.style.gap = "8px"
-		sketchPanel.appendChild(controlsRow)
+		this.sketchPanel.appendChild(controlsRow)
 
 		this.undoButton = this.createButton("Undo", this.handleUndo)
 		controlsRow.appendChild(this.undoButton)
@@ -173,7 +193,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		extrudeControls.style.gap = "8px"
 		extrudeControls.style.alignItems = "center"
 		extrudeControls.style.marginTop = "4px"
-		sketchPanel.appendChild(extrudeControls)
+		this.sketchPanel.appendChild(extrudeControls)
 
 		const heightLabel = document.createElement("label")
 		heightLabel.textContent = "Extrude height"
@@ -195,19 +215,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.extrudeButton = this.createButton("Extrude", this.handleExtrude)
 		this.extrudeButton.style.gridColumn = "span 2"
-		sketchPanel.appendChild(this.extrudeButton)
+		this.sketchPanel.appendChild(this.extrudeButton)
 
 		this.statusText = document.createElement("p")
 		this.statusText.style.margin = "4px 0 0"
 		this.statusText.style.fontSize = "13px"
 		this.statusText.style.color = "#475569"
-		sketchPanel.appendChild(this.statusText)
+		this.sketchPanel.appendChild(this.statusText)
 
 		this.extrudeSummary = document.createElement("p")
 		this.extrudeSummary.style.margin = "0"
 		this.extrudeSummary.style.fontSize = "13px"
 		this.extrudeSummary.style.color = "#0f172a"
-		sketchPanel.appendChild(this.extrudeSummary)
+		this.sketchPanel.appendChild(this.extrudeSummary)
 
 		this.previewContainer = document.createElement("div")
 		this.previewContainer.style.flex = "1 1 auto"
@@ -230,6 +250,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.style.width = "100%"
 		this.previewCanvas.style.height = "100%"
 		this.previewCanvas.style.cursor = "grab"
+		this.previewCanvas.tabIndex = 0
 		this.previewContainer.appendChild(this.previewCanvas)
 
 		this.previewRenderer = new THREE.WebGLRenderer({
@@ -260,6 +281,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.previewReferenceGroup = this.createReferencePlanes()
 		this.previewContentGroup.add(this.previewReferenceGroup)
+		this.previewContentGroup.add(this.sketchOverlayGroup)
+		this.sketchOverlayGroup.visible = false
 
 		this.sketchCanvas.addEventListener("click", this.handleSketchCanvasClick)
 		this.sketchCanvas.addEventListener("mousemove", this.handleSketchHover)
@@ -274,12 +297,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.addEventListener("pointerup", this.handlePreviewPointerUp)
 		this.previewCanvas.addEventListener("pointerleave", this.handlePreviewPointerUp)
 		this.previewCanvas.addEventListener("pointercancel", this.handlePreviewPointerUp)
+		this.previewCanvas.addEventListener("dblclick", this.handlePreviewDoubleClick)
+		this.previewCanvas.addEventListener("keydown", this.handlePreviewKeyDown)
 		this.previewCanvas.addEventListener("wheel", this.handlePreviewWheel, { passive: false })
 		this.previewCanvas.addEventListener("contextmenu", (event) => {
 			event.preventDefault()
 		})
+		document.addEventListener("keydown", this.handleDocumentKeyDown, true)
 
 		this.restoreState(options?.initialState)
+		this.updateStudioModeLayout()
 
 		if (typeof ResizeObserver === "function") {
 			this.resizeObserver = new ResizeObserver(() => {
@@ -301,6 +328,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const heightValue = this.getHeightFromInput()
 		return {
 			sketchPoints: this.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
+			sketchName: this.sketchPoints.length > 0 ? this.sketchName : undefined,
 			isSketchClosed: this.isSketchClosed,
 			extrudedModel:
 				this.extrudedModel === null
@@ -319,10 +347,201 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	public createPaneToolbar(): UiComponent<HTMLElement> {
+		if (this.paneToolbar) {
+			return this.paneToolbar
+		}
+
+		const toolbar = document.createElement("div")
+		toolbar.style.display = "flex"
+		toolbar.style.alignItems = "center"
+		toolbar.style.gap = "6px"
+
+		const sketchButton = document.createElement("button")
+		sketchButton.type = "button"
+		sketchButton.textContent = "Sketch"
+		sketchButton.style.padding = "4px 8px"
+		sketchButton.style.borderRadius = "6px"
+		sketchButton.style.border = "1px solid #93c5fd"
+		sketchButton.style.fontSize = "12px"
+		sketchButton.style.fontWeight = "600"
+		sketchButton.style.cursor = "pointer"
+		sketchButton.draggable = false
+		sketchButton.addEventListener("click", (event) => {
+			event.preventDefault()
+			event.stopPropagation()
+			this.setActiveTool(this.activeTool === "sketch" ? "view" : "sketch")
+		})
+		toolbar.appendChild(sketchButton)
+		const sketchToolsBar = document.createElement("div")
+		sketchToolsBar.style.display = "none"
+		sketchToolsBar.style.alignItems = "center"
+		sketchToolsBar.style.gap = "4px"
+		sketchToolsBar.style.paddingLeft = "4px"
+		sketchToolsBar.style.borderLeft = "1px solid #cbd5e1"
+
+		const createSketchToolButton = (label: string, title: string, onClick: () => void): HTMLButtonElement => {
+			const button = document.createElement("button")
+			button.type = "button"
+			button.textContent = label
+			button.title = title
+			button.style.width = "26px"
+			button.style.height = "24px"
+			button.style.borderRadius = "4px"
+			button.style.border = "1px solid #cbd5e1"
+			button.style.backgroundColor = "#ffffff"
+			button.style.color = "#334155"
+			button.style.fontSize = "14px"
+			button.style.fontWeight = "700"
+			button.style.cursor = "pointer"
+			button.draggable = false
+			button.addEventListener("click", (event) => {
+				event.preventDefault()
+				event.stopPropagation()
+				onClick()
+			})
+			return button
+		}
+
+		const lineButton = createSketchToolButton("/", "Line Tool", () => {
+			this.setActiveSketchTool("line")
+		})
+		const rectangleButton = createSketchToolButton("▭", "Rectangle Tool", () => {
+			this.setActiveSketchTool("rectangle")
+		})
+		sketchToolsBar.appendChild(lineButton)
+		sketchToolsBar.appendChild(rectangleButton)
+		toolbar.appendChild(sketchToolsBar)
+
+		this.sketchToolButton = sketchButton
+		this.sketchToolsBar = sketchToolsBar
+		this.lineSketchToolButton = lineButton
+		this.rectangleSketchToolButton = rectangleButton
+		this.paneToolbar = new UiComponent(toolbar)
+		this.updatePaneToolbarStyles()
+		this.updateSketchToolButtons()
+		return this.paneToolbar
+	}
+
+	public selectReferencePlane(planeName: "Top" | "Front" | "Right"): void {
+		const plane = this.previewReferencePlanes.find((entry) => entry.name === planeName)?.mesh ?? null
+		if (!plane) {
+			return
+		}
+		this.setSelectedReferencePlane(plane)
+	}
+
+	public getSketchName(): string {
+		return this.sketchName
+	}
+
+	public setSketchName(name: string): void {
+		const trimmed = name.trim()
+		if (!trimmed || trimmed === this.sketchName) {
+			return
+		}
+		this.sketchName = trimmed
+		this.updateSketchOverlay()
+		this.emitStateChange()
+	}
+
+	public enterSketchMode(): void {
+		if (this.isSketchClosed) {
+			this.isSketchClosed = false
+			this.updateControls()
+			this.updateStatus()
+		}
+		this.setActiveTool("sketch")
+	}
+
+	public deleteSketch(): void {
+		this.sketchPoints = []
+		this.isSketchClosed = false
+		this.pendingRectangleStart = null
+		this.sketchHoverPoint = null
+		this.extrudedModel = null
+		this.drawSketch()
+		this.syncPreviewGeometry()
+		this.updateSketchOverlay()
+		this.drawPreview()
+		this.updateStatus()
+		this.updateControls()
+		this.emitStateChange()
+	}
+
+	private setActiveTool(tool: PartStudioTool) {
+		if (this.activeTool === tool) {
+			return
+		}
+		this.activeTool = tool
+		this.pointerOverSelectedPlane = false
+		this.pendingRectangleStart = null
+		this.sketchHoverPoint = null
+		if (tool === "sketch" && !this.selectedReferencePlane) {
+			const defaultPlane = this.previewReferencePlanes[0]?.mesh ?? null
+			if (defaultPlane) {
+				this.setSelectedReferencePlane(defaultPlane)
+			}
+		}
+		this.updatePaneToolbarStyles()
+		this.updateStudioModeLayout()
+		this.updateSketchOverlay()
+	}
+
+	private setActiveSketchTool(tool: SketchTool | null) {
+		if (this.activeSketchTool === tool && !this.pendingRectangleStart) {
+			return
+		}
+		this.activeSketchTool = tool
+		this.pendingRectangleStart = null
+		this.sketchHoverPoint = null
+		this.updateSketchToolButtons()
+		this.drawSketch()
+		this.updateSketchOverlay()
+		this.updatePreviewCursor()
+	}
+
+	private updatePaneToolbarStyles() {
+		if (!this.sketchToolButton) {
+			return
+		}
+		const active = this.activeTool === "sketch"
+		this.sketchToolButton.style.backgroundColor = active ? "#2563eb" : "#ffffff"
+		this.sketchToolButton.style.color = active ? "#ffffff" : "#1e293b"
+		this.sketchToolButton.style.borderColor = active ? "#1d4ed8" : "#93c5fd"
+		if (this.sketchToolsBar) {
+			this.sketchToolsBar.style.display = active ? "flex" : "none"
+		}
+	}
+
+	private updateSketchToolButtons() {
+		if (this.lineSketchToolButton) {
+			const active = this.activeSketchTool === "line"
+			this.lineSketchToolButton.style.backgroundColor = active ? "#e2e8f0" : "#ffffff"
+			this.lineSketchToolButton.style.borderColor = active ? "#94a3b8" : "#cbd5e1"
+		}
+		if (this.rectangleSketchToolButton) {
+			const active = this.activeSketchTool === "rectangle"
+			this.rectangleSketchToolButton.style.backgroundColor = active ? "#e2e8f0" : "#ffffff"
+			this.rectangleSketchToolButton.style.borderColor = active ? "#94a3b8" : "#cbd5e1"
+		}
+	}
+
+	private updateStudioModeLayout() {
+		const sketchMode = this.activeTool === "sketch"
+		this.sketchPanel.style.display = "none"
+		this.previewContainer.style.display = "flex"
+		if (sketchMode) {
+			this.drawSketch()
+		}
+		this.drawPreview()
+	}
+
 	private restoreState(state?: PartEditorState) {
 		const height = state && Number.isFinite(state.height) ? state.height : PART_PROJECT_DEFAULT_HEIGHT
 		const rotation = state?.previewRotation ?? PART_PROJECT_DEFAULT_ROTATION
 		this.sketchPoints = state?.sketchPoints?.map((point) => ({ x: point.x, y: point.y })) ?? []
+		this.sketchName = state?.sketchName?.trim() ? state.sketchName.trim() : "Sketch 1"
 		this.isSketchClosed = state?.isSketchClosed ?? false
 		this.extrudedModel = state?.extrudedModel
 			? {
@@ -337,6 +556,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewRotation.pitch = rotation.pitch
 		this.drawSketch()
 		this.syncPreviewGeometry()
+		this.updateSketchOverlay()
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
@@ -383,24 +603,46 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleSketchCanvasClick = (event: MouseEvent) => {
+		if (this.activeTool !== "sketch") {
+			return
+		}
+		if (!this.activeSketchTool) {
+			return
+		}
 		if (this.isSketchClosed) {
 			return
 		}
 		const rect = this.sketchCanvas.getBoundingClientRect()
 		const x = event.clientX - rect.left
 		const y = event.clientY - rect.top
-		this.sketchPoints = [...this.sketchPoints, { x, y }]
+		if (this.activeSketchTool === "rectangle") {
+			if (!this.pendingRectangleStart) {
+				this.pendingRectangleStart = { x, y }
+				this.drawSketch({ x, y, active: true })
+				return
+			}
+			const start = this.pendingRectangleStart
+			this.pendingRectangleStart = null
+			this.appendRectangleToSketch(start, { x, y })
+		} else {
+			this.sketchPoints = [...this.sketchPoints, { x, y }]
+		}
 		this.drawSketch()
+		this.updateSketchOverlay()
 		this.updateStatus()
 		this.updateControls()
 		this.emitStateChange()
 	}
 
 	private handleSketchHover = (event: MouseEvent) => {
+		if (this.activeTool !== "sketch") {
+			return
+		}
 		const rect = this.sketchCanvas.getBoundingClientRect()
 		const x = event.clientX - rect.left
 		const y = event.clientY - rect.top
 		this.drawSketch({ x, y, active: event.type === "mousemove" })
+		this.updateSketchOverlay(event.type === "mousemove" ? { x, y } : null)
 	}
 
 	private handleUndo = () => {
@@ -409,6 +651,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.sketchPoints = this.sketchPoints.slice(0, -1)
 		this.drawSketch()
+		this.updateSketchOverlay()
 		this.updateStatus()
 		this.updateControls()
 		this.emitStateChange()
@@ -417,9 +660,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private handleReset = () => {
 		this.sketchPoints = []
 		this.isSketchClosed = false
+		this.pendingRectangleStart = null
+		this.sketchHoverPoint = null
 		this.extrudedModel = null
 		this.drawSketch()
 		this.syncPreviewGeometry()
+		this.updateSketchOverlay()
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
@@ -431,7 +677,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		this.isSketchClosed = true
+		this.sketchHoverPoint = null
 		this.drawSketch()
+		this.updateSketchOverlay()
 		this.updateStatus()
 		this.updateControls()
 		this.emitStateChange()
@@ -459,6 +707,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerDown = (event: PointerEvent) => {
+		this.previewCanvas.focus({ preventScroll: true })
 		const isLeftMouseClick = event.pointerType === "mouse" ? event.button === 0 : false
 		const isRightMouseClick = event.pointerType === "mouse" ? event.button === 2 : event.isPrimary && event.button === 0
 		const isMiddleMouseClick = event.pointerType === "mouse" && event.button === 1
@@ -472,7 +721,28 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.previewCanvas.style.cursor = "nwse-resize"
 				return
 			}
+			if (this.activeTool === "sketch" && this.selectedReferencePlane && this.isPointInsideReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)) {
+				event.preventDefault()
+				this.handleSketchPlanePointInput(event.clientX, event.clientY)
+				return
+			}
 			const clickedPlane = this.getReferencePlaneAt(event.clientX, event.clientY)
+			if (this.activeTool === "sketch" && clickedPlane) {
+				event.preventDefault()
+				if (this.selectedReferencePlane !== clickedPlane) {
+					// While a sketch command is active, clicks on other reference planes
+					// should not retarget drawing to another plane.
+					if (this.activeSketchTool === null) {
+						this.setSelectedReferencePlane(clickedPlane)
+						this.pendingRectangleStart = null
+						this.sketchHoverPoint = null
+						this.updateSketchOverlay()
+					}
+					return
+				}
+				this.handleSketchPlanePointInput(event.clientX, event.clientY)
+				return
+			}
 			if (clickedPlane) {
 				event.preventDefault()
 				this.setSelectedReferencePlane(clickedPlane)
@@ -502,10 +772,18 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		if ((!this.isRotatingPreview && !this.isPanningPreview) || !this.lastRotationPointer) {
+			if (this.activeTool === "sketch" && this.selectedReferencePlane) {
+				const localPoint = this.getPointOnReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)
+				const clamped = localPoint ? this.clampPointToPlane(localPoint.x, localPoint.y) : null
+				this.sketchHoverPoint = clamped ? this.planeLocalToSketchPoint(clamped) : null
+				this.updateSketchOverlay()
+			}
 			this.updateReferencePlaneHover(event.clientX, event.clientY)
 			return
 		}
 		this.setHoveredReferencePlane(null)
+		this.sketchHoverPoint = null
+		this.updateSketchOverlay()
 		const dx = event.clientX - this.lastRotationPointer.x
 		const dy = event.clientY - this.lastRotationPointer.y
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
@@ -536,7 +814,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		if (!this.isRotatingPreview && !this.isPanningPreview) {
 			if (event.type === "pointerleave" || event.type === "pointercancel") {
+				this.pointerOverSelectedPlane = false
 				this.setHoveredReferencePlane(null)
+				this.updatePreviewCursor()
 			}
 			return
 		}
@@ -547,8 +827,51 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isPanningPreview = false
 		this.reverseRotatePreview = false
 		this.lastRotationPointer = null
+		this.pointerOverSelectedPlane = false
+		if (this.activeTool !== "sketch") {
+			this.sketchHoverPoint = null
+			this.updateSketchOverlay()
+		}
 		this.updatePreviewCursor()
 		this.emitStateChange()
+	}
+
+	private handlePreviewDoubleClick = (event: MouseEvent) => {
+		if (this.activeTool !== "sketch") {
+			return
+		}
+		if (this.activeSketchTool !== "line" || this.isSketchClosed || this.sketchPoints.length < 3) {
+			return
+		}
+		event.preventDefault()
+		this.handleFinishSketch()
+	}
+
+	private handlePreviewKeyDown = (event: KeyboardEvent) => {
+		this.tryCancelSketchToolWithEscape(event)
+	}
+
+	private handleDocumentKeyDown = (event: KeyboardEvent) => {
+		if (!this.root.isConnected) {
+			document.removeEventListener("keydown", this.handleDocumentKeyDown, true)
+			return
+		}
+		this.tryCancelSketchToolWithEscape(event)
+	}
+
+	private tryCancelSketchToolWithEscape(event: KeyboardEvent) {
+		if (event.key !== "Escape" && event.key !== "Esc") {
+			return
+		}
+		if (this.activeTool !== "sketch") {
+			return
+		}
+		if (!this.activeSketchTool && !this.pendingRectangleStart) {
+			return
+		}
+		event.preventDefault()
+		event.stopPropagation()
+		this.setActiveSketchTool(null)
 	}
 
 	private handlePreviewWheel = (event: WheelEvent) => {
@@ -645,16 +968,34 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		if (hover?.active && !this.isSketchClosed && this.sketchPoints.length > 0) {
-			const last = this.sketchPoints[this.sketchPoints.length - 1]
-			if (last) {
+			if (this.activeSketchTool === "rectangle" && this.pendingRectangleStart) {
+				const start = this.pendingRectangleStart
 				this.sketchCtx.setLineDash([4, 4])
 				this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
-				this.sketchCtx.beginPath()
-				this.sketchCtx.moveTo(last.x, last.y)
-				this.sketchCtx.lineTo(hover.x, hover.y)
-				this.sketchCtx.stroke()
+				this.sketchCtx.strokeRect(Math.min(start.x, hover.x), Math.min(start.y, hover.y), Math.abs(hover.x - start.x), Math.abs(hover.y - start.y))
 				this.sketchCtx.setLineDash([])
+				this.drawSketchPoint({ x: hover.x, y: hover.y }, "#0f172a", true)
+			} else if (this.activeSketchTool === "line") {
+				const last = this.sketchPoints[this.sketchPoints.length - 1]
+				if (last) {
+					this.sketchCtx.setLineDash([4, 4])
+					this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
+					this.sketchCtx.beginPath()
+					this.sketchCtx.moveTo(last.x, last.y)
+					this.sketchCtx.lineTo(hover.x, hover.y)
+					this.sketchCtx.stroke()
+					this.sketchCtx.setLineDash([])
+				}
+				this.drawSketchPoint({ x: hover.x, y: hover.y }, "#0f172a", true)
 			}
+		}
+
+		if (hover?.active && !this.isSketchClosed && this.activeSketchTool === "rectangle" && this.pendingRectangleStart && this.sketchPoints.length === 0) {
+			const start = this.pendingRectangleStart
+			this.sketchCtx.setLineDash([4, 4])
+			this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
+			this.sketchCtx.strokeRect(Math.min(start.x, hover.x), Math.min(start.y, hover.y), Math.abs(hover.x - start.x), Math.abs(hover.y - start.y))
+			this.sketchCtx.setLineDash([])
 			this.drawSketchPoint({ x: hover.x, y: hover.y }, "#0f172a", true)
 		}
 	}
@@ -763,6 +1104,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewCanvas.style.cursor = "nwse-resize"
 			return
 		}
+		if (this.activeTool === "sketch") {
+			const overSelected = this.selectedReferencePlane ? this.getPointOnReferencePlane(clientX, clientY, this.selectedReferencePlane) !== null : false
+			this.pointerOverSelectedPlane = overSelected
+			this.setHoveredReferencePlane(null)
+			this.updatePreviewCursor()
+			return
+		}
+		this.pointerOverSelectedPlane = false
 		if (this.getReferenceHandleAt(clientX, clientY)) {
 			this.setHoveredReferencePlane(this.selectedReferencePlane)
 			this.previewCanvas.style.cursor = "nwse-resize"
@@ -805,8 +1154,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		this.selectedReferencePlane = mesh
+		this.pointerOverSelectedPlane = false
+		this.sketchHoverPoint = null
 		this.refreshReferencePlaneStyles()
 		this.updateReferencePlaneHandles()
+		this.updateSketchOverlay()
 		this.updatePreviewCursor()
 		this.drawPreview()
 	}
@@ -866,21 +1218,231 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return plane.worldToLocal(worldPoint.clone())
 	}
 
+	private isPointInsideReferencePlane(clientX: number, clientY: number, plane: THREE.Mesh): boolean {
+		const localPoint = this.getPointOnReferencePlane(clientX, clientY, plane)
+		if (!localPoint) {
+			return false
+		}
+		const half = REFERENCE_PLANE_SIZE / 2
+		return Math.abs(localPoint.x) <= half && Math.abs(localPoint.y) <= half
+	}
+
+	private planeLocalToSketchPoint(point: Point2D): Point2D {
+		return {
+			x: (point.x / REFERENCE_PLANE_SIZE + 0.5) * SKETCH_CANVAS_SIZE,
+			y: (0.5 - point.y / REFERENCE_PLANE_SIZE) * SKETCH_CANVAS_SIZE
+		}
+	}
+
+	private sketchPointToPlaneLocal(point: Point2D): Point2D {
+		return {
+			x: (point.x / SKETCH_CANVAS_SIZE - 0.5) * REFERENCE_PLANE_SIZE,
+			y: (0.5 - point.y / SKETCH_CANVAS_SIZE) * REFERENCE_PLANE_SIZE
+		}
+	}
+
+	private clampPointToPlane(x: number, y: number): Point2D {
+		const half = REFERENCE_PLANE_SIZE / 2
+		return {
+			x: THREE.MathUtils.clamp(x, -half, half),
+			y: THREE.MathUtils.clamp(y, -half, half)
+		}
+	}
+
+	private handleSketchPlanePointInput(clientX: number, clientY: number) {
+		if (!this.selectedReferencePlane || this.isSketchClosed) {
+			return
+		}
+		if (!this.activeSketchTool) {
+			return
+		}
+		const localPoint = this.getPointOnReferencePlane(clientX, clientY, this.selectedReferencePlane)
+		if (!localPoint) {
+			return
+		}
+		const clampedLocal = this.clampPointToPlane(localPoint.x, localPoint.y)
+		const point = this.planeLocalToSketchPoint(clampedLocal)
+		if (this.activeSketchTool === "rectangle") {
+			if (!this.pendingRectangleStart) {
+				this.pendingRectangleStart = point
+				this.sketchHoverPoint = point
+				this.updateSketchOverlay()
+				return
+			}
+			const start = this.pendingRectangleStart
+			this.pendingRectangleStart = null
+			this.appendRectangleToSketch(start, point)
+		} else {
+			this.sketchPoints = [...this.sketchPoints, point]
+		}
+		this.drawSketch(this.sketchHoverPoint ? { ...this.sketchHoverPoint, active: true } : undefined)
+		this.updateSketchOverlay()
+		this.updateStatus()
+		this.updateControls()
+		this.emitStateChange()
+	}
+
+	private appendRectangleToSketch(start: Point2D, end: Point2D) {
+		const rectanglePoints: Point2D[] = [
+			{ x: start.x, y: start.y },
+			{ x: end.x, y: start.y },
+			{ x: end.x, y: end.y },
+			{ x: start.x, y: end.y }
+		]
+		if (this.sketchPoints.length === 0) {
+			this.sketchPoints = rectanglePoints
+			this.isSketchClosed = true
+			return
+		}
+		const closingPoint: Point2D = { x: start.x, y: start.y }
+		this.sketchPoints = [...this.sketchPoints, ...rectanglePoints, closingPoint]
+		this.isSketchClosed = false
+	}
+
+	private createSketchLineObject(points: Point2D[], color: number, zOffset: number, closed: boolean): THREE.Line | THREE.LineLoop | null {
+		if (points.length < 2) {
+			return null
+		}
+		const vertices = points.flatMap((point) => {
+			const local = this.sketchPointToPlaneLocal(point)
+			return [local.x, local.y, zOffset]
+		})
+		const geometry = new THREE.BufferGeometry()
+		geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
+		const material = new THREE.LineBasicMaterial({
+			color,
+			transparent: true,
+			opacity: 1,
+			depthTest: false
+		})
+		return closed ? new THREE.LineLoop(geometry, material) : new THREE.Line(geometry, material)
+	}
+
+	private disposeSketchOverlayObject(object: THREE.Object3D | null) {
+		if (!object) {
+			return
+		}
+		object.removeFromParent()
+		if (object instanceof THREE.Line || object instanceof THREE.LineLoop || object instanceof THREE.Points) {
+			object.geometry.dispose()
+			const material = object.material
+			if (Array.isArray(material)) {
+				for (const entry of material) {
+					entry.dispose()
+				}
+			} else {
+				material.dispose()
+			}
+		}
+	}
+
+	private updateSketchOverlay(hoverOverride?: Point2D | null) {
+		if (typeof hoverOverride !== "undefined") {
+			this.sketchHoverPoint = hoverOverride
+		}
+		const shouldShow = this.activeTool === "sketch" && this.previewReferenceGroup.visible && !!this.selectedReferencePlane
+		if (!shouldShow || !this.selectedReferencePlane) {
+			this.sketchOverlayGroup.visible = false
+			this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
+			this.disposeSketchOverlayObject(this.sketchOverlayPreviewLine)
+			this.disposeSketchOverlayObject(this.sketchOverlayPoints)
+			this.disposeSketchOverlayObject(this.sketchOverlayLabel)
+			this.sketchOverlayCommittedLine = null
+			this.sketchOverlayPreviewLine = null
+			this.sketchOverlayPoints = null
+			this.sketchOverlayLabel = null
+			return
+		}
+
+		if (this.sketchOverlayParentPlane !== this.selectedReferencePlane) {
+			this.sketchOverlayGroup.removeFromParent()
+			this.selectedReferencePlane.add(this.sketchOverlayGroup)
+			this.sketchOverlayParentPlane = this.selectedReferencePlane
+		}
+		this.sketchOverlayGroup.visible = true
+		this.sketchOverlayGroup.position.set(0, 0, 0.004)
+
+		this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
+		this.sketchOverlayCommittedLine = this.createSketchLineObject(this.sketchPoints, 0x2563eb, 0, this.isSketchClosed)
+		if (this.sketchOverlayCommittedLine) {
+			this.sketchOverlayCommittedLine.renderOrder = 6
+			this.sketchOverlayGroup.add(this.sketchOverlayCommittedLine)
+		}
+
+		this.disposeSketchOverlayObject(this.sketchOverlayPreviewLine)
+		let previewPoints: Point2D[] | null = null
+		if (!this.isSketchClosed && this.sketchHoverPoint) {
+			if (this.activeSketchTool === "rectangle" && this.pendingRectangleStart) {
+				const start = this.pendingRectangleStart
+				const hover = this.sketchHoverPoint
+				previewPoints = [
+					{ x: start.x, y: start.y },
+					{ x: hover.x, y: start.y },
+					{ x: hover.x, y: hover.y },
+					{ x: start.x, y: hover.y }
+				]
+			} else if (this.activeSketchTool === "line" && this.sketchPoints.length > 0) {
+				const last = this.sketchPoints[this.sketchPoints.length - 1]
+				if (last) {
+					previewPoints = [last, this.sketchHoverPoint]
+				}
+			}
+		}
+		this.sketchOverlayPreviewLine = previewPoints ? this.createSketchLineObject(previewPoints, 0x0f172a, 0.001, this.activeSketchTool === "rectangle") : null
+		if (this.sketchOverlayPreviewLine) {
+			const material = this.sketchOverlayPreviewLine.material as THREE.LineBasicMaterial
+			material.opacity = 0.7
+			this.sketchOverlayPreviewLine.renderOrder = 7
+			this.sketchOverlayGroup.add(this.sketchOverlayPreviewLine)
+		}
+
+		this.disposeSketchOverlayObject(this.sketchOverlayPoints)
+		if (this.sketchPoints.length > 0) {
+			const vertices = this.sketchPoints.flatMap((point) => {
+				const local = this.sketchPointToPlaneLocal(point)
+				return [local.x, local.y, 0.002]
+			})
+			const geometry = new THREE.BufferGeometry()
+			geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
+			const material = new THREE.PointsMaterial({
+				color: 0x1d4ed8,
+				size: 0.03,
+				sizeAttenuation: true,
+				depthTest: false
+			})
+			this.sketchOverlayPoints = new THREE.Points(geometry, material)
+			this.sketchOverlayPoints.renderOrder = 8
+			this.sketchOverlayGroup.add(this.sketchOverlayPoints)
+		} else {
+			this.sketchOverlayPoints = null
+		}
+
+		this.disposeSketchOverlayObject(this.sketchOverlayLabel)
+		this.sketchOverlayLabel = this.createReferenceLabelSprite(this.sketchName)
+		this.sketchOverlayLabel.position.set(-REFERENCE_PLANE_SIZE / 2 + 0.16, REFERENCE_PLANE_SIZE / 2 - 0.08, 0.003)
+		this.sketchOverlayLabel.renderOrder = 9
+		this.sketchOverlayGroup.add(this.sketchOverlayLabel)
+
+		this.drawPreview()
+	}
+
 	private refreshReferencePlaneStyles() {
 		for (const plane of this.previewReferencePlanes) {
 			const isSelected = plane.mesh === this.selectedReferencePlane
 			const isHovered = plane.mesh === this.hoveredReferencePlane
 			if (isSelected) {
-				plane.fillMaterial.color.setHex(0xf59e0b)
-				plane.fillMaterial.opacity = 0.35
-				plane.edgeMaterial.color.setHex(0xf59e0b)
+				const inSketchMode = this.activeTool === "sketch"
+				plane.fillMaterial.color.setHex(inSketchMode ? 0x7dd3fc : 0xf59e0b)
+				plane.fillMaterial.opacity = inSketchMode ? 0.16 : 0.35
+				plane.edgeMaterial.color.setHex(inSketchMode ? 0x7dd3fc : 0xf59e0b)
 				plane.edgeMaterial.opacity = 1
 				plane.mesh.renderOrder = 3
 				plane.edge.renderOrder = 4
 			} else if (isHovered) {
-				plane.fillMaterial.color.setHex(0xf59e0b)
-				plane.fillMaterial.opacity = 0.2
-				plane.edgeMaterial.color.setHex(0xf59e0b)
+				const hoverColor = this.activeTool === "sketch" ? 0x7dd3fc : 0xf59e0b
+				plane.fillMaterial.color.setHex(hoverColor)
+				plane.fillMaterial.opacity = this.activeTool === "sketch" ? 0.12 : 0.2
+				plane.edgeMaterial.color.setHex(hoverColor)
 				plane.edgeMaterial.opacity = 0.95
 				plane.mesh.renderOrder = 2
 				plane.edge.renderOrder = 3
@@ -946,6 +1508,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewCanvas.style.cursor = "grabbing"
 			return
 		}
+		if (this.activeTool === "sketch" && this.pointerOverSelectedPlane && this.activeSketchTool !== null) {
+			this.previewCanvas.style.cursor = "crosshair"
+			return
+		}
 		this.previewCanvas.style.cursor = this.hoveredReferencePlane ? "pointer" : "grab"
 	}
 
@@ -973,6 +1539,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			edge.rotation.copy(rotation)
 			group.add(edge)
 			this.previewReferencePlanes.push({
+				name,
 				mesh: plane,
 				edge,
 				fillMaterial,

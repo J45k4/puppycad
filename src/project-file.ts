@@ -50,6 +50,7 @@ export type PartProjectPreviewRotation = {
 
 export type PartProjectItemData = {
 	sketchPoints: PartProjectPoint[]
+	sketchName?: string
 	isSketchClosed: boolean
 	extrudedModel?: PartProjectExtrudedModel
 	height: number
@@ -442,8 +443,10 @@ function clonePartProjectItemData(data: PartProjectItemData | undefined): PartPr
 	if (!data) {
 		return undefined
 	}
+	const sketchName = typeof data.sketchName === "string" ? data.sketchName.trim() : ""
 	return {
 		sketchPoints: data.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
+		sketchName: sketchName || undefined,
 		isSketchClosed: data.isSketchClosed,
 		extrudedModel:
 			data.extrudedModel === undefined
@@ -470,6 +473,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 
 	const value = input as Partial<{
 		sketchPoints: unknown
+		sketchName: unknown
 		isSketchClosed: unknown
 		extrudedModel: unknown
 		height: unknown
@@ -486,6 +490,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 	}
 
 	const isSketchClosed = typeof value.isSketchClosed === "boolean" ? value.isSketchClosed : defaults.isSketchClosed
+	const sketchName = typeof value.sketchName === "string" && value.sketchName.trim().length > 0 ? value.sketchName.trim() : undefined
 
 	const heightValue = typeof value.height === "number" && Number.isFinite(value.height) ? value.height : defaults.height
 
@@ -505,6 +510,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 
 	return {
 		sketchPoints,
+		sketchName,
 		isSketchClosed,
 		extrudedModel,
 		height: heightValue,

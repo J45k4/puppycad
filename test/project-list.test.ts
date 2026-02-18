@@ -12,13 +12,27 @@ describe("ProjectList context menu", () => {
 	})
 
 	it("prevents the native menu and renders actions when right-clicking an item", () => {
+		let editInvoked = false
 		let renameInvoked = false
+		let deleteInvoked = false
 		const projectList = new ProjectList(document, {
 			getActions: () => [
+				{
+					label: "Edit",
+					onSelect: () => {
+						editInvoked = true
+					}
+				},
 				{
 					label: "Rename",
 					onSelect: () => {
 						renameInvoked = true
+					}
+				},
+				{
+					label: "Delete",
+					onSelect: () => {
+						deleteInvoked = true
 					}
 				}
 			]
@@ -66,11 +80,18 @@ describe("ProjectList context menu", () => {
 		expect(dispatched).toBe(false)
 		expect(event.defaultPrevented).toBe(true)
 
-		const menuButton = projectList.root.querySelector("button")
-		expect(menuButton?.textContent).toBe("Rename")
+		const menuButtons = Array.from(projectList.root.querySelectorAll("button"))
+		expect(menuButtons.length).toBe(3)
+		expect(menuButtons[0]?.textContent).toBe("Edit")
+		expect(menuButtons[1]?.textContent).toBe("Rename")
+		expect(menuButtons[2]?.textContent).toBe("Delete")
 
-		menuButton?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }))
+		menuButtons[0]?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }))
+		expect(editInvoked).toBe(true)
+		menuButtons[1]?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }))
 		expect(renameInvoked).toBe(true)
+		menuButtons[2]?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }))
+		expect(deleteInvoked).toBe(true)
 	})
 
 	it("respects non-draggable file metadata", () => {

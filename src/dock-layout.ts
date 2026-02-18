@@ -34,11 +34,13 @@ type DockPaneState = {
 	element: HTMLDivElement
 	header: HTMLDivElement
 	title: HTMLSpanElement
+	headerToolbar: HTMLDivElement
 	content: HTMLDivElement
 	resizeHandles: Record<FloatingResizeDirection, HTMLDivElement>
 	placeholder: HTMLDivElement
 	externalDropIndicator: HTMLDivElement
 	currentComponent: UiComponent<HTMLElement> | null
+	headerToolbarComponent: UiComponent<HTMLElement> | null
 	floatButton: HTMLButtonElement
 	closeButton: HTMLButtonElement
 	isFloating: boolean
@@ -329,6 +331,24 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		leaf.pane.placeholder.textContent = text
 	}
 
+	public setPaneHeaderToolbar(paneId: string, toolbar: UiComponent<HTMLElement> | null): void {
+		const leaf = this.panes.get(paneId)
+		if (!leaf) {
+			return
+		}
+
+		const pane = leaf.pane
+		pane.headerToolbar.innerHTML = ""
+		pane.headerToolbarComponent = toolbar
+		if (!toolbar) {
+			pane.headerToolbar.style.display = "none"
+			return
+		}
+
+		pane.headerToolbar.style.display = "flex"
+		pane.headerToolbar.appendChild(toolbar.root)
+	}
+
 	public isPaneFloating(paneId: string): boolean {
 		const leaf = this.panes.get(paneId)
 		if (!leaf) {
@@ -408,6 +428,14 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		title.style.flexGrow = "1"
 		title.style.userSelect = "none"
 		header.appendChild(title)
+
+		const headerToolbar = document.createElement("div")
+		headerToolbar.style.display = "none"
+		headerToolbar.style.alignItems = "center"
+		headerToolbar.style.gap = "6px"
+		headerToolbar.style.minWidth = "0"
+		headerToolbar.style.marginRight = "2px"
+		header.appendChild(headerToolbar)
 
 		const styleHeaderButton = (button: HTMLButtonElement) => {
 			button.style.border = "none"
@@ -625,11 +653,13 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			element,
 			header,
 			title,
+			headerToolbar,
 			content,
 			resizeHandles,
 			placeholder,
 			externalDropIndicator,
 			currentComponent: null,
+			headerToolbarComponent: null,
 			floatButton,
 			closeButton,
 			isFloating: false
@@ -713,7 +743,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 				return
 			}
 			const target = event.target as Node | null
-			if (target && (closeButton.contains(target) || floatButton.contains(target))) {
+			if (target && (closeButton.contains(target) || floatButton.contains(target) || headerToolbar.contains(target))) {
 				return
 			}
 			if (paneState.isFloating) {

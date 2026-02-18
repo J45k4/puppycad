@@ -15,6 +15,7 @@ type BaseProjectItem = {
 	name: string
 	editor: UiComponent<HTMLDivElement>
 	toolbar?: UiComponent<HTMLElement>
+	paneToolbar?: UiComponent<HTMLElement>
 }
 
 type SchemanticProjectItem = BaseProjectItem & {
@@ -53,12 +54,28 @@ function isProjectItem(node: ProjectNode): node is ProjectItem {
 	return !isFolder(node)
 }
 
+type SyntheticProjectEntry =
+	| {
+			kind: "part-sketch"
+			part: PartProjectItem
+			sketchIndex: number
+			id: string
+	  }
+	| {
+			kind: "part-plane"
+			part: PartProjectItem
+			plane: "Top" | "Front" | "Right"
+			id: string
+	  }
+
 class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private items: ProjectNode[] = []
 	private modal: Modal
 	private projectList: ProjectList
 	private selectedPath: number[] | null = null
+	private selectedSyntheticId: string | null = null
 	private readonly onItemSelected?: (item: ProjectItem) => void
+	private readonly onItemsDeleted?: (items: ProjectItem[]) => void
 	private persistTimeout: number | null = null
 	private isRestoring = false
 	private persistenceEnabled = typeof indexedDB !== "undefined"
@@ -66,6 +83,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private nodeIdMap: Map<ProjectNode, string> = new Map()
 	private idNodeMap: Map<string, ProjectNode> = new Map()
 	private readonly syntheticSelectionTargets = new Map<string, ProjectItem>()
+	private readonly syntheticEntries = new Map<string, SyntheticProjectEntry>()
 	private nextNodeId = 0
 	private itemsListContainer: TreeList<ProjectNode>
 	private nodeElements: Map<ProjectNode, { header: HTMLDivElement; container?: HTMLDivElement; exitDropZone?: HTMLDivElement }> = new Map()
@@ -105,10 +123,12 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	public constructor(args: {
 		onClick?: (item: ProjectItem) => void
+		onItemsDeleted?: (items: ProjectItem[]) => void
 		projectId?: string
 	}) {
 		super(document.createElement("div"))
 		this.onItemSelected = args.onClick
+		this.onItemsDeleted = args.onItemsDeleted
 		this.projectId = args.projectId ?? "default"
 		this.root.classList.add("project-tree-panel")
 		this.modal = new Modal({
@@ -166,17 +186,47 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			onSelect: ({ id }) => this.handleSelectionById(id),
 			getActions: ({ id }) => {
 				const node = this.idNodeMap.get(id)
-				if (!node) {
-					return []
-				}
-				return [
-					{
-						label: "Rename",
-						onSelect: () => {
-							void this.renameNode(node)
+				if (node) {
+					return [
+						{
+							label: "Rename",
+							onSelect: () => {
+								void this.renameNode(node)
+							}
+						},
+						{
+							label: "Delete",
+							onSelect: () => {
+								void this.deleteNode(node)
+							}
 						}
-					}
-				]
+					]
+				}
+				const syntheticEntry = this.syntheticEntries.get(id)
+				if (syntheticEntry?.kind === "part-sketch") {
+					return [
+						{
+							label: "Edit",
+							onSelect: () => {
+								syntheticEntry.part.editor.enterSketchMode()
+								this.onItemSelected?.(syntheticEntry.part)
+							}
+						},
+						{
+							label: "Rename",
+							onSelect: () => {
+								void this.renamePartSketch(syntheticEntry)
+							}
+						},
+						{
+							label: "Delete",
+							onSelect: () => {
+								void this.deletePartSketch(syntheticEntry)
+							}
+						}
+					]
+				}
+				return []
 			}
 		})
 		this.root.appendChild(this.projectList.root)
@@ -239,18 +289,37 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.nodeElements.clear()
 		this.idNodeMap.clear()
 		this.syntheticSelectionTargets.clear()
+		this.syntheticEntries.clear()
 		const collapsedIds = this.projectList.getCollapsedFolderIds()
 		const treeItems = this.buildTreeNodes(this.items)
 		this.itemsListContainer.setItems(treeItems)
 		const listEntries = this.buildProjectListEntries(this.items)
 		let selectedId: string | null = null
+		if (this.selectedSyntheticId) {
+			const syntheticEntry = this.syntheticEntries.get(this.selectedSyntheticId)
+			if (syntheticEntry) {
+				const path = this.nodePaths.get(syntheticEntry.part)
+				if (path) {
+					this.selectedPath = path.slice()
+					this.itemsListContainer.setSelected(syntheticEntry.part)
+					selectedId = this.selectedSyntheticId
+				} else {
+					this.selectedSyntheticId = null
+				}
+			} else {
+				this.selectedSyntheticId = null
+			}
+		}
 		if (this.selectedPath !== null) {
 			const selectedNode = this.getNodeByPath(this.selectedPath)
 			if (selectedNode) {
 				this.itemsListContainer.setSelected(selectedNode)
-				selectedId = this.getNodeId(selectedNode)
+				if (selectedId === null) {
+					selectedId = this.getNodeId(selectedNode)
+				}
 			} else {
 				this.selectedPath = null
+				this.selectedSyntheticId = null
 				if (!this.isRestoring) {
 					this.schedulePersist()
 				}
@@ -344,32 +413,64 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			}
 			if (node.type === "part") {
 				const state = node.getState()
-				const sketchCount = state.sketchPoints.length
-				const sketchLabel = sketchCount === 1 ? "1 point" : `${sketchCount} points`
-				const hasExtrude = Boolean(state.extrudedModel)
-				const extrudeLabel = hasExtrude ? `Extrude (${state.extrudedModel?.rawHeight.toFixed(1)}u)` : "Extrudes (none)"
-				const sketchesId = `${id}:sketches`
-				const extrudesId = `${id}:extrudes`
-				this.syntheticSelectionTargets.set(sketchesId, node)
-				this.syntheticSelectionTargets.set(extrudesId, node)
+				const childItems: ProjectListEntry[] = []
+				const addPlaneChild = (suffix: string, name: "Top" | "Front" | "Right") => {
+					const childId = `${id}:${suffix}`
+					this.syntheticSelectionTargets.set(childId, node)
+					this.syntheticEntries.set(childId, {
+						kind: "part-plane",
+						part: node,
+						plane: name,
+						id: childId
+					})
+					childItems.push({
+						kind: "file" as const,
+						id: childId,
+						name,
+						metadata: { draggable: false, synthetic: true }
+					})
+				}
+				const addSketchChild = (sketchIndex: number, name: string) => {
+					const childId = `${id}:sketch-${sketchIndex}`
+					this.syntheticSelectionTargets.set(childId, node)
+					this.syntheticEntries.set(childId, {
+						kind: "part-sketch",
+						part: node,
+						sketchIndex,
+						id: childId
+					})
+					childItems.push({
+						kind: "file" as const,
+						id: childId,
+						name,
+						metadata: { draggable: false, synthetic: true }
+					})
+				}
+				const addSyntheticChild = (suffix: string, name: string) => {
+					const childId = `${id}:${suffix}`
+					this.syntheticSelectionTargets.set(childId, node)
+					childItems.push({
+						kind: "file" as const,
+						id: childId,
+						name,
+						metadata: { draggable: false, synthetic: true }
+					})
+				}
+				addPlaneChild("plane-top", "Top")
+				addPlaneChild("plane-front", "Front")
+				addPlaneChild("plane-right", "Right")
+				if (state.sketchPoints.length > 0) {
+					const sketchName = state.sketchName?.trim() || node.editor.getSketchName() || "Sketch 1"
+					addSketchChild(1, sketchName)
+				}
+				if (state.extrudedModel) {
+					addSyntheticChild("extrude-1", `Extrude 1 (${state.extrudedModel.rawHeight.toFixed(1)}u)`)
+				}
 				return {
 					kind: "folder" as const,
 					id,
 					name: node.name,
-					items: [
-						{
-							kind: "file" as const,
-							id: sketchesId,
-							name: `Sketches (${sketchLabel})`,
-							metadata: { draggable: false, synthetic: true }
-						},
-						{
-							kind: "file" as const,
-							id: extrudesId,
-							name: extrudeLabel,
-							metadata: { draggable: false, synthetic: true }
-						}
-					]
+					items: childItems
 				}
 			}
 			return {
@@ -393,7 +494,29 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private handleSelectionById(id: string) {
 		const node = this.idNodeMap.get(id)
 		if (node) {
+			this.selectedSyntheticId = null
 			this.handleNodeSelection(node)
+			return
+		}
+		const syntheticEntry = this.syntheticEntries.get(id)
+		if (syntheticEntry) {
+			const path = this.nodePaths.get(syntheticEntry.part)
+			if (!path) {
+				return
+			}
+			const selectionChanged = !this.pathsEqual(this.selectedPath, path) || this.selectedSyntheticId !== id
+			this.selectedPath = path.slice()
+			this.selectedSyntheticId = id
+			this.itemsListContainer.setSelected(syntheticEntry.part)
+			if (syntheticEntry.kind === "part-sketch") {
+				syntheticEntry.part.editor.enterSketchMode()
+			} else {
+				syntheticEntry.part.editor.selectReferencePlane(syntheticEntry.plane)
+			}
+			this.onItemSelected?.(syntheticEntry.part)
+			if (selectionChanged) {
+				this.schedulePersist()
+			}
 			return
 		}
 		const syntheticTarget = this.syntheticSelectionTargets.get(id)
@@ -1145,6 +1268,73 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.schedulePersist()
 	}
 
+	private async deleteNode(node: ProjectNode) {
+		const path = this.nodePaths.get(node)
+		if (!path) {
+			return
+		}
+		const shouldDelete = typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(`Delete ${isFolder(node) ? "folder" : "item"} "${node.name}"?`)
+		if (!shouldDelete) {
+			return
+		}
+		const removed = this.removeNodeAtPath(path)
+		if (!removed) {
+			return
+		}
+		const removedItems = this.collectProjectItems(removed)
+		this.selectedPath = null
+		this.renderItems()
+		this.projectList.selectById(null)
+		this.onItemsDeleted?.(removedItems)
+		this.schedulePersist()
+	}
+
+	private collectProjectItems(node: ProjectNode): ProjectItem[] {
+		if (isProjectItem(node)) {
+			return [node]
+		}
+		const items: ProjectItem[] = []
+		for (const child of node.children) {
+			items.push(...this.collectProjectItems(child))
+		}
+		return items
+	}
+
+	private async renamePartSketch(entry: Extract<SyntheticProjectEntry, { kind: "part-sketch" }>) {
+		if (typeof window === "undefined") {
+			return
+		}
+		const currentName = entry.part.editor.getSketchName()
+		const nextName = await showTextPromptModal({
+			title: "Rename Sketch",
+			initialValue: currentName,
+			confirmText: "Save",
+			cancelText: "Cancel"
+		})
+		if (!nextName) {
+			return
+		}
+		const trimmed = nextName.trim()
+		if (!trimmed) {
+			return
+		}
+		entry.part.editor.setSketchName(trimmed)
+		this.renderItems()
+		this.handleSelectionById(entry.id)
+		this.schedulePersist()
+	}
+
+	private async deletePartSketch(entry: Extract<SyntheticProjectEntry, { kind: "part-sketch" }>) {
+		const confirmed = typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(`Delete sketch "${entry.part.editor.getSketchName()}"?`)
+		if (!confirmed) {
+			return
+		}
+		entry.part.editor.deleteSketch()
+		this.renderItems()
+		this.handleNodeSelection(entry.part)
+		this.schedulePersist()
+	}
+
 	private handleNodeSelection(node: ProjectNode) {
 		const path = this.nodePaths.get(node)
 		if (!path) {
@@ -1153,6 +1343,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 		const selectionChanged = !this.pathsEqual(this.selectedPath, path)
 		this.selectedPath = path.slice()
+		this.selectedSyntheticId = null
 		this.log("handleNodeSelection", {
 			node: this.describeNode(node),
 			path: this.describePath(path),
@@ -1197,6 +1388,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					type,
 					name: resolvedName,
 					editor,
+					paneToolbar: editor.createPaneToolbar(),
 					getState: () => editor.getState()
 				}
 			}
@@ -1740,6 +1932,9 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 			projectId: args.projectId,
 			onClick: (item) => {
 				this.showProjectItem(item)
+			},
+			onItemsDeleted: (items) => {
+				this.handleItemsDeleted(items)
 			}
 		})
 		main.appendChild(this.treeView.root)
@@ -1835,6 +2030,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.paneItems.set(paneId, null)
 		this.dockLayout.clearPane(paneId)
 		this.dockLayout.setPaneTitle(paneId, "Empty Pane")
+		this.dockLayout.setPaneHeaderToolbar(paneId, null)
 	}
 
 	private openItemInPane(paneId: string, item: ProjectItem): void {
@@ -1845,6 +2041,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		}
 		this.dockLayout.setPaneContent(paneId, item.editor)
 		this.dockLayout.setPaneTitle(paneId, item.name)
+		this.dockLayout.setPaneHeaderToolbar(paneId, item.paneToolbar ?? null)
 		this.paneItems.set(paneId, item)
 		this.updateToolbarForPane(this.dockLayout.getActivePaneId())
 		this.persistLayoutState()
@@ -2066,6 +2263,26 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 			this.updateToolbarForPane(null)
 		}
 
+		this.persistLayoutState()
+	}
+
+	private handleItemsDeleted(items: ProjectItem[]) {
+		if (items.length === 0) {
+			return
+		}
+		const deletedSet = new Set(items)
+		let didClearAnyPane = false
+		for (const [paneId, paneItem] of this.paneItems) {
+			if (!paneItem || !deletedSet.has(paneItem)) {
+				continue
+			}
+			this.clearPaneAssignment(paneId)
+			didClearAnyPane = true
+		}
+		if (!didClearAnyPane) {
+			return
+		}
+		this.updateToolbarForPane(this.dockLayout.getActivePaneId())
 		this.persistLayoutState()
 	}
 
