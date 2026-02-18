@@ -460,8 +460,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			const limit = Math.PI / 2 - 0.1
 			this.previewRotation.pitch = Math.min(limit, Math.max(-limit, this.previewRotation.pitch))
 		} else if (this.isPanningPreview) {
-			this.previewPan.x += dx * 0.0025
-			this.previewPan.y -= dy * 0.0025
+			const panScale = this.getPreviewPanUnitsPerPixel()
+			this.previewPan.x += dx * panScale.x
+			this.previewPan.y -= dy * panScale.y
 		}
 		this.drawPreview()
 	}
@@ -668,6 +669,18 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			x: near.x + direction.x * t,
 			y: near.y + direction.y * t
 		}
+	}
+
+	private getPreviewPanUnitsPerPixel(): Point2D {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		const width = Math.max(1, rect.width)
+		const height = Math.max(1, rect.height)
+		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(this.previewCamera.position.z))
+		const verticalFovRadians = THREE.MathUtils.degToRad(this.previewCamera.fov)
+		const visibleHeight = 2 * distance * Math.tan(verticalFovRadians / 2)
+		const unitsPerPixelY = visibleHeight / height
+		const unitsPerPixelX = (visibleHeight * this.previewCamera.aspect) / width
+		return { x: unitsPerPixelX, y: unitsPerPixelY }
 	}
 
 	private drawPreview() {
