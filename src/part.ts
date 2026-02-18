@@ -103,6 +103,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private rectangleSketchToolButton: HTMLButtonElement | null = null
 	private pendingRectangleStart: Point2D | null = null
 	private sketchHoverPoint: Point2D | null = null
+	private draggingSketchPointIndex: number | null = null
 
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
@@ -721,6 +722,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.previewCanvas.style.cursor = "nwse-resize"
 				return
 			}
+			if (this.activeTool === "sketch" && this.selectedReferencePlane) {
+				const pointIndex = this.getSketchPointIndexAtClient(event.clientX, event.clientY, this.selectedReferencePlane)
+				if (pointIndex !== null) {
+					event.preventDefault()
+					this.draggingSketchPointIndex = pointIndex
+					this.sketchHoverPoint = null
+					this.previewCanvas.setPointerCapture(event.pointerId)
+					this.previewCanvas.style.cursor = "move"
+					return
+				}
+			}
 			if (this.activeTool === "sketch" && this.selectedReferencePlane && this.isPointInsideReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)) {
 				event.preventDefault()
 				this.handleSketchPlanePointInput(event.clientX, event.clientY)
@@ -766,6 +778,27 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerMove = (event: PointerEvent) => {
+		if (this.draggingSketchPointIndex !== null && this.selectedReferencePlane) {
+			event.preventDefault()
+			const localPoint = this.getPointOnReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)
+			if (!localPoint) {
+				return
+			}
+			const clamped = this.clampPointToPlane(localPoint.x, localPoint.y)
+			const point = this.planeLocalToSketchPoint(clamped)
+			const nextPoints = [...this.sketchPoints]
+			if (!nextPoints[this.draggingSketchPointIndex]) {
+				return
+			}
+			nextPoints[this.draggingSketchPointIndex] = point
+			this.sketchPoints = nextPoints
+			this.drawSketch()
+			this.updateSketchOverlay()
+			this.updateStatus()
+			this.updateControls()
+			this.emitStateChange()
+			return
+		}
 		if (this.activeResizeHandle && this.resizingReferencePlane) {
 			event.preventDefault()
 			this.resizeReferencePlaneFromPointer(event.clientX, event.clientY, this.resizingReferencePlane)
@@ -802,6 +835,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerUp = (event: PointerEvent) => {
+		if (this.draggingSketchPointIndex !== null) {
+			if (this.previewCanvas.hasPointerCapture(event.pointerId)) {
+				this.previewCanvas.releasePointerCapture(event.pointerId)
+			}
+			this.draggingSketchPointIndex = null
+			this.updatePreviewCursor()
+			this.emitStateChange()
+			return
+		}
 		if (this.activeResizeHandle) {
 			if (this.previewCanvas.hasPointerCapture(event.pointerId)) {
 				this.previewCanvas.releasePointerCapture(event.pointerId)
@@ -1225,6 +1267,36 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		const half = REFERENCE_PLANE_SIZE / 2
 		return Math.abs(localPoint.x) <= half && Math.abs(localPoint.y) <= half
+	}
+
+	private getSketchPointIndexAtClient(clientX: number, clientY: number, plane: THREE.Mesh): number | null {
+		if (this.sketchPoints.length === 0) {
+			return null
+		}
+		const localPoint = this.getPointOnReferencePlane(clientX, clientY, plane)
+		if (!localPoint) {
+			return null
+		}
+		const clamped = this.clampPointToPlane(localPoint.x, localPoint.y)
+		const pointer = this.planeLocalToSketchPoint(clamped)
+		const maxDistancePx = 12
+		const maxDistanceSquared = maxDistancePx * maxDistancePx
+		let bestIndex: number | null = null
+		let bestDistanceSquared = maxDistanceSquared
+		for (let index = 0; index < this.sketchPoints.length; index += 1) {
+			const point = this.sketchPoints[index]
+			if (!point) {
+				continue
+			}
+			const dx = point.x - pointer.x
+			const dy = point.y - pointer.y
+			const distanceSquared = dx * dx + dy * dy
+			if (distanceSquared <= bestDistanceSquared) {
+				bestIndex = index
+				bestDistanceSquared = distanceSquared
+			}
+		}
+		return bestIndex
 	}
 
 	private planeLocalToSketchPoint(point: Point2D): Point2D {
