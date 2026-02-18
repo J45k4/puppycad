@@ -65,6 +65,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private nodePaths: Map<ProjectNode, number[]> = new Map()
 	private nodeIdMap: Map<ProjectNode, string> = new Map()
 	private idNodeMap: Map<string, ProjectNode> = new Map()
+	private readonly syntheticSelectionTargets = new Map<string, ProjectItem>()
 	private nextNodeId = 0
 	private itemsListContainer: TreeList<ProjectNode>
 	private nodeElements: Map<ProjectNode, { header: HTMLDivElement; container?: HTMLDivElement; exitDropZone?: HTMLDivElement }> = new Map()
@@ -237,6 +238,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.nodePaths.clear()
 		this.nodeElements.clear()
 		this.idNodeMap.clear()
+		this.syntheticSelectionTargets.clear()
 		const collapsedIds = this.projectList.getCollapsedFolderIds()
 		const treeItems = this.buildTreeNodes(this.items)
 		this.itemsListContainer.setItems(treeItems)
@@ -340,6 +342,36 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					items: this.buildProjectListEntries(node.children, path)
 				}
 			}
+			if (node.type === "part") {
+				const state = node.getState()
+				const sketchCount = state.sketchPoints.length
+				const sketchLabel = sketchCount === 1 ? "1 point" : `${sketchCount} points`
+				const hasExtrude = Boolean(state.extrudedModel)
+				const extrudeLabel = hasExtrude ? `Extrude (${state.extrudedModel?.rawHeight.toFixed(1)}u)` : "Extrudes (none)"
+				const sketchesId = `${id}:sketches`
+				const extrudesId = `${id}:extrudes`
+				this.syntheticSelectionTargets.set(sketchesId, node)
+				this.syntheticSelectionTargets.set(extrudesId, node)
+				return {
+					kind: "folder" as const,
+					id,
+					name: node.name,
+					items: [
+						{
+							kind: "file" as const,
+							id: sketchesId,
+							name: `Sketches (${sketchLabel})`,
+							metadata: { draggable: false, synthetic: true }
+						},
+						{
+							kind: "file" as const,
+							id: extrudesId,
+							name: extrudeLabel,
+							metadata: { draggable: false, synthetic: true }
+						}
+					]
+				}
+			}
 			return {
 				kind: "file" as const,
 				id,
@@ -360,18 +392,23 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	private handleSelectionById(id: string) {
 		const node = this.idNodeMap.get(id)
-		if (!node) {
+		if (node) {
+			this.handleNodeSelection(node)
 			return
 		}
-		this.handleNodeSelection(node)
+		const syntheticTarget = this.syntheticSelectionTargets.get(id)
+		if (!syntheticTarget) {
+			return
+		}
+		this.handleNodeSelection(syntheticTarget)
 	}
 
 	public getProjectItemByNodeId(id: string): ProjectItem | null {
 		const node = this.idNodeMap.get(id)
-		if (!node || !isProjectItem(node)) {
-			return null
+		if (node && isProjectItem(node)) {
+			return node
 		}
-		return node
+		return this.syntheticSelectionTargets.get(id) ?? null
 	}
 
 	private canMoveNodes(sourceId: string, destinationId: string | null): boolean {
@@ -1151,7 +1188,10 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			case "part": {
 				const editor = new PartEditor({
 					initialState: partState,
-					onStateChange: () => this.schedulePersist()
+					onStateChange: () => {
+						this.schedulePersist()
+						this.renderItems()
+					}
 				})
 				return {
 					type,

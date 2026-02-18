@@ -20,6 +20,14 @@ type ProjectListAction = {
 	onSelect: () => void
 }
 
+function isEntryDraggable(entry: ProjectListEntry): boolean {
+	const metadata = entry.metadata as { draggable?: unknown } | undefined
+	if (!metadata) {
+		return true
+	}
+	return metadata.draggable !== false
+}
+
 type ProjectListOptions = {
 	onMove?: (args: { sourceId: string; destinationId: string | null }) => void
 	canMove?: (args: { sourceId: string; destinationId: string | null }) => boolean
@@ -53,14 +61,16 @@ class ProjectFileView extends ProjectItemView<ProjectListFileEntry> {
 	protected createRoot(): HTMLElement {
 		const root = this.list.doc.createElement("div")
 		root.classList.add("project-file")
-		root.draggable = true
+		root.draggable = isEntryDraggable(this.entry)
 		root.textContent = this.entry.name
-		root.addEventListener("dragstart", (event) => {
-			this.list.beginDrag(this, event)
-		})
-		root.addEventListener("dragend", () => {
-			this.list.endDrag()
-		})
+		if (root.draggable) {
+			root.addEventListener("dragstart", (event) => {
+				this.list.beginDrag(this, event)
+			})
+			root.addEventListener("dragend", () => {
+				this.list.endDrag()
+			})
+		}
 		root.addEventListener("click", (event) => {
 			event.stopPropagation()
 			this.list.handleItemLeftClick(this)

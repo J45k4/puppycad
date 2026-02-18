@@ -15,6 +15,9 @@ type PartEditorOptions = {
 }
 
 const SKETCH_CANVAS_SIZE = 360
+const PREVIEW_MIN_CAMERA_DISTANCE = 0.5
+const PREVIEW_MAX_CAMERA_DISTANCE = 12
+const PREVIEW_ZOOM_SENSITIVITY = 0.0015
 
 export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly sketchCanvas: HTMLCanvasElement
@@ -25,8 +28,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewCamera: THREE.PerspectiveCamera
 	private readonly previewRootGroup: THREE.Group
 	private readonly previewContentGroup: THREE.Group
-	private readonly previewPlaceholderMesh: THREE.Mesh
-	private readonly previewPlaceholderText: HTMLParagraphElement
+	private readonly previewReferenceGroup: THREE.Group
 	private previewMesh: THREE.Mesh | null = null
 	private previewEdges: THREE.LineSegments | null = null
 	private readonly heightInput: HTMLInputElement
@@ -44,7 +46,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
 		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
 	}
+	private readonly previewPan = { x: 0, y: 0 }
 	private isRotatingPreview = false
+	private isPanningPreview = false
+	private reverseRotatePreview = false
 	private lastRotationPointer: { x: number; y: number } | null = null
 	private resizeObserver: ResizeObserver | null = null
 	private readonly onStateChange?: () => void
@@ -73,11 +78,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		body.style.flex = "1"
 		body.style.minWidth = "0"
 		body.style.minHeight = "0"
-		body.style.alignItems = "flex-start"
+		body.style.alignItems = "stretch"
 		body.style.gap = "16px"
 		body.style.padding = "16px"
 		body.style.boxSizing = "border-box"
-		body.style.overflow = "auto"
+		body.style.overflow = "hidden"
 		this.root.appendChild(body)
 
 		const sketchPanel = document.createElement("div")
@@ -87,6 +92,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		sketchPanel.style.display = "flex"
 		sketchPanel.style.flexDirection = "column"
 		sketchPanel.style.gap = "12px"
+		sketchPanel.style.display = "none"
 		body.appendChild(sketchPanel)
 
 		const sketchHeader = document.createElement("div")
@@ -175,19 +181,20 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		sketchPanel.appendChild(this.extrudeSummary)
 
 		this.previewContainer = document.createElement("div")
-		this.previewContainer.style.flex = "1 1 360px"
+		this.previewContainer.style.flex = "1 1 auto"
+		this.previewContainer.style.width = "100%"
 		this.previewContainer.style.minWidth = "0"
-		this.previewContainer.style.maxWidth = `${SKETCH_CANVAS_SIZE}px`
-		this.previewContainer.style.aspectRatio = "1 / 1"
-		this.previewContainer.style.height = "auto"
-		this.previewContainer.style.minHeight = "260px"
-		this.previewContainer.style.backgroundColor = "#1f2937"
+		this.previewContainer.style.maxWidth = "none"
+		this.previewContainer.style.aspectRatio = "auto"
+		this.previewContainer.style.height = "100%"
+		this.previewContainer.style.minHeight = "0"
+		this.previewContainer.style.backgroundColor = "#f1f5f9"
 		this.previewContainer.style.borderRadius = "12px"
 		this.previewContainer.style.position = "relative"
 		this.previewContainer.style.display = "flex"
 		this.previewContainer.style.alignItems = "center"
 		this.previewContainer.style.justifyContent = "center"
-		this.previewContainer.style.boxShadow = "inset 0 0 0 1px rgba(255,255,255,0.05)"
+		this.previewContainer.style.boxShadow = "inset 0 0 0 1px rgba(148,163,184,0.35)"
 		body.appendChild(this.previewContainer)
 
 		this.previewCanvas = document.createElement("canvas")
@@ -196,30 +203,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.style.cursor = "grab"
 		this.previewContainer.appendChild(this.previewCanvas)
 
-		this.previewPlaceholderText = document.createElement("p")
-		this.previewPlaceholderText.textContent = "Sketch a profile and extrude to see it here"
-		this.previewPlaceholderText.style.position = "absolute"
-		this.previewPlaceholderText.style.left = "50%"
-		this.previewPlaceholderText.style.bottom = "12%"
-		this.previewPlaceholderText.style.transform = "translateX(-50%)"
-		this.previewPlaceholderText.style.margin = "0"
-		this.previewPlaceholderText.style.padding = "0 12px"
-		this.previewPlaceholderText.style.pointerEvents = "none"
-		this.previewPlaceholderText.style.color = "rgba(255,255,255,0.75)"
-		this.previewPlaceholderText.style.font = "14px Inter, system-ui, sans-serif"
-		this.previewContainer.appendChild(this.previewPlaceholderText)
-
 		this.previewRenderer = new THREE.WebGLRenderer({
 			canvas: this.previewCanvas,
 			antialias: true,
 			alpha: false
 		})
 		this.previewRenderer.setPixelRatio(Math.min(2, Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : 1))
-		this.previewRenderer.setClearColor(0x1f2937, 1)
+		this.previewRenderer.setClearColor(0xf1f5f9, 1)
 
 		this.previewScene = new THREE.Scene()
 		this.previewCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 50)
-		this.previewCamera.position.set(0, 0.15, 3)
+		this.previewCamera.position.set(0, 0.18, 3.2)
 
 		this.previewRootGroup = new THREE.Group()
 		this.previewContentGroup = new THREE.Group()
@@ -235,16 +229,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		fillLight.position.set(-1.8, -0.4, 1.1)
 		this.previewScene.add(fillLight)
 
-		const placeholderGeometry = new THREE.BoxGeometry(1.2, 0.8, 1.2)
-		const placeholderMaterial = new THREE.MeshStandardMaterial({
-			color: 0xffffff,
-			transparent: true,
-			opacity: 0.12,
-			roughness: 0.65,
-			metalness: 0
-		})
-		this.previewPlaceholderMesh = new THREE.Mesh(placeholderGeometry, placeholderMaterial)
-		this.previewContentGroup.add(this.previewPlaceholderMesh)
+		this.previewReferenceGroup = this.createReferencePlanes()
+		this.previewContentGroup.add(this.previewReferenceGroup)
 
 		this.sketchCanvas.addEventListener("click", this.handleSketchCanvasClick)
 		this.sketchCanvas.addEventListener("mousemove", this.handleSketchHover)
@@ -259,6 +245,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.addEventListener("pointerup", this.handlePreviewPointerUp)
 		this.previewCanvas.addEventListener("pointerleave", this.handlePreviewPointerUp)
 		this.previewCanvas.addEventListener("pointercancel", this.handlePreviewPointerUp)
+		this.previewCanvas.addEventListener("wheel", this.handlePreviewWheel, { passive: false })
 		this.previewCanvas.addEventListener("contextmenu", (event) => {
 			event.preventDefault()
 		})
@@ -443,41 +430,79 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerDown = (event: PointerEvent) => {
+		const isLeftMouseClick = event.pointerType === "mouse" ? event.button === 0 : false
 		const isRightMouseClick = event.pointerType === "mouse" ? event.button === 2 : event.isPrimary && event.button === 0
-		if (!isRightMouseClick) {
+		const isMiddleMouseClick = event.pointerType === "mouse" && event.button === 1
+		const isRotatePointer = isLeftMouseClick || isRightMouseClick || (event.pointerType !== "mouse" && event.isPrimary && event.button === 0)
+		if (!isRotatePointer && !isMiddleMouseClick) {
 			return
 		}
 		event.preventDefault()
-		this.isRotatingPreview = true
+		this.isRotatingPreview = isRotatePointer
+		this.isPanningPreview = isMiddleMouseClick
+		this.reverseRotatePreview = isRightMouseClick
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
 		this.previewCanvas.setPointerCapture(event.pointerId)
 		this.previewCanvas.style.cursor = "grabbing"
 	}
 
 	private handlePreviewPointerMove = (event: PointerEvent) => {
-		if (!this.isRotatingPreview || !this.lastRotationPointer) {
+		if ((!this.isRotatingPreview && !this.isPanningPreview) || !this.lastRotationPointer) {
 			return
 		}
 		const dx = event.clientX - this.lastRotationPointer.x
 		const dy = event.clientY - this.lastRotationPointer.y
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
-		this.previewRotation.yaw -= dx * 0.01
-		this.previewRotation.pitch += dy * 0.01
-		const limit = Math.PI / 2 - 0.1
-		this.previewRotation.pitch = Math.min(limit, Math.max(-limit, this.previewRotation.pitch))
+		if (this.isRotatingPreview) {
+			const direction = this.reverseRotatePreview ? -1 : 1
+			this.previewRotation.yaw -= dx * 0.01 * direction
+			this.previewRotation.pitch -= dy * 0.01 * direction
+			const limit = Math.PI / 2 - 0.1
+			this.previewRotation.pitch = Math.min(limit, Math.max(-limit, this.previewRotation.pitch))
+		} else if (this.isPanningPreview) {
+			this.previewPan.x += dx * 0.0025
+			this.previewPan.y -= dy * 0.0025
+		}
 		this.drawPreview()
 	}
 
 	private handlePreviewPointerUp = (event: PointerEvent) => {
-		if (!this.isRotatingPreview) {
+		if (!this.isRotatingPreview && !this.isPanningPreview) {
 			return
 		}
 		if (this.previewCanvas.hasPointerCapture(event.pointerId)) {
 			this.previewCanvas.releasePointerCapture(event.pointerId)
 		}
 		this.isRotatingPreview = false
+		this.isPanningPreview = false
+		this.reverseRotatePreview = false
 		this.lastRotationPointer = null
 		this.previewCanvas.style.cursor = "grab"
+		this.emitStateChange()
+	}
+
+	private handlePreviewWheel = (event: WheelEvent) => {
+		if (event.deltaY === 0) {
+			return
+		}
+		event.preventDefault()
+		const anchorBefore = this.getPreviewPlaneIntersection(event.clientX, event.clientY)
+		const zoomFactor = Math.exp(event.deltaY * PREVIEW_ZOOM_SENSITIVITY)
+		const nextDistance = THREE.MathUtils.clamp(this.previewCamera.position.z * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		if (Math.abs(nextDistance - this.previewCamera.position.z) < 0.0001) {
+			return
+		}
+		this.previewCamera.position.z = nextDistance
+		this.previewCamera.updateProjectionMatrix()
+
+		if (anchorBefore) {
+			const anchorAfter = this.getPreviewPlaneIntersection(event.clientX, event.clientY)
+			if (anchorAfter) {
+				this.previewPan.x += anchorBefore.x - anchorAfter.x
+				this.previewPan.y += anchorBefore.y - anchorAfter.y
+			}
+		}
+		this.drawPreview()
 		this.emitStateChange()
 	}
 
@@ -622,9 +647,93 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawPreview()
 	}
 
+	private getPreviewPlaneIntersection(clientX: number, clientY: number): Point2D | null {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1
+		const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1
+		const near = new THREE.Vector3(ndcX, ndcY, -1).unproject(this.previewCamera)
+		const far = new THREE.Vector3(ndcX, ndcY, 1).unproject(this.previewCamera)
+		const direction = far.sub(near)
+		if (Math.abs(direction.z) < 1e-6) {
+			return null
+		}
+		const t = -near.z / direction.z
+		if (!Number.isFinite(t)) {
+			return null
+		}
+		return {
+			x: near.x + direction.x * t,
+			y: near.y + direction.y * t
+		}
+	}
+
 	private drawPreview() {
+		this.previewRootGroup.position.set(this.previewPan.x, this.previewPan.y, 0)
 		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
 		this.previewRenderer.render(this.previewScene, this.previewCamera)
+	}
+
+	private createReferencePlanes(): THREE.Group {
+		const group = new THREE.Group()
+		const size = 1.9
+		const fillMaterial = new THREE.MeshBasicMaterial({
+			color: 0x93b4dc,
+			transparent: true,
+			opacity: 0.14,
+			side: THREE.DoubleSide,
+			depthWrite: false
+		})
+		const lineMaterial = new THREE.LineBasicMaterial({
+			color: 0x8fb3dd,
+			transparent: true,
+			opacity: 0.7
+		})
+		const addPlane = (name: "Front" | "Top" | "Right", rotation: THREE.Euler, labelPosition: THREE.Vector3) => {
+			const plane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), fillMaterial.clone())
+			plane.rotation.copy(rotation)
+			group.add(plane)
+			const edge = new THREE.LineSegments(new THREE.EdgesGeometry(plane.geometry), lineMaterial.clone())
+			edge.rotation.copy(rotation)
+			group.add(edge)
+			const label = this.createReferenceLabelSprite(name)
+			label.position.copy(labelPosition)
+			group.add(label)
+		}
+		addPlane("Front", new THREE.Euler(0, 0, 0), new THREE.Vector3(-size / 2 + 0.16, size / 2 - 0.1, 0))
+		addPlane("Top", new THREE.Euler(-Math.PI / 2, 0, 0), new THREE.Vector3(-0.08, 0, -size / 2 + 0.18))
+		addPlane("Right", new THREE.Euler(0, Math.PI / 2, 0), new THREE.Vector3(0, size / 2 - 0.1, -size / 2 + 0.16))
+		const origin = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 12), new THREE.MeshBasicMaterial({ color: 0x111827 }))
+		group.add(origin)
+		return group
+	}
+
+	private createReferenceLabelSprite(text: string): THREE.Sprite {
+		const canvas = document.createElement("canvas")
+		canvas.width = 128
+		canvas.height = 48
+		const ctx = canvas.getContext("2d")
+		if (ctx) {
+			ctx.clearRect(0, 0, canvas.width, canvas.height)
+			ctx.fillStyle = "#2d6bcf"
+			ctx.font = "700 24px sans-serif"
+			ctx.textBaseline = "middle"
+			ctx.fillText(text, 8, canvas.height / 2)
+		}
+		const texture = new THREE.CanvasTexture(canvas)
+		texture.minFilter = THREE.LinearFilter
+		texture.magFilter = THREE.LinearFilter
+		texture.generateMipmaps = false
+		const material = new THREE.SpriteMaterial({
+			map: texture,
+			transparent: true,
+			depthWrite: false
+		})
+		const sprite = new THREE.Sprite(material)
+		sprite.scale.set(0.48, 0.18, 1)
+		return sprite
 	}
 
 	private syncPreviewGeometry() {
@@ -657,8 +766,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		if (!this.extrudedModel || this.extrudedModel.base.length < 3) {
-			this.previewPlaceholderMesh.visible = true
-			this.previewPlaceholderText.style.display = "block"
+			this.previewReferenceGroup.visible = true
 			return
 		}
 
@@ -690,7 +798,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewEdges = new THREE.LineSegments(edgeGeometry, edgeMaterial)
 		this.previewContentGroup.add(this.previewEdges)
 
-		this.previewPlaceholderMesh.visible = false
-		this.previewPlaceholderText.style.display = "none"
+		this.previewReferenceGroup.visible = false
 	}
 }

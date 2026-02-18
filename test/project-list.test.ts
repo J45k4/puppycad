@@ -72,4 +72,22 @@ describe("ProjectList context menu", () => {
 		menuButton?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }))
 		expect(renameInvoked).toBe(true)
 	})
+
+	it("respects non-draggable file metadata", () => {
+		const projectList = new ProjectList(document)
+		projectList.setItems([
+			{
+				kind: "file",
+				id: "file-1",
+				name: "Sketches (0 points)",
+				metadata: { draggable: false }
+			}
+		])
+		const fileElement = projectList.root.querySelector<HTMLElement>("[data-project-item-id='file-1']")
+		expect(fileElement).toBeTruthy()
+		if (!fileElement) {
+			throw new Error("Expected project item to exist")
+		}
+		expect(fileElement.draggable).toBe(false)
+	})
 })
