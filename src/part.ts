@@ -6,6 +6,17 @@ import * as THREE from "three"
 type Point2D = { x: number; y: number }
 
 type ExtrudedModel = PartProjectExtrudedModel
+type ReferencePlaneVisual = {
+	mesh: THREE.Mesh
+	edge: THREE.LineSegments
+	fillMaterial: THREE.MeshBasicMaterial
+	edgeMaterial: THREE.LineBasicMaterial
+}
+type ReferencePlaneHandle = {
+	mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+	xSign: -1 | 1
+	ySign: -1 | 1
+}
 
 export type PartEditorState = PartProjectItemData
 
@@ -15,6 +26,7 @@ type PartEditorOptions = {
 }
 
 const SKETCH_CANVAS_SIZE = 360
+const REFERENCE_PLANE_SIZE = 1.9
 const PREVIEW_MIN_CAMERA_DISTANCE = 0.5
 const PREVIEW_MAX_CAMERA_DISTANCE = 12
 const PREVIEW_ZOOM_SENSITIVITY = 0.0015
@@ -29,6 +41,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewRootGroup: THREE.Group
 	private readonly previewContentGroup: THREE.Group
 	private readonly previewReferenceGroup: THREE.Group
+	private readonly previewReferencePlanes: ReferencePlaneVisual[] = []
+	private readonly previewReferenceHandleGeometry = new THREE.RingGeometry(0.028, 0.04, 24)
+	private readonly previewReferenceHandleMaterial = new THREE.MeshBasicMaterial({
+		color: 0x94a3b8,
+		transparent: true,
+		opacity: 0.95,
+		side: THREE.DoubleSide,
+		depthWrite: false,
+		depthTest: false
+	})
+	private readonly previewReferenceHandles: ReferencePlaneHandle[] = []
 	private previewMesh: THREE.Mesh | null = null
 	private previewEdges: THREE.LineSegments | null = null
 	private readonly heightInput: HTMLInputElement
@@ -52,6 +75,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private reverseRotatePreview = false
 	private lastRotationPointer: { x: number; y: number } | null = null
 	private resizeObserver: ResizeObserver | null = null
+	private readonly previewRaycaster = new THREE.Raycaster()
+	private readonly previewPointer = new THREE.Vector2()
+	private hoveredReferencePlane: THREE.Mesh | null = null
+	private selectedReferencePlane: THREE.Mesh | null = null
+	private activeResizeHandle: ReferencePlaneHandle | null = null
+	private resizingReferencePlane: THREE.Mesh | null = null
 	private readonly onStateChange?: () => void
 
 	public constructor(options?: PartEditorOptions) {
@@ -433,7 +462,27 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const isLeftMouseClick = event.pointerType === "mouse" ? event.button === 0 : false
 		const isRightMouseClick = event.pointerType === "mouse" ? event.button === 2 : event.isPrimary && event.button === 0
 		const isMiddleMouseClick = event.pointerType === "mouse" && event.button === 1
-		const isRotatePointer = isLeftMouseClick || isRightMouseClick || (event.pointerType !== "mouse" && event.isPrimary && event.button === 0)
+		if (isLeftMouseClick) {
+			const clickedHandle = this.getReferenceHandleAt(event.clientX, event.clientY)
+			if (clickedHandle && this.selectedReferencePlane) {
+				event.preventDefault()
+				this.activeResizeHandle = clickedHandle
+				this.resizingReferencePlane = this.selectedReferencePlane
+				this.previewCanvas.setPointerCapture(event.pointerId)
+				this.previewCanvas.style.cursor = "nwse-resize"
+				return
+			}
+			const clickedPlane = this.getReferencePlaneAt(event.clientX, event.clientY)
+			if (clickedPlane) {
+				event.preventDefault()
+				this.setSelectedReferencePlane(clickedPlane)
+				return
+			}
+			if (this.selectedReferencePlane) {
+				this.setSelectedReferencePlane(null)
+			}
+		}
+		const isRotatePointer = isRightMouseClick || (event.pointerType !== "mouse" && event.isPrimary && event.button === 0)
 		if (!isRotatePointer && !isMiddleMouseClick) {
 			return
 		}
@@ -447,9 +496,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerMove = (event: PointerEvent) => {
-		if ((!this.isRotatingPreview && !this.isPanningPreview) || !this.lastRotationPointer) {
+		if (this.activeResizeHandle && this.resizingReferencePlane) {
+			event.preventDefault()
+			this.resizeReferencePlaneFromPointer(event.clientX, event.clientY, this.resizingReferencePlane)
 			return
 		}
+		if ((!this.isRotatingPreview && !this.isPanningPreview) || !this.lastRotationPointer) {
+			this.updateReferencePlaneHover(event.clientX, event.clientY)
+			return
+		}
+		this.setHoveredReferencePlane(null)
 		const dx = event.clientX - this.lastRotationPointer.x
 		const dy = event.clientY - this.lastRotationPointer.y
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
@@ -468,7 +524,20 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerUp = (event: PointerEvent) => {
+		if (this.activeResizeHandle) {
+			if (this.previewCanvas.hasPointerCapture(event.pointerId)) {
+				this.previewCanvas.releasePointerCapture(event.pointerId)
+			}
+			this.activeResizeHandle = null
+			this.resizingReferencePlane = null
+			this.updatePreviewCursor()
+			this.emitStateChange()
+			return
+		}
 		if (!this.isRotatingPreview && !this.isPanningPreview) {
+			if (event.type === "pointerleave" || event.type === "pointercancel") {
+				this.setHoveredReferencePlane(null)
+			}
 			return
 		}
 		if (this.previewCanvas.hasPointerCapture(event.pointerId)) {
@@ -478,7 +547,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isPanningPreview = false
 		this.reverseRotatePreview = false
 		this.lastRotationPointer = null
-		this.previewCanvas.style.cursor = "grab"
+		this.updatePreviewCursor()
 		this.emitStateChange()
 	}
 
@@ -689,35 +758,233 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewRenderer.render(this.previewScene, this.previewCamera)
 	}
 
+	private updateReferencePlaneHover(clientX: number, clientY: number) {
+		if (this.activeResizeHandle) {
+			this.previewCanvas.style.cursor = "nwse-resize"
+			return
+		}
+		if (this.getReferenceHandleAt(clientX, clientY)) {
+			this.setHoveredReferencePlane(this.selectedReferencePlane)
+			this.previewCanvas.style.cursor = "nwse-resize"
+			return
+		}
+		this.setHoveredReferencePlane(this.getReferencePlaneAt(clientX, clientY))
+	}
+
+	private getReferencePlaneAt(clientX: number, clientY: number): THREE.Mesh | null {
+		if (!this.previewReferenceGroup.visible || this.previewReferencePlanes.length === 0) {
+			return null
+		}
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		this.previewPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+		this.previewPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+		const intersections = this.previewRaycaster.intersectObjects(
+			this.previewReferencePlanes.map((plane) => plane.mesh),
+			false
+		)
+		const mesh = intersections[0]?.object
+		return mesh instanceof THREE.Mesh ? mesh : null
+	}
+
+	private setHoveredReferencePlane(mesh: THREE.Mesh | null) {
+		if (this.hoveredReferencePlane === mesh) {
+			return
+		}
+		this.hoveredReferencePlane = mesh
+		this.refreshReferencePlaneStyles()
+		this.updatePreviewCursor()
+		this.drawPreview()
+	}
+
+	private setSelectedReferencePlane(mesh: THREE.Mesh | null) {
+		if (this.selectedReferencePlane === mesh) {
+			return
+		}
+		this.selectedReferencePlane = mesh
+		this.refreshReferencePlaneStyles()
+		this.updateReferencePlaneHandles()
+		this.updatePreviewCursor()
+		this.drawPreview()
+	}
+
+	private getReferenceHandleAt(clientX: number, clientY: number): ReferencePlaneHandle | null {
+		if (!this.selectedReferencePlane || this.previewReferenceHandles.length === 0) {
+			return null
+		}
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		this.previewPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+		this.previewPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+		const intersections = this.previewRaycaster.intersectObjects(
+			this.previewReferenceHandles.map((handle) => handle.mesh),
+			false
+		)
+		const mesh = intersections[0]?.object
+		if (!(mesh instanceof THREE.Mesh)) {
+			return null
+		}
+		return this.previewReferenceHandles.find((handle) => handle.mesh === mesh) ?? null
+	}
+
+	private resizeReferencePlaneFromPointer(clientX: number, clientY: number, plane: THREE.Mesh) {
+		const localPoint = this.getPointOnReferencePlane(clientX, clientY, plane)
+		if (!localPoint) {
+			return
+		}
+		const minHalfSize = 0.2
+		const maxHalfSize = 3.5
+		const halfX = THREE.MathUtils.clamp(Math.abs(localPoint.x), minHalfSize, maxHalfSize)
+		const halfY = THREE.MathUtils.clamp(Math.abs(localPoint.y), minHalfSize, maxHalfSize)
+		plane.scale.set((halfX * 2) / REFERENCE_PLANE_SIZE, (halfY * 2) / REFERENCE_PLANE_SIZE, 1)
+		this.updateReferencePlaneHandles()
+		this.drawPreview()
+	}
+
+	private getPointOnReferencePlane(clientX: number, clientY: number, plane: THREE.Mesh): THREE.Vector3 | null {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		this.previewPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+		this.previewPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+
+		const worldNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.getWorldQuaternion(new THREE.Quaternion())).normalize()
+		const worldOrigin = plane.getWorldPosition(new THREE.Vector3())
+		const planeEquation = new THREE.Plane().setFromNormalAndCoplanarPoint(worldNormal, worldOrigin)
+		const worldPoint = this.previewRaycaster.ray.intersectPlane(planeEquation, new THREE.Vector3())
+		if (!worldPoint) {
+			return null
+		}
+		return plane.worldToLocal(worldPoint.clone())
+	}
+
+	private refreshReferencePlaneStyles() {
+		for (const plane of this.previewReferencePlanes) {
+			const isSelected = plane.mesh === this.selectedReferencePlane
+			const isHovered = plane.mesh === this.hoveredReferencePlane
+			if (isSelected) {
+				plane.fillMaterial.color.setHex(0xf59e0b)
+				plane.fillMaterial.opacity = 0.35
+				plane.edgeMaterial.color.setHex(0xf59e0b)
+				plane.edgeMaterial.opacity = 1
+				plane.mesh.renderOrder = 3
+				plane.edge.renderOrder = 4
+			} else if (isHovered) {
+				plane.fillMaterial.color.setHex(0xf59e0b)
+				plane.fillMaterial.opacity = 0.2
+				plane.edgeMaterial.color.setHex(0xf59e0b)
+				plane.edgeMaterial.opacity = 0.95
+				plane.mesh.renderOrder = 2
+				plane.edge.renderOrder = 3
+			} else {
+				plane.fillMaterial.color.setHex(0x93b4dc)
+				plane.fillMaterial.opacity = 0.14
+				plane.edgeMaterial.color.setHex(0x8fb3dd)
+				plane.edgeMaterial.opacity = 0.7
+				plane.mesh.renderOrder = 1
+				plane.edge.renderOrder = 2
+			}
+		}
+	}
+
+	private updateReferencePlaneHandles() {
+		if (!this.selectedReferencePlane || !this.previewReferenceGroup.visible) {
+			for (const handle of this.previewReferenceHandles) {
+				handle.mesh.visible = false
+			}
+			return
+		}
+		const half = REFERENCE_PLANE_SIZE / 2
+		const corners: Array<{ x: number; y: number; xSign: -1 | 1; ySign: -1 | 1 }> = [
+			{ x: -half, y: half, xSign: -1, ySign: 1 },
+			{ x: half, y: half, xSign: 1, ySign: 1 },
+			{ x: half, y: -half, xSign: 1, ySign: -1 },
+			{ x: -half, y: -half, xSign: -1, ySign: -1 }
+		]
+		for (let index = 0; index < corners.length; index += 1) {
+			let handle = this.previewReferenceHandles[index]
+			if (!handle) {
+				const mesh = new THREE.Mesh(this.previewReferenceHandleGeometry, this.previewReferenceHandleMaterial.clone())
+				mesh.renderOrder = 5
+				handle = {
+					mesh,
+					xSign: corners[index]?.xSign ?? 1,
+					ySign: corners[index]?.ySign ?? 1
+				}
+				this.previewReferenceHandles[index] = handle
+			}
+			const corner = corners[index]
+			if (!corner) {
+				continue
+			}
+			handle.xSign = corner.xSign
+			handle.ySign = corner.ySign
+			handle.mesh.position.set(corner.x, corner.y, 0.001)
+			handle.mesh.scale.set(1 / Math.max(0.2, this.selectedReferencePlane.scale.x), 1 / Math.max(0.2, this.selectedReferencePlane.scale.y), 1)
+			handle.mesh.visible = true
+			if (handle.mesh.parent !== this.selectedReferencePlane) {
+				handle.mesh.removeFromParent()
+				this.selectedReferencePlane.add(handle.mesh)
+			}
+		}
+	}
+
+	private updatePreviewCursor() {
+		if (this.activeResizeHandle) {
+			this.previewCanvas.style.cursor = "nwse-resize"
+			return
+		}
+		if (this.isRotatingPreview || this.isPanningPreview) {
+			this.previewCanvas.style.cursor = "grabbing"
+			return
+		}
+		this.previewCanvas.style.cursor = this.hoveredReferencePlane ? "pointer" : "grab"
+	}
+
 	private createReferencePlanes(): THREE.Group {
 		const group = new THREE.Group()
-		const size = 1.9
-		const fillMaterial = new THREE.MeshBasicMaterial({
-			color: 0x93b4dc,
-			transparent: true,
-			opacity: 0.14,
-			side: THREE.DoubleSide,
-			depthWrite: false
-		})
-		const lineMaterial = new THREE.LineBasicMaterial({
-			color: 0x8fb3dd,
-			transparent: true,
-			opacity: 0.7
-		})
 		const addPlane = (name: "Front" | "Top" | "Right", rotation: THREE.Euler, labelPosition: THREE.Vector3) => {
-			const plane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), fillMaterial.clone())
+			const fillMaterial = new THREE.MeshBasicMaterial({
+				color: 0x93b4dc,
+				transparent: true,
+				opacity: 0.14,
+				side: THREE.DoubleSide,
+				depthWrite: false,
+				depthTest: false
+			})
+			const plane = new THREE.Mesh(new THREE.PlaneGeometry(REFERENCE_PLANE_SIZE, REFERENCE_PLANE_SIZE), fillMaterial)
 			plane.rotation.copy(rotation)
 			group.add(plane)
-			const edge = new THREE.LineSegments(new THREE.EdgesGeometry(plane.geometry), lineMaterial.clone())
+			const edgeMaterial = new THREE.LineBasicMaterial({
+				color: 0x8fb3dd,
+				transparent: true,
+				opacity: 0.7,
+				depthTest: false
+			})
+			const edge = new THREE.LineSegments(new THREE.EdgesGeometry(plane.geometry), edgeMaterial)
 			edge.rotation.copy(rotation)
 			group.add(edge)
+			this.previewReferencePlanes.push({
+				mesh: plane,
+				edge,
+				fillMaterial,
+				edgeMaterial
+			})
 			const label = this.createReferenceLabelSprite(name)
 			label.position.copy(labelPosition)
 			group.add(label)
 		}
-		addPlane("Front", new THREE.Euler(0, 0, 0), new THREE.Vector3(-size / 2 + 0.16, size / 2 - 0.1, 0))
-		addPlane("Top", new THREE.Euler(-Math.PI / 2, 0, 0), new THREE.Vector3(-0.08, 0, -size / 2 + 0.18))
-		addPlane("Right", new THREE.Euler(0, Math.PI / 2, 0), new THREE.Vector3(0, size / 2 - 0.1, -size / 2 + 0.16))
+		addPlane("Front", new THREE.Euler(0, 0, 0), new THREE.Vector3(-REFERENCE_PLANE_SIZE / 2 + 0.16, REFERENCE_PLANE_SIZE / 2 - 0.1, 0))
+		addPlane("Top", new THREE.Euler(-Math.PI / 2, 0, 0), new THREE.Vector3(-0.08, 0, -REFERENCE_PLANE_SIZE / 2 + 0.18))
+		addPlane("Right", new THREE.Euler(0, Math.PI / 2, 0), new THREE.Vector3(0, REFERENCE_PLANE_SIZE / 2 - 0.1, -REFERENCE_PLANE_SIZE / 2 + 0.16))
 		const origin = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 12), new THREE.MeshBasicMaterial({ color: 0x111827 }))
 		group.add(origin)
 		return group
@@ -812,5 +1079,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewContentGroup.add(this.previewEdges)
 
 		this.previewReferenceGroup.visible = false
+		this.setHoveredReferencePlane(null)
+		this.setSelectedReferencePlane(null)
 	}
 }
