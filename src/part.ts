@@ -58,7 +58,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly sketchOverlayGroup = new THREE.Group()
 	private previewMesh: THREE.Mesh | null = null
 	private previewEdges: THREE.LineSegments | null = null
-	private sketchOverlayCommittedLine: THREE.Line | THREE.LineLoop | null = null
+	private sketchOverlayCommittedLine: THREE.Line | THREE.LineLoop | THREE.LineSegments | null = null
 	private sketchOverlayPreviewLine: THREE.Line | THREE.LineLoop | null = null
 	private sketchOverlayPoints: THREE.Points | null = null
 	private sketchOverlayLabel: THREE.Sprite | null = null
@@ -102,8 +102,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private lineSketchToolButton: HTMLButtonElement | null = null
 	private rectangleSketchToolButton: HTMLButtonElement | null = null
 	private pendingRectangleStart: Point2D | null = null
+	private pendingLineStart: Point2D | null = null
+	private lineToolNeedsFreshStart = true
 	private sketchHoverPoint: Point2D | null = null
 	private draggingSketchPointIndex: number | null = null
+	private sketchBreakIndices = new Set<number>()
 
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
@@ -457,8 +460,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	public deleteSketch(): void {
 		this.sketchPoints = []
+		this.sketchBreakIndices.clear()
 		this.isSketchClosed = false
 		this.pendingRectangleStart = null
+		this.pendingLineStart = null
+		this.lineToolNeedsFreshStart = true
 		this.sketchHoverPoint = null
 		this.extrudedModel = null
 		this.drawSketch()
@@ -477,6 +483,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.activeTool = tool
 		this.pointerOverSelectedPlane = false
 		this.pendingRectangleStart = null
+		this.pendingLineStart = null
 		this.sketchHoverPoint = null
 		if (tool === "sketch" && !this.selectedReferencePlane) {
 			const defaultPlane = this.previewReferencePlanes[0]?.mesh ?? null
@@ -491,10 +498,25 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private setActiveSketchTool(tool: SketchTool | null) {
 		if (this.activeSketchTool === tool && !this.pendingRectangleStart) {
+			if (tool === "line") {
+				this.pendingLineStart = null
+				this.lineToolNeedsFreshStart = true
+				this.sketchHoverPoint = null
+				this.updateSketchToolButtons()
+				this.drawSketch()
+				this.updateSketchOverlay()
+				this.updatePreviewCursor()
+			}
 			return
 		}
 		this.activeSketchTool = tool
 		this.pendingRectangleStart = null
+		if (tool === "line") {
+			this.pendingLineStart = null
+			this.lineToolNeedsFreshStart = true
+		} else {
+			this.pendingLineStart = null
+		}
 		this.sketchHoverPoint = null
 		this.updateSketchToolButtons()
 		this.drawSketch()
@@ -543,6 +565,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const rotation = state?.previewRotation ?? PART_PROJECT_DEFAULT_ROTATION
 		this.sketchPoints = state?.sketchPoints?.map((point) => ({ x: point.x, y: point.y })) ?? []
 		this.sketchName = state?.sketchName?.trim() ? state.sketchName.trim() : "Sketch 1"
+		this.sketchBreakIndices.clear()
+		this.pendingLineStart = null
+		this.lineToolNeedsFreshStart = true
 		this.isSketchClosed = state?.isSketchClosed ?? false
 		this.extrudedModel = state?.extrudedModel
 			? {
@@ -626,7 +651,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.pendingRectangleStart = null
 			this.appendRectangleToSketch(start, { x, y })
 		} else {
-			this.sketchPoints = [...this.sketchPoints, { x, y }]
+			const committed = this.handleLinePointInput({ x, y })
+			if (!committed) {
+				this.drawSketch({ x, y, active: true })
+				this.updateSketchOverlay({ x, y })
+				this.updateControls()
+				this.emitStateChange()
+				return
+			}
 		}
 		this.drawSketch()
 		this.updateSketchOverlay()
@@ -647,10 +679,25 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleUndo = () => {
-		if (!this.sketchPoints.length || this.isSketchClosed) {
+		if (this.isSketchClosed) {
 			return
 		}
-		this.sketchPoints = this.sketchPoints.slice(0, -1)
+		if (this.pendingLineStart) {
+			this.pendingLineStart = null
+			this.sketchHoverPoint = null
+			this.drawSketch()
+			this.updateSketchOverlay()
+			this.updateStatus()
+			this.updateControls()
+			this.emitStateChange()
+			return
+		}
+		if (!this.sketchPoints.length) {
+			return
+		}
+		const removedIndex = this.sketchPoints.length - 1
+		this.sketchPoints = this.sketchPoints.slice(0, removedIndex)
+		this.sketchBreakIndices.delete(removedIndex)
 		this.drawSketch()
 		this.updateSketchOverlay()
 		this.updateStatus()
@@ -660,8 +707,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private handleReset = () => {
 		this.sketchPoints = []
+		this.sketchBreakIndices.clear()
 		this.isSketchClosed = false
 		this.pendingRectangleStart = null
+		this.pendingLineStart = null
+		this.lineToolNeedsFreshStart = true
 		this.sketchHoverPoint = null
 		this.extrudedModel = null
 		this.drawSketch()
@@ -674,7 +724,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleFinishSketch = () => {
-		if (this.sketchPoints.length < 3) {
+		if (this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0) {
 			return
 		}
 		this.isSketchClosed = true
@@ -687,7 +737,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleExtrude = () => {
-		if (!this.isSketchClosed || this.sketchPoints.length < 3) {
+		if (!this.isSketchClosed || this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0) {
 			return
 		}
 		const height = Number.parseFloat(this.heightInput.value)
@@ -908,7 +958,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (this.activeTool !== "sketch") {
 			return
 		}
-		if (!this.activeSketchTool && !this.pendingRectangleStart) {
+		if (!this.activeSketchTool && !this.pendingRectangleStart && !this.pendingLineStart) {
 			return
 		}
 		event.preventDefault()
@@ -954,9 +1004,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateControls() {
-		this.finishButton.disabled = this.isSketchClosed || this.sketchPoints.length < 3
-		this.undoButton.disabled = this.isSketchClosed || this.sketchPoints.length === 0
-		this.resetButton.disabled = this.sketchPoints.length === 0 && !this.extrudedModel
+		this.finishButton.disabled = this.isSketchClosed || this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0
+		this.undoButton.disabled = this.isSketchClosed || (this.sketchPoints.length === 0 && !this.pendingLineStart)
+		this.resetButton.disabled = this.sketchPoints.length === 0 && !this.extrudedModel && !this.pendingLineStart
 		this.extrudeButton.disabled = !this.isSketchClosed
 		this.heightInput.disabled = !this.isSketchClosed
 		this.finishButton.style.backgroundColor = this.finishButton.disabled ? "#e2e8f0" : "#fff"
@@ -983,24 +1033,40 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchCtx.stroke()
 
 		if (this.sketchPoints.length > 0) {
-			const first = this.sketchPoints[0]
-			if (!first) {
-				return
-			}
 			this.sketchCtx.lineWidth = 2
 			this.sketchCtx.strokeStyle = "#2563eb"
-			this.sketchCtx.beginPath()
-			this.sketchCtx.moveTo(first.x, first.y)
-			for (const point of this.sketchPoints.slice(1)) {
-				this.sketchCtx.lineTo(point.x, point.y)
+			const ranges = this.getSketchRanges()
+			for (const range of ranges) {
+				const first = this.sketchPoints[range.start]
+				if (!first) {
+					continue
+				}
+				this.sketchCtx.beginPath()
+				this.sketchCtx.moveTo(first.x, first.y)
+				for (let index = range.start + 1; index < range.end; index += 1) {
+					const point = this.sketchPoints[index]
+					if (!point) {
+						continue
+					}
+					this.sketchCtx.lineTo(point.x, point.y)
+				}
+				if (this.isSketchClosed && this.sketchBreakIndices.size === 0 && range.end - range.start >= 3) {
+					this.sketchCtx.closePath()
+				}
+				this.sketchCtx.stroke()
 			}
-			if (this.isSketchClosed) {
-				this.sketchCtx.closePath()
-			}
-			this.sketchCtx.stroke()
 
-			if (this.isSketchClosed && this.sketchPoints.length >= 3) {
+			if (this.isSketchClosed && this.sketchPoints.length >= 3 && this.sketchBreakIndices.size === 0) {
 				this.sketchCtx.fillStyle = "rgba(59,130,246,0.2)"
+				const first = this.sketchPoints[0]
+				if (first) {
+					this.sketchCtx.beginPath()
+					this.sketchCtx.moveTo(first.x, first.y)
+					for (const point of this.sketchPoints.slice(1)) {
+						this.sketchCtx.lineTo(point.x, point.y)
+					}
+					this.sketchCtx.closePath()
+				}
 				this.sketchCtx.fill()
 			}
 
@@ -1018,12 +1084,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.sketchCtx.setLineDash([])
 				this.drawSketchPoint({ x: hover.x, y: hover.y }, "#0f172a", true)
 			} else if (this.activeSketchTool === "line") {
-				const last = this.sketchPoints[this.sketchPoints.length - 1]
-				if (last) {
+				const anchor = this.pendingLineStart ?? (!this.lineToolNeedsFreshStart ? this.sketchPoints[this.sketchPoints.length - 1] : null)
+				if (anchor) {
 					this.sketchCtx.setLineDash([4, 4])
 					this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
 					this.sketchCtx.beginPath()
-					this.sketchCtx.moveTo(last.x, last.y)
+					this.sketchCtx.moveTo(anchor.x, anchor.y)
 					this.sketchCtx.lineTo(hover.x, hover.y)
 					this.sketchCtx.stroke()
 					this.sketchCtx.setLineDash([])
@@ -1037,6 +1103,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.sketchCtx.setLineDash([4, 4])
 			this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
 			this.sketchCtx.strokeRect(Math.min(start.x, hover.x), Math.min(start.y, hover.y), Math.abs(hover.x - start.x), Math.abs(hover.y - start.y))
+			this.sketchCtx.setLineDash([])
+			this.drawSketchPoint({ x: hover.x, y: hover.y }, "#0f172a", true)
+		}
+
+		if (hover?.active && !this.isSketchClosed && this.activeSketchTool === "line" && this.pendingLineStart && this.sketchPoints.length === 0) {
+			this.sketchCtx.setLineDash([4, 4])
+			this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
+			this.sketchCtx.beginPath()
+			this.sketchCtx.moveTo(this.pendingLineStart.x, this.pendingLineStart.y)
+			this.sketchCtx.lineTo(hover.x, hover.y)
+			this.sketchCtx.stroke()
 			this.sketchCtx.setLineDash([])
 			this.drawSketchPoint({ x: hover.x, y: hover.y }, "#0f172a", true)
 		}
@@ -1057,7 +1134,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private normalizeSketch(height: number): ExtrudedModel | null {
-		if (this.sketchPoints.length < 3) {
+		if (this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0) {
 			return null
 		}
 		const xs = this.sketchPoints.map((p) => p.x)
@@ -1345,7 +1422,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.pendingRectangleStart = null
 			this.appendRectangleToSketch(start, point)
 		} else {
-			this.sketchPoints = [...this.sketchPoints, point]
+			const committed = this.handleLinePointInput(point)
+			if (!committed) {
+				this.sketchHoverPoint = point
+				this.drawSketch(this.sketchHoverPoint ? { ...this.sketchHoverPoint, active: true } : undefined)
+				this.updateSketchOverlay()
+				this.updateControls()
+				this.emitStateChange()
+				return
+			}
 		}
 		this.drawSketch(this.sketchHoverPoint ? { ...this.sketchHoverPoint, active: true } : undefined)
 		this.updateSketchOverlay()
@@ -1371,6 +1456,25 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isSketchClosed = false
 	}
 
+	private handleLinePointInput(point: Point2D): boolean {
+		if (this.lineToolNeedsFreshStart) {
+			this.pendingLineStart = point
+			this.lineToolNeedsFreshStart = false
+			return false
+		}
+		if (this.pendingLineStart) {
+			const start = this.pendingLineStart
+			this.pendingLineStart = null
+			if (this.sketchPoints.length > 0) {
+				this.sketchBreakIndices.add(this.sketchPoints.length)
+			}
+			this.sketchPoints = [...this.sketchPoints, start, point]
+			return true
+		}
+		this.sketchPoints = [...this.sketchPoints, point]
+		return true
+	}
+
 	private createSketchLineObject(points: Point2D[], color: number, zOffset: number, closed: boolean): THREE.Line | THREE.LineLoop | null {
 		if (points.length < 2) {
 			return null
@@ -1390,12 +1494,57 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return closed ? new THREE.LineLoop(geometry, material) : new THREE.Line(geometry, material)
 	}
 
+	private createSketchSegmentObject(points: Point2D[], color: number, zOffset: number): THREE.LineSegments | null {
+		const ranges = this.getSketchRanges()
+		const vertices: number[] = []
+		for (const range of ranges) {
+			for (let index = range.start + 1; index < range.end; index += 1) {
+				const previous = points[index - 1]
+				const current = points[index]
+				if (!previous || !current) {
+					continue
+				}
+				const start = this.sketchPointToPlaneLocal(previous)
+				const end = this.sketchPointToPlaneLocal(current)
+				vertices.push(start.x, start.y, zOffset, end.x, end.y, zOffset)
+			}
+		}
+		if (vertices.length === 0) {
+			return null
+		}
+		const geometry = new THREE.BufferGeometry()
+		geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
+		const material = new THREE.LineBasicMaterial({
+			color,
+			transparent: true,
+			opacity: 1,
+			depthTest: false
+		})
+		return new THREE.LineSegments(geometry, material)
+	}
+
+	private getSketchRanges(): Array<{ start: number; end: number }> {
+		if (this.sketchPoints.length === 0) {
+			return []
+		}
+		const ranges: Array<{ start: number; end: number }> = []
+		let start = 0
+		for (let index = 1; index < this.sketchPoints.length; index += 1) {
+			if (this.sketchBreakIndices.has(index)) {
+				ranges.push({ start, end: index })
+				start = index
+			}
+		}
+		ranges.push({ start, end: this.sketchPoints.length })
+		return ranges
+	}
+
 	private disposeSketchOverlayObject(object: THREE.Object3D | null) {
 		if (!object) {
 			return
 		}
 		object.removeFromParent()
-		if (object instanceof THREE.Line || object instanceof THREE.LineLoop || object instanceof THREE.Points) {
+		if (object instanceof THREE.Line || object instanceof THREE.LineLoop || object instanceof THREE.LineSegments || object instanceof THREE.Points) {
 			object.geometry.dispose()
 			const material = object.material
 			if (Array.isArray(material)) {
@@ -1435,7 +1584,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchOverlayGroup.position.set(0, 0, 0.004)
 
 		this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
-		this.sketchOverlayCommittedLine = this.createSketchLineObject(this.sketchPoints, 0x2563eb, 0, this.isSketchClosed)
+		if (this.sketchBreakIndices.size === 0) {
+			this.sketchOverlayCommittedLine = this.createSketchLineObject(this.sketchPoints, 0x2563eb, 0, this.isSketchClosed)
+		} else {
+			this.sketchOverlayCommittedLine = this.createSketchSegmentObject(this.sketchPoints, 0x2563eb, 0)
+		}
 		if (this.sketchOverlayCommittedLine) {
 			this.sketchOverlayCommittedLine.renderOrder = 6
 			this.sketchOverlayGroup.add(this.sketchOverlayCommittedLine)
@@ -1453,10 +1606,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 					{ x: hover.x, y: hover.y },
 					{ x: start.x, y: hover.y }
 				]
-			} else if (this.activeSketchTool === "line" && this.sketchPoints.length > 0) {
-				const last = this.sketchPoints[this.sketchPoints.length - 1]
-				if (last) {
-					previewPoints = [last, this.sketchHoverPoint]
+			} else if (this.activeSketchTool === "line") {
+				const anchor = this.pendingLineStart ?? (!this.lineToolNeedsFreshStart && this.sketchPoints.length > 0 ? this.sketchPoints[this.sketchPoints.length - 1] : null)
+				if (anchor) {
+					previewPoints = [anchor, this.sketchHoverPoint]
 				}
 			}
 		}
