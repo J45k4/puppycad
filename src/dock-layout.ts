@@ -91,12 +91,13 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	public onActivePaneChange: ((paneId: string) => void) | null = null
 	public onPaneClosed: ((closedPaneId: string, nextActivePaneId: string | null) => void) | null = null
 	public canAcceptExternalDrop: ((event: DragEvent) => boolean) | null = null
-	public onExternalDrop: ((args: { paneId: string; position: DockDropPosition; event: DragEvent }) => void) | null = null
+	public onExternalDrop: ((args: { paneId: string | null; position: DockDropPosition; event: DragEvent }) => void) | null = null
 	private dragState: DragState | null = null
 	private pointerMoveState: PointerMoveState | null = null
 	private pendingPointerMoveCancel: (() => void) | null = null
 	private floatingMoveState: FloatingMoveState | null = null
 	private floatingResizeState: FloatingResizeState | null = null
+	private floatingZIndexCounter = 80
 
 	public constructor() {
 		super(document.createElement("div"))
@@ -106,15 +107,12 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.root.style.minHeight = "0"
 		this.root.style.minWidth = "0"
 		this.root.style.position = "relative"
+		this.root.addEventListener("dragenter", (event) => this.handleExternalRootDragEnter(event))
+		this.root.addEventListener("dragover", (event) => this.handleExternalRootDragOver(event))
 		this.root.addEventListener("dragleave", (event) => {
-			const related = event.relatedTarget as Node | null
-			if (!related || !this.root.contains(related)) {
-				this.hideAllExternalDropIndicators()
-			}
+			this.handleExternalRootDragLeave(event)
 		})
-		this.root.addEventListener("drop", () => {
-			this.hideAllExternalDropIndicators()
-		})
+		this.root.addEventListener("drop", (event) => this.handleExternalRootDrop(event))
 
 		const initialLeaf = this.createLeaf()
 		this.rootNode = initialLeaf
@@ -329,6 +327,23 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		}
 
 		leaf.pane.placeholder.textContent = text
+	}
+
+	public isPaneFloating(paneId: string): boolean {
+		const leaf = this.panes.get(paneId)
+		if (!leaf) {
+			return false
+		}
+		return leaf.pane.isFloating
+	}
+
+	public setPaneFloating(paneId: string, floating: boolean): boolean {
+		const leaf = this.panes.get(paneId)
+		if (!leaf) {
+			return false
+		}
+		this.setPaneFloatingState(leaf.pane, floating)
+		return true
 	}
 
 	public movePane(paneId: string, targetPaneId: string | null, position: DockDropPosition): void {
@@ -657,7 +672,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		floatButton.addEventListener("click", (event) => {
 			event.stopPropagation()
 			this.setActivePane(paneState.id)
-			this.setPaneFloating(paneState, !paneState.isFloating)
+			this.setPaneFloatingState(paneState, !paneState.isFloating)
 		})
 
 		this.updateFloatingButtonState(paneState)
@@ -756,12 +771,96 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		return nearest?.position ?? "center"
 	}
 
+	private getRootExternalDropPosition(event: DragEvent): DockDropPosition {
+		const rect = this.root.getBoundingClientRect()
+		const leftEdge = Math.min(Math.max(rect.width * 0.22, 56), 220)
+		const topEdge = Math.min(Math.max(rect.height * 0.22, 56), 180)
+		const offsetX = event.clientX - rect.left
+		const offsetY = event.clientY - rect.top
+		const distances: Array<{ position: DockDropPosition; score: number }> = []
+		if (offsetY <= topEdge) {
+			distances.push({ position: "top", score: offsetY / topEdge })
+		}
+		if (offsetY >= rect.height - topEdge) {
+			distances.push({ position: "bottom", score: (rect.height - offsetY) / topEdge })
+		}
+		if (offsetX <= leftEdge) {
+			distances.push({ position: "left", score: offsetX / leftEdge })
+		}
+		if (offsetX >= rect.width - leftEdge) {
+			distances.push({ position: "right", score: (rect.width - offsetX) / leftEdge })
+		}
+		if (distances.length === 0) {
+			return "center"
+		}
+		distances.sort((a, b) => a.score - b.score)
+		return distances[0]?.position ?? "center"
+	}
+
 	private showExternalDropIndicator(pane: DockPaneState, position: DockDropPosition): void {
 		const indicator = pane.externalDropIndicator
 		const paneWidth = pane.content.clientWidth
 		const paneHeight = pane.content.clientHeight
 		const edgeWidth = Math.min(Math.max(paneWidth * 0.35, 48), 180)
 		const edgeHeight = Math.min(Math.max(paneHeight * 0.35, 48), 180)
+		indicator.style.display = "block"
+		indicator.style.left = ""
+		indicator.style.right = ""
+		indicator.style.width = ""
+		indicator.style.height = ""
+		indicator.style.top = ""
+		indicator.style.bottom = ""
+		switch (position) {
+			case "left":
+				indicator.style.left = "0"
+				indicator.style.top = "0"
+				indicator.style.bottom = "0"
+				indicator.style.width = `${Math.round(edgeWidth)}px`
+				break
+			case "right":
+				indicator.style.right = "0"
+				indicator.style.top = "0"
+				indicator.style.bottom = "0"
+				indicator.style.width = `${Math.round(edgeWidth)}px`
+				break
+			case "top":
+				indicator.style.left = "0"
+				indicator.style.right = "0"
+				indicator.style.top = "0"
+				indicator.style.height = `${Math.round(edgeHeight)}px`
+				break
+			case "bottom":
+				indicator.style.left = "0"
+				indicator.style.right = "0"
+				indicator.style.bottom = "0"
+				indicator.style.height = `${Math.round(edgeHeight)}px`
+				break
+			default:
+				indicator.style.left = "0"
+				indicator.style.right = "0"
+				indicator.style.top = "0"
+				indicator.style.bottom = "0"
+				break
+		}
+	}
+
+	private showRootExternalDropIndicator(position: DockDropPosition): void {
+		let indicator = this.root.querySelector('[data-dock-root-external-drop-indicator="true"]') as HTMLDivElement | null
+		if (!indicator) {
+			indicator = document.createElement("div")
+			indicator.dataset.dockRootExternalDropIndicator = "true"
+			indicator.style.position = "absolute"
+			indicator.style.pointerEvents = "none"
+			indicator.style.backgroundColor = "rgba(59, 130, 246, 0.2)"
+			indicator.style.border = "2px solid rgba(59, 130, 246, 0.65)"
+			indicator.style.borderRadius = "6px"
+			indicator.style.zIndex = "90"
+			this.root.appendChild(indicator)
+		}
+		const rootWidth = this.root.clientWidth
+		const rootHeight = this.root.clientHeight
+		const edgeWidth = Math.min(Math.max(rootWidth * 0.28, 56), 240)
+		const edgeHeight = Math.min(Math.max(rootHeight * 0.28, 56), 220)
 		indicator.style.display = "block"
 		indicator.style.left = ""
 		indicator.style.right = ""
@@ -810,6 +909,10 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 	private hideAllExternalDropIndicators(): void {
 		for (const leaf of this.panes.values()) {
 			this.hideExternalDropIndicator(leaf.pane)
+		}
+		const rootIndicator = this.root.querySelector('[data-dock-root-external-drop-indicator="true"]') as HTMLDivElement | null
+		if (rootIndicator) {
+			rootIndicator.style.display = "none"
 		}
 	}
 
@@ -860,6 +963,54 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.setActivePane(pane.id)
 		this.onExternalDrop?.({
 			paneId: pane.id,
+			position,
+			event
+		})
+	}
+
+	private handleExternalRootDragEnter(event: DragEvent): void {
+		if (!this.canHandleExternalDrop(event)) {
+			this.hideAllExternalDropIndicators()
+			return
+		}
+		event.preventDefault()
+		const position = this.getRootExternalDropPosition(event)
+		this.hideAllExternalDropIndicators()
+		this.showRootExternalDropIndicator(position)
+	}
+
+	private handleExternalRootDragOver(event: DragEvent): void {
+		if (!this.canHandleExternalDrop(event)) {
+			this.hideAllExternalDropIndicators()
+			return
+		}
+		event.preventDefault()
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = "move"
+		}
+		const position = this.getRootExternalDropPosition(event)
+		this.hideAllExternalDropIndicators()
+		this.showRootExternalDropIndicator(position)
+	}
+
+	private handleExternalRootDragLeave(event: DragEvent): void {
+		const related = event.relatedTarget as Node | null
+		if (related && this.root.contains(related)) {
+			return
+		}
+		this.hideAllExternalDropIndicators()
+	}
+
+	private handleExternalRootDrop(event: DragEvent): void {
+		if (!this.canHandleExternalDrop(event)) {
+			this.hideAllExternalDropIndicators()
+			return
+		}
+		event.preventDefault()
+		const position = this.getRootExternalDropPosition(event)
+		this.hideAllExternalDropIndicators()
+		this.onExternalDrop?.({
+			paneId: null,
 			position,
 			event
 		})
@@ -1036,7 +1187,12 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		pane.title.draggable = draggable
 	}
 
-	private setPaneFloating(pane: DockPaneState, floating: boolean): void {
+	private bringFloatingPaneToFront(pane: DockPaneState): void {
+		this.floatingZIndexCounter += 1
+		pane.element.style.zIndex = `${this.floatingZIndexCounter}`
+	}
+
+	private setPaneFloatingState(pane: DockPaneState, floating: boolean): void {
 		if (pane.isFloating === floating) {
 			return
 		}
@@ -1057,7 +1213,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			pane.element.style.flex = "0 0 auto"
 			pane.element.style.width = `${Math.round(width)}px`
 			pane.element.style.height = `${Math.round(height)}px`
-			pane.element.style.zIndex = "80"
+			this.bringFloatingPaneToFront(pane)
 			pane.element.style.overflow = "hidden"
 			for (const handle of Object.values(pane.resizeHandles)) {
 				handle.style.display = "block"
@@ -1273,6 +1429,9 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 
 	private setPaneActive(pane: DockPaneState, active: boolean): void {
 		if (active) {
+			if (pane.isFloating) {
+				this.bringFloatingPaneToFront(pane)
+			}
 			pane.element.style.boxShadow = pane.isFloating ? "0 16px 40px rgba(15, 23, 42, 0.25), 0 0 0 2px #3b82f6" : "0 0 0 2px #3b82f6"
 			pane.element.style.borderColor = "#3b82f6"
 		} else {

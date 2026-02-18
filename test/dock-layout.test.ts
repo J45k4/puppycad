@@ -277,6 +277,68 @@ describe("DockLayout", () => {
 		expect(positions).toEqual(["top", "left", "center", "right", "bottom"])
 	})
 
+	it("detects root empty-space drop positions for external drops", () => {
+		const layout = new DockLayout()
+		layout.canAcceptExternalDrop = () => true
+		const drops: Array<{ paneId: string | null; position: string }> = []
+		layout.onExternalDrop = ({ paneId, position }) => {
+			drops.push({ paneId, position })
+		}
+
+		Object.defineProperty(layout.root, "clientWidth", { value: 1000, configurable: true })
+		Object.defineProperty(layout.root, "clientHeight", { value: 700, configurable: true })
+		layout.root.getBoundingClientRect = () =>
+			({
+				x: 0,
+				y: 0,
+				left: 0,
+				top: 0,
+				right: 1000,
+				bottom: 700,
+				width: 1000,
+				height: 700,
+				toJSON: () => ({})
+			}) as DOMRect
+
+		const createDragEvent = (type: string, clientX: number, clientY: number): DragEvent => {
+			const event = new window.Event(type, { bubbles: true, cancelable: true }) as DragEvent
+			Object.defineProperty(event, "clientX", { value: clientX, configurable: true })
+			Object.defineProperty(event, "clientY", { value: clientY, configurable: true })
+			Object.defineProperty(event, "dataTransfer", {
+				value: {
+					dropEffect: "move",
+					getData: () => "",
+					setData: () => undefined
+				},
+				configurable: true
+			})
+			return event
+		}
+
+		layout.root.dispatchEvent(createDragEvent("dragover", 500, 20))
+		layout.root.dispatchEvent(createDragEvent("drop", 500, 20))
+
+		layout.root.dispatchEvent(createDragEvent("dragover", 20, 350))
+		layout.root.dispatchEvent(createDragEvent("drop", 20, 350))
+
+		layout.root.dispatchEvent(createDragEvent("dragover", 500, 350))
+		layout.root.dispatchEvent(createDragEvent("drop", 500, 350))
+
+		layout.root.dispatchEvent(createDragEvent("dragover", 980, 350))
+		layout.root.dispatchEvent(createDragEvent("drop", 980, 350))
+
+		layout.root.dispatchEvent(createDragEvent("dragover", 500, 680))
+		layout.root.dispatchEvent(createDragEvent("drop", 500, 680))
+
+		expect(drops).toEqual([
+			{ paneId: null, position: "top" },
+			{ paneId: null, position: "left" },
+			{ paneId: null, position: "center" },
+			{ paneId: null, position: "right" },
+			{ paneId: null, position: "bottom" }
+		])
+	})
+
 	it("toggles pane floating mode from the header button", () => {
 		const layout = new DockLayout()
 		const paneId = layout.getActivePaneId()
@@ -310,6 +372,55 @@ describe("DockLayout", () => {
 		expect(pane.style.position).toBe("")
 		expect(header.draggable).toBe(true)
 		expect(floatButton.getAttribute("aria-label")).toBe("Float pane")
+	})
+
+	it("supports floating mode through the public pane API", () => {
+		const layout = new DockLayout()
+		const paneId = layout.getActivePaneId()
+		expect(paneId).toBeTruthy()
+		if (!paneId) {
+			throw new Error("Expected pane to exist")
+		}
+
+		expect(layout.isPaneFloating(paneId)).toBe(false)
+		expect(layout.setPaneFloating(paneId, true)).toBe(true)
+		expect(layout.isPaneFloating(paneId)).toBe(true)
+		expect(layout.setPaneFloating(paneId, false)).toBe(true)
+		expect(layout.isPaneFloating(paneId)).toBe(false)
+	})
+
+	it("brings the active floating pane to the top", () => {
+		const layout = new DockLayout()
+		const firstPaneId = layout.getActivePaneId()
+		expect(firstPaneId).toBeTruthy()
+		if (!firstPaneId) {
+			throw new Error("Expected first pane to exist")
+		}
+		const secondPaneId = layout.splitPane(firstPaneId, "horizontal")
+		expect(secondPaneId).toBeTruthy()
+		if (!secondPaneId) {
+			throw new Error("Expected second pane to exist")
+		}
+
+		expect(layout.setPaneFloating(firstPaneId, true)).toBe(true)
+		expect(layout.setPaneFloating(secondPaneId, true)).toBe(true)
+
+		layout.setActivePane(firstPaneId)
+		const firstPane = layout.root.querySelector(`[data-pane-id="${firstPaneId}"]`) as HTMLDivElement | null
+		const secondPane = layout.root.querySelector(`[data-pane-id="${secondPaneId}"]`) as HTMLDivElement | null
+		expect(firstPane).not.toBeNull()
+		expect(secondPane).not.toBeNull()
+		if (!firstPane || !secondPane) {
+			throw new Error("Expected both pane elements")
+		}
+		const firstZ = Number.parseInt(firstPane.style.zIndex || "0", 10)
+		const secondZ = Number.parseInt(secondPane.style.zIndex || "0", 10)
+		expect(firstZ).toBeGreaterThan(secondZ)
+
+		layout.setActivePane(secondPaneId)
+		const firstAfter = Number.parseInt(firstPane.style.zIndex || "0", 10)
+		const secondAfter = Number.parseInt(secondPane.style.zIndex || "0", 10)
+		expect(secondAfter).toBeGreaterThan(firstAfter)
 	})
 
 	it("moves floating panes immediately when dragging the header", () => {

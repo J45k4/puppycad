@@ -1810,10 +1810,41 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.persistLayoutState()
 	}
 
-	private openDraggedItemInPane(item: ProjectItem, paneId: string, position: "top" | "bottom" | "center" | "left" | "right"): void {
+	private openDraggedItemInPane(item: ProjectItem, paneId: string | null, position: "top" | "bottom" | "center" | "left" | "right"): void {
+		if (!paneId) {
+			const activePaneId = this.dockLayout.getActivePaneId()
+			if (!activePaneId) {
+				return
+			}
+			if (position === "center") {
+				this.openItemInPane(activePaneId, item)
+				this.dockLayout.setActivePane(activePaneId)
+				return
+			}
+			if (this.tryOpenDraggedItemAsFloatingSplit(item, activePaneId, position)) {
+				return
+			}
+			const orientation = position === "left" || position === "right" ? "horizontal" : "vertical"
+			const splitPaneId = this.dockLayout.splitPane(activePaneId, orientation)
+			if (!splitPaneId) {
+				this.openItemInPane(activePaneId, item)
+				this.dockLayout.setActivePane(activePaneId)
+				return
+			}
+			this.ensurePaneRegistration(splitPaneId)
+			this.openItemInPane(splitPaneId, item)
+			this.dockLayout.movePane(splitPaneId, null, position)
+			this.dockLayout.setActivePane(splitPaneId)
+			return
+		}
+
 		if (position === "center") {
 			this.openItemInPane(paneId, item)
 			this.dockLayout.setActivePane(paneId)
+			return
+		}
+
+		if (this.tryOpenDraggedItemAsFloatingSplit(item, paneId, position)) {
 			return
 		}
 
@@ -1842,6 +1873,112 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 			this.openItemInPane(paneId, existing)
 		}
 		this.dockLayout.setActivePane(splitPaneId)
+	}
+
+	private tryOpenDraggedItemAsFloatingSplit(item: ProjectItem, targetPaneId: string, position: "top" | "bottom" | "left" | "right"): boolean {
+		if (!this.dockLayout.isPaneFloating(targetPaneId)) {
+			return false
+		}
+		const targetBounds = this.getPaneBoundsRelativeToDockRoot(targetPaneId)
+		this.dockLayout.setPaneFloating(targetPaneId, false)
+		this.dockLayout.setActivePane(targetPaneId)
+		const orientation = position === "left" || position === "right" ? "horizontal" : "vertical"
+		const splitPaneId = this.dockLayout.splitPane(targetPaneId, orientation)
+		if (!splitPaneId) {
+			this.openItemInPane(targetPaneId, item)
+			this.dockLayout.setPaneFloating(targetPaneId, true)
+			this.dockLayout.setActivePane(targetPaneId)
+			if (targetBounds) {
+				this.setPaneFloatingBounds(targetPaneId, targetBounds)
+			}
+			return true
+		}
+		this.ensurePaneRegistration(splitPaneId)
+		this.openItemInPane(splitPaneId, item)
+		this.dockLayout.movePane(splitPaneId, targetPaneId, position)
+		this.dockLayout.setPaneFloating(targetPaneId, true)
+		this.dockLayout.setPaneFloating(splitPaneId, true)
+		if (targetBounds) {
+			this.setPaneFloatingBounds(targetPaneId, targetBounds)
+			const floatingSplitBounds = this.computeFloatingSplitBounds(targetBounds, position)
+			this.setPaneFloatingBounds(splitPaneId, floatingSplitBounds)
+		}
+		this.dockLayout.setActivePane(splitPaneId)
+		return true
+	}
+
+	private getPaneBoundsRelativeToDockRoot(paneId: string): { left: number; top: number; width: number; height: number } | null {
+		const paneElement = this.dockLayout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		if (!paneElement) {
+			return null
+		}
+		const rootRect = this.dockLayout.root.getBoundingClientRect()
+		const paneRect = paneElement.getBoundingClientRect()
+		return {
+			left: paneRect.left - rootRect.left,
+			top: paneRect.top - rootRect.top,
+			width: paneRect.width,
+			height: paneRect.height
+		}
+	}
+
+	private setPaneFloatingBounds(paneId: string, bounds: { left: number; top: number; width: number; height: number }): void {
+		const paneElement = this.dockLayout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		if (!paneElement) {
+			return
+		}
+		const rootRect = this.dockLayout.root.getBoundingClientRect()
+		const minWidth = 240
+		const minHeight = 160
+		const width = Math.max(Math.min(bounds.width, Math.max(rootRect.width - 8, minWidth)), minWidth)
+		const height = Math.max(Math.min(bounds.height, Math.max(rootRect.height - 8, minHeight)), minHeight)
+		const maxLeft = Math.max(rootRect.width - width, 0)
+		const maxTop = Math.max(rootRect.height - height, 0)
+		const left = Math.max(0, Math.min(bounds.left, maxLeft))
+		const top = Math.max(0, Math.min(bounds.top, maxTop))
+		paneElement.style.left = `${Math.round(left)}px`
+		paneElement.style.top = `${Math.round(top)}px`
+		paneElement.style.width = `${Math.round(width)}px`
+		paneElement.style.height = `${Math.round(height)}px`
+	}
+
+	private computeFloatingSplitBounds(
+		targetBounds: { left: number; top: number; width: number; height: number },
+		position: "top" | "bottom" | "left" | "right"
+	): { left: number; top: number; width: number; height: number } {
+		const gap = 16
+		const width = Math.max(targetBounds.width, 320)
+		const height = Math.max(targetBounds.height, 220)
+		switch (position) {
+			case "left":
+				return {
+					left: targetBounds.left - width - gap,
+					top: targetBounds.top,
+					width,
+					height
+				}
+			case "right":
+				return {
+					left: targetBounds.left + targetBounds.width + gap,
+					top: targetBounds.top,
+					width,
+					height
+				}
+			case "top":
+				return {
+					left: targetBounds.left,
+					top: targetBounds.top - height - gap,
+					width,
+					height
+				}
+			default:
+				return {
+					left: targetBounds.left,
+					top: targetBounds.top + targetBounds.height + gap,
+					width,
+					height
+				}
+		}
 	}
 
 	private setToolbar(toolbar: UiComponent<HTMLElement> | null) {
