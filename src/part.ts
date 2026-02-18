@@ -33,6 +33,9 @@ const REFERENCE_PLANE_SIZE = 1.9
 const PREVIEW_MIN_CAMERA_DISTANCE = 0.5
 const PREVIEW_MAX_CAMERA_DISTANCE = 12
 const PREVIEW_ZOOM_SENSITIVITY = 0.0015
+const SKETCH_SNAP_DISTANCE = 16
+const SKETCH_SNAP_MARKER_SIZE = 12
+const SKETCH_SELECTED_MARKER_SIZE = 14
 
 export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly sketchCanvas: HTMLCanvasElement
@@ -61,6 +64,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private sketchOverlayCommittedLine: THREE.Line | THREE.LineLoop | THREE.LineSegments | null = null
 	private sketchOverlayPreviewLine: THREE.Line | THREE.LineLoop | null = null
 	private sketchOverlayPoints: THREE.Points | null = null
+	private sketchOverlaySnapIndicator: THREE.LineLoop | null = null
+	private sketchOverlaySelectedIndicator: THREE.LineLoop | null = null
 	private sketchOverlayLabel: THREE.Sprite | null = null
 	private sketchOverlayParentPlane: THREE.Mesh | null = null
 	private readonly heightInput: HTMLInputElement
@@ -103,8 +108,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private rectangleSketchToolButton: HTMLButtonElement | null = null
 	private pendingRectangleStart: Point2D | null = null
 	private pendingLineStart: Point2D | null = null
+	private pendingLineStartSourceIndex: number | null = null
 	private lineToolNeedsFreshStart = true
 	private sketchHoverPoint: Point2D | null = null
+	private sketchHoverSnapIndex: number | null = null
+	private selectedSketchPointIndex: number | null = null
 	private draggingSketchPointIndex: number | null = null
 	private sketchBreakIndices = new Set<number>()
 
@@ -464,8 +472,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isSketchClosed = false
 		this.pendingRectangleStart = null
 		this.pendingLineStart = null
+		this.pendingLineStartSourceIndex = null
 		this.lineToolNeedsFreshStart = true
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
 		this.extrudedModel = null
 		this.drawSketch()
 		this.syncPreviewGeometry()
@@ -484,7 +495,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pointerOverSelectedPlane = false
 		this.pendingRectangleStart = null
 		this.pendingLineStart = null
+		this.pendingLineStartSourceIndex = null
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
 		if (tool === "sketch" && !this.selectedReferencePlane) {
 			const defaultPlane = this.previewReferencePlanes[0]?.mesh ?? null
 			if (defaultPlane) {
@@ -500,8 +514,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (this.activeSketchTool === tool && !this.pendingRectangleStart) {
 			if (tool === "line") {
 				this.pendingLineStart = null
+				this.pendingLineStartSourceIndex = null
 				this.lineToolNeedsFreshStart = true
 				this.sketchHoverPoint = null
+				this.sketchHoverSnapIndex = null
+				this.selectedSketchPointIndex = null
 				this.updateSketchToolButtons()
 				this.drawSketch()
 				this.updateSketchOverlay()
@@ -513,11 +530,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pendingRectangleStart = null
 		if (tool === "line") {
 			this.pendingLineStart = null
+			this.pendingLineStartSourceIndex = null
 			this.lineToolNeedsFreshStart = true
 		} else {
 			this.pendingLineStart = null
+			this.pendingLineStartSourceIndex = null
 		}
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
 		this.updateSketchToolButtons()
 		this.drawSketch()
 		this.updateSketchOverlay()
@@ -567,7 +588,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchName = state?.sketchName?.trim() ? state.sketchName.trim() : "Sketch 1"
 		this.sketchBreakIndices.clear()
 		this.pendingLineStart = null
+		this.pendingLineStartSourceIndex = null
 		this.lineToolNeedsFreshStart = true
+		this.selectedSketchPointIndex = null
 		this.isSketchClosed = state?.isSketchClosed ?? false
 		this.extrudedModel = state?.extrudedModel
 			? {
@@ -635,6 +658,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!this.activeSketchTool) {
 			return
 		}
+		this.selectedSketchPointIndex = null
 		if (this.isSketchClosed) {
 			return
 		}
@@ -674,8 +698,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const rect = this.sketchCanvas.getBoundingClientRect()
 		const x = event.clientX - rect.left
 		const y = event.clientY - rect.top
-		this.drawSketch({ x, y, active: event.type === "mousemove" })
-		this.updateSketchOverlay(event.type === "mousemove" ? { x, y } : null)
+		if (event.type === "mousemove") {
+			const hoverPoint = this.getLineSnapPointIfNeeded({ x, y })
+			this.sketchHoverPoint = hoverPoint
+			this.drawSketch(hoverPoint ? { ...hoverPoint, active: true } : undefined)
+			this.updateSketchOverlay(hoverPoint)
+			return
+		}
+		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.drawSketch({ x, y, active: false })
+		this.updateSketchOverlay(null)
 	}
 
 	private handleUndo = () => {
@@ -684,7 +717,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		if (this.pendingLineStart) {
 			this.pendingLineStart = null
+			this.pendingLineStartSourceIndex = null
 			this.sketchHoverPoint = null
+			this.sketchHoverSnapIndex = null
+			this.selectedSketchPointIndex = null
 			this.drawSketch()
 			this.updateSketchOverlay()
 			this.updateStatus()
@@ -711,8 +747,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isSketchClosed = false
 		this.pendingRectangleStart = null
 		this.pendingLineStart = null
+		this.pendingLineStartSourceIndex = null
 		this.lineToolNeedsFreshStart = true
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
 		this.extrudedModel = null
 		this.drawSketch()
 		this.syncPreviewGeometry()
@@ -729,6 +768,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.isSketchClosed = true
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
 		this.drawSketch()
 		this.updateSketchOverlay()
 		this.updateStatus()
@@ -772,12 +813,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.previewCanvas.style.cursor = "nwse-resize"
 				return
 			}
-			if (this.activeTool === "sketch" && this.selectedReferencePlane) {
+			if (this.activeTool === "sketch" && this.selectedReferencePlane && this.activeSketchTool === null) {
 				const pointIndex = this.getSketchPointIndexAtClient(event.clientX, event.clientY, this.selectedReferencePlane)
 				if (pointIndex !== null) {
 					event.preventDefault()
 					this.draggingSketchPointIndex = pointIndex
+					this.selectedSketchPointIndex = pointIndex
 					this.sketchHoverPoint = null
+					this.sketchHoverSnapIndex = null
 					this.previewCanvas.setPointerCapture(event.pointerId)
 					this.previewCanvas.style.cursor = "move"
 					return
@@ -785,6 +828,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			}
 			if (this.activeTool === "sketch" && this.selectedReferencePlane && this.isPointInsideReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)) {
 				event.preventDefault()
+				if (this.activeSketchTool === null) {
+					this.selectedSketchPointIndex = null
+					this.updateSketchOverlay()
+					this.drawSketch()
+					return
+				}
 				this.handleSketchPlanePointInput(event.clientX, event.clientY)
 				return
 			}
@@ -798,6 +847,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 						this.setSelectedReferencePlane(clickedPlane)
 						this.pendingRectangleStart = null
 						this.sketchHoverPoint = null
+						this.sketchHoverSnapIndex = null
+						this.selectedSketchPointIndex = null
 						this.updateSketchOverlay()
 					}
 					return
@@ -830,6 +881,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private handlePreviewPointerMove = (event: PointerEvent) => {
 		if (this.draggingSketchPointIndex !== null && this.selectedReferencePlane) {
 			event.preventDefault()
+			this.sketchHoverSnapIndex = null
 			const localPoint = this.getPointOnReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)
 			if (!localPoint) {
 				return
@@ -858,7 +910,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			if (this.activeTool === "sketch" && this.selectedReferencePlane) {
 				const localPoint = this.getPointOnReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)
 				const clamped = localPoint ? this.clampPointToPlane(localPoint.x, localPoint.y) : null
-				this.sketchHoverPoint = clamped ? this.planeLocalToSketchPoint(clamped) : null
+				if (clamped) {
+					this.sketchHoverPoint = this.getLineSnapPointIfNeeded(this.planeLocalToSketchPoint(clamped))
+				} else {
+					this.sketchHoverPoint = null
+					this.sketchHoverSnapIndex = null
+				}
 				this.updateSketchOverlay()
 			}
 			this.updateReferencePlaneHover(event.clientX, event.clientY)
@@ -866,6 +923,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.setHoveredReferencePlane(null)
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
 		this.updateSketchOverlay()
 		const dx = event.clientX - this.lastRotationPointer.x
 		const dy = event.clientY - this.lastRotationPointer.y
@@ -907,7 +965,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!this.isRotatingPreview && !this.isPanningPreview) {
 			if (event.type === "pointerleave" || event.type === "pointercancel") {
 				this.pointerOverSelectedPlane = false
+				this.sketchHoverPoint = null
+				this.sketchHoverSnapIndex = null
 				this.setHoveredReferencePlane(null)
+				this.updateSketchOverlay()
 				this.updatePreviewCursor()
 			}
 			return
@@ -922,6 +983,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pointerOverSelectedPlane = false
 		if (this.activeTool !== "sketch") {
 			this.sketchHoverPoint = null
+			this.sketchHoverSnapIndex = null
 			this.updateSketchOverlay()
 		}
 		this.updatePreviewCursor()
@@ -940,6 +1002,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewKeyDown = (event: KeyboardEvent) => {
+		if (this.tryDeleteSelectedSketchPointWithKey(event)) {
+			return
+		}
 		this.tryCancelSketchToolWithEscape(event)
 	}
 
@@ -948,7 +1013,29 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			document.removeEventListener("keydown", this.handleDocumentKeyDown, true)
 			return
 		}
+		if (this.tryDeleteSelectedSketchPointWithKey(event)) {
+			return
+		}
 		this.tryCancelSketchToolWithEscape(event)
+	}
+
+	private tryDeleteSelectedSketchPointWithKey(event: KeyboardEvent): boolean {
+		if (event.key !== "Delete" && event.key !== "Backspace") {
+			return false
+		}
+		if (this.activeTool !== "sketch") {
+			return false
+		}
+		if (this.activeSketchTool !== null) {
+			return false
+		}
+		if (this.selectedSketchPointIndex === null) {
+			return false
+		}
+		event.preventDefault()
+		event.stopPropagation()
+		this.removeSketchPointAt(this.selectedSketchPointIndex)
+		return true
 	}
 
 	private tryCancelSketchToolWithEscape(event: KeyboardEvent) {
@@ -1072,6 +1159,26 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 			for (const point of this.sketchPoints) {
 				this.drawSketchPoint(point, "#1d4ed8")
+			}
+			if (this.selectedSketchPointIndex !== null) {
+				const selectedPoint = this.sketchPoints[this.selectedSketchPointIndex]
+				if (selectedPoint) {
+					const size = SKETCH_SELECTED_MARKER_SIZE
+					const half = size / 2
+					this.sketchCtx.strokeStyle = "#f59e0b"
+					this.sketchCtx.lineWidth = 2
+					this.sketchCtx.strokeRect(selectedPoint.x - half, selectedPoint.y - half, size, size)
+				}
+			}
+			if (this.sketchHoverSnapIndex !== null) {
+				const snapPoint = this.sketchPoints[this.sketchHoverSnapIndex]
+				if (snapPoint) {
+					const size = SKETCH_SNAP_MARKER_SIZE
+					const half = size / 2
+					this.sketchCtx.strokeStyle = "#f59e0b"
+					this.sketchCtx.lineWidth = 2
+					this.sketchCtx.strokeRect(snapPoint.x - half, snapPoint.y - half, size, size)
+				}
 			}
 		}
 
@@ -1275,6 +1382,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedReferencePlane = mesh
 		this.pointerOverSelectedPlane = false
 		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
 		this.refreshReferencePlaneStyles()
 		this.updateReferencePlaneHandles()
 		this.updateSketchOverlay()
@@ -1405,6 +1514,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!this.activeSketchTool) {
 			return
 		}
+		this.selectedSketchPointIndex = null
 		const localPoint = this.getPointOnReferencePlane(clientX, clientY, this.selectedReferencePlane)
 		if (!localPoint) {
 			return
@@ -1456,23 +1566,162 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isSketchClosed = false
 	}
 
+	private removeSketchPointAt(index: number) {
+		if (index < 0 || index >= this.sketchPoints.length) {
+			return
+		}
+		this.sketchPoints = this.sketchPoints.filter((_, pointIndex) => pointIndex !== index)
+		this.reindexSketchBreaksAfterPointRemoval(index)
+		if (this.pendingLineStartSourceIndex !== null) {
+			if (this.pendingLineStartSourceIndex === index) {
+				this.pendingLineStartSourceIndex = null
+			} else if (this.pendingLineStartSourceIndex > index) {
+				this.pendingLineStartSourceIndex -= 1
+			}
+		}
+		if (this.selectedSketchPointIndex !== null) {
+			if (this.selectedSketchPointIndex === index) {
+				this.selectedSketchPointIndex = this.sketchPoints.length > 0 ? Math.min(index, this.sketchPoints.length - 1) : null
+			} else if (this.selectedSketchPointIndex > index) {
+				this.selectedSketchPointIndex -= 1
+			}
+		}
+		if (this.draggingSketchPointIndex !== null) {
+			if (this.draggingSketchPointIndex === index) {
+				this.draggingSketchPointIndex = null
+			} else if (this.draggingSketchPointIndex > index) {
+				this.draggingSketchPointIndex -= 1
+			}
+		}
+		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		if (this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0) {
+			this.isSketchClosed = false
+		}
+		this.drawSketch()
+		this.updateSketchOverlay()
+		this.updateStatus()
+		this.updateControls()
+		this.emitStateChange()
+	}
+
+	private reindexSketchBreaksAfterPointRemoval(removedIndex: number) {
+		if (this.sketchBreakIndices.size === 0) {
+			return
+		}
+		const nextBreaks: number[] = []
+		for (const breakIndex of this.sketchBreakIndices) {
+			let nextIndex = breakIndex
+			if (breakIndex > removedIndex) {
+				nextIndex = breakIndex - 1
+			} else if (breakIndex === removedIndex) {
+				nextIndex = removedIndex
+			}
+			if (nextIndex > 0 && nextIndex < this.sketchPoints.length) {
+				nextBreaks.push(nextIndex)
+			}
+		}
+		this.sketchBreakIndices.clear()
+		for (const breakIndex of nextBreaks) {
+			this.sketchBreakIndices.add(breakIndex)
+		}
+	}
+
 	private handleLinePointInput(point: Point2D): boolean {
+		this.sketchHoverSnapIndex = null
+		const anchor = this.getCurrentLineAnchor()
+		const snapTarget = this.findNearestSketchPoint(point, SKETCH_SNAP_DISTANCE, anchor?.index ?? null)
+		const nextPoint = snapTarget ? { x: snapTarget.point.x, y: snapTarget.point.y } : point
 		if (this.lineToolNeedsFreshStart) {
-			this.pendingLineStart = point
+			this.pendingLineStart = nextPoint
+			this.pendingLineStartSourceIndex = snapTarget?.index ?? null
 			this.lineToolNeedsFreshStart = false
 			return false
 		}
 		if (this.pendingLineStart) {
 			const start = this.pendingLineStart
 			this.pendingLineStart = null
+			this.pendingLineStartSourceIndex = null
 			if (this.sketchPoints.length > 0) {
 				this.sketchBreakIndices.add(this.sketchPoints.length)
 			}
-			this.sketchPoints = [...this.sketchPoints, start, point]
+			this.sketchPoints = [...this.sketchPoints, start, nextPoint]
 			return true
 		}
-		this.sketchPoints = [...this.sketchPoints, point]
+		this.sketchPoints = [...this.sketchPoints, nextPoint]
 		return true
+	}
+
+	private getCurrentLineAnchor(): { point: Point2D; index: number | null } | null {
+		if (this.pendingLineStart) {
+			return {
+				point: this.pendingLineStart,
+				index: this.pendingLineStartSourceIndex
+			}
+		}
+		if (this.lineToolNeedsFreshStart || this.sketchPoints.length === 0) {
+			return null
+		}
+		const index = this.sketchPoints.length - 1
+		const last = this.sketchPoints[index]
+		if (!last) {
+			return null
+		}
+		return {
+			point: { x: last.x, y: last.y },
+			index
+		}
+	}
+
+	private findNearestSketchPoint(point: Point2D, maxDistancePx: number, excludeIndex?: number | null): { point: Point2D; index: number } | null {
+		if (this.sketchPoints.length === 0) {
+			return null
+		}
+		const maxDistanceSquared = maxDistancePx * maxDistancePx
+		let bestIndex: number | null = null
+		let bestDistanceSquared = maxDistanceSquared
+		for (let index = 0; index < this.sketchPoints.length; index += 1) {
+			const candidate = this.sketchPoints[index]
+			if (!candidate) {
+				continue
+			}
+			if (typeof excludeIndex === "number" && index === excludeIndex) {
+				continue
+			}
+			const dx = candidate.x - point.x
+			const dy = candidate.y - point.y
+			const distanceSquared = dx * dx + dy * dy
+			if (distanceSquared <= bestDistanceSquared) {
+				bestDistanceSquared = distanceSquared
+				bestIndex = index
+			}
+		}
+		if (bestIndex === null) {
+			return null
+		}
+		const bestPoint = this.sketchPoints[bestIndex]
+		if (!bestPoint) {
+			return null
+		}
+		return {
+			point: { x: bestPoint.x, y: bestPoint.y },
+			index: bestIndex
+		}
+	}
+
+	private getLineSnapPointIfNeeded(point: Point2D): Point2D {
+		if (this.activeSketchTool !== "line" || this.isSketchClosed) {
+			this.sketchHoverSnapIndex = null
+			return point
+		}
+		const anchor = this.getCurrentLineAnchor()
+		const snapTarget = this.findNearestSketchPoint(point, SKETCH_SNAP_DISTANCE, anchor?.index ?? null)
+		if (!snapTarget) {
+			this.sketchHoverSnapIndex = null
+			return point
+		}
+		this.sketchHoverSnapIndex = snapTarget.index
+		return { x: snapTarget.point.x, y: snapTarget.point.y }
 	}
 
 	private createSketchLineObject(points: Point2D[], color: number, zOffset: number, closed: boolean): THREE.Line | THREE.LineLoop | null {
@@ -1523,6 +1772,34 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return new THREE.LineSegments(geometry, material)
 	}
 
+	private createSketchSnapIndicatorObject(point: Point2D, color: number, zOffset: number, sizePx = SKETCH_SNAP_MARKER_SIZE): THREE.LineLoop {
+		const center = this.sketchPointToPlaneLocal(point)
+		const halfSize = (sizePx / SKETCH_CANVAS_SIZE) * REFERENCE_PLANE_SIZE * 0.5
+		const vertices = [
+			center.x - halfSize,
+			center.y - halfSize,
+			zOffset,
+			center.x + halfSize,
+			center.y - halfSize,
+			zOffset,
+			center.x + halfSize,
+			center.y + halfSize,
+			zOffset,
+			center.x - halfSize,
+			center.y + halfSize,
+			zOffset
+		]
+		const geometry = new THREE.BufferGeometry()
+		geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
+		const material = new THREE.LineBasicMaterial({
+			color,
+			transparent: true,
+			opacity: 1,
+			depthTest: false
+		})
+		return new THREE.LineLoop(geometry, material)
+	}
+
 	private getSketchRanges(): Array<{ start: number; end: number }> {
 		if (this.sketchPoints.length === 0) {
 			return []
@@ -1567,10 +1844,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
 			this.disposeSketchOverlayObject(this.sketchOverlayPreviewLine)
 			this.disposeSketchOverlayObject(this.sketchOverlayPoints)
+			this.disposeSketchOverlayObject(this.sketchOverlaySnapIndicator)
+			this.disposeSketchOverlayObject(this.sketchOverlaySelectedIndicator)
 			this.disposeSketchOverlayObject(this.sketchOverlayLabel)
 			this.sketchOverlayCommittedLine = null
 			this.sketchOverlayPreviewLine = null
 			this.sketchOverlayPoints = null
+			this.sketchOverlaySnapIndicator = null
+			this.sketchOverlaySelectedIndicator = null
 			this.sketchOverlayLabel = null
 			return
 		}
@@ -1642,10 +1923,38 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.sketchOverlayPoints = null
 		}
 
+		this.disposeSketchOverlayObject(this.sketchOverlaySnapIndicator)
+		if (this.sketchHoverSnapIndex !== null) {
+			const snapPoint = this.sketchPoints[this.sketchHoverSnapIndex]
+			if (snapPoint) {
+				this.sketchOverlaySnapIndicator = this.createSketchSnapIndicatorObject(snapPoint, 0xf59e0b, 0.003)
+				this.sketchOverlaySnapIndicator.renderOrder = 9
+				this.sketchOverlayGroup.add(this.sketchOverlaySnapIndicator)
+			} else {
+				this.sketchOverlaySnapIndicator = null
+			}
+		} else {
+			this.sketchOverlaySnapIndicator = null
+		}
+
+		this.disposeSketchOverlayObject(this.sketchOverlaySelectedIndicator)
+		if (this.selectedSketchPointIndex !== null) {
+			const selectedPoint = this.sketchPoints[this.selectedSketchPointIndex]
+			if (selectedPoint) {
+				this.sketchOverlaySelectedIndicator = this.createSketchSnapIndicatorObject(selectedPoint, 0xf59e0b, 0.0035, SKETCH_SELECTED_MARKER_SIZE)
+				this.sketchOverlaySelectedIndicator.renderOrder = 9
+				this.sketchOverlayGroup.add(this.sketchOverlaySelectedIndicator)
+			} else {
+				this.sketchOverlaySelectedIndicator = null
+			}
+		} else {
+			this.sketchOverlaySelectedIndicator = null
+		}
+
 		this.disposeSketchOverlayObject(this.sketchOverlayLabel)
 		this.sketchOverlayLabel = this.createReferenceLabelSprite(this.sketchName)
 		this.sketchOverlayLabel.position.set(-REFERENCE_PLANE_SIZE / 2 + 0.16, REFERENCE_PLANE_SIZE / 2 - 0.08, 0.003)
-		this.sketchOverlayLabel.renderOrder = 9
+		this.sketchOverlayLabel.renderOrder = 11
 		this.sketchOverlayGroup.add(this.sketchOverlayLabel)
 
 		this.drawPreview()
