@@ -35,7 +35,7 @@ type DockPaneState = {
 	header: HTMLDivElement
 	title: HTMLSpanElement
 	content: HTMLDivElement
-	resizeHandle: HTMLDivElement
+	resizeHandles: Record<FloatingResizeDirection, HTMLDivElement>
 	placeholder: HTMLDivElement
 	externalDropIndicator: HTMLDivElement
 	currentComponent: UiComponent<HTMLElement> | null
@@ -80,6 +80,8 @@ type FloatingResizeState = {
 	moveHandler: (event: MouseEvent) => void
 	upHandler: (event: MouseEvent) => void
 }
+
+type FloatingResizeDirection = "top" | "right" | "bottom" | "left" | "top-left" | "top-right" | "bottom-left" | "bottom-right"
 
 export class DockLayout extends UiComponent<HTMLDivElement> {
 	private rootNode: DockNode
@@ -505,24 +507,91 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		content.appendChild(placeholder)
 		content.appendChild(externalDropIndicator)
 
-		const resizeHandle = document.createElement("div")
-		resizeHandle.style.position = "absolute"
-		resizeHandle.style.right = "2px"
-		resizeHandle.style.bottom = "2px"
-		resizeHandle.style.width = "14px"
-		resizeHandle.style.height = "14px"
-		resizeHandle.style.cursor = "nwse-resize"
-		resizeHandle.style.zIndex = "5"
-		resizeHandle.style.display = "none"
-		resizeHandle.style.pointerEvents = "auto"
-		resizeHandle.style.borderRight = "2px solid #94a3b8"
-		resizeHandle.style.borderBottom = "2px solid #94a3b8"
-		resizeHandle.style.borderBottomRightRadius = "2px"
-		resizeHandle.dataset.dockFloatingResizeHandle = "corner"
+		const createResizeHandle = (direction: FloatingResizeDirection): HTMLDivElement => {
+			const handle = document.createElement("div")
+			const edgeThickness = "14px"
+			const cornerSize = "20px"
+			const inset = "14px"
+			const edgeOffset = "-7px"
+			const cornerOffset = "-8px"
+			handle.style.position = "absolute"
+			handle.style.display = "none"
+			handle.style.pointerEvents = "auto"
+			handle.style.zIndex = "5"
+			handle.style.backgroundColor = "transparent"
+			handle.dataset.dockFloatingResizeHandle = direction
+			switch (direction) {
+				case "top":
+					handle.style.left = inset
+					handle.style.right = inset
+					handle.style.top = edgeOffset
+					handle.style.height = edgeThickness
+					handle.style.cursor = "ns-resize"
+					break
+				case "right":
+					handle.style.top = inset
+					handle.style.bottom = inset
+					handle.style.right = edgeOffset
+					handle.style.width = edgeThickness
+					handle.style.cursor = "ew-resize"
+					break
+				case "bottom":
+					handle.style.left = inset
+					handle.style.right = inset
+					handle.style.bottom = edgeOffset
+					handle.style.height = edgeThickness
+					handle.style.cursor = "ns-resize"
+					break
+				case "left":
+					handle.style.top = inset
+					handle.style.bottom = inset
+					handle.style.left = edgeOffset
+					handle.style.width = edgeThickness
+					handle.style.cursor = "ew-resize"
+					break
+				case "top-left":
+					handle.style.left = cornerOffset
+					handle.style.top = cornerOffset
+					handle.style.width = cornerSize
+					handle.style.height = cornerSize
+					handle.style.cursor = "nwse-resize"
+					break
+				case "top-right":
+					handle.style.right = cornerOffset
+					handle.style.top = cornerOffset
+					handle.style.width = cornerSize
+					handle.style.height = cornerSize
+					handle.style.cursor = "nesw-resize"
+					break
+				case "bottom-left":
+					handle.style.left = cornerOffset
+					handle.style.bottom = cornerOffset
+					handle.style.width = cornerSize
+					handle.style.height = cornerSize
+					handle.style.cursor = "nesw-resize"
+					break
+				default:
+					handle.style.right = cornerOffset
+					handle.style.bottom = cornerOffset
+					handle.style.width = cornerSize
+					handle.style.height = cornerSize
+					handle.style.cursor = "nwse-resize"
+					handle.style.borderRight = "2px solid #94a3b8"
+					handle.style.borderBottom = "2px solid #94a3b8"
+					handle.style.borderBottomRightRadius = "2px"
+					break
+			}
+			return handle
+		}
+
+		const resizeHandleDirections: FloatingResizeDirection[] = ["top", "right", "bottom", "left", "top-left", "top-right", "bottom-left", "bottom-right"]
+		const resizeHandles = Object.fromEntries(resizeHandleDirections.map((direction) => [direction, createResizeHandle(direction)])) as Record<FloatingResizeDirection, HTMLDivElement>
 
 		element.appendChild(header)
 		element.appendChild(content)
-		element.appendChild(resizeHandle)
+		for (const direction of resizeHandleDirections) {
+			element.appendChild(resizeHandles[direction])
+		}
 
 		const paneId = presetId ?? `pane-${++paneIdCounter}`
 		if (presetId) {
@@ -542,7 +611,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			header,
 			title,
 			content,
-			resizeHandle,
+			resizeHandles,
 			placeholder,
 			externalDropIndicator,
 			currentComponent: null,
@@ -573,15 +642,17 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			this.closePane(paneState.id)
 		})
 
-		resizeHandle.addEventListener("mousedown", (event) => {
-			if (event.button !== 0 || !paneState.isFloating) {
-				return
-			}
-			event.preventDefault()
-			event.stopPropagation()
-			this.setActivePane(paneState.id)
-			this.startFloatingResize(paneState, event.clientX, event.clientY)
-		})
+		for (const direction of resizeHandleDirections) {
+			resizeHandles[direction].addEventListener("mousedown", (event) => {
+				if (event.button !== 0 || !paneState.isFloating) {
+					return
+				}
+				event.preventDefault()
+				event.stopPropagation()
+				this.setActivePane(paneState.id)
+				this.startFloatingResize(paneState, direction, event.clientX, event.clientY)
+			})
+		}
 
 		floatButton.addEventListener("click", (event) => {
 			event.stopPropagation()
@@ -988,7 +1059,9 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			pane.element.style.height = `${Math.round(height)}px`
 			pane.element.style.zIndex = "80"
 			pane.element.style.overflow = "hidden"
-			pane.resizeHandle.style.display = "block"
+			for (const handle of Object.values(pane.resizeHandles)) {
+				handle.style.display = "block"
+			}
 			const left = paneRect.left - rootRect.left
 			const top = paneRect.top - rootRect.top
 			this.positionFloatingPane(pane, left, top)
@@ -1003,7 +1076,9 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 			pane.element.style.zIndex = ""
 			pane.element.style.flex = "1 1 0"
 			pane.element.style.overflow = ""
-			pane.resizeHandle.style.display = "none"
+			for (const handle of Object.values(pane.resizeHandles)) {
+				handle.style.display = "none"
+			}
 		}
 		pane.isFloating = floating
 		this.updateFloatingButtonState(pane)
@@ -1054,7 +1129,7 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		window.addEventListener("mouseup", upHandler, true)
 	}
 
-	private startFloatingResize(pane: DockPaneState, startX: number, startY: number): void {
+	private startFloatingResize(pane: DockPaneState, direction: FloatingResizeDirection, startX: number, startY: number): void {
 		if (!pane.isFloating) {
 			return
 		}
@@ -1065,12 +1140,38 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		this.endFloatingResize()
 		const minWidth = 240
 		const minHeight = 160
+		const rootRect = this.root.getBoundingClientRect()
 		const parsedWidth = Number.parseFloat(pane.element.style.width)
 		const parsedHeight = Number.parseFloat(pane.element.style.height)
+		const parsedLeft = Number.parseFloat(pane.element.style.left)
+		const parsedTop = Number.parseFloat(pane.element.style.top)
+		const paneRect = pane.element.getBoundingClientRect()
 		const startWidth = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : Math.max(pane.element.offsetWidth, minWidth)
 		const startHeight = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : Math.max(pane.element.offsetHeight, minHeight)
+		const startLeft = Number.isFinite(parsedLeft) ? parsedLeft : paneRect.left - rootRect.left
+		const startTop = Number.isFinite(parsedTop) ? parsedTop : paneRect.top - rootRect.top
+		const startRight = startLeft + startWidth
+		const startBottom = startTop + startHeight
 		const moveHandler = (event: MouseEvent) => {
-			this.resizeFloatingPane(pane, startWidth + (event.clientX - startX), startHeight + (event.clientY - startY))
+			const deltaX = event.clientX - startX
+			const deltaY = event.clientY - startY
+			let rawLeft = startLeft
+			let rawRight = startRight
+			let rawTop = startTop
+			let rawBottom = startBottom
+			if (direction.includes("left")) {
+				rawLeft = startLeft + deltaX
+			}
+			if (direction.includes("right")) {
+				rawRight = startRight + deltaX
+			}
+			if (direction.includes("top")) {
+				rawTop = startTop + deltaY
+			}
+			if (direction.includes("bottom")) {
+				rawBottom = startBottom + deltaY
+			}
+			this.resizeFloatingPane(pane, direction, rawLeft, rawTop, rawRight, rawBottom)
 		}
 		const upHandler = () => {
 			this.endFloatingResize(pane)
@@ -1084,19 +1185,41 @@ export class DockLayout extends UiComponent<HTMLDivElement> {
 		window.addEventListener("mouseup", upHandler, true)
 	}
 
-	private resizeFloatingPane(pane: DockPaneState, rawWidth: number, rawHeight: number): void {
+	private resizeFloatingPane(pane: DockPaneState, direction: FloatingResizeDirection, rawLeft: number, rawTop: number, rawRight: number, rawBottom: number): void {
 		const minWidth = 240
 		const minHeight = 160
 		const rootRect = this.root.getBoundingClientRect()
-		const parsedLeft = Number.parseFloat(pane.element.style.left)
-		const parsedTop = Number.parseFloat(pane.element.style.top)
-		const paneRect = pane.element.getBoundingClientRect()
-		const left = Number.isFinite(parsedLeft) ? parsedLeft : paneRect.left - rootRect.left
-		const top = Number.isFinite(parsedTop) ? parsedTop : paneRect.top - rootRect.top
-		const maxWidth = Math.max(rootRect.width - left, minWidth)
-		const maxHeight = Math.max(rootRect.height - top, minHeight)
-		const width = this.clamp(rawWidth, minWidth, maxWidth)
-		const height = this.clamp(rawHeight, minHeight, maxHeight)
+		let left = rawLeft
+		let right = rawRight
+		let top = rawTop
+		let bottom = rawBottom
+
+		if (direction.includes("left")) {
+			right = this.clamp(right, minWidth, rootRect.width)
+			left = this.clamp(left, 0, right - minWidth)
+		} else if (direction.includes("right")) {
+			left = this.clamp(left, 0, rootRect.width - minWidth)
+			right = this.clamp(right, left + minWidth, rootRect.width)
+		} else {
+			left = this.clamp(left, 0, rootRect.width - minWidth)
+			right = this.clamp(right, left + minWidth, rootRect.width)
+		}
+
+		if (direction.includes("top")) {
+			bottom = this.clamp(bottom, minHeight, rootRect.height)
+			top = this.clamp(top, 0, bottom - minHeight)
+		} else if (direction.includes("bottom")) {
+			top = this.clamp(top, 0, rootRect.height - minHeight)
+			bottom = this.clamp(bottom, top + minHeight, rootRect.height)
+		} else {
+			top = this.clamp(top, 0, rootRect.height - minHeight)
+			bottom = this.clamp(bottom, top + minHeight, rootRect.height)
+		}
+
+		const width = Math.max(right - left, minWidth)
+		const height = Math.max(bottom - top, minHeight)
+		pane.element.style.left = `${Math.round(left)}px`
+		pane.element.style.top = `${Math.round(top)}px`
 		pane.element.style.width = `${Math.round(width)}px`
 		pane.element.style.height = `${Math.round(height)}px`
 	}

@@ -390,7 +390,7 @@ describe("DockLayout", () => {
 		expect(pane.style.top).toBe("170px")
 	})
 
-	it("resizes floating panes from the corner handle", () => {
+	it("shows all floating resize handles and supports corner resize", () => {
 		const layout = new DockLayout()
 		const paneId = layout.getActivePaneId()
 		expect(paneId).toBeTruthy()
@@ -413,10 +413,12 @@ describe("DockLayout", () => {
 		if (!floatButton) {
 			throw new Error("Expected float button")
 		}
-		const resizeHandle = pane.querySelector('[data-dock-floating-resize-handle="corner"]') as HTMLDivElement | null
-		expect(resizeHandle).not.toBeNull()
-		if (!resizeHandle) {
-			throw new Error("Expected floating resize handle")
+		const resizeHandles = pane.querySelectorAll("[data-dock-floating-resize-handle]")
+		expect(resizeHandles.length).toBe(8)
+		const cornerHandle = pane.querySelector('[data-dock-floating-resize-handle="bottom-right"]') as HTMLDivElement | null
+		expect(cornerHandle).not.toBeNull()
+		if (!cornerHandle) {
+			throw new Error("Expected floating corner resize handle")
 		}
 
 		layout.root.getBoundingClientRect = () =>
@@ -445,9 +447,12 @@ describe("DockLayout", () => {
 			}) as DOMRect
 
 		floatButton.click()
-		expect(resizeHandle.style.display).toBe("block")
+		for (let i = 0; i < resizeHandles.length; i += 1) {
+			const handle = resizeHandles[i] as HTMLDivElement | undefined
+			expect(handle?.style.display).toBe("block")
+		}
 
-		resizeHandle.dispatchEvent(
+		cornerHandle.dispatchEvent(
 			new window.MouseEvent("mousedown", {
 				bubbles: true,
 				button: 0,
@@ -472,6 +477,92 @@ describe("DockLayout", () => {
 		expect(pane.style.height).toBe("380px")
 
 		floatButton.click()
-		expect(resizeHandle.style.display).toBe("none")
+		for (let i = 0; i < resizeHandles.length; i += 1) {
+			const handle = resizeHandles[i] as HTMLDivElement | undefined
+			expect(handle?.style.display).toBe("none")
+		}
+	})
+
+	it("resizes floating panes from a side handle", () => {
+		const layout = new DockLayout()
+		const paneId = layout.getActivePaneId()
+		expect(paneId).toBeTruthy()
+		if (!paneId) {
+			throw new Error("Expected pane to exist")
+		}
+
+		const pane = layout.root.querySelector(`[data-pane-id="${paneId}"]`) as HTMLDivElement | null
+		expect(pane).not.toBeNull()
+		if (!pane) {
+			throw new Error("Expected pane element to exist")
+		}
+
+		const header = pane.children[0] as HTMLDivElement | undefined
+		if (!header) {
+			throw new Error("Expected header element")
+		}
+		const floatButton = header.querySelector('button[aria-label="Float pane"]') as HTMLButtonElement | null
+		expect(floatButton).not.toBeNull()
+		if (!floatButton) {
+			throw new Error("Expected float button")
+		}
+		const leftHandle = pane.querySelector('[data-dock-floating-resize-handle="left"]') as HTMLDivElement | null
+		expect(leftHandle).not.toBeNull()
+		if (!leftHandle) {
+			throw new Error("Expected floating left resize handle")
+		}
+
+		layout.root.getBoundingClientRect = () =>
+			({
+				x: 100,
+				y: 50,
+				left: 100,
+				top: 50,
+				right: 1100,
+				bottom: 750,
+				width: 1000,
+				height: 700,
+				toJSON: () => ({})
+			}) as DOMRect
+		pane.getBoundingClientRect = () =>
+			({
+				x: 180,
+				y: 120,
+				left: 180,
+				top: 120,
+				right: 540,
+				bottom: 360,
+				width: 360,
+				height: 240,
+				toJSON: () => ({})
+			}) as DOMRect
+
+		floatButton.click()
+		expect(pane.style.left).toBe("80px")
+		expect(pane.style.width).toBe("360px")
+
+		leftHandle.dispatchEvent(
+			new window.MouseEvent("mousedown", {
+				bubbles: true,
+				button: 0,
+				clientX: 180,
+				clientY: 220
+			})
+		)
+		window.dispatchEvent(
+			new window.MouseEvent("mousemove", {
+				bubbles: true,
+				clientX: 230,
+				clientY: 220
+			})
+		)
+		window.dispatchEvent(
+			new window.MouseEvent("mouseup", {
+				bubbles: true
+			})
+		)
+
+		expect(pane.style.left).toBe("130px")
+		expect(pane.style.width).toBe("310px")
 	})
 })
