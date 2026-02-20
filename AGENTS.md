@@ -1,13 +1,23 @@
-Before changes run
-- bun install
+# Instructions for agents
 
-After changes run:
+## 1. After changes
+
+**If changes made to typescript code run:**
+
 - bun run check
 - bun run lint-fix and after you should add possible lint changes to the commit.
 - bun run test
 - bun run format-fix and after you should add the possible format changes to the commit.
 
+**If changes made to rust code run:**
 
-Dont update readme unless specifically instructed
+- cargo build --workspace
+- cargo test --workspace
 
-When making changes always think about unit tests you could implement but always prioritize finding relevant unit tests and updating them first.
+## 2. Documentation
+
+When making changes always check docs folder if it needs to be updated and update it if needed.
+
+## 3. Testing
+
+When making changes always check if there are relevant unit tests and if not add them. If there are relevant unit tests, run them and update them if needed.
