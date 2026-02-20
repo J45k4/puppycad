@@ -16,6 +16,7 @@ fn main() -> ExitCode {
 	match cli.command {
 		Command::Parse(args) => parse_cmd::run_parse(args),
 		Command::Validate(args) => parse_cmd::run_validate(args),
+		Command::Render(args) => parse_cmd::run_render(args),
 	}
 }
 

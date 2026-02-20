@@ -1,0 +1,3 @@
+[submodule "pge"]
+	path = pge
+	url = https://github.com/puppycorp/pge.git
