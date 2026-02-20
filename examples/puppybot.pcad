@@ -1,0 +1,326 @@
+// PuppyCAD enclosure (approx) based on screenshots
+// Coordinate system: origin at the OUTER box min corner.
+// +X = right, +Y = back, +Z = up
+// Units: mm (convention)
+
+feature cfg = config {
+  // Outer envelope
+  w: 140;
+  d: 90;
+  h: 70;
+
+  // Shell thickness
+  wall: 3;
+  floor: 3;
+
+  // Corner bosses (for lid screws)
+  boss_r: 5;
+  boss_h: 10;
+  boss_inset: 10;   // measured from inner wall
+
+  screw_d: 3.2;     // through hole in bosses
+
+  // Big circular ports (approx)
+  front_port_d: 30;
+  front_port_x: 105;  // along X on FRONT face
+  front_port_z: 28;   // along Z on FRONT face
+
+  left_port_d: 30;
+  left_port_y: 60;    // along Y on LEFT face
+  left_port_z: 40;    // along Z on LEFT face
+
+  // Front rectangular cutout (approx)
+  front_slot_w: 30;
+  front_slot_h: 24;
+  front_slot_x: 28;   // along X on FRONT face
+  front_slot_z: 24;   // along Z on FRONT face
+
+  // A top hole (seen on top surface in screenshots)
+  top_hole_d: 26;
+  top_hole_x: 120;    // along X on TOP face
+  top_hole_y: 75;     // along Y on TOP face
+
+  // Interior blocks (rough proportions)
+  // Back-left connector wall block
+  conn_block_w: 60;
+  conn_block_d: 18;
+  conn_block_h: 40;
+
+  // Front-right reinforcement block near the big front circular port
+  front_reinf_w: 50;
+  front_reinf_d: 28;
+  front_reinf_h: 45;
+
+  // Bottom-right pocket block
+  br_block_w: 48;
+  br_block_d: 32;
+  br_block_h: 25;
+
+  // Central "switch mount" style tower
+  switch_w: 26;
+  switch_d: 18;
+  switch_h: 30;
+};
+
+//
+// 1) Base shell = outer box minus inner cavity (open top)
+//
+
+solid outer = box {
+  w: cfg.w;
+  d: cfg.d;
+  h: cfg.h;
+};
+
+solid cavity_raw = box {
+  w: cfg.w - 2 * cfg.wall;
+  d: cfg.d - 2 * cfg.wall;
+  h: cfg.h - cfg.floor;
+};
+
+solid cavity = translate {
+  of: cavity_raw;
+  by: [cfg.wall, cfg.wall, cfg.floor];
+};
+
+solid case0 = boolean {
+  op: "subtract";
+  a: outer;
+  b: cavity;
+};
+
+//
+// 2) Corner bosses (4x) + union into case
+//    (boss centers are inset from the INNER cavity walls)
+//
+
+solid boss_raw = cylinder {
+  r: cfg.boss_r;
+  h: cfg.boss_h;
+};
+
+solid boss_fl = translate {
+  let x = cfg.wall + cfg.boss_inset;
+  let y = cfg.wall + cfg.boss_inset;
+
+  of: boss_raw;
+  by: [x, y, cfg.floor];
+};
+
+solid boss_fr = translate {
+  let x = cfg.w - cfg.wall - cfg.boss_inset;
+  let y = cfg.wall + cfg.boss_inset;
+
+  of: boss_raw;
+  by: [x, y, cfg.floor];
+};
+
+solid boss_bl = translate {
+  let x = cfg.wall + cfg.boss_inset;
+  let y = cfg.d - cfg.wall - cfg.boss_inset;
+
+  of: boss_raw;
+  by: [x, y, cfg.floor];
+};
+
+solid boss_br = translate {
+  let x = cfg.w - cfg.wall - cfg.boss_inset;
+  let y = cfg.d - cfg.wall - cfg.boss_inset;
+
+  of: boss_raw;
+  by: [x, y, cfg.floor];
+};
+
+solid case1 = boolean { op: "union"; a: case0; b: boss_fl; };
+solid case2 = boolean { op: "union"; a: case1; b: boss_fr; };
+solid case3 = boolean { op: "union"; a: case2; b: boss_bl; };
+solid case4 = boolean { op: "union"; a: case3; b: boss_br; };
+
+//
+// 3) Interior blocks (approx) - union into case
+//
+
+// Back-left connector wall block (against back interior wall)
+solid conn_block_raw = box {
+  w: cfg.conn_block_w;
+  d: cfg.conn_block_d;
+  h: cfg.conn_block_h;
+};
+
+solid conn_block = translate {
+  // place near back wall, slightly inset from left wall
+  let x = cfg.wall;
+  let y = cfg.d - cfg.wall - cfg.conn_block_d;
+  let z = cfg.floor;
+
+  of: conn_block_raw;
+  by: [x, y, z];
+};
+
+solid case5 = boolean { op: "union"; a: case4; b: conn_block; };
+
+// Front-right reinforcement block near front circular port
+solid front_reinf_raw = box {
+  w: cfg.front_reinf_w;
+  d: cfg.front_reinf_d;
+  h: cfg.front_reinf_h;
+};
+
+solid front_reinf = translate {
+  // place near front wall and right wall
+  let x = cfg.w - cfg.wall - cfg.front_reinf_w;
+  let y = cfg.wall;
+  let z = cfg.floor;
+
+  of: front_reinf_raw;
+  by: [x, y, z];
+};
+
+solid case6 = boolean { op: "union"; a: case5; b: front_reinf; };
+
+// Bottom-right pocket block
+solid br_block_raw = box {
+  w: cfg.br_block_w;
+  d: cfg.br_block_d;
+  h: cfg.br_block_h;
+};
+
+solid br_block = translate {
+  let x = cfg.w - cfg.wall - cfg.br_block_w;
+  let y = cfg.wall;
+  let z = cfg.floor;
+
+  of: br_block_raw;
+  by: [x, y, z];
+};
+
+solid case7 = boolean { op: "union"; a: case6; b: br_block; };
+
+// Central switch-mount tower
+solid switch_raw = box {
+  w: cfg.switch_w;
+  d: cfg.switch_d;
+  h: cfg.switch_h;
+};
+
+solid switch_mount = translate {
+  let x = (cfg.w - cfg.switch_w) / 2;
+  let y = (cfg.d - cfg.switch_d) / 2;
+  let z = cfg.floor;
+
+  of: switch_raw;
+  by: [x, y, z];
+};
+
+solid case8 = boolean { op: "union"; a: case7; b: switch_mount; };
+
+//
+// 4) Cutouts / ports (intent-based: target = face anchor of the current body)
+//
+
+// Big front circular port (axis normal to FRONT face)
+solid case9 = hole {
+  of: case8;
+  target: case8.front;
+
+  x: cfg.front_port_x;
+  y: cfg.front_port_z;
+  d: cfg.front_port_d;
+
+  through: true;
+};
+
+// Left circular port (axis normal to LEFT face)
+solid case10 = hole {
+  of: case9;
+  target: case9.left;
+
+  x: cfg.left_port_y;
+  y: cfg.left_port_z;
+  d: cfg.left_port_d;
+
+  through: true;
+};
+
+// Front rectangular cutout (approx for the latch/connector shape)
+solid case11 = cut_rect {
+  of: case10;
+  target: case10.front;
+
+  x: cfg.front_slot_x;
+  y: cfg.front_slot_z;
+  w: cfg.front_slot_w;
+  h: cfg.front_slot_h;
+
+  through: true;
+};
+
+// Top circular hole (seen on top surface)
+solid enclosure = hole {
+  of: case11;
+  target: case11.top;
+
+  x: cfg.top_hole_x;
+  y: cfg.top_hole_y;
+  d: cfg.top_hole_d;
+
+  through: true;
+};
+
+//
+// 5) Drill boss screw holes (vertical through bosses)
+//    Using hole op on TOP face so axis is -Z through the bosses
+//
+
+solid enclosure2 = hole {
+  of: enclosure;
+  target: enclosure.top;
+
+  // boss FL
+  x: cfg.wall + cfg.boss_inset;
+  y: cfg.wall + cfg.boss_inset;
+  d: cfg.screw_d;
+
+  through: true;
+};
+
+solid enclosure3 = hole {
+  of: enclosure2;
+  target: enclosure2.top;
+
+  // boss FR
+  x: cfg.w - cfg.wall - cfg.boss_inset;
+  y: cfg.wall + cfg.boss_inset;
+  d: cfg.screw_d;
+
+  through: true;
+};
+
+solid enclosure4 = hole {
+  of: enclosure3;
+  target: enclosure3.top;
+
+  // boss BL
+  x: cfg.wall + cfg.boss_inset;
+  y: cfg.d - cfg.wall - cfg.boss_inset;
+  d: cfg.screw_d;
+
+  through: true;
+};
+
+solid enclosure5 = hole {
+  of: enclosure4;
+  target: enclosure4.top;
+
+  // boss BR
+  x: cfg.w - cfg.wall - cfg.boss_inset;
+  y: cfg.d - cfg.wall - cfg.boss_inset;
+  d: cfg.screw_d;
+
+  through: true;
+};
+
+// Final exported solid
+solid final = identity {
+  of: enclosure5;
+};
