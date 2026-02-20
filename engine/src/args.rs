@@ -13,6 +13,7 @@ pub enum Command {
     Parse(ParseArgs),
     Validate(ValidateArgs),
     Render(RenderArgs),
+    Api(ApiArgs),
 }
 
 #[derive(Args, Debug)]
@@ -74,6 +75,17 @@ pub struct RenderArgs {
         help = "Write the selected frame to this directory (defaults to workdir/screenshots)."
     )]
     pub output_dir: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+#[command(name = "api", about = "Start the PuppyCAD HTTP API daemon")]
+pub struct ApiArgs {
+    #[arg(long, default_value = "127.0.0.1", value_name = "HOST", help = "Bind address (localhost by default)")]
+    pub host: String,
+    #[arg(long, default_value_t = 18790, value_name = "PORT", help = "Bind port")]
+    pub port: u16,
+    #[arg(long, help = "Allow binding outside localhost")]
+    pub allow_remote: bool,
 }
 
 pub fn parse_args() -> Cli {

@@ -4,12 +4,11 @@ mod parser;
 mod parse_cmd;
 mod eval;
 mod types;
+mod api;
 
 use args::{parse_args, Command};
-use std::fs;
-use std::io::{self, IsTerminal, Read};
+use std::io::{IsTerminal, Read};
 use std::process::ExitCode;
-
 
 fn main() -> ExitCode {
 	let cli = parse_args();
@@ -17,12 +16,13 @@ fn main() -> ExitCode {
 		Command::Parse(args) => parse_cmd::run_parse(args),
 		Command::Validate(args) => parse_cmd::run_validate(args),
 		Command::Render(args) => parse_cmd::run_render(args),
+		Command::Api(args) => api::run_api(args),
 	}
 }
 
 fn read_source(path: Option<&std::path::Path>) -> Result<String, String> {
 	if let Some(path) = path {
-		return fs::read_to_string(path).map_err(|err| {
+		return std::fs::read_to_string(path).map_err(|err| {
 			format!(
 				"failed to read '{}': {err}",
 				path.to_string_lossy()
@@ -30,12 +30,12 @@ fn read_source(path: Option<&std::path::Path>) -> Result<String, String> {
 		});
 	}
 
-	if io::stdin().is_terminal() {
+	if std::io::stdin().is_terminal() {
 		return Err("no input provided; pass FILE or pipe .pcad content via stdin".to_owned());
 	}
 
 	let mut input = String::new();
-	io::stdin()
+	std::io::stdin()
 		.read_to_string(&mut input)
 		.map_err(|err| format!("failed to read stdin: {err}"))?;
 
