@@ -823,21 +823,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
-name = "engine"
-version = "0.1.0"
-dependencies = [
- "clap",
- "hex",
- "hyper",
- "pge",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2462,6 +2447,40 @@ checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "puppycad"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "pge",
+ "puppycad-core",
+ "serde_json",
+]
+
+[[package]]
+name = "puppycad-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "puppycad-daemon"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hex",
+ "hyper",
+ "pge",
+ "puppycad-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

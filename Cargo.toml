@@ -1,4 +1,4 @@
 [workspace]
-members = ["engine"]
-default-members = ["engine"]
+members = ["core", "cli", "daemon"]
+default-members = ["cli"]
 resolver = "2"
