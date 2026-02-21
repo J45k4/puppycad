@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::parser::{BinaryOp, Decl, DeclKind, Entry, Expr, ExprKind, File, UnaryOp};
+use crate::ast::{BinaryOp, Decl, DeclKind, Entry, Expr, ExprKind, File, UnaryOp};
 use crate::types::{CompiledNode, ErrorCode, ErrorLevel, LangError, Position, Span, Value};
 
 #[derive(Debug, Default)]

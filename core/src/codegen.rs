@@ -1,6 +1,6 @@
 use serde_json::{Map, Value as JsonValue};
 
-use crate::parser::File;
+use crate::ast::File;
 use crate::eval::Evaluator;
 use crate::types::{CompiledNode, ErrorCode, ErrorLevel, LangError};
 
