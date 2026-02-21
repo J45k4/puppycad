@@ -1,4 +1,4 @@
-use clap::{Args, Parser as _};
+use clap::{Args, Parser as _, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(clap::Parser, Debug)]
@@ -16,15 +16,34 @@ pub enum Command {
 	Ui(UiArgs),
 }
 
+#[derive(Clone, Debug, ValueEnum)]
+pub enum ParseOutput {
+	Summary,
+	Ast,
+	FeatureScript,
+	ModelState,
+}
+
 #[derive(Args, Debug)]
 #[command(name = "parse", about = "Parse a .pcad file")]
 pub struct ParseArgs {
-    #[arg(value_name = "FILE", help = "Input .pcad file. Reads stdin when omitted.")]
-    pub input: Option<PathBuf>,
-    #[arg(long, help = "Print parsed AST using Rust debug format.")]
-    pub ast: bool,
-    #[arg(long, help = "Emit compact JSON model for renderer tooling.")]
-    pub json: bool,
+	#[arg(value_name = "FILE", help = "Input .pcad file. Reads stdin when omitted.")]
+	pub input: Option<PathBuf>,
+	#[arg(
+		long = "print",
+		value_enum,
+		default_value_t = ParseOutput::Summary,
+		help = "Select parse output: summary, ast, feature-script, model-state"
+	)]
+	pub output: ParseOutput,
+	#[arg(long, help = "Alias for --print ast.")]
+	pub ast: bool,
+	#[arg(long, help = "Alias for --print feature-script.")]
+	pub json: bool,
+	#[arg(long, help = "Alias for --print feature-script.")]
+	pub feature_script: bool,
+	#[arg(long = "model-state", help = "Alias for --print model-state.")]
+	pub model_state: bool,
 }
 
 #[derive(Args, Debug)]

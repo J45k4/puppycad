@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use serde_json::{Map, Value as JsonValue};
@@ -176,4 +177,22 @@ pub struct CompiledNode {
     pub kind: String,
     pub op: String,
     pub fields: JsonValue,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelNode {
+	pub id: String,
+	pub kind: String,
+	pub op: String,
+	pub fields: HashMap<String, Value>,
+	pub dependencies: Vec<String>,
+	pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelState {
+	pub nodes: HashMap<String, ModelNode>,
+	pub declaration_order: Vec<String>,
+	pub execution_order: Vec<String>,
+	pub final_node_id: Option<String>,
 }

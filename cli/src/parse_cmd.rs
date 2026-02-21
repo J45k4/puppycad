@@ -4,9 +4,12 @@ use std::process::Command as ProcessCommand;
 use std::path::PathBuf;
 use std::path::Path;
 
-use crate::{args::{ParseArgs, RenderArgs, UiArgs, ValidateArgs}, read_source};
+use crate::{
+	args::{ParseArgs, ParseOutput, RenderArgs, UiArgs, ValidateArgs},
+	read_source,
+};
 use serde_json::Value as JsonValue;
-use puppycad_core::{codegen, eval::Evaluator, parser::parse_pcad, types::CompiledNode};
+use puppycad_core::{build_model_state, codegen, eval::Evaluator, parser::parse_pcad, types::CompiledNode};
 
 #[derive(Clone)]
 struct RenderPrimitive {
@@ -127,20 +130,43 @@ pub fn run_parse(args: ParseArgs) -> ExitCode {
 
 	match parse_pcad(&source) {
 		Ok(ast) => {
-			if args.json {
-				match codegen::compile_to_three_json(&ast) {
-					Ok(json) => {
-						println!("{json}");
+			let output = if args.ast {
+				ParseOutput::Ast
+			} else if args.json || args.feature_script {
+				ParseOutput::FeatureScript
+			} else if args.model_state {
+				ParseOutput::ModelState
+			} else {
+				args.output
+			};
+
+			match output {
+				ParseOutput::Summary => {
+					println!("Parsed {} declaration(s)", ast.decls.len());
+				}
+				ParseOutput::Ast => {
+					println!("{ast:#?}");
+				}
+				ParseOutput::FeatureScript => {
+					match codegen::compile_to_three_json(&ast) {
+						Ok(json) => {
+							println!("{json}");
+						}
+						Err(err) => {
+							eprintln!("{err}");
+							return ExitCode::FAILURE;
+						}
+					}
+				}
+				ParseOutput::ModelState => match build_model_state(&puppycad_core::FeatureGraph::new(&ast)) {
+					Ok(state) => {
+						println!("{state:#?}");
 					}
 					Err(err) => {
 						eprintln!("{err}");
 						return ExitCode::FAILURE;
 					}
-				}
-			} else if args.ast {
-				println!("{ast:#?}");
-			} else {
-				println!("Parsed {} declaration(s)", ast.decls.len());
+				},
 			}
 			ExitCode::SUCCESS
 		}

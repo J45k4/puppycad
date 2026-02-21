@@ -1,0 +1,15 @@
+solid body = box {
+  w: 20;
+  h: 20;
+  d: 20;
+}
+
+feature hole1 = hole {
+  let cx = body.w / 2;
+  let cy = body.h / 2;
+
+  target: body.top;
+  x: cx;
+  y: cy;
+  d: 6;
+}
