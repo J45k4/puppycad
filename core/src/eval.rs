@@ -1,27 +1,20 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{BinaryOp, Decl, DeclKind, Entry, Expr, ExprKind, File, UnaryOp};
+use crate::ast::{BinaryOp, DeclKind, Entry, Expr, ExprKind, File, UnaryOp};
+use crate::feature_graph::FeatureGraph;
 use crate::types::{CompiledNode, ErrorCode, ErrorLevel, LangError, Position, Span, Value};
 
 #[derive(Debug, Default)]
 pub struct Evaluator<'a> {
-	decls: HashMap<&'a str, &'a Decl>,
-	order: Vec<&'a str>,
+	feature_graph: FeatureGraph<'a>,
 	resolved: HashMap<String, HashMap<String, Value>>,
 	evaluating: HashSet<String>,
 }
 
 impl<'a> Evaluator<'a> {
 	pub fn new(file: &'a File) -> Self {
-		let mut decls = HashMap::new();
-		let mut order = Vec::new();
-		for decl in &file.decls {
-			decls.insert(decl.id.as_str(), decl);
-			order.push(decl.id.as_str());
-		}
 		Self {
-			decls,
-			order,
+			feature_graph: FeatureGraph::new(file),
 			resolved: HashMap::new(),
 			evaluating: HashSet::new(),
 		}
@@ -29,31 +22,28 @@ impl<'a> Evaluator<'a> {
 
 	pub fn build(&mut self) -> Result<Vec<CompiledNode>, LangError> {
 		let mut nodes = Vec::new();
-		let ids = self.order.clone();
+		let ids = self.feature_graph.declaration_order().to_vec();
 		for id in ids {
 			let fields = self.resolve_decl(id)?;
-			let decl = self
-				.decls
-				.get(id)
-				.ok_or_else(|| LangError {
-					level: ErrorLevel::Error,
-					code: ErrorCode::UnknownIdentifier,
-					message: format!("unknown declaration '{id}'"),
-					span: Span {
-						start: Position {
-							line: 0,
-							col: 0,
-							offset: 0,
-						},
-						end: Position {
-							line: 0,
-							col: 0,
-							offset: 0,
-						},
+			let decl = self.feature_graph.decl(id).ok_or_else(|| LangError {
+				level: ErrorLevel::Error,
+				code: ErrorCode::UnknownIdentifier,
+				message: format!("unknown declaration '{id}'"),
+				span: Span {
+					start: Position {
+						line: 0,
+						col: 0,
+						offset: 0,
 					},
-					node: Some(id.to_owned()),
-					details: Vec::new(),
-				})?;
+					end: Position {
+						line: 0,
+						col: 0,
+						offset: 0,
+					},
+				},
+				node: Some(id.to_owned()),
+				details: Vec::new(),
+			})?;
 			let mut node_fields = serde_json::Map::new();
 			for entry in &decl.entries {
 				let Entry::Field { name, .. } = entry else {
@@ -82,7 +72,7 @@ impl<'a> Evaluator<'a> {
 		if let Some(cached) = self.resolved.get(id).cloned() {
 			return Ok(cached);
 		}
-		if !self.decls.contains_key(id) {
+		if !self.feature_graph.has_decl(id) {
 			return Err(LangError {
 				level: ErrorLevel::Error,
 				code: ErrorCode::UnknownIdentifier,
@@ -125,7 +115,25 @@ impl<'a> Evaluator<'a> {
 			});
 		}
 
-		let decl = self.decls[id];
+		let decl = self.feature_graph.decl(id).ok_or_else(|| LangError {
+			level: ErrorLevel::Error,
+			code: ErrorCode::UnknownIdentifier,
+			message: format!("unknown declaration '{id}'"),
+			span: Span {
+				start: Position {
+					line: 0,
+					col: 0,
+					offset: 0,
+				},
+				end: Position {
+					line: 0,
+					col: 0,
+					offset: 0,
+				},
+			},
+			node: Some(id.to_owned()),
+			details: Vec::new(),
+		})?;
 		let mut scope = HashMap::<String, Value>::new();
 
 		for entry in &decl.entries {
@@ -195,7 +203,7 @@ impl<'a> Evaluator<'a> {
 			ExprKind::Ident(name) => scope
 				.get(name)
 				.cloned()
-				.or_else(|| self.decls.contains_key(name.as_str()).then(|| Value::NodeRef(name.clone())))
+				.or_else(|| self.feature_graph.has_decl(name.as_str()).then(|| Value::NodeRef(name.clone())))
 				.ok_or_else(|| self.unknown_identifier(expr.span, current, name)),
 			ExprKind::Reference(segments) => self.resolve_reference(segments, scope, expr.span, current),
 			ExprKind::Call { name, args } => self.eval_call(name, args, scope, current, expr.span),
@@ -284,8 +292,8 @@ impl<'a> Evaluator<'a> {
 		}
 
 		let decl_id = first.as_str();
-		self.decls
-			.get(decl_id)
+		self.feature_graph
+			.decl(decl_id)
 			.ok_or_else(|| self.unknown_identifier(span, current, first))?;
 
 		if segments.len() == 2 {
