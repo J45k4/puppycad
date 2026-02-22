@@ -243,6 +243,14 @@ struct BuiltRuntime {
 	render_state: puppycad_core::RenderState,
 }
 
+#[derive(Clone, Copy)]
+struct ScenePointLightSpec {
+	name: &'static str,
+	position: [f32; 3],
+	color: [f32; 3],
+	intensity: f32,
+}
+
 enum ApiRenderEvent {
 	LoadRenderState(puppycad_core::RenderState),
 	RequestScreenshot(String),
@@ -261,7 +269,8 @@ struct ApiRenderStateApp {
 	mesh_ids: Vec<pge::ArenaId<pge::Mesh>>,
 	camera_id: Option<pge::ArenaId<pge::Camera>>,
 	camera_node_id: Option<pge::ArenaId<pge::Node>>,
-	light_node_id: Option<pge::ArenaId<pge::Node>>,
+	light_node_ids: Vec<pge::ArenaId<pge::Node>>,
+	point_light_ids: Vec<pge::ArenaId<pge::PointLight>>,
 	window_id: Option<pge::ArenaId<pge::Window>>,
 	gui_id: Option<pge::ArenaId<pge::GUIElement>>,
 }
@@ -286,7 +295,8 @@ impl ApiRenderStateApp {
 			mesh_ids: Vec::new(),
 			camera_id: None,
 			camera_node_id: None,
-			light_node_id: None,
+			light_node_ids: Vec::new(),
+			point_light_ids: Vec::new(),
 			window_id: None,
 			gui_id: None,
 		}
@@ -302,8 +312,11 @@ impl ApiRenderStateApp {
 		if let Some(camera_node_id) = self.camera_node_id.take() {
 			state.nodes.remove(&camera_node_id);
 		}
-		if let Some(light_node_id) = self.light_node_id.take() {
+		for light_node_id in self.light_node_ids.drain(..) {
 			state.nodes.remove(&light_node_id);
+		}
+		for point_light_id in self.point_light_ids.drain(..) {
+			state.point_lights.remove(&point_light_id);
 		}
 		if let Some(camera_id) = self.camera_id.take() {
 			state.cameras.remove(&camera_id);
@@ -364,15 +377,27 @@ impl ApiRenderStateApp {
 		let default_camera_position = [center.x, center.y, center.z + distance.max(0.1)];
 		let camera_position = self.camera_position.unwrap_or(default_camera_position);
 
-		let mut light_node = pge::Node::new();
-		light_node.name = Some("Light".to_string());
-		light_node.translation = pge::Vec3::new(0.0, 5.0, -5.0);
-		light_node.parent = pge::NodeParent::Scene(scene_id);
-		let light_node_id = state.nodes.insert(light_node);
-		let mut light = pge::PointLight::new();
-		light.node_id = Some(light_node_id);
-		state.point_lights.insert(light);
-		self.light_node_id = Some(light_node_id);
+		let scene_center = [center.x, center.y, center.z];
+		let light_distance = max_size.max(1.0);
+		let mut add_light = |name: &str, position: [f32; 3], color: [f32; 3], intensity: f32| {
+			let mut light_node = pge::Node::new();
+			light_node.name = Some(name.to_string());
+			light_node.translation = pge::Vec3::new(position[0], position[1], position[2]);
+			light_node.parent = pge::NodeParent::Scene(scene_id);
+			let light_node_id = state.nodes.insert(light_node);
+			self.light_node_ids.push(light_node_id);
+
+			let mut light = pge::PointLight::new();
+			light.node_id = Some(light_node_id);
+			light.color = color;
+			light.intensity = intensity;
+			let point_light_id = state.point_lights.insert(light);
+			self.point_light_ids.push(point_light_id);
+		};
+
+		for spec in scene_point_light_specs(scene_center, light_distance) {
+			add_light(spec.name, spec.position, spec.color, spec.intensity);
+		}
 
 		let mut camera_node = pge::Node::new();
 		camera_node.parent = pge::NodeParent::Scene(scene_id);
@@ -409,6 +434,68 @@ fn to_u16_indices(indices: &[u32], mesh_name: &str) -> Vec<u16> {
 		}
 	}
 	out
+}
+
+fn scene_point_light_specs(
+	scene_center: [f32; 3],
+	light_distance: f32,
+) -> [ScenePointLightSpec; 3] {
+	[
+		ScenePointLightSpec {
+			name: "MainLight",
+			position: [
+				scene_center[0] + light_distance,
+				scene_center[1] + light_distance * 0.6,
+				scene_center[2] + light_distance,
+			],
+			color: [1.0, 0.98, 0.9],
+			intensity: 2.5,
+		},
+		ScenePointLightSpec {
+			name: "FillLight",
+			position: [
+				scene_center[0] - light_distance * 0.8,
+				scene_center[1] + light_distance * 0.4,
+				scene_center[2] + light_distance * 0.4,
+			],
+			color: [0.7, 0.8, 1.0],
+			intensity: 1.0,
+		},
+		ScenePointLightSpec {
+			name: "RimLight",
+			position: [
+				scene_center[0],
+				scene_center[1] - light_distance * 0.7,
+				scene_center[2] - light_distance * 0.9,
+			],
+			color: [0.75, 0.85, 1.0],
+			intensity: 0.7,
+		},
+	]
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn scene_point_lights_are_outside_unit_cube_bounds() {
+		let specs = scene_point_light_specs([0.5, 0.5, 0.5], 1.0);
+		assert_eq!(specs.len(), 3);
+
+		for spec in specs {
+			let p = spec.position;
+			let outside_x = p[0] < 0.0 || p[0] > 1.0;
+			let outside_y = p[1] < 0.0 || p[1] > 1.0;
+			let outside_z = p[2] < 0.0 || p[2] > 1.0;
+			assert!(
+				outside_x || outside_y || outside_z,
+				"light '{}' is not outside cube bounds: {:?}",
+				spec.name,
+				p
+			);
+		}
+	}
 }
 
 impl pge::App<ApiRenderEvent> for ApiRenderStateApp {

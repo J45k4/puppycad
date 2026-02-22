@@ -4,4 +4,4 @@ default-members = ["cli"]
 resolver = "2"
 
 [workspace.dependencies]
-pge = { git = "https://github.com/puppycorp/pge.git", rev = "054348997d09e62ebe9008aa0cb82a1fe15f96c1"}
+pge = { git = "https://github.com/puppycorp/pge.git", rev = "e89dd8acb3f24cdf8f2d4e5910a5f4a74f345b1f"}

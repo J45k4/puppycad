@@ -5,11 +5,11 @@ solid body = box {
 }
 
 feature hole1 = hole {
-  let cx = body.w / 2;
-  let cy = body.h / 2;
+  let cx = body.w * 0.8;
+  let cy = body.h * 0.8;
 
   target: body.top;
   x: cx;
   y: cy;
-  d: 6;
+  d: 18;
 }

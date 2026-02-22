@@ -22,15 +22,27 @@ struct RenderStateApp {
 	screenshot_frame: u64,
 	next_frame: u64,
 	screenshot_requested: bool,
-	orbit_controller: pge::OrbitController,
+	free_fly_controller: pge::FreeFlyController,
 	right_button_down: bool,
-	middle_button_down: bool,
+	move_left: bool,
+	move_right: bool,
+	move_forward_w: bool,
+	move_forward_f: bool,
+	move_backward: bool,
+	move_up: bool,
+	move_down: bool,
+	move_fast: bool,
+	rotate_left: bool,
+	rotate_right: bool,
+	rotate_up: bool,
+	rotate_down: bool,
 	scene_id: Option<pge::ArenaId<pge::Scene>>,
 	mesh_node_ids: Vec<pge::ArenaId<pge::Node>>,
 	mesh_ids: Vec<pge::ArenaId<pge::Mesh>>,
 	camera_id: Option<pge::ArenaId<pge::Camera>>,
 	camera_node_id: Option<pge::ArenaId<pge::Node>>,
-	light_node_id: Option<pge::ArenaId<pge::Node>>,
+	light_node_ids: Vec<pge::ArenaId<pge::Node>>,
+	point_light_ids: Vec<pge::ArenaId<pge::PointLight>>,
 	mesh_material_id: Option<pge::ArenaId<pge::Material>>,
 	window_id: Option<pge::ArenaId<pge::Window>>,
 	gui_id: Option<pge::ArenaId<pge::GUIElement>>,
@@ -49,15 +61,27 @@ impl RenderStateApp {
 			screenshot_frame: 0,
 			next_frame: 0,
 			screenshot_requested: false,
-			orbit_controller: pge::OrbitController::default(),
+			free_fly_controller: pge::FreeFlyController::default(),
 			right_button_down: false,
-			middle_button_down: false,
+			move_left: false,
+			move_right: false,
+			move_forward_w: false,
+			move_forward_f: false,
+			move_backward: false,
+			move_up: false,
+			move_down: false,
+			move_fast: false,
+			rotate_left: false,
+			rotate_right: false,
+			rotate_up: false,
+			rotate_down: false,
 			scene_id: None,
 			mesh_node_ids: Vec::new(),
 			mesh_ids: Vec::new(),
 			camera_id: None,
 			camera_node_id: None,
-			light_node_id: None,
+			light_node_ids: Vec::new(),
+			point_light_ids: Vec::new(),
 			mesh_material_id: None,
 			window_id: None,
 			gui_id: None,
@@ -74,8 +98,11 @@ impl RenderStateApp {
 		if let Some(camera_node_id) = self.camera_node_id.take() {
 			state.nodes.remove(&camera_node_id);
 		}
-		if let Some(light_node_id) = self.light_node_id.take() {
+		for light_node_id in self.light_node_ids.drain(..) {
 			state.nodes.remove(&light_node_id);
+		}
+		for point_light_id in self.point_light_ids.drain(..) {
+			state.point_lights.remove(&point_light_id);
 		}
 		if let Some(camera_id) = self.camera_id.take() {
 			state.cameras.remove(&camera_id);
@@ -99,7 +126,8 @@ impl RenderStateApp {
 		let grey_material_id = {
 			let mut material = pge::Material::default();
 			material.base_color_factor = [0.55, 0.55, 0.55, 1.0];
-			material.roughness_factor = 0.7;
+			// Keep highlights controlled, but allow enough contrast to read surface orientation.
+			material.roughness_factor = 0.9;
 			state.materials.insert(material)
 		};
 		self.mesh_material_id = Some(grey_material_id);
@@ -156,18 +184,57 @@ impl RenderStateApp {
 			camera_position[1],
 			camera_position[2],
 		);
-		let mut orbit_controller = pge::OrbitController::default();
-		orbit_controller.set_from_target_and_position(target, camera_position);
+		let mut free_fly_controller = pge::FreeFlyController::default();
+		free_fly_controller.set_from_target_and_position(target, camera_position);
 
-		let mut light_node = pge::Node::new();
-		light_node.name = Some("Light".to_string());
-		light_node.translation = pge::Vec3::new(0.0, 5.0, -5.0);
-		light_node.parent = pge::NodeParent::Scene(scene_id);
-		let light_node_id = state.nodes.insert(light_node);
-		let mut light = pge::PointLight::new();
-		light.node_id = Some(light_node_id);
-		state.point_lights.insert(light);
-		self.light_node_id = Some(light_node_id);
+		let light_distance = (max_size.max(1.0)) * 1.4;
+		let mut add_light = |name: &str, position: [f32; 3], color: [f32; 3], intensity: f32| {
+			let mut light_node = pge::Node::new();
+			light_node.name = Some(name.to_string());
+			light_node.translation = pge::Vec3::new(position[0], position[1], position[2]);
+			light_node.parent = pge::NodeParent::Scene(scene_id);
+			let light_node_id = state.nodes.insert(light_node);
+			self.light_node_ids.push(light_node_id);
+
+			let mut light = pge::PointLight::new();
+			light.node_id = Some(light_node_id);
+			light.color = color;
+			light.intensity = intensity;
+			let point_light_id = state.point_lights.insert(light);
+			self.point_light_ids.push(point_light_id);
+		};
+
+		// PGE's current shader uses two point lights, so keep a deterministic two-light rig.
+		let view_dir = (target - camera_position).normalize_or_zero();
+		let world_up = pge::Vec3::new(0.0, 1.0, 0.0);
+		let mut right = view_dir.cross(world_up);
+		if right.length_squared() <= f32::EPSILON {
+			right = pge::Vec3::new(1.0, 0.0, 0.0);
+		}
+		right = right.normalize_or_zero();
+		let up = right.cross(view_dir).normalize_or_zero();
+
+		let key_position = target
+			- (view_dir * light_distance)
+			+ (right * (light_distance * 0.45))
+			+ (up * (light_distance * 0.55));
+		let fill_position = target
+			+ (view_dir * (light_distance * 0.3))
+			- (right * (light_distance * 0.85))
+			+ (up * (light_distance * 0.25));
+
+		add_light(
+			"MainLight",
+			[key_position.x, key_position.y, key_position.z],
+			[1.0, 1.0, 1.0],
+			2.2,
+		);
+		add_light(
+			"FillLight",
+			[fill_position.x, fill_position.y, fill_position.z],
+			[1.0, 1.0, 1.0],
+			0.9,
+		);
 
 		let mut camera_node = pge::Node::new();
 		camera_node.parent = pge::NodeParent::Scene(scene_id);
@@ -187,12 +254,88 @@ impl RenderStateApp {
 		let window_id = state.windows.insert(pge::Window::new().title("render").ui(gui_id));
 		self.window_id = Some(window_id);
 
-		self.orbit_controller = orbit_controller;
-		self.right_button_down = false;
-		self.middle_button_down = false;
+		self.free_fly_controller = free_fly_controller;
+		self.clear_input_state();
 
 		self.next_frame = 0;
 		self.screenshot_requested = false;
+	}
+
+	fn clear_input_state(&mut self) {
+		self.right_button_down = false;
+		self.move_left = false;
+		self.move_right = false;
+		self.move_forward_w = false;
+		self.move_forward_f = false;
+		self.move_backward = false;
+		self.move_up = false;
+		self.move_down = false;
+		self.move_fast = false;
+		self.rotate_left = false;
+		self.rotate_right = false;
+		self.rotate_up = false;
+		self.rotate_down = false;
+	}
+
+	fn on_keyboard_state_change(&mut self, key: pge::KeyboardKey, action: pge::KeyAction) {
+		let pressed = matches!(action, pge::KeyAction::Pressed);
+		match key {
+			pge::KeyboardKey::ControlLeft => self.move_down = pressed,
+			pge::KeyboardKey::A => self.move_left = pressed,
+			pge::KeyboardKey::D => self.move_right = pressed,
+			pge::KeyboardKey::W => self.move_forward_w = pressed,
+			pge::KeyboardKey::F => self.move_forward_f = pressed,
+			pge::KeyboardKey::S => self.move_backward = pressed,
+			pge::KeyboardKey::Space => self.move_up = pressed,
+			pge::KeyboardKey::ShiftLeft => self.move_fast = pressed,
+			pge::KeyboardKey::Left => self.rotate_left = pressed,
+			pge::KeyboardKey::Right => self.rotate_right = pressed,
+			pge::KeyboardKey::Up => self.rotate_up = pressed,
+			pge::KeyboardKey::Down => self.rotate_down = pressed,
+			_ => {}
+		}
+	}
+
+	fn keyboard_move_input(&self) -> pge::FreeFlyMoveInput {
+		let mut input = pge::FreeFlyMoveInput::default();
+		if self.move_left {
+			input.right -= 1.0;
+		}
+		if self.move_right {
+			input.right += 1.0;
+		}
+		if self.move_forward_w || self.move_forward_f {
+			input.forward += 1.0;
+		}
+		if self.move_backward {
+			input.forward -= 1.0;
+		}
+		if self.move_up {
+			input.up += 1.0;
+		}
+		if self.move_down {
+			input.up -= 1.0;
+		}
+		input.fast = self.move_fast;
+		input
+	}
+
+	fn keyboard_look_input(&self) -> (f32, f32) {
+		let mut yaw = 0.0;
+		let mut pitch = 0.0;
+		if self.rotate_left {
+			yaw -= 1.0;
+		}
+		if self.rotate_right {
+			yaw += 1.0;
+		}
+		if self.rotate_up {
+			pitch -= 1.0;
+		}
+		if self.rotate_down {
+			pitch += 1.0;
+		}
+		(yaw, pitch)
 	}
 }
 
@@ -240,33 +383,45 @@ impl pge::App<RenderEvent> for RenderStateApp {
 
 		match event {
 			pge::MouseEvent::Moved { dx, dy } => {
-				let delta = pge::Vec2::new(dx, dy);
 				if self.right_button_down {
-					self.orbit_controller.orbit(delta);
-				} else if self.middle_button_down {
-					self.orbit_controller.pan(delta);
+					self.free_fly_controller.look_mouse(pge::Vec2::new(dx, dy));
 				}
 			}
 			pge::MouseEvent::Pressed { button } => match button {
 				pge::MouseButton::Right => self.right_button_down = true,
-				pge::MouseButton::Middle => self.middle_button_down = true,
 				_ => {}
 			},
 			pge::MouseEvent::Released { button } => match button {
 				pge::MouseButton::Right => self.right_button_down = false,
-				pge::MouseButton::Middle => self.middle_button_down = false,
 				_ => {}
 			},
-			pge::MouseEvent::Wheel { dy, .. } => {
-				self.orbit_controller.zoom(dy);
-			}
+			pge::MouseEvent::Wheel { .. } => {}
 		}
 	}
 
-	fn on_process(&mut self, state: &mut pge::State, _delta: f32) {
+	fn on_keyboard_input(
+		&mut self,
+		window_id: pge::ArenaId<pge::Window>,
+		key: pge::KeyboardKey,
+		action: pge::KeyAction,
+		_state: &mut pge::State,
+	) {
+		let Some(active_window_id) = self.window_id else {
+			return;
+		};
+		if active_window_id != window_id {
+			return;
+		}
+		self.on_keyboard_state_change(key, action);
+	}
+
+	fn on_process(&mut self, state: &mut pge::State, delta: f32) {
 		if let Some(camera_node_id) = self.camera_node_id {
-			self.orbit_controller
-				.process(state, camera_node_id, _delta);
+			self.free_fly_controller
+				.move_local(self.keyboard_move_input(), delta);
+			let (yaw, pitch) = self.keyboard_look_input();
+			self.free_fly_controller.look_keyboard(yaw, pitch, delta);
+			self.free_fly_controller.apply_to_node(state, camera_node_id);
 		}
 
 		if self.screenshot_path.is_none() || self.screenshot_requested {
@@ -554,5 +709,44 @@ feature bad = hole {
 	fn ignores_camera_and_look_at_args_without_three_components() {
 		let partial = vec![1.0, 2.0];
 		assert_eq!(parse_vec3_arg(Some(&partial)), None);
+	}
+
+	#[test]
+	fn maps_keyboard_movement_state_to_free_fly_input() {
+		let mut app = RenderStateApp::new(None, None, None);
+		app.move_left = true;
+		app.move_forward_w = true;
+		app.move_up = true;
+		app.move_fast = true;
+
+		let input = app.keyboard_move_input();
+		assert_eq!(input.right, -1.0);
+		assert_eq!(input.forward, 1.0);
+		assert_eq!(input.up, 1.0);
+		assert!(input.fast);
+	}
+
+	#[test]
+	fn maps_arrow_keys_to_keyboard_look_directions() {
+		let mut app = RenderStateApp::new(None, None, None);
+		app.rotate_left = true;
+		app.rotate_down = true;
+
+		assert_eq!(app.keyboard_look_input(), (-1.0, 1.0));
+	}
+
+	#[test]
+	fn updates_keyboard_state_on_press_and_release() {
+		let mut app = RenderStateApp::new(None, None, None);
+
+		app.on_keyboard_state_change(pge::KeyboardKey::W, pge::KeyAction::Pressed);
+		app.on_keyboard_state_change(pge::KeyboardKey::ShiftLeft, pge::KeyAction::Pressed);
+		assert!(app.move_forward_w);
+		assert!(app.move_fast);
+
+		app.on_keyboard_state_change(pge::KeyboardKey::W, pge::KeyAction::Released);
+		app.on_keyboard_state_change(pge::KeyboardKey::ShiftLeft, pge::KeyAction::Released);
+		assert!(!app.move_forward_w);
+		assert!(!app.move_fast);
 	}
 }

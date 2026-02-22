@@ -59,7 +59,10 @@ pub struct ValidateArgs {
 #[derive(Args, Debug)]
 #[command(name = "render", about = "Render a .pcad file using PGE")]
 pub struct RenderArgs {
-    #[arg(value_name = "FILE", help = "Input .pcad file. Reads stdin when omitted.")]
+    #[arg(
+		value_name = "FILE",
+		help = "Input .pcad file. Reads stdin when omitted. Interactive mode uses free-fly camera controls."
+	)]
     pub input: Option<PathBuf>,
     #[arg(long, help = "Run in headless mode (no window).")]
     pub headless: bool,

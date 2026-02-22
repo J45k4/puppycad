@@ -329,14 +329,6 @@ fn face_normal_from_points(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
 	[nx * inv_length, ny * inv_length, nz * inv_length]
 }
 
-fn set_vertex_normal(normals: &mut Vec<[f32; 3]>, index: u32, normal: [f32; 3]) {
-	let idx = index as usize;
-	if idx >= normals.len() {
-		normals.resize(idx + 1, [0.0; 3]);
-	}
-	normals[idx] = normal;
-}
-
 pub fn build_render_state(model: &ModelState) -> RenderState {
 	build_render_state_with_view(model, &ViewParams::default())
 }
@@ -447,7 +439,7 @@ fn render_box_mesh(
 	let min = [offset[0], offset[1], offset[2]];
 	let max = [offset[0] + width, offset[1] + height, offset[2] + depth];
 
-	let mut positions = vec![
+	let corner_positions = [
 		min,
 		[max[0], min[1], min[2]],
 		[max[0], max[1], min[2]],
@@ -458,6 +450,7 @@ fn render_box_mesh(
 		[min[0], max[1], max[2]],
 	];
 
+	let mut positions = Vec::new();
 	let mut normals = Vec::new();
 	let mut indices = Vec::<u32>::new();
 	let mut tri_face_ids = Vec::new();
@@ -479,7 +472,7 @@ fn render_box_mesh(
 	let mut emit_face = |face: HoleTarget, hole_spec: Option<&HoleSpec>| {
 		let corners = face.base_face_corner_indices();
 		let mut emit_corner = |corner: u32| -> u32 {
-			let point = positions[corner as usize];
+			let point = corner_positions[corner as usize];
 			push_face_vertex(point, &mut positions, &mut normals, face)
 		};
 		let mut emit_solid_face = |kind: PickKind, decl_id: &str, hint: &str, next_pick_key: &mut PickKey| {
@@ -644,12 +637,12 @@ fn render_box_mesh(
 			continue;
 		}
 
-		let mut wall_point = |u: f32, v: f32, n: f32| -> u32 {
+		let wall_point = |u: f32, v: f32, n: f32| -> [f32; 3] {
 			let mut point = [0.0; 3];
 			point[u_axis] = u;
 			point[v_axis] = v;
 			point[n_axis] = n;
-			push_face_vertex(point, &mut positions, &mut normals, base_face)
+			point
 		};
 
 		let b0 = wall_point(hole_u0, hole_v0, base_n);
@@ -661,84 +654,65 @@ fn render_box_mesh(
 		let o2 = wall_point(hole_u1, hole_v1, opp_n);
 		let o3 = wall_point(hole_u0, hole_v1, opp_n);
 
-		let wall_normals = [
-			face_normal_from_points(positions[b0 as usize], positions[b1 as usize], positions[o1 as usize]),
-			face_normal_from_points(positions[b1 as usize], positions[b2 as usize], positions[o2 as usize]),
-			face_normal_from_points(positions[b2 as usize], positions[b3 as usize], positions[o3 as usize]),
-			face_normal_from_points(positions[b3 as usize], positions[b0 as usize], positions[o0 as usize]),
-		];
+		let mut emit_wall_quad = |a: [f32; 3], b: [f32; 3], c: [f32; 3], d: [f32; 3], suffix: &str| {
+			let normal = face_normal_from_points(a, b, c);
+			let mut push_wall_vertex = |point: [f32; 3]| -> u32 {
+				let idx = positions.len() as u32;
+				positions.push(point);
+				normals.push(normal);
+				idx
+			};
+			let ia = push_wall_vertex(a);
+			let ib = push_wall_vertex(b);
+			let ic = push_wall_vertex(c);
+			let id = push_wall_vertex(d);
+			emit_quad(
+				ia,
+				ib,
+				ic,
+				id,
+				PickKind::Face,
+				&hole.decl_id,
+				&format!("hole-wall.{base_face:?}.{suffix}"),
+				next_pick_key,
+				&mut indices,
+				&mut tri_face_ids,
+				&mut pick_map,
+				&mut tri_start_index,
+			);
+		};
 
-		emit_quad(
+		emit_wall_quad(
 			b0,
 			b1,
 			o1,
 			o0,
-			PickKind::Face,
-			&hole.decl_id,
-			&format!("hole-wall.{base_face:?}.0"),
-			next_pick_key,
-			&mut indices,
-			&mut tri_face_ids,
-			&mut pick_map,
-			&mut tri_start_index,
+			"0",
 		);
-		for (idx, normal) in [b0, b1, o1, o0].into_iter().zip([wall_normals[0]; 4]) {
-			set_vertex_normal(&mut normals, idx, normal);
-		}
 
-		emit_quad(
+		emit_wall_quad(
 			b1,
 			b2,
 			o2,
 			o1,
-			PickKind::Face,
-			&hole.decl_id,
-			&format!("hole-wall.{base_face:?}.1"),
-			next_pick_key,
-			&mut indices,
-			&mut tri_face_ids,
-			&mut pick_map,
-			&mut tri_start_index,
+			"1",
 		);
-		for (idx, normal) in [b1, b2, o2, o1].into_iter().zip([wall_normals[1]; 4]) {
-			set_vertex_normal(&mut normals, idx, normal);
-		}
 
-		emit_quad(
+		emit_wall_quad(
 			b2,
 			b3,
 			o3,
 			o2,
-			PickKind::Face,
-			&hole.decl_id,
-			&format!("hole-wall.{base_face:?}.2"),
-			next_pick_key,
-			&mut indices,
-			&mut tri_face_ids,
-			&mut pick_map,
-			&mut tri_start_index,
+			"2",
 		);
-		for (idx, normal) in [b2, b3, o3, o2].into_iter().zip([wall_normals[2]; 4]) {
-			set_vertex_normal(&mut normals, idx, normal);
-		}
 
-		emit_quad(
+		emit_wall_quad(
 			b3,
 			b0,
 			o0,
 			o3,
-			PickKind::Face,
-			&hole.decl_id,
-			&format!("hole-wall.{base_face:?}.3"),
-			next_pick_key,
-			&mut indices,
-			&mut tri_face_ids,
-			&mut pick_map,
-			&mut tri_start_index,
+			"3",
 		);
-		for (idx, normal) in [b3, b0, o0, o3].into_iter().zip([wall_normals[3]; 4]) {
-			set_vertex_normal(&mut normals, idx, normal);
-		}
 	}
 
 	let mut bounds = Aabb {
@@ -769,8 +743,8 @@ fn render_box_mesh(
 	let mut edge_key_ranges = Vec::new();
 	for (edge_idx, (a, b)) in edge_pairs.iter().enumerate() {
 		let start = edge_positions.len() as u32;
-		edge_positions.push(positions[*a]);
-		edge_positions.push(positions[*b]);
+		edge_positions.push(corner_positions[*a]);
+		edge_positions.push(corner_positions[*b]);
 		edge_indices.push(start);
 		edge_indices.push(start + 1);
 
