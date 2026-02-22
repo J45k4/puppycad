@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::process::ExitCode;
 use std::process::Command as ProcessCommand;
 use std::path::PathBuf;
@@ -8,58 +7,119 @@ use crate::{
 	args::{ParseArgs, ParseOutput, RenderArgs, UiArgs, ValidateArgs},
 	read_source,
 };
-use serde_json::Value as JsonValue;
-use puppycad_core::{build_model_state, codegen, eval::Evaluator, parser::parse_pcad, types::CompiledNode};
+use puppycad_core::{
+	build_model_state, codegen, eval::Evaluator, parser::parse_pcad,
+	build_render_state,
+};
 
-#[derive(Clone)]
-struct RenderPrimitive {
-	name: String,
-	scale: [f32; 3],
-	translation: [f32; 3],
+enum RenderEvent {
+	LoadRenderState(puppycad_core::RenderState),
+	RequestScreenshot(String),
 }
 
-struct RenderApp {
-	primitives: Vec<RenderPrimitive>,
+struct RenderStateApp {
 	camera_position: Option<[f32; 3]>,
 	camera_look_at: Option<[f32; 3]>,
 	screenshot_path: Option<String>,
 	screenshot_frame: u64,
 	next_frame: u64,
 	screenshot_requested: bool,
+	scene_id: Option<pge::ArenaId<pge::Scene>>,
+	mesh_node_ids: Vec<pge::ArenaId<pge::Node>>,
+	mesh_ids: Vec<pge::ArenaId<pge::Mesh>>,
+	camera_id: Option<pge::ArenaId<pge::Camera>>,
+	camera_node_id: Option<pge::ArenaId<pge::Node>>,
+	light_node_id: Option<pge::ArenaId<pge::Node>>,
+	window_id: Option<pge::ArenaId<pge::Window>>,
+	gui_id: Option<pge::ArenaId<pge::GUIElement>>,
 }
 
-impl pge::App for RenderApp {
-	fn on_create(&mut self, state: &mut pge::State) {
-		if self.primitives.is_empty() {
-			return;
+impl RenderStateApp {
+	fn new(
+		camera_position: Option<[f32; 3]>,
+		camera_look_at: Option<[f32; 3]>,
+		screenshot_path: Option<String>,
+	) -> Self {
+		Self {
+			camera_position,
+			camera_look_at,
+			screenshot_path,
+			screenshot_frame: 0,
+			next_frame: 0,
+			screenshot_requested: false,
+			scene_id: None,
+			mesh_node_ids: Vec::new(),
+			mesh_ids: Vec::new(),
+			camera_id: None,
+			camera_node_id: None,
+			light_node_id: None,
+			window_id: None,
+			gui_id: None,
 		}
+	}
+
+	fn clear_previous_scene(&mut self, state: &mut pge::State) {
+		for node_id in self.mesh_node_ids.drain(..) {
+			state.nodes.remove(&node_id);
+		}
+		for mesh_id in self.mesh_ids.drain(..) {
+			state.meshes.remove(&mesh_id);
+		}
+		if let Some(camera_node_id) = self.camera_node_id.take() {
+			state.nodes.remove(&camera_node_id);
+		}
+		if let Some(light_node_id) = self.light_node_id.take() {
+			state.nodes.remove(&light_node_id);
+		}
+		if let Some(camera_id) = self.camera_id.take() {
+			state.cameras.remove(&camera_id);
+		}
+		if let Some(gui_id) = self.gui_id.take() {
+			state.guis.remove(&gui_id);
+		}
+		if let Some(window_id) = self.window_id.take() {
+			state.windows.remove(&window_id);
+		}
+		if let Some(scene_id) = self.scene_id.take() {
+			state.scenes.remove(&scene_id);
+		}
+	}
+
+	fn load_render_state(&mut self, render_state: puppycad_core::RenderState, state: &mut pge::State) {
+		self.clear_previous_scene(state);
 
 		let scene_id = state.scenes.insert(pge::Scene::new());
-		let cube_mesh = state.meshes.insert(pge::cube(0.5));
+		self.scene_id = Some(scene_id);
 
-		for primitive in &self.primitives {
+		for mesh in render_state.meshes {
 			let mut node = pge::Node::new();
-			node.name = Some(primitive.name.clone());
+			node.name = Some(mesh.decl_id.clone());
 			node.parent = pge::NodeParent::Scene(scene_id);
-			node.mesh = Some(cube_mesh);
-			node.set_translation(
-				primitive.translation[0],
-				primitive.translation[1],
-				primitive.translation[2],
-			);
-			node.scale(
-				primitive.scale[0],
-				primitive.scale[1],
-				primitive.scale[2],
-			);
+
+			let mut pge_mesh = pge::Mesh::new();
+			let mut primitive = pge::Primitive::new(pge::PrimitiveTopology::TriangleList);
+			primitive.vertices = mesh.positions;
+			primitive.indices = to_u16_indices(&mesh.indices, &mesh.decl_id);
+			let mut normals = mesh.normals;
+			if normals.len() != primitive.vertices.len() {
+				normals.resize(primitive.vertices.len(), [0.0, 0.0, 1.0]);
+			}
+			primitive.normals = normals;
+			primitive.tex_coords = vec![[0.0, 0.0]; primitive.vertices.len()];
+			pge_mesh.primitives.push(primitive);
+			let mesh_id = state.meshes.insert(pge_mesh);
+
+			node.mesh = Some(mesh_id);
 			node.global_transform = node.matrix();
-			state.nodes.insert(node);
+			let node_id = state.nodes.insert(node);
+			self.mesh_ids.push(mesh_id);
+			self.mesh_node_ids.push(node_id);
 		}
 
 		let scene_bounding_box = state.get_scene_bounding_box(scene_id);
 		let center = (scene_bounding_box.min + scene_bounding_box.max) * 0.5;
 		let size = scene_bounding_box.max - scene_bounding_box.min;
-		let max_size = size.x.max(size.y).max(size.z);
+		let max_size = size.x.abs().max(size.y.abs()).max(size.z.abs());
 
 		let fov_degrees = 60.0_f32;
 		let fov_radians = fov_degrees.to_radians();
@@ -80,42 +140,76 @@ impl pge::App for RenderApp {
 		let mut light = pge::PointLight::new();
 		light.node_id = Some(light_node_id);
 		state.point_lights.insert(light);
+		self.light_node_id = Some(light_node_id);
 
 		let mut camera_node = pge::Node::new();
 		camera_node.parent = pge::NodeParent::Scene(scene_id);
 		camera_node.translation = pge::Vec3::new(camera_position[0], camera_position[1], camera_position[2]);
 		camera_node.looking_at(target[0], target[1], target[2]);
 		let camera_node_id = state.nodes.insert(camera_node);
+		self.camera_node_id = Some(camera_node_id);
 
 		let mut camera = pge::Camera::new();
 		camera.fovy = fov_radians;
 		camera.node_id = Some(camera_node_id);
 		let camera_id = state.cameras.insert(camera);
+		self.camera_id = Some(camera_id);
 
-		let gui_id = state
-			.guis
-			.insert(pge::camera_view(camera_id));
-		let window = pge::Window::new().title("render").ui(gui_id);
-		state.windows.insert(window);
+		let gui_id = state.guis.insert(pge::camera_view(camera_id));
+		self.gui_id = Some(gui_id);
+		let window_id = state.windows.insert(pge::Window::new().title("render").ui(gui_id));
+		self.window_id = Some(window_id);
+
+		self.next_frame = 0;
+		self.screenshot_requested = false;
+	}
+}
+
+fn to_u16_indices(indices: &[u32], mesh_name: &str) -> Vec<u16> {
+	let mut out = Vec::with_capacity(indices.len());
+	for index in indices {
+		match u16::try_from(*index) {
+			Ok(index) => out.push(index),
+			Err(_) => {
+				eprintln!("render mesh '{mesh_name}' has index {index} outside u16 range");
+				return Vec::new();
+			}
+		}
+	}
+	out
+}
+
+impl pge::App<RenderEvent> for RenderStateApp {
+	fn on_create(&mut self, _state: &mut pge::State) {}
+
+	fn on_event(&mut self, event: RenderEvent, state: &mut pge::State) {
+		match event {
+			RenderEvent::LoadRenderState(render_state) => self.load_render_state(render_state, state),
+			RenderEvent::RequestScreenshot(path) => {
+				self.screenshot_path = Some(path);
+				self.screenshot_requested = false;
+				self.next_frame = 0;
+				self.screenshot_frame = 0;
+			}
+		}
 	}
 
 	fn on_process(&mut self, state: &mut pge::State, _delta: f32) {
 		if self.screenshot_path.is_none() || self.screenshot_requested {
-			self.next_frame += 1;
 			return;
 		}
 
 		if self.next_frame >= self.screenshot_frame {
-			if let Some((window_id, _)) = state.windows.iter().next() {
-				state.screenshot_request = Some((
-					window_id.clone(),
-					self.screenshot_path.clone().expect("screenshot path exists"),
-				));
+			let Some(window_id) = self.window_id else {
+				return;
+			};
+			if let Some(path) = self.screenshot_path.clone() {
+				state.screenshot_request = Some((window_id, path));
 				self.screenshot_requested = true;
 			}
 		}
 
-		self.next_frame += 1;
+		self.next_frame = self.next_frame.saturating_add(1);
 	}
 }
 
@@ -136,6 +230,8 @@ pub fn run_parse(args: ParseArgs) -> ExitCode {
 				ParseOutput::FeatureScript
 			} else if args.model_state {
 				ParseOutput::ModelState
+			} else if args.render_state {
+				ParseOutput::RenderState
 			} else {
 				args.output
 			};
@@ -161,6 +257,16 @@ pub fn run_parse(args: ParseArgs) -> ExitCode {
 				ParseOutput::ModelState => match build_model_state(&puppycad_core::FeatureGraph::new(&ast)) {
 					Ok(state) => {
 						println!("{state:#?}");
+					}
+					Err(err) => {
+						eprintln!("{err}");
+						return ExitCode::FAILURE;
+					}
+				},
+				ParseOutput::RenderState => match build_model_state(&puppycad_core::FeatureGraph::new(&ast)) {
+					Ok(state) => {
+						let render_state = build_render_state(&state);
+						println!("{render_state:#?}");
 					}
 					Err(err) => {
 						eprintln!("{err}");
@@ -224,18 +330,16 @@ pub fn run_render(args: RenderArgs) -> ExitCode {
 		}
 	};
 
-	let mut evaluator = Evaluator::new(&ast);
-	let nodes: Vec<CompiledNode> = match evaluator.build() {
-		Ok(nodes) => nodes,
+	let state = match build_model_state(&puppycad_core::FeatureGraph::new(&ast)) {
+		Ok(state) => state,
 		Err(err) => {
-			eprintln!("{err}");
+			eprintln!("model-state failed: {err}");
 			return ExitCode::FAILURE;
 		}
 	};
-
-	let primitives = extract_render_primitives(&nodes);
-	if primitives.is_empty() {
-		eprintln!("render warning: no supported renderable nodes found (supported ops: box, translate)");
+	let render_state = build_render_state(&state);
+	if render_state.meshes.is_empty() {
+		eprintln!("render warning: no supported renderable mesh found");
 	}
 
 	let screenshot_path = resolve_screenshot_path(args.output.as_deref(), args.output_dir.as_deref());
@@ -250,15 +354,11 @@ pub fn run_render(args: RenderArgs) -> ExitCode {
 		}
 	}
 
-	let app = RenderApp {
-		primitives,
-		camera_position: parse_vec3_arg(args.camera.as_deref()),
-		camera_look_at: parse_vec3_arg(args.look_at.as_deref()),
-		screenshot_path: screenshot_path.clone(),
-		screenshot_frame: 0,
-		next_frame: 0,
-		screenshot_requested: false,
-	};
+	let app = RenderStateApp::new(
+		parse_vec3_arg(args.camera.as_deref()),
+		parse_vec3_arg(args.look_at.as_deref()),
+		screenshot_path.clone(),
+	);
 
 	let should_run_headless = args.headless || screenshot_path.is_some();
 	let iterations = args.iterations.or(if should_run_headless { Some(1) } else { None });
@@ -274,7 +374,14 @@ pub fn run_render(args: RenderArgs) -> ExitCode {
 		unsafe { std::env::set_var("SCREENSHOT", "1") };
 	}
 
-	match pge::run(app) {
+	let app_result = pge::run_with_event_sender(app, |sender| {
+		_ = sender.send(RenderEvent::LoadRenderState(render_state));
+		if let Some(path) = screenshot_path {
+			_ = sender.send(RenderEvent::RequestScreenshot(path));
+		}
+	});
+
+	match app_result {
 		Ok(()) => ExitCode::SUCCESS,
 		Err(err) => {
 			eprintln!("render failed: {err}");
@@ -285,6 +392,14 @@ pub fn run_render(args: RenderArgs) -> ExitCode {
 
 pub fn run_ui(args: UiArgs) -> ExitCode {
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../pge/Cargo.toml");
+	if !manifest.exists() {
+		eprintln!(
+			"ui mode requires a local pge checkout at '{}'. The current git dependency setup is render-only.",
+			manifest.display()
+		);
+		return ExitCode::FAILURE;
+	}
+
 	let mut command = ProcessCommand::new("cargo");
 	command
 		.current_dir(manifest.parent().expect("pge manifest directory"))
@@ -333,98 +448,6 @@ fn resolve_screenshot_path(output: Option<&Path>, output_dir: Option<&Path>) -> 
 	}
 }
 
-fn extract_render_primitives(nodes: &[CompiledNode]) -> Vec<RenderPrimitive> {
-	let mut primitive_by_id: HashMap<String, RenderPrimitive> = HashMap::new();
-	let mut primitives = Vec::new();
-
-	for node in nodes {
-		let Some(fields) = node.fields.as_object() else {
-			continue;
-		};
-		let local_translation = read_xyz(fields);
-
-		let primitive = match node.op.as_str() {
-			"box" => read_box(fields).map(|scale| RenderPrimitive {
-				name: node.id.clone(),
-				scale,
-				translation: local_translation,
-			}),
-			"translate" => {
-				let source = fields.get("of").and_then(parse_node_ref);
-				let by = fields.get("by").and_then(parse_vec3);
-				match (source, by) {
-					(Some(source), Some(by)) => primitive_by_id.get(source).map(|base| {
-						let mut translated = base.clone();
-						translated.translation = [
-							base.translation[0] + by[0],
-							base.translation[1] + by[1],
-							base.translation[2] + by[2],
-						];
-						translated.name = node.id.clone();
-						translated
-					}),
-					_ => None,
-				}
-			}
-			_ => None,
-		};
-
-		if let Some(primitive) = primitive {
-			primitive_by_id.insert(node.id.clone(), primitive.clone());
-			primitives.push(primitive);
-		}
-	}
-
-	primitives
-}
-
-fn read_box(fields: &serde_json::Map<String, JsonValue>) -> Option<[f32; 3]> {
-	let w = parse_f32(fields.get("w"))?;
-	let h = parse_f32(fields.get("h"))?;
-	let d = parse_f32(fields.get("d"))?;
-	Some([w, h, d])
-}
-
-fn read_xyz(fields: &serde_json::Map<String, JsonValue>) -> [f32; 3] {
-	[
-		parse_f32(fields.get("x")).unwrap_or(0.0),
-		parse_f32(fields.get("y")).unwrap_or(0.0),
-		parse_f32(fields.get("z")).unwrap_or(0.0),
-	]
-}
-
-fn parse_vec3(value: &JsonValue) -> Option<[f32; 3]> {
-	let array = value.as_array()?;
-	if array.len() != 3 {
-		return None;
-	}
-	let x = parse_f32(array.get(0))?;
-	let y = parse_f32(array.get(1))?;
-	let z = parse_f32(array.get(2))?;
-	Some([x, y, z])
-}
-
-fn parse_node_ref(value: &JsonValue) -> Option<&str> {
-	match value {
-		JsonValue::String(value) => Some(value.as_str()),
-		JsonValue::Object(obj) => {
-			let kind = obj.get("kind")?.as_str()?;
-			if kind != "node" {
-				return None;
-			}
-			obj.get("id")?.as_str()
-		}
-		_ => None,
-	}
-}
-
-fn parse_f32(value: Option<&JsonValue>) -> Option<f32> {
-	value.and_then(|value| value.as_f64()).and_then(|value| {
-		let parsed = value as f32;
-		if parsed.is_finite() { Some(parsed) } else { None }
-	})
-}
-
 #[cfg(test)]
 mod tests {
 	use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
@@ -466,40 +489,6 @@ feature bad = hole {
 		});
 		let _ = fs::remove_file(&invalid);
 		assert_eq!(exit, ExitCode::FAILURE);
-	}
-
-	#[test]
-	fn extracts_render_primitives_for_boxes_and_translate() {
-		let nodes = vec![
-			CompiledNode {
-				id: "base".to_string(),
-				kind: "solid".to_string(),
-				op: "box".to_string(),
-				fields: serde_json::json!({
-					"w": 1,
-					"h": 2,
-					"d": 3,
-					"x": 10,
-					"y": 20,
-					"z": 30,
-				}),
-			},
-			CompiledNode {
-				id: "shifted".to_string(),
-				kind: "solid".to_string(),
-				op: "translate".to_string(),
-				fields: serde_json::json!({
-					"of": {"kind":"node","id":"base"},
-					"by": [1, 2, 3],
-				}),
-			},
-		];
-
-		let primitives = super::extract_render_primitives(&nodes);
-
-		assert_eq!(primitives.len(), 2);
-		assert_eq!(primitives[0].scale, [1.0, 2.0, 3.0]);
-		assert_eq!(primitives[1].translation, [11.0, 22.0, 33.0]);
 	}
 
 	#[test]

@@ -18,7 +18,15 @@ use uuid::Uuid;
 
 use crate::args::ApiArgs;
 
-use puppycad_core::{codegen, eval::Evaluator, parser::parse_pcad, types::{CompiledNode, ErrorLevel, LangError}};
+use puppycad_core::{
+	build_model_state,
+	build_render_state,
+	codegen,
+	eval::Evaluator,
+	parser::parse_pcad,
+	feature_graph::FeatureGraph,
+	types::{ErrorLevel, LangError},
+};
 
 #[derive(Clone)]
 struct Session {
@@ -224,13 +232,6 @@ struct Position {
 }
 
 #[derive(Clone)]
-struct RenderPrimitive {
-	name: String,
-	scale: [f32; 3],
-	translation: [f32; 3],
-}
-
-#[derive(Clone)]
 struct ResolvedCamera {
 	name: String,
 	eye: [f32; 3],
@@ -239,11 +240,15 @@ struct ResolvedCamera {
 }
 
 struct BuiltRuntime {
-	primitives: Vec<RenderPrimitive>,
+	render_state: puppycad_core::RenderState,
 }
 
-struct ApiRenderApp {
-	primitives: Vec<RenderPrimitive>,
+enum ApiRenderEvent {
+	LoadRenderState(puppycad_core::RenderState),
+	RequestScreenshot(String),
+}
+
+struct ApiRenderStateApp {
 	camera_position: Option<[f32; 3]>,
 	camera_look_at: Option<[f32; 3]>,
 	camera_fov_deg: f32,
@@ -251,36 +256,104 @@ struct ApiRenderApp {
 	screenshot_frame: u64,
 	next_frame: u64,
 	screenshot_requested: bool,
+	scene_id: Option<pge::ArenaId<pge::Scene>>,
+	mesh_node_ids: Vec<pge::ArenaId<pge::Node>>,
+	mesh_ids: Vec<pge::ArenaId<pge::Mesh>>,
+	camera_id: Option<pge::ArenaId<pge::Camera>>,
+	camera_node_id: Option<pge::ArenaId<pge::Node>>,
+	light_node_id: Option<pge::ArenaId<pge::Node>>,
+	window_id: Option<pge::ArenaId<pge::Window>>,
+	gui_id: Option<pge::ArenaId<pge::GUIElement>>,
 }
 
-impl pge::App for ApiRenderApp {
-	fn on_create(&mut self, state: &mut pge::State) {
-		if self.primitives.is_empty() {
-			return;
+impl ApiRenderStateApp {
+	fn new(
+		camera_position: Option<[f32; 3]>,
+		camera_look_at: Option<[f32; 3]>,
+		camera_fov_deg: f32,
+		screenshot_path: Option<String>,
+	) -> Self {
+		Self {
+			camera_position,
+			camera_look_at,
+			camera_fov_deg,
+			screenshot_path,
+			screenshot_frame: 0,
+			next_frame: 0,
+			screenshot_requested: false,
+			scene_id: None,
+			mesh_node_ids: Vec::new(),
+			mesh_ids: Vec::new(),
+			camera_id: None,
+			camera_node_id: None,
+			light_node_id: None,
+			window_id: None,
+			gui_id: None,
 		}
+	}
+
+	fn clear_previous_scene(&mut self, state: &mut pge::State) {
+		for node_id in self.mesh_node_ids.drain(..) {
+			state.nodes.remove(&node_id);
+		}
+		for mesh_id in self.mesh_ids.drain(..) {
+			state.meshes.remove(&mesh_id);
+		}
+		if let Some(camera_node_id) = self.camera_node_id.take() {
+			state.nodes.remove(&camera_node_id);
+		}
+		if let Some(light_node_id) = self.light_node_id.take() {
+			state.nodes.remove(&light_node_id);
+		}
+		if let Some(camera_id) = self.camera_id.take() {
+			state.cameras.remove(&camera_id);
+		}
+		if let Some(gui_id) = self.gui_id.take() {
+			state.guis.remove(&gui_id);
+		}
+		if let Some(window_id) = self.window_id.take() {
+			state.windows.remove(&window_id);
+		}
+		if let Some(scene_id) = self.scene_id.take() {
+			state.scenes.remove(&scene_id);
+		}
+	}
+
+	fn load_render_state(&mut self, render_state: puppycad_core::RenderState, state: &mut pge::State) {
+		self.clear_previous_scene(state);
 
 		let scene_id = state.scenes.insert(pge::Scene::new());
-		let cube_mesh = state.meshes.insert(pge::cube(0.5));
+		self.scene_id = Some(scene_id);
 
-		for primitive in &self.primitives {
+		for mesh in render_state.meshes {
 			let mut node = pge::Node::new();
-			node.name = Some(primitive.name.clone());
+			node.name = Some(mesh.decl_id.clone());
 			node.parent = pge::NodeParent::Scene(scene_id);
-			node.mesh = Some(cube_mesh);
-			node.set_translation(
-				primitive.translation[0],
-				primitive.translation[1],
-				primitive.translation[2],
-			);
-			node.scale(primitive.scale[0], primitive.scale[1], primitive.scale[2]);
+
+			let mut pge_mesh = pge::Mesh::new();
+			let mut primitive = pge::Primitive::new(pge::PrimitiveTopology::TriangleList);
+			primitive.vertices = mesh.positions;
+			primitive.indices = to_u16_indices(&mesh.indices, &mesh.decl_id);
+			let mut normals = mesh.normals;
+			if normals.len() != primitive.vertices.len() {
+				normals.resize(primitive.vertices.len(), [0.0, 0.0, 1.0]);
+			}
+			primitive.normals = normals;
+			primitive.tex_coords = vec![[0.0, 0.0]; primitive.vertices.len()];
+			pge_mesh.primitives.push(primitive);
+			let mesh_id = state.meshes.insert(pge_mesh);
+			node.mesh = Some(mesh_id);
 			node.global_transform = node.matrix();
-			state.nodes.insert(node);
+			let node_id = state.nodes.insert(node);
+			self.mesh_ids.push(mesh_id);
+			self.mesh_node_ids.push(node_id);
 		}
 
 		let scene_bounding_box = state.get_scene_bounding_box(scene_id);
 		let center = (scene_bounding_box.min + scene_bounding_box.max) * 0.5;
 		let size = scene_bounding_box.max - scene_bounding_box.min;
-		let max_size = size.x.max(size.y).max(size.z);
+		let max_size = size.x.abs().max(size.y.abs()).max(size.z.abs());
+
 		let fov_radians = self.camera_fov_deg.to_radians();
 		let distance = if max_size > 0.0 {
 			(max_size / 2.0) / fov_radians.tan()
@@ -299,42 +372,76 @@ impl pge::App for ApiRenderApp {
 		let mut light = pge::PointLight::new();
 		light.node_id = Some(light_node_id);
 		state.point_lights.insert(light);
+		self.light_node_id = Some(light_node_id);
 
 		let mut camera_node = pge::Node::new();
 		camera_node.parent = pge::NodeParent::Scene(scene_id);
 		camera_node.translation = pge::Vec3::new(camera_position[0], camera_position[1], camera_position[2]);
 		camera_node.looking_at(target[0], target[1], target[2]);
 		let camera_node_id = state.nodes.insert(camera_node);
+		self.camera_node_id = Some(camera_node_id);
 
 		let mut camera = pge::Camera::new();
 		camera.fovy = fov_radians;
 		camera.node_id = Some(camera_node_id);
 		let camera_id = state.cameras.insert(camera);
+		self.camera_id = Some(camera_id);
 
 		let gui_id = state.guis.insert(pge::camera_view(camera_id));
-		let window = pge::Window::new().title("render").ui(gui_id);
-		state.windows.insert(window);
+		self.gui_id = Some(gui_id);
+		let window_id = state.windows.insert(pge::Window::new().title("render").ui(gui_id));
+		self.window_id = Some(window_id);
+
+		self.next_frame = 0;
+		self.screenshot_requested = false;
+	}
+}
+
+fn to_u16_indices(indices: &[u32], mesh_name: &str) -> Vec<u16> {
+	let mut out = Vec::with_capacity(indices.len());
+	for index in indices {
+		match u16::try_from(*index) {
+			Ok(index) => out.push(index),
+			Err(_) => {
+				eprintln!("render mesh '{mesh_name}' has index {index} outside u16 range");
+				return Vec::new();
+			}
+		}
+	}
+	out
+}
+
+impl pge::App<ApiRenderEvent> for ApiRenderStateApp {
+	fn on_create(&mut self, _state: &mut pge::State) {}
+
+	fn on_event(&mut self, event: ApiRenderEvent, state: &mut pge::State) {
+		match event {
+			ApiRenderEvent::LoadRenderState(render_state) => self.load_render_state(render_state, state),
+			ApiRenderEvent::RequestScreenshot(path) => {
+				self.screenshot_path = Some(path);
+				self.screenshot_requested = false;
+				self.next_frame = 0;
+				self.screenshot_frame = 0;
+			}
+		}
 	}
 
 	fn on_process(&mut self, state: &mut pge::State, _delta: f32) {
 		if self.screenshot_path.is_none() || self.screenshot_requested {
-			self.next_frame += 1;
 			return;
 		}
 
 		if self.next_frame >= self.screenshot_frame {
-			if let Some((window_id, _)) = state.windows.iter().next() {
-				state.screenshot_request = Some((
-					window_id.clone(),
-					self.screenshot_path
-						.clone()
-						.expect("screenshot path exists"),
-				));
+			let Some(window_id) = self.window_id else {
+				return;
+			};
+			if let Some(path) = self.screenshot_path.clone() {
+				state.screenshot_request = Some((window_id, path));
 				self.screenshot_requested = true;
 			}
 		}
 
-		self.next_frame += 1;
+		self.next_frame = self.next_frame.saturating_add(1);
 	}
 }
 
@@ -763,12 +870,10 @@ fn validate_source(source: &str) -> Vec<Diagnostic> {
 
 fn build_runtime(source: &str) -> Result<BuiltRuntime, ApiError> {
 	let ast = parse_pcad(source).map_err(|err| ApiError::BadRequest(err.message.clone()))?;
-	let mut evaluator = Evaluator::new(&ast);
-	let nodes = evaluator
-		.build()
-		.map_err(|err| ApiError::BadRequest(err.message.clone()))?;
-	let primitives = extract_render_primitives(&nodes);
-	Ok(BuiltRuntime { primitives })
+	let graph = FeatureGraph::new(&ast);
+	let model = build_model_state(&graph).map_err(|err| ApiError::BadRequest(err.message.clone()))?;
+	let render_state = build_render_state(&model);
+	Ok(BuiltRuntime { render_state })
 }
 
 fn render_single_frame(
@@ -777,23 +882,25 @@ fn render_single_frame(
 	output: &Path,
 	iterations: u64,
 ) -> Result<(), ApiError> {
-	let app = ApiRenderApp {
-		primitives: runtime.primitives.clone(),
-		camera_position: Some(camera.eye),
-		camera_look_at: Some(camera.look),
-		camera_fov_deg: camera.fov,
-		screenshot_path: Some(output.to_string_lossy().to_string()),
-		screenshot_frame: 0,
-		next_frame: 0,
-		screenshot_requested: false,
-	};
+	let app = ApiRenderStateApp::new(
+		Some(camera.eye),
+		Some(camera.look),
+		camera.fov,
+		Some(output.to_string_lossy().to_string()),
+	);
 
 	unsafe {
 		std::env::set_var("HEADLESS", "1");
 		std::env::set_var("SCREENSHOT", "1");
 		std::env::set_var("ITERATIONS", iterations.to_string());
 	}
-	pge::run(app).map_err(|err| ApiError::Internal(format!("render failed: {err}")))?;
+	let app_result = pge::run_with_event_sender(app, |sender| {
+		let _ = sender.send(ApiRenderEvent::LoadRenderState(runtime.render_state.clone()));
+		let _ = sender.send(ApiRenderEvent::RequestScreenshot(
+			output.to_string_lossy().to_string(),
+		));
+	});
+	app_result.map_err(|err| ApiError::Internal(format!("render failed: {err}")))?;
 	if !output.exists() {
 		return Err(ApiError::Internal(format!(
 			"render completed but output file was not written: {}",
@@ -972,102 +1079,4 @@ fn add_request_id(mut response: Response<Body>, request_id: String) -> Response<
 		.headers_mut()
 		.insert("x-request-id", request_id.parse().expect("request id must be valid header value"));
 	response
-}
-
-fn extract_render_primitives(nodes: &[CompiledNode]) -> Vec<RenderPrimitive> {
-	let mut primitive_by_id: HashMap<String, RenderPrimitive> = HashMap::new();
-	let mut primitives = Vec::new();
-
-	for node in nodes {
-		let Some(fields) = node.fields.as_object() else {
-			continue;
-		};
-		let local_translation = read_xyz(fields);
-
-		let primitive = match node.op.as_str() {
-			"box" => read_box(fields).map(|scale| RenderPrimitive {
-				name: node.id.clone(),
-				scale,
-				translation: local_translation,
-			}),
-			"translate" => {
-				let source = fields.get("of").and_then(parse_node_ref);
-				let by = fields.get("by").and_then(parse_vec3);
-				match (source, by) {
-					(Some(source), Some(by)) => primitive_by_id.get(source).map(|base| {
-						let mut translated = base.clone();
-						translated.translation = [
-							base.translation[0] + by[0],
-							base.translation[1] + by[1],
-							base.translation[2] + by[2],
-						];
-						translated.name = node.id.clone();
-						translated
-					}),
-					_ => None,
-				}
-			}
-			_ => None,
-		};
-
-		if let Some(primitive) = primitive {
-			primitive_by_id.insert(node.id.clone(), primitive.clone());
-			primitives.push(primitive);
-		}
-	}
-
-	primitives
-}
-
-fn read_box(fields: &serde_json::Map<String, Value>) -> Option<[f32; 3]> {
-	let w = parse_f32(fields.get("w"))?;
-	let h = parse_f32(fields.get("h"))?;
-	let d = parse_f32(fields.get("d"))?;
-	Some([w, h, d])
-}
-
-fn read_xyz(fields: &serde_json::Map<String, Value>) -> [f32; 3] {
-	[
-		parse_f32(fields.get("x")).unwrap_or(0.0),
-		parse_f32(fields.get("y")).unwrap_or(0.0),
-		parse_f32(fields.get("z")).unwrap_or(0.0),
-	]
-}
-
-fn parse_vec3(value: &Value) -> Option<[f32; 3]> {
-	let values = value.as_array()?;
-	if values.len() != 3 {
-		return None;
-	}
-	let x = parse_f32(values.first())?;
-	let y = parse_f32(values.get(1))?;
-	let z = parse_f32(values.get(2))?;
-	Some([x, y, z])
-}
-
-fn parse_node_ref(value: &Value) -> Option<&str> {
-	match value {
-		Value::String(value) => Some(value.as_str()),
-		Value::Object(object) => {
-			let kind = object.get("kind")?.as_str()?;
-			if kind != "node" {
-				return None;
-			}
-			object.get("id")?.as_str()
-		}
-		_ => None,
-	}
-}
-
-fn parse_f32(value: Option<&Value>) -> Option<f32> {
-	value
-		.and_then(Value::as_f64)
-		.and_then(|value| {
-			let parsed = value as f32;
-			if parsed.is_finite() {
-				Some(parsed)
-			} else {
-				None
-			}
-		})
 }

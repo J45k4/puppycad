@@ -22,6 +22,7 @@ pub enum ParseOutput {
 	Ast,
 	FeatureScript,
 	ModelState,
+	RenderState,
 }
 
 #[derive(Args, Debug)]
@@ -33,7 +34,7 @@ pub struct ParseArgs {
 		long = "print",
 		value_enum,
 		default_value_t = ParseOutput::Summary,
-		help = "Select parse output: summary, ast, feature-script, model-state"
+		help = "Select parse output: summary, ast, feature-script, model-state, render-state"
 	)]
 	pub output: ParseOutput,
 	#[arg(long, help = "Alias for --print ast.")]
@@ -44,6 +45,8 @@ pub struct ParseArgs {
 	pub feature_script: bool,
 	#[arg(long = "model-state", help = "Alias for --print model-state.")]
 	pub model_state: bool,
+	#[arg(long = "render-state", help = "Alias for --print render-state.")]
+	pub render_state: bool,
 }
 
 #[derive(Args, Debug)]
