@@ -309,6 +309,34 @@ fn push_face_vertex(
 	idx
 }
 
+fn face_normal_from_points(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+	let ux = b[0] - a[0];
+	let uy = b[1] - a[1];
+	let uz = b[2] - a[2];
+	let vx = c[0] - a[0];
+	let vy = c[1] - a[1];
+	let vz = c[2] - a[2];
+
+	let nx = uy * vz - uz * vy;
+	let ny = uz * vx - ux * vz;
+	let nz = ux * vy - uy * vx;
+	let length = (nx * nx + ny * ny + nz * nz).sqrt();
+	if length <= f32::EPSILON {
+		return [0.0, 0.0, 0.0];
+	}
+
+	let inv_length = 1.0 / length;
+	[nx * inv_length, ny * inv_length, nz * inv_length]
+}
+
+fn set_vertex_normal(normals: &mut Vec<[f32; 3]>, index: u32, normal: [f32; 3]) {
+	let idx = index as usize;
+	if idx >= normals.len() {
+		normals.resize(idx + 1, [0.0; 3]);
+	}
+	normals[idx] = normal;
+}
+
 pub fn build_render_state(model: &ModelState) -> RenderState {
 	build_render_state_with_view(model, &ViewParams::default())
 }
@@ -633,6 +661,13 @@ fn render_box_mesh(
 		let o2 = wall_point(hole_u1, hole_v1, opp_n);
 		let o3 = wall_point(hole_u0, hole_v1, opp_n);
 
+		let wall_normals = [
+			face_normal_from_points(positions[b0 as usize], positions[b1 as usize], positions[o1 as usize]),
+			face_normal_from_points(positions[b1 as usize], positions[b2 as usize], positions[o2 as usize]),
+			face_normal_from_points(positions[b2 as usize], positions[b3 as usize], positions[o3 as usize]),
+			face_normal_from_points(positions[b3 as usize], positions[b0 as usize], positions[o0 as usize]),
+		];
+
 		emit_quad(
 			b0,
 			b1,
@@ -647,6 +682,10 @@ fn render_box_mesh(
 			&mut pick_map,
 			&mut tri_start_index,
 		);
+		for (idx, normal) in [b0, b1, o1, o0].into_iter().zip([wall_normals[0]; 4]) {
+			set_vertex_normal(&mut normals, idx, normal);
+		}
+
 		emit_quad(
 			b1,
 			b2,
@@ -661,6 +700,10 @@ fn render_box_mesh(
 			&mut pick_map,
 			&mut tri_start_index,
 		);
+		for (idx, normal) in [b1, b2, o2, o1].into_iter().zip([wall_normals[1]; 4]) {
+			set_vertex_normal(&mut normals, idx, normal);
+		}
+
 		emit_quad(
 			b2,
 			b3,
@@ -675,6 +718,10 @@ fn render_box_mesh(
 			&mut pick_map,
 			&mut tri_start_index,
 		);
+		for (idx, normal) in [b2, b3, o3, o2].into_iter().zip([wall_normals[2]; 4]) {
+			set_vertex_normal(&mut normals, idx, normal);
+		}
+
 		emit_quad(
 			b3,
 			b0,
@@ -689,6 +736,9 @@ fn render_box_mesh(
 			&mut pick_map,
 			&mut tri_start_index,
 		);
+		for (idx, normal) in [b3, b0, o0, o3].into_iter().zip([wall_normals[3]; 4]) {
+			set_vertex_normal(&mut normals, idx, normal);
+		}
 	}
 
 	let mut bounds = Aabb {
@@ -862,4 +912,78 @@ fn parse_hole(
 		target,
 		through,
 	}))
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::builder::build_model_state;
+	use crate::feature_graph::FeatureGraph;
+	use crate::parser::parse_pcad;
+
+	const HOLE_MODEL: &str = r#"
+solid body = box {
+  w: 20;
+  h: 20;
+  d: 20;
+}
+
+feature hole1 = hole {
+  let cx = body.w / 2;
+  let cy = body.h / 2;
+
+  target: body.top;
+  x: cx;
+  y: cy;
+  d: 6;
+}
+"#;
+
+	fn build_render_state_for_example() -> super::RenderState {
+		let file = parse_pcad(HOLE_MODEL).expect("source parses");
+		let graph = FeatureGraph::new(&file);
+		let model = build_model_state(&graph).expect("model builds");
+		super::build_render_state(&model)
+	}
+
+	#[test]
+	fn build_render_state_does_not_panic_on_through_hole() {
+		let state = build_render_state_for_example();
+		assert!(
+			!state.meshes.is_empty(),
+			"expected at least one mesh"
+		);
+	}
+
+	#[test]
+	fn normals_align_with_positions_and_indices_for_hole_mesh() {
+		let state = build_render_state_for_example();
+		let mesh = state.meshes[0].clone();
+
+		assert_eq!(
+			mesh.positions.len(),
+			mesh.normals.len(),
+			"every vertex must have a normal"
+		);
+		assert_eq!(
+			mesh.tri_face_ids.len(),
+			(mesh.indices.len() / 3) as usize
+		);
+		for face_range in mesh.tri_face_ids {
+			let start = face_range.start_index as usize;
+			let end = start + face_range.index_count as usize;
+			assert!(
+				end <= mesh.indices.len(),
+				"face index range must not exceed triangle index buffer"
+			);
+		}
+		for pick_key in [
+			"body",
+			"hole1",
+		] {
+			assert!(
+				state.pick_map.iter().any(|entry| entry.decl_id == pick_key),
+				"expected pick record for {pick_key}"
+			);
+		}
+	}
 }

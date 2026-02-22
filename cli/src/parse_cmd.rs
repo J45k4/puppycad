@@ -31,6 +31,7 @@ struct RenderStateApp {
 	camera_id: Option<pge::ArenaId<pge::Camera>>,
 	camera_node_id: Option<pge::ArenaId<pge::Node>>,
 	light_node_id: Option<pge::ArenaId<pge::Node>>,
+	mesh_material_id: Option<pge::ArenaId<pge::Material>>,
 	window_id: Option<pge::ArenaId<pge::Window>>,
 	gui_id: Option<pge::ArenaId<pge::GUIElement>>,
 }
@@ -57,6 +58,7 @@ impl RenderStateApp {
 			camera_id: None,
 			camera_node_id: None,
 			light_node_id: None,
+			mesh_material_id: None,
 			window_id: None,
 			gui_id: None,
 		}
@@ -84,6 +86,9 @@ impl RenderStateApp {
 		if let Some(window_id) = self.window_id.take() {
 			state.windows.remove(&window_id);
 		}
+		if let Some(material_id) = self.mesh_material_id.take() {
+			state.materials.remove(&material_id);
+		}
 		if let Some(scene_id) = self.scene_id.take() {
 			state.scenes.remove(&scene_id);
 		}
@@ -91,6 +96,13 @@ impl RenderStateApp {
 
 	fn load_render_state(&mut self, render_state: puppycad_core::RenderState, state: &mut pge::State) {
 		self.clear_previous_scene(state);
+		let grey_material_id = {
+			let mut material = pge::Material::default();
+			material.base_color_factor = [0.55, 0.55, 0.55, 1.0];
+			material.roughness_factor = 0.7;
+			state.materials.insert(material)
+		};
+		self.mesh_material_id = Some(grey_material_id);
 
 		let scene_id = state.scenes.insert(pge::Scene::new());
 		self.scene_id = Some(scene_id);
@@ -104,6 +116,7 @@ impl RenderStateApp {
 			let mut primitive = pge::Primitive::new(pge::PrimitiveTopology::TriangleList);
 			primitive.vertices = mesh.positions;
 			primitive.indices = to_u16_indices(&mesh.indices, &mesh.decl_id);
+			primitive.material = Some(grey_material_id);
 			let mut normals = mesh.normals;
 			if normals.len() != primitive.vertices.len() {
 				normals.resize(primitive.vertices.len(), [0.0, 0.0, 1.0]);
