@@ -1,8 +1,10 @@
 mod args;
 mod parse_cmd;
+mod ui;
 
 pub use args::{parse_args, Command, ParseArgs, RenderArgs, ValidateArgs};
-pub use parse_cmd::{run_parse, run_render, run_ui, run_validate};
+pub use parse_cmd::{run_parse, run_render, run_validate};
+pub use ui::run_ui;
 pub use args::UiArgs;
 
 use std::io::{IsTerminal, Read};

@@ -20,4 +20,5 @@ When making changes always check docs folder if it needs to be updated and updat
 
 ## 3. Testing
 
-When making changes always check if there are relevant unit tests and if not add them. If there are relevant unit tests, run them and update them if needed.
+- When making changes always check if there are relevant unit tests and if not add them. If there are relevant unit tests, run them and update them if needed.
+- When making changes to rendering take screenshots into ./workdir folder to check your work visually and make changes if needed.

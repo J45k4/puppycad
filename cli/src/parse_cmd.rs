@@ -1,10 +1,8 @@
 use std::process::ExitCode;
-use std::process::Command as ProcessCommand;
-use std::path::PathBuf;
 use std::path::Path;
 
 use crate::{
-	args::{ParseArgs, ParseOutput, RenderArgs, UiArgs, ValidateArgs},
+	args::{ParseArgs, ParseOutput, RenderArgs, ValidateArgs},
 	read_source,
 };
 use puppycad_core::{
@@ -24,6 +22,9 @@ struct RenderStateApp {
 	screenshot_frame: u64,
 	next_frame: u64,
 	screenshot_requested: bool,
+	orbit_controller: pge::OrbitController,
+	right_button_down: bool,
+	middle_button_down: bool,
 	scene_id: Option<pge::ArenaId<pge::Scene>>,
 	mesh_node_ids: Vec<pge::ArenaId<pge::Node>>,
 	mesh_ids: Vec<pge::ArenaId<pge::Mesh>>,
@@ -47,6 +48,9 @@ impl RenderStateApp {
 			screenshot_frame: 0,
 			next_frame: 0,
 			screenshot_requested: false,
+			orbit_controller: pge::OrbitController::default(),
+			right_button_down: false,
+			middle_button_down: false,
 			scene_id: None,
 			mesh_node_ids: Vec::new(),
 			mesh_ids: Vec::new(),
@@ -128,9 +132,19 @@ impl RenderStateApp {
 		} else {
 			3.0
 		};
-		let target = self.camera_look_at.unwrap_or([center.x, center.y, center.z]);
+		let target = self
+			.camera_look_at
+			.unwrap_or([center.x, center.y, center.z]);
 		let default_camera_position = [center.x, center.y, center.z + distance.max(0.1)];
 		let camera_position = self.camera_position.unwrap_or(default_camera_position);
+		let target = pge::Vec3::new(target[0], target[1], target[2]);
+		let camera_position = pge::Vec3::new(
+			camera_position[0],
+			camera_position[1],
+			camera_position[2],
+		);
+		let mut orbit_controller = pge::OrbitController::default();
+		orbit_controller.set_from_target_and_position(target, camera_position);
 
 		let mut light_node = pge::Node::new();
 		light_node.name = Some("Light".to_string());
@@ -144,8 +158,8 @@ impl RenderStateApp {
 
 		let mut camera_node = pge::Node::new();
 		camera_node.parent = pge::NodeParent::Scene(scene_id);
-		camera_node.translation = pge::Vec3::new(camera_position[0], camera_position[1], camera_position[2]);
-		camera_node.looking_at(target[0], target[1], target[2]);
+		camera_node.translation = camera_position;
+		camera_node.looking_at(target.x, target.y, target.z);
 		let camera_node_id = state.nodes.insert(camera_node);
 		self.camera_node_id = Some(camera_node_id);
 
@@ -159,6 +173,10 @@ impl RenderStateApp {
 		self.gui_id = Some(gui_id);
 		let window_id = state.windows.insert(pge::Window::new().title("render").ui(gui_id));
 		self.window_id = Some(window_id);
+
+		self.orbit_controller = orbit_controller;
+		self.right_button_down = false;
+		self.middle_button_down = false;
 
 		self.next_frame = 0;
 		self.screenshot_requested = false;
@@ -194,7 +212,50 @@ impl pge::App<RenderEvent> for RenderStateApp {
 		}
 	}
 
+	fn on_mouse_input(
+		&mut self,
+		window_id: pge::ArenaId<pge::Window>,
+		event: pge::MouseEvent,
+		_state: &mut pge::State,
+	) {
+		let Some(active_window_id) = self.window_id else {
+			return;
+		};
+		if active_window_id != window_id {
+			return;
+		}
+
+		match event {
+			pge::MouseEvent::Moved { dx, dy } => {
+				let delta = pge::Vec2::new(dx, dy);
+				if self.right_button_down {
+					self.orbit_controller.orbit(delta);
+				} else if self.middle_button_down {
+					self.orbit_controller.pan(delta);
+				}
+			}
+			pge::MouseEvent::Pressed { button } => match button {
+				pge::MouseButton::Right => self.right_button_down = true,
+				pge::MouseButton::Middle => self.middle_button_down = true,
+				_ => {}
+			},
+			pge::MouseEvent::Released { button } => match button {
+				pge::MouseButton::Right => self.right_button_down = false,
+				pge::MouseButton::Middle => self.middle_button_down = false,
+				_ => {}
+			},
+			pge::MouseEvent::Wheel { dy, .. } => {
+				self.orbit_controller.zoom(dy);
+			}
+		}
+	}
+
 	fn on_process(&mut self, state: &mut pge::State, _delta: f32) {
+		if let Some(camera_node_id) = self.camera_node_id {
+			self.orbit_controller
+				.process(state, camera_node_id, _delta);
+		}
+
 		if self.screenshot_path.is_none() || self.screenshot_requested {
 			return;
 		}
@@ -385,41 +446,6 @@ pub fn run_render(args: RenderArgs) -> ExitCode {
 		Ok(()) => ExitCode::SUCCESS,
 		Err(err) => {
 			eprintln!("render failed: {err}");
-			ExitCode::FAILURE
-		}
-	}
-}
-
-pub fn run_ui(args: UiArgs) -> ExitCode {
-	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../pge/Cargo.toml");
-	if !manifest.exists() {
-		eprintln!(
-			"ui mode requires a local pge checkout at '{}'. The current git dependency setup is render-only.",
-			manifest.display()
-		);
-		return ExitCode::FAILURE;
-	}
-
-	let mut command = ProcessCommand::new("cargo");
-	command
-		.current_dir(manifest.parent().expect("pge manifest directory"))
-		.arg("run")
-		.arg("--manifest-path")
-		.arg(&manifest)
-		.arg("--package")
-		.arg("pge_editor");
-
-	if let Some(path) = args.inspect {
-		command.arg("--").arg("inspect").arg(path);
-	}
-
-	match command.status() {
-		Ok(status) => match status.code() {
-			Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
-			None => ExitCode::FAILURE,
-		},
-		Err(err) => {
-			eprintln!("failed to launch editor via cargo: {err}");
 			ExitCode::FAILURE
 		}
 	}
