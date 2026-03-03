@@ -1,6 +1,6 @@
 # Render and Inspect Controls
 
-When using interactive camera windows in PuppyCAD (`render` without `--headless`, or `ui --inspect <file>.pcad`), the camera uses PGE free-fly controls:
+When using interactive camera windows in PuppyCAD (`render` without `--headless`), the camera uses PGE free-fly controls:
 
 - Hold right mouse button and move mouse: look around
 - `W` / `F`: move forward

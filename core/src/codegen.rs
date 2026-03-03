@@ -7,7 +7,10 @@ use crate::types::{CompiledNode, ErrorCode, ErrorLevel, LangError};
 pub fn compile_to_three_json(file: &File) -> Result<String, LangError> {
     let mut evaluator = Evaluator::new(file);
     let mut nodes: Vec<CompiledNode> = evaluator.build()?;
-    let final_id = file.decls.last().map_or(String::new(), |decl| decl.id.clone());
+    let final_id = file
+        .decls
+        .last()
+        .map_or(String::new(), |decl| decl.id.clone());
 
     let mut body = Map::new();
     body.insert(

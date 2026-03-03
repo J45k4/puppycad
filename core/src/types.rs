@@ -138,7 +138,11 @@ impl Value {
                 JsonValue::Object(object)
             }
             Self::Null => JsonValue::Null,
-            Self::Vec3(value) => JsonValue::Array(vec![JsonValue::from(value[0]), JsonValue::from(value[1]), JsonValue::from(value[2])]),
+            Self::Vec3(value) => JsonValue::Array(vec![
+                JsonValue::from(value[0]),
+                JsonValue::from(value[1]),
+                JsonValue::from(value[2]),
+            ]),
             Self::Object(fields) => {
                 let mut object = Map::new();
                 for (name, value) in fields {
@@ -181,18 +185,18 @@ pub struct CompiledNode {
 
 #[derive(Debug, Clone)]
 pub struct ModelNode {
-	pub id: String,
-	pub kind: String,
-	pub op: String,
-	pub fields: HashMap<String, Value>,
-	pub dependencies: Vec<String>,
-	pub span: Span,
+    pub id: String,
+    pub kind: String,
+    pub op: String,
+    pub fields: HashMap<String, Value>,
+    pub dependencies: Vec<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct ModelState {
-	pub nodes: HashMap<String, ModelNode>,
-	pub declaration_order: Vec<String>,
-	pub execution_order: Vec<String>,
-	pub final_node_id: Option<String>,
+    pub nodes: HashMap<String, ModelNode>,
+    pub declaration_order: Vec<String>,
+    pub execution_order: Vec<String>,
+    pub final_node_id: Option<String>,
 }
