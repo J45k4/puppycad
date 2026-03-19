@@ -26,6 +26,7 @@ cargo run -p puppycad -- examples/puppybot.pcad
   - right panel: interactive 3D viewer with mode switch:
     - `Graph`: dependency graph nodes/edges,
     - `Result`: render-result preview derived from `build_render_state`.
+- When launched with a `.pcad` file path, the window hot-reloads the file after on-disk edits and keeps the last good graph visible if a reload fails.
 - `Result` mode supports:
   - `Wireframe`: debug triangulation edges,
   - `Solid`: filled shaded triangles with selected-part highlighting.

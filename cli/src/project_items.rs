@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use bytemuck::{Pod, Zeroable};
 use eframe::egui;
@@ -21,6 +22,7 @@ const VIEW_NEAR_PLANE: f32 = 0.05;
 const VIEW_FAR_PLANE: f32 = 10_000.0;
 const WGPU_CLEAR_COLOR: Color32 = Color32::from_rgb(22, 25, 32);
 const RESULT_LIGHT_DIR: [f32; 3] = [0.45, 0.75, 0.55];
+const HOT_RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(400);
 const RESULT_WGPU_SHADER: &str = r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
@@ -251,12 +253,21 @@ struct RenderPreview {
     warning: Option<String>,
 }
 
+struct LoadedProjectData {
+    graph: NodeGraph,
+    render_state_result: Result<RenderPreview, String>,
+}
+
 #[derive(Debug)]
 struct ProjectItemsApp {
     graph: NodeGraph,
     render_state: Option<RenderState>,
     render_warning: Option<String>,
     render_error: Option<String>,
+    source_path: Option<PathBuf>,
+    last_observed_source: Option<String>,
+    source_reload_error: Option<String>,
+    next_source_check_at: Instant,
     position_by_id: HashMap<String, [f32; 2]>,
     items: Vec<ProjectItem>,
     filter_query: String,
@@ -268,7 +279,15 @@ struct ProjectItemsApp {
 }
 
 impl ProjectItemsApp {
-    fn new(graph: NodeGraph, render_state_result: Result<RenderPreview, String>) -> Self {
+    fn new(
+        loaded: LoadedProjectData,
+        source_path: Option<PathBuf>,
+        initial_source: Option<String>,
+    ) -> Self {
+        let LoadedProjectData {
+            graph,
+            render_state_result,
+        } = loaded;
         let position_by_id = graph
             .nodes
             .iter()
@@ -302,6 +321,10 @@ impl ProjectItemsApp {
             render_state,
             render_warning,
             render_error,
+            source_path,
+            last_observed_source: initial_source,
+            source_reload_error: None,
+            next_source_check_at: Instant::now() + HOT_RELOAD_POLL_INTERVAL,
             position_by_id,
             items,
             filter_query: String::new(),
@@ -310,6 +333,85 @@ impl ProjectItemsApp {
             result_render_mode: ResultRenderMode::Wireframe,
             graph_viewer,
             result_viewer,
+        }
+    }
+
+    fn apply_loaded_project(&mut self, loaded: LoadedProjectData) {
+        let previous_selection = self.selected_item_id().map(str::to_owned);
+        self.graph = loaded.graph;
+        self.position_by_id = self
+            .graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.position))
+            .collect::<HashMap<_, _>>();
+        self.items = self
+            .graph
+            .nodes
+            .iter()
+            .map(ProjectItem::from_node)
+            .collect::<Vec<_>>();
+        self.selected_index = previous_selection
+            .as_deref()
+            .and_then(|selected_id| self.items.iter().position(|item| item.id == selected_id))
+            .or_else(|| (!self.items.is_empty()).then_some(0));
+
+        match loaded.render_state_result {
+            Ok(preview) => {
+                self.render_state = Some(preview.state);
+                self.render_warning = preview.warning;
+                self.render_error = None;
+            }
+            Err(err) => {
+                self.render_state = None;
+                self.render_warning = None;
+                self.render_error = Some(err);
+            }
+        }
+    }
+
+    fn poll_source_file(&mut self, ctx: &egui::Context) {
+        let Some(source_path) = self.source_path.clone() else {
+            return;
+        };
+        ctx.request_repaint_after(HOT_RELOAD_POLL_INTERVAL);
+
+        let now = Instant::now();
+        if now < self.next_source_check_at {
+            return;
+        }
+        self.next_source_check_at = now + HOT_RELOAD_POLL_INTERVAL;
+
+        let source = match read_source(Some(source_path.as_path())) {
+            Ok(source) => source,
+            Err(err) => {
+                let message = format!("Hot reload failed: {err}");
+                if self.source_reload_error.as_deref() != Some(message.as_str()) {
+                    self.source_reload_error = Some(message);
+                    ctx.request_repaint();
+                }
+                return;
+            }
+        };
+
+        if self.last_observed_source.as_deref() == Some(source.as_str()) {
+            if self.source_reload_error.take().is_some() {
+                ctx.request_repaint();
+            }
+            return;
+        }
+
+        self.last_observed_source = Some(source.clone());
+        match load_project_data_from_source(&source) {
+            Ok(loaded) => {
+                self.apply_loaded_project(loaded);
+                self.source_reload_error = None;
+                ctx.request_repaint();
+            }
+            Err(err) => {
+                self.source_reload_error = Some(format!("Hot reload failed: {err}"));
+                ctx.request_repaint();
+            }
         }
     }
 
@@ -573,6 +675,7 @@ impl ProjectItemsApp {
 
 impl eframe::App for ProjectItemsApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.poll_source_file(ctx);
         let filtered = self.filtered_indices();
         self.ensure_valid_selection(&filtered);
 
@@ -590,6 +693,14 @@ impl eframe::App for ProjectItemsApp {
                 ui.label(format!("{} item(s)", self.items.len()));
                 ui.separator();
                 ui.label(format!("{} visible", filtered.len()));
+                if let Some(source_path) = &self.source_path {
+                    ui.separator();
+                    ui.label(format!("Hot reload: {}", source_path.display()));
+                }
+                if let Some(err) = &self.source_reload_error {
+                    ui.separator();
+                    ui.colored_label(Color32::from_rgb(255, 170, 170), err);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Close").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -677,18 +788,16 @@ pub fn run_project_items_ui(input_path: Option<PathBuf>) -> ExitCode {
         }
     };
 
-    let ast = match parse_pcad(&source) {
-        Ok(file) => file,
+    let loaded = match load_project_data_from_source(&source) {
+        Ok(loaded) => loaded,
         Err(err) => {
             eprintln!("{err}");
             return ExitCode::FAILURE;
         }
     };
 
-    let graph = build_node_graph(&ast);
-    let render_state_result = build_render_preview(&ast);
-
-    match run_project_items_window(graph, render_state_result) {
+    let initial_source = input_path.as_ref().map(|_| source);
+    match run_project_items_window(loaded, input_path, initial_source) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("{err}");
@@ -698,8 +807,9 @@ pub fn run_project_items_ui(input_path: Option<PathBuf>) -> ExitCode {
 }
 
 fn run_project_items_window(
-    graph: NodeGraph,
-    render_state_result: Result<RenderPreview, String>,
+    loaded: LoadedProjectData,
+    source_path: Option<PathBuf>,
+    initial_source: Option<String>,
 ) -> Result<(), String> {
     let native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -712,7 +822,13 @@ fn run_project_items_window(
     eframe::run_native(
         WINDOW_TITLE,
         native_options,
-        Box::new(move |_cc| Ok(Box::new(ProjectItemsApp::new(graph, render_state_result)))),
+        Box::new(move |_cc| {
+            Ok(Box::new(ProjectItemsApp::new(
+                loaded,
+                source_path,
+                initial_source,
+            )))
+        }),
     )
     .map_err(|err| format!("failed to open project items UI: {err}"))
 }
@@ -1657,6 +1773,14 @@ fn build_render_preview(ast: &File) -> Result<RenderPreview, String> {
     })
 }
 
+fn load_project_data_from_source(source: &str) -> Result<LoadedProjectData, String> {
+    let ast = parse_pcad(source).map_err(|err| err.to_string())?;
+    Ok(LoadedProjectData {
+        graph: build_node_graph(&ast),
+        render_state_result: build_render_preview(&ast),
+    })
+}
+
 fn summarize_unsupported_preview_ops(model: &puppycad_core::ModelState) -> Option<String> {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
     for node_id in &model.execution_order {
@@ -1750,6 +1874,8 @@ fn item_matches_filter(item: &ProjectItem, filter_query: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
 
     fn fixture_graph() -> NodeGraph {
         NodeGraph {
@@ -1797,7 +1923,14 @@ mod tests {
 
     #[test]
     fn move_selection_stays_in_filtered_bounds() {
-        let mut app = ProjectItemsApp::new(fixture_graph(), Err("no render".to_owned()));
+        let mut app = ProjectItemsApp::new(
+            LoadedProjectData {
+                graph: fixture_graph(),
+                render_state_result: Err("no render".to_owned()),
+            },
+            None,
+            None,
+        );
         app.filter_query = String::new();
         app.selected_index = Some(0);
 
@@ -1831,9 +1964,117 @@ mod tests {
 
     #[test]
     fn defaults_to_graph_view_mode() {
-        let app = ProjectItemsApp::new(fixture_graph(), Err("no render".to_owned()));
+        let app = ProjectItemsApp::new(
+            LoadedProjectData {
+                graph: fixture_graph(),
+                render_state_result: Err("no render".to_owned()),
+            },
+            None,
+            None,
+        );
         assert_eq!(app.viewer_mode, ViewerMode::Graph);
         assert_eq!(app.result_render_mode, ResultRenderMode::Wireframe);
+    }
+
+    fn temp_pcad_path(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("puppycad-{label}-{nanos}.pcad"))
+    }
+
+    fn valid_source_with_hole(hole_name: &str, diameter: u32) -> String {
+        format!(
+            r#"
+solid body = box {{
+  w: 20;
+  h: 20;
+  d: 20;
+}}
+
+feature {hole_name} = hole {{
+  let cx = body.w / 2;
+  let cy = body.h / 2;
+
+  target: body.top;
+  x: cx;
+  y: cy;
+  d: {diameter};
+}}
+"#
+        )
+    }
+
+    #[test]
+    fn poll_source_file_reloads_when_source_changes() {
+        let path = temp_pcad_path("hot-reload-success");
+        let initial_source = valid_source_with_hole("hole1", 6);
+        fs::write(&path, &initial_source).expect("failed to write initial source");
+
+        let loaded =
+            load_project_data_from_source(&initial_source).expect("initial source should load");
+        let mut app =
+            ProjectItemsApp::new(loaded, Some(path.clone()), Some(initial_source.clone()));
+        app.selected_index = Some(1);
+        app.next_source_check_at = Instant::now();
+
+        let updated_source = valid_source_with_hole("hole2", 8);
+        fs::write(&path, &updated_source).expect("failed to write updated source");
+
+        let ctx = egui::Context::default();
+        app.poll_source_file(&ctx);
+
+        assert_eq!(app.items.len(), 2);
+        assert_eq!(app.items[1].id, "hole2");
+        assert_eq!(app.selected_item_id(), Some("body"));
+        assert!(app.source_reload_error.is_none());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_source_file_keeps_last_good_graph_on_reload_error() {
+        let path = temp_pcad_path("hot-reload-error");
+        let initial_source = valid_source_with_hole("hole1", 6);
+        fs::write(&path, &initial_source).expect("failed to write initial source");
+
+        let loaded =
+            load_project_data_from_source(&initial_source).expect("initial source should load");
+        let mut app =
+            ProjectItemsApp::new(loaded, Some(path.clone()), Some(initial_source.clone()));
+        app.selected_index = Some(1);
+        app.next_source_check_at = Instant::now();
+
+        fs::write(
+            &path,
+            r#"
+solid body = box {
+  w: 20;
+  h: 20;
+  d: 20;
+}
+
+feature broken = hole {
+  target: body.top;
+  x:
+}
+"#,
+        )
+        .expect("failed to write invalid source");
+
+        let ctx = egui::Context::default();
+        app.poll_source_file(&ctx);
+
+        assert_eq!(app.items[1].id, "hole1");
+        assert_eq!(app.selected_item_id(), Some("hole1"));
+        assert!(
+            app.source_reload_error
+                .as_deref()
+                .is_some_and(|message| message.contains("Hot reload failed"))
+        );
+
+        let _ = fs::remove_file(path);
     }
 
     fn fixture_render_state() -> RenderState {
