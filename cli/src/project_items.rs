@@ -245,10 +245,17 @@ struct ResultWgpuResources {
     line_index_capacity: u64,
 }
 
+#[derive(Debug, Clone)]
+struct RenderPreview {
+    state: RenderState,
+    warning: Option<String>,
+}
+
 #[derive(Debug)]
 struct ProjectItemsApp {
     graph: NodeGraph,
     render_state: Option<RenderState>,
+    render_warning: Option<String>,
     render_error: Option<String>,
     position_by_id: HashMap<String, [f32; 2]>,
     items: Vec<ProjectItem>,
@@ -261,7 +268,7 @@ struct ProjectItemsApp {
 }
 
 impl ProjectItemsApp {
-    fn new(graph: NodeGraph, render_state_result: Result<RenderState, String>) -> Self {
+    fn new(graph: NodeGraph, render_state_result: Result<RenderPreview, String>) -> Self {
         let position_by_id = graph
             .nodes
             .iter()
@@ -276,17 +283,24 @@ impl ProjectItemsApp {
 
         let graph_viewer = ViewerState::from_bounds(graph_bounds(&graph));
 
-        let (render_state, render_error, result_viewer) = match render_state_result {
-            Ok(state) => {
-                let bounds = render_bounds(&state).unwrap_or_else(|| graph_bounds(&graph));
-                (Some(state), None, ViewerState::from_bounds(bounds))
+        let (render_state, render_warning, render_error, result_viewer) = match render_state_result
+        {
+            Ok(preview) => {
+                let bounds = render_bounds(&preview.state).unwrap_or_else(|| graph_bounds(&graph));
+                (
+                    Some(preview.state),
+                    preview.warning,
+                    None,
+                    ViewerState::from_bounds(bounds),
+                )
             }
-            Err(err) => (None, Some(err), graph_viewer.clone()),
+            Err(err) => (None, None, Some(err), graph_viewer.clone()),
         };
 
         Self {
             graph,
             render_state,
+            render_warning,
             render_error,
             position_by_id,
             items,
@@ -373,6 +387,14 @@ impl ProjectItemsApp {
                 );
             }
         });
+        if self.viewer_mode == ViewerMode::Result
+            && let Some(warning) = &self.render_warning
+        {
+            ui.colored_label(
+                Color32::from_rgb(255, 196, 120),
+                format!("Preview warning: {warning}"),
+            );
+        }
         ui.separator();
     }
 
@@ -677,7 +699,7 @@ pub fn run_project_items_ui(input_path: Option<PathBuf>) -> ExitCode {
 
 fn run_project_items_window(
     graph: NodeGraph,
-    render_state_result: Result<RenderState, String>,
+    render_state_result: Result<RenderPreview, String>,
 ) -> Result<(), String> {
     let native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -752,7 +774,7 @@ impl ResultWgpuResources {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -1089,33 +1111,64 @@ fn build_result_wgpu_scene(
                     default_fill
                 };
                 for tri in mesh.indices.chunks_exact(3) {
-                    let Some((a, b, c)) = triangle_positions(mesh, tri) else {
+                    let (Ok(i0), Ok(i1), Ok(i2)) = (
+                        usize::try_from(tri[0]),
+                        usize::try_from(tri[1]),
+                        usize::try_from(tri[2]),
+                    ) else {
+                        continue;
+                    };
+                    let Some(a) = mesh.positions.get(i0).copied() else {
+                        continue;
+                    };
+                    let Some(b) = mesh.positions.get(i1).copied() else {
+                        continue;
+                    };
+                    let Some(c) = mesh.positions.get(i2).copied() else {
                         continue;
                     };
 
-                    let normal = normalize3(cross3(sub3(b, a), sub3(c, a)));
-                    if length3(normal) <= f32::EPSILON {
-                        continue;
-                    }
+                    let fallback_normal = normalize3(cross3(sub3(b, a), sub3(c, a)));
+                    let n0 = mesh
+                        .normals
+                        .get(i0)
+                        .copied()
+                        .map(normalize3)
+                        .filter(|n| length3(*n) > f32::EPSILON)
+                        .unwrap_or(fallback_normal);
+                    let n1 = mesh
+                        .normals
+                        .get(i1)
+                        .copied()
+                        .map(normalize3)
+                        .filter(|n| length3(*n) > f32::EPSILON)
+                        .unwrap_or(fallback_normal);
+                    let n2 = mesh
+                        .normals
+                        .get(i2)
+                        .copied()
+                        .map(normalize3)
+                        .filter(|n| length3(*n) > f32::EPSILON)
+                        .unwrap_or(fallback_normal);
 
                     let Ok(base) = u32::try_from(triangle_vertices.len()) else {
                         continue;
                     };
                     triangle_vertices.push(ResultWgpuVertex {
                         position: a,
-                        normal,
+                        normal: n0,
                         color,
                         _padding: 0.0,
                     });
                     triangle_vertices.push(ResultWgpuVertex {
                         position: b,
-                        normal,
+                        normal: n1,
                         color,
                         _padding: 0.0,
                     });
                     triangle_vertices.push(ResultWgpuVertex {
                         position: c,
-                        normal,
+                        normal: n2,
                         color,
                         _padding: 0.0,
                     });
@@ -1594,11 +1647,37 @@ fn shade_color(color: Color32, factor: f32) -> Color32 {
     Color32::from_rgb(scale(r), scale(g), scale(b))
 }
 
-fn build_render_preview(ast: &File) -> Result<RenderState, String> {
+fn build_render_preview(ast: &File) -> Result<RenderPreview, String> {
     let feature_graph = FeatureGraph::new(ast);
     let model = build_model_state(&feature_graph)
         .map_err(|err| format!("failed to build model state: {err}"))?;
-    Ok(build_render_state(&model))
+    Ok(RenderPreview {
+        state: build_render_state(&model),
+        warning: summarize_unsupported_preview_ops(&model),
+    })
+}
+
+fn summarize_unsupported_preview_ops(model: &puppycad_core::ModelState) -> Option<String> {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for node_id in &model.execution_order {
+        let Some(node) = model.nodes.get(node_id) else {
+            continue;
+        };
+        if matches!(node.op.as_str(), "box" | "translate" | "hole") {
+            continue;
+        }
+        *counts.entry(node.op.clone()).or_insert(0) += 1;
+    }
+
+    if counts.is_empty() {
+        return None;
+    }
+
+    let parts = counts
+        .into_iter()
+        .map(|(op, count)| format!("{op} x{count}"))
+        .collect::<Vec<_>>();
+    Some(format!("skipped unsupported op(s): {}", parts.join(", ")))
 }
 
 fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
