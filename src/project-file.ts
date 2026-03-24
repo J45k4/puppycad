@@ -48,6 +48,12 @@ export type PartProjectPreviewRotation = {
 	pitch: number
 }
 
+export type PartProjectReferencePlaneVisibility = {
+	Front: boolean
+	Top: boolean
+	Right: boolean
+}
+
 export type PartProjectItemData = {
 	sketchPoints: PartProjectPoint[]
 	sketchName?: string
@@ -55,6 +61,8 @@ export type PartProjectItemData = {
 	extrudedModel?: PartProjectExtrudedModel
 	height: number
 	previewRotation: PartProjectPreviewRotation
+	sketchVisible: boolean
+	referencePlaneVisibility: PartProjectReferencePlaneVisibility
 }
 
 export const PART_PROJECT_DEFAULT_HEIGHT = 30
@@ -69,21 +77,25 @@ export type ProjectFileItem =
 			type: "schemantic"
 			name: string
 			data?: SchemanticProjectItemData
+			visible?: boolean
 	  }
 	| {
 			type: "part"
 			name: string
 			data?: PartProjectItemData
+			visible?: boolean
 	  }
 	| {
 			type: Exclude<ProjectFileType, "schemantic" | "part">
 			name: string
+			visible?: boolean
 	  }
 
 export type ProjectFileFolder = {
 	kind: "folder"
 	name: string
 	items: ProjectFileEntry[]
+	visible?: boolean
 }
 
 export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
@@ -162,11 +174,13 @@ function normalizeProjectFileEntries(input: unknown): ProjectFileEntry[] {
 
 		if (isFolderEntry(rawItem)) {
 			const folderName = normalizeEntryName(rawItem, usedNames, generateDefaultFolderName)
+			const visible = normalizeVisibleFlag(rawItem)
 			const children = normalizeProjectFileEntries((rawItem as { items?: unknown }).items)
 			items.push({
 				kind: "folder",
 				name: folderName,
-				items: children
+				items: children,
+				...(visible === undefined ? {} : { visible })
 			})
 			continue
 		}
@@ -180,25 +194,34 @@ function normalizeProjectFileEntries(input: unknown): ProjectFileEntry[] {
 
 		if (type === "schemantic") {
 			const data = normalizeSchemanticProjectItemData((rawItem as { data?: unknown }).data)
+			const visible = normalizeVisibleFlag(rawItem)
 			items.push({
 				type,
 				name,
-				data: data.components.length === 0 && data.connections.length === 0 ? undefined : data
+				data: data.components.length === 0 && data.connections.length === 0 ? undefined : data,
+				...(visible === undefined ? {} : { visible })
 			})
 			continue
 		}
 
 		if (type === "part") {
 			const data = normalizePartProjectItemData((rawItem as { data?: unknown }).data)
+			const visible = normalizeVisibleFlag(rawItem)
 			items.push({
 				type,
 				name,
-				data
+				data,
+				...(visible === undefined ? {} : { visible })
 			})
 			continue
 		}
 
-		items.push({ type, name })
+		const visible = normalizeVisibleFlag(rawItem)
+		items.push({
+			type,
+			name,
+			...(visible === undefined ? {} : { visible })
+		})
 	}
 
 	return items
@@ -271,7 +294,8 @@ function cloneProjectFileEntry(entry: ProjectFileEntry): ProjectFileEntry {
 		return {
 			kind: "folder",
 			name: entry.name,
-			items: entry.items.map(cloneProjectFileEntry)
+			items: entry.items.map(cloneProjectFileEntry),
+			...(entry.visible === undefined ? {} : { visible: entry.visible })
 		}
 	}
 
@@ -279,7 +303,8 @@ function cloneProjectFileEntry(entry: ProjectFileEntry): ProjectFileEntry {
 		return {
 			type: entry.type,
 			name: entry.name,
-			data: cloneSchemanticProjectItemData(entry.data)
+			data: cloneSchemanticProjectItemData(entry.data),
+			...(entry.visible === undefined ? {} : { visible: entry.visible })
 		}
 	}
 
@@ -287,13 +312,15 @@ function cloneProjectFileEntry(entry: ProjectFileEntry): ProjectFileEntry {
 		return {
 			type: entry.type,
 			name: entry.name,
-			data: clonePartProjectItemData(entry.data)
+			data: clonePartProjectItemData(entry.data),
+			...(entry.visible === undefined ? {} : { visible: entry.visible })
 		}
 	}
 
 	return {
 		type: entry.type,
-		name: entry.name
+		name: entry.name,
+		...(entry.visible === undefined ? {} : { visible: entry.visible })
 	}
 }
 
@@ -461,6 +488,12 @@ function clonePartProjectItemData(data: PartProjectItemData | undefined): PartPr
 		previewRotation: {
 			yaw: data.previewRotation.yaw,
 			pitch: data.previewRotation.pitch
+		},
+		sketchVisible: data.sketchVisible,
+		referencePlaneVisibility: {
+			Front: data.referencePlaneVisibility.Front,
+			Top: data.referencePlaneVisibility.Top,
+			Right: data.referencePlaneVisibility.Right
 		}
 	}
 }
@@ -478,6 +511,8 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		extrudedModel: unknown
 		height: unknown
 		previewRotation: unknown
+		sketchVisible: unknown
+		referencePlaneVisibility: unknown
 	}>
 
 	const sketchPointsInput = Array.isArray(value.sketchPoints) ? value.sketchPoints : []
@@ -507,6 +542,8 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 	}
 
 	const extrudedModel = normalizePartProjectExtrudedModel(value.extrudedModel)
+	const sketchVisible = typeof value.sketchVisible === "boolean" ? value.sketchVisible : defaults.sketchVisible
+	const referencePlaneVisibility = normalizePartProjectReferencePlaneVisibility(value.referencePlaneVisibility, defaults.referencePlaneVisibility)
 
 	return {
 		sketchPoints,
@@ -514,7 +551,25 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		isSketchClosed,
 		extrudedModel,
 		height: heightValue,
-		previewRotation
+		previewRotation,
+		sketchVisible,
+		referencePlaneVisibility
+	}
+}
+
+function normalizePartProjectReferencePlaneVisibility(input: unknown, defaults: PartProjectReferencePlaneVisibility): PartProjectReferencePlaneVisibility {
+	if (!input || typeof input !== "object") {
+		return {
+			Front: defaults.Front,
+			Top: defaults.Top,
+			Right: defaults.Right
+		}
+	}
+	const value = input as Partial<PartProjectReferencePlaneVisibility>
+	return {
+		Front: typeof value.Front === "boolean" ? value.Front : defaults.Front,
+		Top: typeof value.Top === "boolean" ? value.Top : defaults.Top,
+		Right: typeof value.Right === "boolean" ? value.Right : defaults.Right
 	}
 }
 
@@ -578,6 +633,20 @@ function createDefaultPartProjectItemData(): PartProjectItemData {
 		isSketchClosed: false,
 		extrudedModel: undefined,
 		height: PART_PROJECT_DEFAULT_HEIGHT,
-		previewRotation: { ...PART_PROJECT_DEFAULT_ROTATION }
+		previewRotation: { ...PART_PROJECT_DEFAULT_ROTATION },
+		sketchVisible: true,
+		referencePlaneVisibility: {
+			Front: true,
+			Top: true,
+			Right: true
+		}
 	}
+}
+
+function normalizeVisibleFlag(rawItem: unknown): boolean | undefined {
+	if (!rawItem || typeof rawItem !== "object") {
+		return undefined
+	}
+	const candidate = rawItem as { visible?: unknown }
+	return typeof candidate.visible === "boolean" ? candidate.visible : undefined
 }

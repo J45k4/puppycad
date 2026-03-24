@@ -5,6 +5,7 @@ export type ProjectListFileEntry = {
 	id: string
 	name: string
 	metadata?: unknown
+	visible?: boolean
 }
 
 export type ProjectListFolderEntry = {
@@ -13,6 +14,7 @@ export type ProjectListFolderEntry = {
 	name: string
 	items: ProjectListEntry[]
 	metadata?: unknown
+	visible?: boolean
 }
 
 type ProjectListAction = {
@@ -33,6 +35,65 @@ type ProjectListOptions = {
 	canMove?: (args: { sourceId: string; destinationId: string | null }) => boolean
 	onSelect?: (args: { id: string }) => void
 	getActions?: (entry: ProjectListEntry) => ProjectListAction[]
+	onToggleVisibility?: (args: { id: string; visible: boolean }) => void
+}
+
+function isEntryVisible(entry: ProjectListEntry): boolean {
+	return entry.visible !== false
+}
+
+function createVisibilityIcon(doc: Document, isVisible: boolean): SVGSVGElement {
+	const svgNamespace = "http://www.w3.org/2000/svg"
+	const svg = doc.createElementNS(svgNamespace, "svg")
+	svg.setAttribute("viewBox", "0 0 20 20")
+	svg.setAttribute("width", "16")
+	svg.setAttribute("height", "16")
+	svg.setAttribute("aria-hidden", "true")
+
+	const eye = doc.createElementNS(svgNamespace, "path")
+	eye.setAttribute("d", "M1.5 10s3.5-6.5 8.5-6.5 8.5 6.5 8.5 6.5-3.5 6.5-8.5 6.5S1.5 10 1.5 10Z")
+	eye.setAttribute("fill", "none")
+	eye.setAttribute("stroke", "currentColor")
+	eye.setAttribute("stroke-width", "1.5")
+	eye.setAttribute("stroke-linejoin", "round")
+	svg.appendChild(eye)
+
+	const pupil = doc.createElementNS(svgNamespace, "circle")
+	pupil.setAttribute("cx", "10")
+	pupil.setAttribute("cy", "10")
+	pupil.setAttribute("r", "2.4")
+	pupil.setAttribute("fill", "currentColor")
+	svg.appendChild(pupil)
+
+	if (!isVisible) {
+		const slash = doc.createElementNS(svgNamespace, "path")
+		slash.setAttribute("d", "M4 16L16 4")
+		slash.setAttribute("fill", "none")
+		slash.setAttribute("stroke", "currentColor")
+		slash.setAttribute("stroke-width", "1.7")
+		slash.setAttribute("stroke-linecap", "round")
+		svg.appendChild(slash)
+	}
+
+	return svg
+}
+
+function createVisibilityToggleButton(doc: Document, isVisible: boolean, onClick: () => void): HTMLButtonElement {
+	const button = doc.createElement("button")
+	button.type = "button"
+	button.className = "project-item__visibility-toggle"
+	button.setAttribute("aria-label", isVisible ? "Hide item" : "Show item")
+	button.setAttribute("aria-pressed", String(isVisible))
+	button.appendChild(createVisibilityIcon(doc, isVisible))
+	button.addEventListener("mousedown", (event) => {
+		event.stopPropagation()
+	})
+	button.addEventListener("click", (event) => {
+		event.preventDefault()
+		event.stopPropagation()
+		onClick()
+	})
+	return button
 }
 
 abstract class ProjectItemView<T extends ProjectListEntry> {
@@ -48,6 +109,7 @@ abstract class ProjectItemView<T extends ProjectListEntry> {
 		this.root = this.createRoot()
 		this.root.dataset.projectItemId = entry.id
 		this.root.classList.add("project-item")
+		this.root.classList.toggle("project-item--hidden", !isEntryVisible(entry))
 	}
 
 	protected abstract createRoot(): HTMLElement
@@ -62,7 +124,18 @@ class ProjectFileView extends ProjectItemView<ProjectListFileEntry> {
 		const root = this.list.doc.createElement("div")
 		root.classList.add("project-file")
 		root.draggable = isEntryDraggable(this.entry)
-		root.textContent = this.entry.name
+		const name = this.list.doc.createElement("span")
+		name.textContent = this.entry.name
+		name.style.flexGrow = "1"
+		name.style.userSelect = "none"
+		root.appendChild(name)
+		if (this.list.canToggleVisibility()) {
+			root.appendChild(
+				createVisibilityToggleButton(this.list.doc, isEntryVisible(this.entry), () => {
+					this.list.toggleEntryVisibility(this.entry.id)
+				})
+			)
+		}
 		if (root.draggable) {
 			root.addEventListener("dragstart", (event) => {
 				this.list.beginDrag(this, event)
@@ -115,6 +188,12 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 		titleText.style.flexGrow = "1"
 		titleText.style.userSelect = "none"
 
+		const visibilityToggle = this.list.canToggleVisibility()
+			? createVisibilityToggleButton(this.list.doc, isEntryVisible(this.entry), () => {
+					this.list.toggleEntryVisibility(this.entry.id)
+				})
+			: null
+
 		this.titleElement.draggable = true
 		this.titleElement.addEventListener("dragstart", (event) => {
 			this.list.beginDrag(this, event)
@@ -135,6 +214,9 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 
 		this.titleElement.appendChild(this.expandIcon)
 		this.titleElement.appendChild(titleText)
+		if (visibilityToggle) {
+			this.titleElement.appendChild(visibilityToggle)
+		}
 		root.appendChild(this.titleElement)
 		root.appendChild(this.itemsContainer)
 		this.updateExpandState()
@@ -313,6 +395,18 @@ export class ProjectList {
 		this.root.appendChild(this.menu)
 
 		this.doc.addEventListener("click", this.onDocumentClick)
+	}
+
+	public canToggleVisibility(): boolean {
+		return Boolean(this.options.onToggleVisibility)
+	}
+
+	public toggleEntryVisibility(id: string) {
+		const view = this.views.get(id)
+		if (!view || !this.options.onToggleVisibility) {
+			return
+		}
+		this.options.onToggleVisibility({ id, visible: !isEntryVisible(view.entry) })
 	}
 
 	public setItems(items: ProjectListEntry[], selectedId: string | null = null) {

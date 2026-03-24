@@ -14,6 +14,7 @@ type BaseProjectItem = {
 	type: ProjectFileType
 	name: string
 	editor: UiComponent<HTMLDivElement>
+	visible: boolean
 	toolbar?: UiComponent<HTMLElement>
 	paneToolbar?: UiComponent<HTMLElement>
 }
@@ -39,6 +40,7 @@ export type ProjectItem = SchemanticProjectItem | PartProjectItem | OtherProject
 type ProjectFolder = {
 	kind: "folder"
 	name: string
+	visible: boolean
 	children: ProjectNode[]
 }
 
@@ -184,6 +186,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			onMove: ({ sourceId, destinationId }) => this.handleMoveRequest(sourceId, destinationId),
 			canMove: ({ sourceId, destinationId }) => this.canMoveNodes(sourceId, destinationId),
 			onSelect: ({ id }) => this.handleSelectionById(id),
+			onToggleVisibility: ({ id, visible }) => this.handleVisibilityToggle(id, visible),
 			getActions: ({ id }) => {
 				const node = this.idNodeMap.get(id)
 				if (node) {
@@ -408,7 +411,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					kind: "folder" as const,
 					id,
 					name: node.name,
-					items: this.buildProjectListEntries(node.children, path)
+					items: this.buildProjectListEntries(node.children, path),
+					visible: node.visible
 				}
 			}
 			if (node.type === "part") {
@@ -427,7 +431,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						kind: "file" as const,
 						id: childId,
 						name,
-						metadata: { draggable: false, synthetic: true }
+						metadata: { draggable: false, synthetic: true },
+						visible: state.referencePlaneVisibility[name]
 					})
 				}
 				const addSketchChild = (sketchIndex: number, name: string) => {
@@ -443,7 +448,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						kind: "file" as const,
 						id: childId,
 						name,
-						metadata: { draggable: false, synthetic: true }
+						metadata: { draggable: false, synthetic: true },
+						visible: state.sketchVisible
 					})
 				}
 				const addSyntheticChild = (suffix: string, name: string) => {
@@ -453,7 +459,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						kind: "file" as const,
 						id: childId,
 						name,
-						metadata: { draggable: false, synthetic: true }
+						metadata: { draggable: false, synthetic: true },
+						visible: true
 					})
 				}
 				addPlaneChild("plane-top", "Top")
@@ -470,13 +477,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					kind: "folder" as const,
 					id,
 					name: node.name,
-					items: childItems
+					items: childItems,
+					visible: node.visible
 				}
 			}
 			return {
 				kind: "file" as const,
 				id,
-				name: node.name
+				name: node.name,
+				visible: node.visible
 			}
 		})
 	}
@@ -532,6 +541,25 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return node
 		}
 		return this.syntheticSelectionTargets.get(id) ?? null
+	}
+
+	private handleVisibilityToggle(id: string, visible: boolean): void {
+		const node = this.idNodeMap.get(id)
+		if (node) {
+			node.visible = visible
+			this.renderItems()
+			this.schedulePersist()
+			return
+		}
+		const syntheticEntry = this.syntheticEntries.get(id)
+		if (!syntheticEntry) {
+			return
+		}
+		if (syntheticEntry.kind === "part-plane") {
+			syntheticEntry.part.editor.setReferencePlaneVisible(syntheticEntry.plane, visible)
+			return
+		}
+		syntheticEntry.part.editor.setSketchVisible(visible)
 	}
 
 	private canMoveNodes(sourceId: string, destinationId: string | null): boolean {
@@ -1359,7 +1387,14 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private createProjectItem(type: ProjectFileType, name?: string, existingNodes: ProjectNode[] = this.items, schemanticState?: SchemanticEditorState, partState?: PartEditorState): ProjectItem {
+	private createProjectItem(
+		type: ProjectFileType,
+		name?: string,
+		existingNodes: ProjectNode[] = this.items,
+		schemanticState?: SchemanticEditorState,
+		partState?: PartEditorState,
+		visible = true
+	): ProjectItem {
 		const resolvedName = this.resolveItemName(type, name, existingNodes)
 		switch (type) {
 			case "schemantic": {
@@ -1371,11 +1406,12 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					type,
 					name: resolvedName,
 					editor,
+					visible,
 					getState: () => editor.getState()
 				}
 			}
 			case "pcb":
-				return { type, name: resolvedName, editor: new PCBEditor() }
+				return { type, name: resolvedName, editor: new PCBEditor(), visible }
 			case "part": {
 				const editor = new PartEditor({
 					initialState: partState,
@@ -1388,18 +1424,20 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					type,
 					name: resolvedName,
 					editor,
+					visible,
 					paneToolbar: editor.createPaneToolbar(),
 					getState: () => editor.getState()
 				}
 			}
 			case "assembly":
-				return { type, name: resolvedName, editor: new AssemblyEditor() }
+				return { type, name: resolvedName, editor: new AssemblyEditor(), visible }
 			case "diagram": {
 				const editor = createDiagramEditor()
 				return {
 					type,
 					name: resolvedName,
 					editor,
+					visible,
 					toolbar: editor.createToolbar()
 				}
 			}
@@ -1407,10 +1445,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		throw new Error(`Unsupported project item type: ${type}`)
 	}
 
-	private createFolder(name?: string, existingNodes: ProjectNode[] = this.items): ProjectFolder {
+	private createFolder(name?: string, existingNodes: ProjectNode[] = this.items, visible = true): ProjectFolder {
 		return {
 			kind: "folder",
 			name: this.resolveFolderName(name, existingNodes),
+			visible,
 			children: []
 		}
 	}
@@ -1634,24 +1673,27 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				return {
 					kind: "folder",
 					name: node.name,
-					items: this.buildProjectFileEntries(node.children)
+					items: this.buildProjectFileEntries(node.children),
+					visible: node.visible
 				}
 			}
 			if (node.type === "schemantic") {
 				return {
 					type: node.type,
 					name: node.name,
-					data: node.getState()
+					data: node.getState(),
+					visible: node.visible
 				}
 			}
 			if (node.type === "part") {
 				return {
 					type: node.type,
 					name: node.name,
-					data: node.getState()
+					data: node.getState(),
+					visible: node.visible
 				}
 			}
-			return { type: node.type, name: node.name }
+			return { type: node.type, name: node.name, visible: node.visible }
 		})
 	}
 
@@ -1681,14 +1723,14 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		const nodes: ProjectNode[] = []
 		for (const entry of entries) {
 			if (this.isFolderEntry(entry)) {
-				const folder = this.createFolder(entry.name, nodes)
+				const folder = this.createFolder(entry.name, nodes, entry.visible ?? true)
 				folder.children = this.createNodesFromEntries(entry.items)
 				nodes.push(folder)
 				continue
 			}
 			const schemanticState = entry.type === "schemantic" ? entry.data : undefined
 			const partState = entry.type === "part" ? entry.data : undefined
-			nodes.push(this.createProjectItem(entry.type, entry.name, nodes, schemanticState, partState))
+			nodes.push(this.createProjectItem(entry.type, entry.name, nodes, schemanticState, partState, entry.visible ?? true))
 		}
 		return nodes
 	}

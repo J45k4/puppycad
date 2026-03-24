@@ -142,6 +142,12 @@ describe("normalizeProjectFile", () => {
 		expect(data.height).toBe(PART_PROJECT_DEFAULT_HEIGHT)
 		expect(data.previewRotation.yaw).toBeCloseTo(PART_PROJECT_DEFAULT_ROTATION.yaw)
 		expect(data.previewRotation.pitch).toBeCloseTo(0.2)
+		expect(data.sketchVisible).toBe(true)
+		expect(data.referencePlaneVisibility).toEqual({
+			Front: true,
+			Top: true,
+			Right: true
+		})
 
 		expect(data.extrudedModel).toEqual({
 			base: [
@@ -205,6 +211,7 @@ describe("normalizeProjectFile", () => {
 			throw new Error("Expected fourth item to be a folder entry")
 		}
 		expect(folderEntry.name).toBe("Folder 1")
+		expect(folderEntry.visible).toBeUndefined()
 		expect(folderEntry.items).toHaveLength(2)
 
 		const nestedDiagram = folderEntry.items[0]
@@ -221,7 +228,76 @@ describe("normalizeProjectFile", () => {
 		const nestedPartData = nestedPart.data as PartProjectItemData
 		expect(nestedPartData.sketchPoints).toEqual([])
 		expect(nestedPartData.height).toBe(PART_PROJECT_DEFAULT_HEIGHT)
+		expect(nestedPartData.sketchVisible).toBe(true)
+		expect(nestedPartData.referencePlaneVisibility).toEqual({
+			Front: true,
+			Top: true,
+			Right: true
+		})
 
 		expect(file.selectedPath).toEqual([3, 0])
+	})
+
+	it("preserves visibility flags on entries and part state", () => {
+		const input = {
+			version: 2,
+			items: [
+				{
+					kind: "folder",
+					name: "Folder",
+					visible: false,
+					items: [
+						{
+							type: "part",
+							name: "Part",
+							visible: false,
+							data: {
+								sketchPoints: [],
+								isSketchClosed: false,
+								height: 30,
+								previewRotation: { yaw: 0, pitch: 0 },
+								sketchVisible: false,
+								referencePlaneVisibility: {
+									Front: false,
+									Top: true,
+									Right: false
+								}
+							}
+						}
+					]
+				}
+			],
+			selectedPath: null
+		}
+
+		const file = normalizeProjectFile(input)
+		expect(file).not.toBeNull()
+		if (!file) {
+			throw new Error("normalizeProjectFile returned null")
+		}
+
+		const folderEntry = file.items[0]
+		if (!folderEntry || !("kind" in folderEntry) || folderEntry.kind !== "folder") {
+			throw new Error("Expected folder entry")
+		}
+		expect(folderEntry.visible).toBe(false)
+		const partEntry = folderEntry.items[0]
+		if (!partEntry || !("type" in partEntry) || partEntry.type !== "part") {
+			throw new Error("Expected nested part entry")
+		}
+		expect(partEntry.visible).toBe(false)
+		expect(partEntry.data).toEqual({
+			sketchPoints: [],
+			isSketchClosed: false,
+			extrudedModel: undefined,
+			height: 30,
+			previewRotation: { yaw: 0, pitch: 0 },
+			sketchVisible: false,
+			referencePlaneVisibility: {
+				Front: false,
+				Top: true,
+				Right: false
+			}
+		})
 	})
 })

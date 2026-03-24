@@ -1,5 +1,5 @@
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
-import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation } from "./project-file"
+import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "./project-file"
 import { UiComponent } from "./ui"
 import * as THREE from "three"
 
@@ -12,6 +12,7 @@ type ReferencePlaneVisual = {
 	name: "Front" | "Top" | "Right"
 	mesh: THREE.Mesh
 	edge: THREE.LineSegments
+	label: THREE.Sprite
 	fillMaterial: THREE.MeshBasicMaterial
 	edgeMaterial: THREE.LineBasicMaterial
 }
@@ -30,8 +31,9 @@ type PartEditorOptions = {
 
 const SKETCH_CANVAS_SIZE = 360
 const REFERENCE_PLANE_SIZE = 1.9
+const PREVIEW_FIELD_OF_VIEW = 60
 const PREVIEW_MIN_CAMERA_DISTANCE = 0.5
-const PREVIEW_MAX_CAMERA_DISTANCE = 12
+const PREVIEW_MAX_CAMERA_DISTANCE = 50
 const PREVIEW_ZOOM_SENSITIVITY = 0.0015
 const SKETCH_SNAP_DISTANCE = 16
 const SKETCH_SNAP_MARKER_SIZE = 12
@@ -59,6 +61,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	})
 	private readonly previewReferenceHandles: ReferencePlaneHandle[] = []
 	private readonly sketchOverlayGroup = new THREE.Group()
+	private referencePlaneVisibility: PartProjectReferencePlaneVisibility = {
+		Front: true,
+		Top: true,
+		Right: true
+	}
+	private sketchVisible = true
 	private previewMesh: THREE.Mesh | null = null
 	private previewEdges: THREE.LineSegments | null = null
 	private sketchOverlayCommittedLine: THREE.Line | THREE.LineLoop | THREE.LineSegments | null = null
@@ -274,7 +282,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewRenderer.setClearColor(0xf1f5f9, 1)
 
 		this.previewScene = new THREE.Scene()
-		this.previewCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 50)
+		this.previewCamera = new THREE.PerspectiveCamera(PREVIEW_FIELD_OF_VIEW, 1, 0.01, 50)
 		this.previewCamera.position.set(0, 0.18, 3.2)
 
 		this.previewRootGroup = new THREE.Group()
@@ -355,6 +363,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			previewRotation: {
 				yaw: this.previewRotation.yaw,
 				pitch: this.previewRotation.pitch
+			},
+			sketchVisible: this.sketchVisible,
+			referencePlaneVisibility: {
+				Front: this.referencePlaneVisibility.Front,
+				Top: this.referencePlaneVisibility.Top,
+				Right: this.referencePlaneVisibility.Right
 			}
 		}
 	}
@@ -437,10 +451,36 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	public selectReferencePlane(planeName: "Top" | "Front" | "Right"): void {
 		const plane = this.previewReferencePlanes.find((entry) => entry.name === planeName)?.mesh ?? null
-		if (!plane) {
+		if (!plane || !plane.visible) {
 			return
 		}
 		this.setSelectedReferencePlane(plane)
+	}
+
+	public setReferencePlaneVisible(planeName: "Top" | "Front" | "Right", visible: boolean): void {
+		if (this.referencePlaneVisibility[planeName] === visible) {
+			return
+		}
+		this.referencePlaneVisibility[planeName] = visible
+		this.refreshReferencePlaneStyles()
+		const plane = this.previewReferencePlanes.find((entry) => entry.name === planeName)
+		if (plane && !visible && this.selectedReferencePlane === plane.mesh) {
+			this.setSelectedReferencePlane(null)
+		}
+		this.updateReferencePlaneHandles()
+		this.updateSketchOverlay()
+		this.drawPreview()
+		this.emitStateChange()
+	}
+
+	public setSketchVisible(visible: boolean): void {
+		if (this.sketchVisible === visible) {
+			return
+		}
+		this.sketchVisible = visible
+		this.updateSketchOverlay()
+		this.drawPreview()
+		this.emitStateChange()
 	}
 
 	public getSketchName(): string {
@@ -600,6 +640,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 					rawHeight: state.extrudedModel.rawHeight
 				}
 			: null
+		this.sketchVisible = state?.sketchVisible ?? true
+		this.referencePlaneVisibility = {
+			Front: state?.referencePlaneVisibility?.Front ?? true,
+			Top: state?.referencePlaneVisibility?.Top ?? true,
+			Right: state?.referencePlaneVisibility?.Right ?? true
+		}
+		this.refreshReferencePlaneStyles()
+		this.updateReferencePlaneHandles()
 		this.heightInput.value = String(height)
 		this.previewRotation.yaw = rotation.yaw
 		this.previewRotation.pitch = rotation.pitch
@@ -1358,7 +1406,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
 		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
 		const intersections = this.previewRaycaster.intersectObjects(
-			this.previewReferencePlanes.map((plane) => plane.mesh),
+			this.previewReferencePlanes.filter((plane) => plane.mesh.visible).map((plane) => plane.mesh),
 			false
 		)
 		const mesh = intersections[0]?.object
@@ -1838,7 +1886,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (typeof hoverOverride !== "undefined") {
 			this.sketchHoverPoint = hoverOverride
 		}
-		const shouldShow = this.activeTool === "sketch" && this.previewReferenceGroup.visible && !!this.selectedReferencePlane
+		const shouldShow = this.activeTool === "sketch" && this.previewReferenceGroup.visible && this.sketchVisible && !!this.selectedReferencePlane
 		if (!shouldShow || !this.selectedReferencePlane) {
 			this.sketchOverlayGroup.visible = false
 			this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
@@ -1962,6 +2010,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private refreshReferencePlaneStyles() {
 		for (const plane of this.previewReferencePlanes) {
+			const isVisible = this.referencePlaneVisibility[plane.name]
+			plane.mesh.visible = isVisible
+			plane.edge.visible = isVisible
+			plane.label.visible = isVisible
+			if (!isVisible) {
+				continue
+			}
 			const isSelected = plane.mesh === this.selectedReferencePlane
 			const isHovered = plane.mesh === this.hoveredReferencePlane
 			if (isSelected) {
@@ -1992,7 +2047,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateReferencePlaneHandles() {
-		if (!this.selectedReferencePlane || !this.previewReferenceGroup.visible) {
+		if (!this.selectedReferencePlane || !this.previewReferenceGroup.visible || !this.selectedReferencePlane.visible) {
 			for (const handle of this.previewReferenceHandles) {
 				handle.mesh.visible = false
 			}
@@ -2072,16 +2127,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			const edge = new THREE.LineSegments(new THREE.EdgesGeometry(plane.geometry), edgeMaterial)
 			edge.rotation.copy(rotation)
 			group.add(edge)
+			const label = this.createReferenceLabelSprite(name)
+			label.position.copy(labelPosition)
+			group.add(label)
 			this.previewReferencePlanes.push({
 				name,
 				mesh: plane,
 				edge,
+				label,
 				fillMaterial,
 				edgeMaterial
 			})
-			const label = this.createReferenceLabelSprite(name)
-			label.position.copy(labelPosition)
-			group.add(label)
 		}
 		addPlane("Front", new THREE.Euler(0, 0, 0), new THREE.Vector3(-REFERENCE_PLANE_SIZE / 2 + 0.16, REFERENCE_PLANE_SIZE / 2 - 0.1, 0))
 		addPlane("Top", new THREE.Euler(-Math.PI / 2, 0, 0), new THREE.Vector3(-0.08, 0, -REFERENCE_PLANE_SIZE / 2 + 0.18))

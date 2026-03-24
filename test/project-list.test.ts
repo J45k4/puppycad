@@ -111,4 +111,35 @@ describe("ProjectList context menu", () => {
 		}
 		expect(fileElement.draggable).toBe(false)
 	})
+
+	it("renders a visibility toggle when enabled and reports visibility changes", () => {
+		let toggleArgs: { id: string; visible: boolean } | null = null
+		const projectList = new ProjectList(document, {
+			onToggleVisibility: (args) => {
+				toggleArgs = args
+			}
+		})
+		projectList.setItems([
+			{
+				kind: "file",
+				id: "file-1",
+				name: "File",
+				visible: true
+			}
+		])
+
+		const toggle = projectList.root.querySelector<HTMLButtonElement>("[data-project-item-id='file-1'] .project-item__visibility-toggle")
+		expect(toggle).toBeTruthy()
+		if (!toggle) {
+			throw new Error("Expected visibility toggle to exist")
+		}
+		expect(toggle.getAttribute("aria-pressed")).toBe("true")
+
+		toggle.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }))
+		if (!toggleArgs) {
+			throw new Error("Expected visibility toggle callback to run")
+		}
+		const resolvedArgs: { id: string; visible: boolean } = toggleArgs
+		expect(resolvedArgs).toEqual({ id: "file-1", visible: false })
+	})
 })
