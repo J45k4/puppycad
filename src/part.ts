@@ -1,5 +1,6 @@
-import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
+import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
 import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "./project-file"
+import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "./part-quick-actions"
 import { UiComponent } from "./ui"
 import * as THREE from "three"
 
@@ -9,7 +10,7 @@ type ExtrudedModel = PartProjectExtrudedModel
 type PartStudioTool = "view" | "sketch"
 type SketchTool = "line" | "rectangle"
 type ReferencePlaneVisual = {
-	name: "Front" | "Top" | "Right"
+	name: ReferencePlaneName
 	mesh: THREE.Mesh
 	edge: THREE.LineSegments
 	label: THREE.Sprite
@@ -85,6 +86,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly extrudeButton: HTMLButtonElement
 	private readonly previewContainer: HTMLDivElement
 	private readonly sketchPanel: HTMLDivElement
+	private readonly quickActionsRail: HTMLDivElement
+	private readonly quickActionsTitle: HTMLHeadingElement
+	private readonly quickActionsDescription: HTMLParagraphElement
+	private readonly quickActionsPrimaryActions: HTMLDivElement
+	private readonly quickActionsSketchToolsSection: HTMLDivElement
+	private readonly quickActionsSketchToolsActions: HTMLDivElement
+	private readonly quickActionsCommandSection: HTMLDivElement
+	private readonly quickActionsCommandActions: HTMLDivElement
+	private readonly quickActionsHeightSection: HTMLDivElement
+	private readonly quickActionsStatusSection: HTMLDivElement
 	private sketchPoints: Point2D[] = []
 	private isSketchClosed = false
 	private extrudedModel: ExtrudedModel | null = null
@@ -92,6 +103,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
 		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
 	}
+	private previewBaseDistance = PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
 	private readonly previewPan = { x: 0, y: 0 }
 	private isRotatingPreview = false
 	private isPanningPreview = false
@@ -109,11 +121,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private activeTool: PartStudioTool = "view"
 	private activeSketchTool: SketchTool | null = "line"
 	private sketchName = "Sketch 1"
-	private paneToolbar: UiComponent<HTMLElement> | null = null
-	private sketchToolButton: HTMLButtonElement | null = null
-	private sketchToolsBar: HTMLDivElement | null = null
-	private lineSketchToolButton: HTMLButtonElement | null = null
-	private rectangleSketchToolButton: HTMLButtonElement | null = null
 	private pendingRectangleStart: Point2D | null = null
 	private pendingLineStart: Point2D | null = null
 	private pendingLineStartSourceIndex: number | null = null
@@ -193,33 +200,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const sketchScale = window.devicePixelRatio
 		this.sketchCtx.scale(sketchScale, sketchScale)
 
-		const controlsRow = document.createElement("div")
-		controlsRow.style.display = "grid"
-		controlsRow.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))"
-		controlsRow.style.gap = "8px"
-		this.sketchPanel.appendChild(controlsRow)
-
 		this.undoButton = this.createButton("Undo", this.handleUndo)
-		controlsRow.appendChild(this.undoButton)
-
 		this.resetButton = this.createButton("Reset", this.handleReset)
-		controlsRow.appendChild(this.resetButton)
-
 		this.finishButton = this.createButton("Finish Sketch", this.handleFinishSketch)
-		controlsRow.appendChild(this.finishButton)
-
-		const extrudeControls = document.createElement("div")
-		extrudeControls.style.display = "flex"
-		extrudeControls.style.gap = "8px"
-		extrudeControls.style.alignItems = "center"
-		extrudeControls.style.marginTop = "4px"
-		this.sketchPanel.appendChild(extrudeControls)
-
-		const heightLabel = document.createElement("label")
-		heightLabel.textContent = "Extrude height"
-		heightLabel.style.fontSize = "13px"
-		heightLabel.style.color = "#0f172a"
-		extrudeControls.appendChild(heightLabel)
 
 		this.heightInput = document.createElement("input")
 		this.heightInput.type = "number"
@@ -230,28 +213,23 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.heightInput.style.padding = "4px 6px"
 		this.heightInput.style.border = "1px solid #cbd5f5"
 		this.heightInput.style.borderRadius = "4px"
-		extrudeControls.appendChild(this.heightInput)
 		this.heightInput.addEventListener("input", this.handleHeightInputChange)
 
 		this.extrudeButton = this.createButton("Extrude", this.handleExtrude)
-		this.extrudeButton.style.gridColumn = "span 2"
-		this.sketchPanel.appendChild(this.extrudeButton)
 
 		this.statusText = document.createElement("p")
 		this.statusText.style.margin = "4px 0 0"
 		this.statusText.style.fontSize = "13px"
 		this.statusText.style.color = "#475569"
-		this.sketchPanel.appendChild(this.statusText)
 
 		this.extrudeSummary = document.createElement("p")
 		this.extrudeSummary.style.margin = "0"
 		this.extrudeSummary.style.fontSize = "13px"
 		this.extrudeSummary.style.color = "#0f172a"
-		this.sketchPanel.appendChild(this.extrudeSummary)
 
 		this.previewContainer = document.createElement("div")
-		this.previewContainer.style.flex = "1 1 auto"
-		this.previewContainer.style.width = "100%"
+		this.previewContainer.style.flex = "1 1 640px"
+		this.previewContainer.style.width = "auto"
 		this.previewContainer.style.minWidth = "0"
 		this.previewContainer.style.maxWidth = "none"
 		this.previewContainer.style.aspectRatio = "auto"
@@ -263,8 +241,87 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewContainer.style.display = "flex"
 		this.previewContainer.style.alignItems = "center"
 		this.previewContainer.style.justifyContent = "center"
+		this.previewContainer.style.overflow = "hidden"
 		this.previewContainer.style.boxShadow = "inset 0 0 0 1px rgba(148,163,184,0.35)"
 		body.appendChild(this.previewContainer)
+
+		this.quickActionsRail = document.createElement("div")
+		this.quickActionsRail.style.display = "none"
+		this.quickActionsRail.style.position = "absolute"
+		this.quickActionsRail.style.top = "16px"
+		this.quickActionsRail.style.right = "16px"
+		this.quickActionsRail.style.bottom = "16px"
+		this.quickActionsRail.style.width = "220px"
+		this.quickActionsRail.style.maxWidth = "calc(100% - 32px)"
+		this.quickActionsRail.style.backgroundColor = "rgba(255,255,255,0.96)"
+		this.quickActionsRail.style.backdropFilter = "blur(10px)"
+		this.quickActionsRail.style.border = "1px solid rgba(203,226,241,0.95)"
+		this.quickActionsRail.style.borderRadius = "12px"
+		this.quickActionsRail.style.boxShadow = "0 14px 32px rgba(15,23,42,0.14)"
+		this.quickActionsRail.style.padding = "16px"
+		this.quickActionsRail.style.flexDirection = "column"
+		this.quickActionsRail.style.gap = "16px"
+		this.quickActionsRail.style.overflowY = "auto"
+		this.quickActionsRail.style.zIndex = "2"
+		this.previewContainer.appendChild(this.quickActionsRail)
+
+		const quickActionsHeader = document.createElement("div")
+		quickActionsHeader.style.display = "flex"
+		quickActionsHeader.style.flexDirection = "column"
+		quickActionsHeader.style.gap = "6px"
+		this.quickActionsRail.appendChild(quickActionsHeader)
+
+		this.quickActionsTitle = document.createElement("h3")
+		this.quickActionsTitle.style.margin = "0"
+		this.quickActionsTitle.style.fontSize = "16px"
+		quickActionsHeader.appendChild(this.quickActionsTitle)
+
+		this.quickActionsDescription = document.createElement("p")
+		this.quickActionsDescription.style.margin = "0"
+		this.quickActionsDescription.style.fontSize = "13px"
+		this.quickActionsDescription.style.lineHeight = "1.5"
+		this.quickActionsDescription.style.color = "#475569"
+		quickActionsHeader.appendChild(this.quickActionsDescription)
+
+		this.quickActionsPrimaryActions = document.createElement("div")
+		this.quickActionsPrimaryActions.style.display = "grid"
+		this.quickActionsPrimaryActions.style.gap = "8px"
+		this.quickActionsRail.appendChild(this.quickActionsPrimaryActions)
+
+		this.quickActionsSketchToolsSection = this.createQuickActionsSection("Sketch Tools")
+		this.quickActionsSketchToolsActions = document.createElement("div")
+		this.quickActionsSketchToolsActions.style.display = "grid"
+		this.quickActionsSketchToolsActions.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))"
+		this.quickActionsSketchToolsActions.style.gap = "8px"
+		this.quickActionsSketchToolsSection.appendChild(this.quickActionsSketchToolsActions)
+		this.quickActionsRail.appendChild(this.quickActionsSketchToolsSection)
+
+		this.quickActionsCommandSection = this.createQuickActionsSection("Sketch Actions")
+		this.quickActionsCommandActions = document.createElement("div")
+		this.quickActionsCommandActions.style.display = "grid"
+		this.quickActionsCommandActions.style.gap = "8px"
+		this.quickActionsCommandSection.appendChild(this.quickActionsCommandActions)
+		this.quickActionsRail.appendChild(this.quickActionsCommandSection)
+
+		this.quickActionsHeightSection = this.createQuickActionsSection("Extrude")
+		const extrudeControls = document.createElement("div")
+		extrudeControls.style.display = "flex"
+		extrudeControls.style.flexDirection = "column"
+		extrudeControls.style.gap = "8px"
+		this.quickActionsHeightSection.appendChild(extrudeControls)
+		const heightLabel = document.createElement("label")
+		heightLabel.textContent = "Extrude height"
+		heightLabel.style.marginBottom = "0"
+		heightLabel.style.fontSize = "13px"
+		heightLabel.style.color = "#0f172a"
+		extrudeControls.appendChild(heightLabel)
+		extrudeControls.appendChild(this.heightInput)
+		this.quickActionsRail.appendChild(this.quickActionsHeightSection)
+
+		this.quickActionsStatusSection = this.createQuickActionsSection("Status")
+		this.quickActionsStatusSection.appendChild(this.statusText)
+		this.quickActionsStatusSection.appendChild(this.extrudeSummary)
+		this.quickActionsRail.appendChild(this.quickActionsStatusSection)
 
 		this.previewCanvas = document.createElement("canvas")
 		this.previewCanvas.style.width = "100%"
@@ -283,7 +340,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.previewScene = new THREE.Scene()
 		this.previewCamera = new THREE.PerspectiveCamera(PREVIEW_FIELD_OF_VIEW, 1, 0.01, 50)
-		this.previewCamera.position.set(0, 0.18, 3.2)
+		this.previewCamera.position.set(0, 0.18, this.previewBaseDistance)
 
 		this.previewRootGroup = new THREE.Group()
 		this.previewContentGroup = new THREE.Group()
@@ -360,6 +417,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 							rawHeight: this.extrudedModel.rawHeight
 						},
 			height: heightValue,
+			previewDistance: this.previewBaseDistance,
 			previewRotation: {
 				yaw: this.previewRotation.yaw,
 				pitch: this.previewRotation.pitch
@@ -373,83 +431,178 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	public createPaneToolbar(): UiComponent<HTMLElement> {
-		if (this.paneToolbar) {
-			return this.paneToolbar
-		}
+	private createQuickActionsSection(title: string): HTMLDivElement {
+		const section = document.createElement("div")
+		section.style.display = "none"
+		section.style.flexDirection = "column"
+		section.style.gap = "8px"
 
-		const toolbar = document.createElement("div")
-		toolbar.style.display = "flex"
-		toolbar.style.alignItems = "center"
-		toolbar.style.gap = "6px"
-
-		const sketchButton = document.createElement("button")
-		sketchButton.type = "button"
-		sketchButton.textContent = "Sketch"
-		sketchButton.style.padding = "4px 8px"
-		sketchButton.style.borderRadius = "6px"
-		sketchButton.style.border = "1px solid #93c5fd"
-		sketchButton.style.fontSize = "12px"
-		sketchButton.style.fontWeight = "600"
-		sketchButton.style.cursor = "pointer"
-		sketchButton.draggable = false
-		sketchButton.addEventListener("click", (event) => {
-			event.preventDefault()
-			event.stopPropagation()
-			this.setActiveTool(this.activeTool === "sketch" ? "view" : "sketch")
-		})
-		toolbar.appendChild(sketchButton)
-		const sketchToolsBar = document.createElement("div")
-		sketchToolsBar.style.display = "none"
-		sketchToolsBar.style.alignItems = "center"
-		sketchToolsBar.style.gap = "4px"
-		sketchToolsBar.style.paddingLeft = "4px"
-		sketchToolsBar.style.borderLeft = "1px solid #cbd5e1"
-
-		const createSketchToolButton = (label: string, title: string, onClick: () => void): HTMLButtonElement => {
-			const button = document.createElement("button")
-			button.type = "button"
-			button.textContent = label
-			button.title = title
-			button.style.width = "26px"
-			button.style.height = "24px"
-			button.style.borderRadius = "4px"
-			button.style.border = "1px solid #cbd5e1"
-			button.style.backgroundColor = "#ffffff"
-			button.style.color = "#334155"
-			button.style.fontSize = "14px"
-			button.style.fontWeight = "700"
-			button.style.cursor = "pointer"
-			button.draggable = false
-			button.addEventListener("click", (event) => {
-				event.preventDefault()
-				event.stopPropagation()
-				onClick()
-			})
-			return button
-		}
-
-		const lineButton = createSketchToolButton("/", "Line Tool", () => {
-			this.setActiveSketchTool("line")
-		})
-		const rectangleButton = createSketchToolButton("▭", "Rectangle Tool", () => {
-			this.setActiveSketchTool("rectangle")
-		})
-		sketchToolsBar.appendChild(lineButton)
-		sketchToolsBar.appendChild(rectangleButton)
-		toolbar.appendChild(sketchToolsBar)
-
-		this.sketchToolButton = sketchButton
-		this.sketchToolsBar = sketchToolsBar
-		this.lineSketchToolButton = lineButton
-		this.rectangleSketchToolButton = rectangleButton
-		this.paneToolbar = new UiComponent(toolbar)
-		this.updatePaneToolbarStyles()
-		this.updateSketchToolButtons()
-		return this.paneToolbar
+		const label = document.createElement("p")
+		label.textContent = title
+		label.style.margin = "0"
+		label.style.fontSize = "11px"
+		label.style.fontWeight = "700"
+		label.style.letterSpacing = "0.08em"
+		label.style.textTransform = "uppercase"
+		label.style.color = "#64748b"
+		section.appendChild(label)
+		return section
 	}
 
-	public selectReferencePlane(planeName: "Top" | "Front" | "Right"): void {
+	private createQuickActionButton(actionId: PartQuickActionId, label: string, options?: { active?: boolean; disabled?: boolean }): HTMLButtonElement {
+		const button = document.createElement("button")
+		button.type = "button"
+		button.textContent = label
+		button.disabled = options?.disabled ?? false
+		button.style.width = "100%"
+		button.style.minHeight = "34px"
+		button.style.padding = "8px 10px"
+		button.style.borderRadius = "8px"
+		button.style.border = "1px solid #cbd5e1"
+		button.style.backgroundColor = "#ffffff"
+		button.style.color = "#0f172a"
+		button.style.fontSize = "13px"
+		button.style.fontWeight = "600"
+		button.style.cursor = button.disabled ? "not-allowed" : "pointer"
+
+		if (options?.active) {
+			button.style.backgroundColor = "#dbeafe"
+			button.style.borderColor = "#60a5fa"
+			button.style.color = "#1d4ed8"
+		}
+		if (actionId === "start-sketch" || actionId === "extrude") {
+			button.style.backgroundColor = button.disabled ? "#cbd5f5" : "#2563eb"
+			button.style.borderColor = button.disabled ? "#cbd5f5" : "#1d4ed8"
+			button.style.color = button.disabled ? "#475569" : "#ffffff"
+		}
+		if (actionId === "exit-sketch") {
+			button.style.backgroundColor = "#f8fafc"
+			button.style.borderColor = "#cbd5e1"
+		}
+
+		button.addEventListener("click", (event) => {
+			event.preventDefault()
+			event.stopPropagation()
+			this.handleQuickAction(actionId)
+		})
+		return button
+	}
+
+	private handleQuickAction(actionId: PartQuickActionId) {
+		switch (actionId) {
+			case "start-sketch":
+				this.enterSketchMode()
+				return
+			case "exit-sketch":
+				this.setActiveTool("view")
+				return
+			case "tool-line":
+				this.setActiveSketchTool("line")
+				return
+			case "tool-rectangle":
+				this.setActiveSketchTool("rectangle")
+				return
+			case "undo":
+				this.handleUndo()
+				return
+			case "reset":
+				this.handleReset()
+				return
+			case "finish-sketch":
+				this.handleFinishSketch()
+				return
+			case "extrude":
+				this.handleExtrude()
+				return
+		}
+	}
+
+	private getSelectedReferencePlaneName(): ReferencePlaneName | null {
+		if (!this.selectedReferencePlane) {
+			return null
+		}
+		return this.previewReferencePlanes.find((entry) => entry.mesh === this.selectedReferencePlane)?.name ?? null
+	}
+
+	private updateQuickActionsRail() {
+		const selectedPlaneName = this.getSelectedReferencePlaneName()
+		const model = derivePartQuickActionsModel({
+			activeTool: this.activeTool,
+			selectedPlaneName,
+			selectedPlaneVisible: selectedPlaneName ? this.referencePlaneVisibility[selectedPlaneName] : false,
+			activeSketchTool: this.activeSketchTool,
+			sketchPointCount: this.sketchPoints.length,
+			isSketchClosed: this.isSketchClosed,
+			hasSketchBreaks: this.sketchBreakIndices.size > 0,
+			hasExtrudedModel: this.extrudedModel !== null,
+			hasPendingLineStart: this.pendingLineStart !== null
+		})
+
+		this.quickActionsRail.style.display = model.visible ? "flex" : "none"
+		this.quickActionsTitle.textContent = model.title
+		this.quickActionsDescription.textContent = model.description
+
+		this.quickActionsPrimaryActions.replaceChildren(
+			...model.primaryActions.map((action) => this.createQuickActionButton(action.id, action.label, { active: action.active, disabled: action.disabled }))
+		)
+
+		this.quickActionsSketchToolsSection.style.display = model.sketchToolActions.length > 0 ? "flex" : "none"
+		this.quickActionsSketchToolsActions.replaceChildren(
+			...model.sketchToolActions.map((action) => this.createQuickActionButton(action.id, action.label, { active: action.active, disabled: action.disabled }))
+		)
+
+		this.quickActionsCommandSection.style.display = model.commandActions.length > 0 ? "flex" : "none"
+		this.quickActionsCommandActions.replaceChildren(
+			...model.commandActions.map((action) => this.createQuickActionButton(action.id, action.label, { active: action.active, disabled: action.disabled }))
+		)
+
+		this.quickActionsHeightSection.style.display = model.showHeightInput ? "flex" : "none"
+		this.quickActionsStatusSection.style.display = model.showStatus ? "flex" : "none"
+		requestAnimationFrame(() => this.drawPreview())
+	}
+
+	private getQuickActionsInsetPx(): number {
+		if (this.quickActionsRail.style.display === "none") {
+			return 0
+		}
+		const railRect = this.quickActionsRail.getBoundingClientRect()
+		if (railRect.width <= 0) {
+			return 0
+		}
+		const rightInset = Number.parseFloat(this.quickActionsRail.style.right)
+		return railRect.width + (Number.isFinite(rightInset) ? rightInset : 0)
+	}
+
+	private getQuickActionsPreviewOffset(): Point2D {
+		const insetPx = this.getQuickActionsInsetPx()
+		if (insetPx <= 0) {
+			return { x: 0, y: 0 }
+		}
+		const panUnits = this.getPreviewPanUnitsPerPixel()
+		return {
+			x: -(insetPx * 0.5) * panUnits.x,
+			y: 0
+		}
+	}
+
+	private getQuickActionsZoomFactor(): number {
+		const insetPx = this.getQuickActionsInsetPx()
+		if (insetPx <= 0) {
+			return 1
+		}
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0) {
+			return 1
+		}
+		const visibleFraction = THREE.MathUtils.clamp((rect.width - insetPx) / rect.width, 0.45, 1)
+		return (1 / visibleFraction) * 1.25
+	}
+
+	private getEffectivePreviewCameraDistance(): number {
+		return THREE.MathUtils.clamp(this.previewBaseDistance * this.getQuickActionsZoomFactor(), PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+	}
+
+	public selectReferencePlane(planeName: ReferencePlaneName): void {
 		const plane = this.previewReferencePlanes.find((entry) => entry.name === planeName)?.mesh ?? null
 		if (!plane || !plane.visible) {
 			return
@@ -457,7 +610,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.setSelectedReferencePlane(plane)
 	}
 
-	public setReferencePlaneVisible(planeName: "Top" | "Front" | "Right", visible: boolean): void {
+	public setReferencePlaneVisible(planeName: ReferencePlaneName, visible: boolean): void {
 		if (this.referencePlaneVisibility[planeName] === visible) {
 			return
 		}
@@ -503,6 +656,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.updateControls()
 			this.updateStatus()
 		}
+		this.alignPreviewToSelectedPlane()
 		this.setActiveTool("sketch")
 	}
 
@@ -545,9 +699,32 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.setSelectedReferencePlane(defaultPlane)
 			}
 		}
-		this.updatePaneToolbarStyles()
 		this.updateStudioModeLayout()
 		this.updateSketchOverlay()
+		this.updateQuickActionsRail()
+	}
+
+	private alignPreviewToSelectedPlane() {
+		const selectedPlaneName = this.getSelectedReferencePlaneName()
+		if (!selectedPlaneName) {
+			return
+		}
+		const rotation = this.getAlignedPreviewRotationForPlane(selectedPlaneName)
+		this.previewRotation.yaw = rotation.yaw
+		this.previewRotation.pitch = rotation.pitch
+		this.previewPan.x = 0
+		this.previewPan.y = 0
+	}
+
+	private getAlignedPreviewRotationForPlane(planeName: ReferencePlaneName): PartProjectPreviewRotation {
+		switch (planeName) {
+			case "Front":
+				return { yaw: 0, pitch: 0 }
+			case "Top":
+				return { yaw: 0, pitch: Math.PI / 2 }
+			case "Right":
+				return { yaw: -Math.PI / 2, pitch: 0 }
+		}
 	}
 
 	private setActiveSketchTool(tool: SketchTool | null) {
@@ -559,10 +736,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.sketchHoverPoint = null
 				this.sketchHoverSnapIndex = null
 				this.selectedSketchPointIndex = null
-				this.updateSketchToolButtons()
 				this.drawSketch()
 				this.updateSketchOverlay()
 				this.updatePreviewCursor()
+				this.updateQuickActionsRail()
 			}
 			return
 		}
@@ -579,36 +756,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchHoverPoint = null
 		this.sketchHoverSnapIndex = null
 		this.selectedSketchPointIndex = null
-		this.updateSketchToolButtons()
 		this.drawSketch()
 		this.updateSketchOverlay()
 		this.updatePreviewCursor()
-	}
-
-	private updatePaneToolbarStyles() {
-		if (!this.sketchToolButton) {
-			return
-		}
-		const active = this.activeTool === "sketch"
-		this.sketchToolButton.style.backgroundColor = active ? "#2563eb" : "#ffffff"
-		this.sketchToolButton.style.color = active ? "#ffffff" : "#1e293b"
-		this.sketchToolButton.style.borderColor = active ? "#1d4ed8" : "#93c5fd"
-		if (this.sketchToolsBar) {
-			this.sketchToolsBar.style.display = active ? "flex" : "none"
-		}
-	}
-
-	private updateSketchToolButtons() {
-		if (this.lineSketchToolButton) {
-			const active = this.activeSketchTool === "line"
-			this.lineSketchToolButton.style.backgroundColor = active ? "#e2e8f0" : "#ffffff"
-			this.lineSketchToolButton.style.borderColor = active ? "#94a3b8" : "#cbd5e1"
-		}
-		if (this.rectangleSketchToolButton) {
-			const active = this.activeSketchTool === "rectangle"
-			this.rectangleSketchToolButton.style.backgroundColor = active ? "#e2e8f0" : "#ffffff"
-			this.rectangleSketchToolButton.style.borderColor = active ? "#94a3b8" : "#cbd5e1"
-		}
+		this.updateQuickActionsRail()
 	}
 
 	private updateStudioModeLayout() {
@@ -623,6 +774,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private restoreState(state?: PartEditorState) {
 		const height = state && Number.isFinite(state.height) ? state.height : PART_PROJECT_DEFAULT_HEIGHT
+		const previewDistance = state && Number.isFinite(state.previewDistance) ? state.previewDistance : PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
 		const rotation = state?.previewRotation ?? PART_PROJECT_DEFAULT_ROTATION
 		this.sketchPoints = state?.sketchPoints?.map((point) => ({ x: point.x, y: point.y })) ?? []
 		this.sketchName = state?.sketchName?.trim() ? state.sketchName.trim() : "Sketch 1"
@@ -649,6 +801,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.refreshReferencePlaneStyles()
 		this.updateReferencePlaneHandles()
 		this.heightInput.value = String(height)
+		this.previewBaseDistance = THREE.MathUtils.clamp(previewDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
 		this.previewRotation.yaw = rotation.yaw
 		this.previewRotation.pitch = rotation.pitch
 		this.drawSketch()
@@ -1108,12 +1261,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		event.preventDefault()
 		const anchorBefore = this.getPreviewPlaneIntersection(event.clientX, event.clientY)
 		const zoomFactor = Math.exp(event.deltaY * PREVIEW_ZOOM_SENSITIVITY)
-		const nextDistance = THREE.MathUtils.clamp(this.previewCamera.position.z * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
-		if (Math.abs(nextDistance - this.previewCamera.position.z) < 0.0001) {
+		const nextDistance = THREE.MathUtils.clamp(this.previewBaseDistance * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		if (Math.abs(nextDistance - this.previewBaseDistance) < 0.0001) {
 			return
 		}
-		this.previewCamera.position.z = nextDistance
-		this.previewCamera.updateProjectionMatrix()
+		this.previewBaseDistance = nextDistance
+		this.previewCamera.position.z = this.getEffectivePreviewCameraDistance()
 
 		if (anchorBefore) {
 			const anchorAfter = this.getPreviewPlaneIntersection(event.clientX, event.clientY)
@@ -1150,6 +1303,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.extrudeButton.style.backgroundColor = this.extrudeButton.disabled ? "#cbd5f5" : "#3b82f6"
 		this.extrudeButton.style.color = this.extrudeButton.disabled ? "#64748b" : "#ffffff"
 		this.extrudeButton.style.border = this.extrudeButton.disabled ? "1px solid #cbd5f5" : "1px solid #1d4ed8"
+		this.updateQuickActionsRail()
 	}
 
 	private drawSketch(hover?: { x: number; y: number; active: boolean }) {
@@ -1359,7 +1513,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const rect = this.previewCanvas.getBoundingClientRect()
 		const width = Math.max(1, rect.width)
 		const height = Math.max(1, rect.height)
-		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(this.previewCamera.position.z))
+		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(this.getEffectivePreviewCameraDistance()))
 		const verticalFovRadians = THREE.MathUtils.degToRad(this.previewCamera.fov)
 		const visibleHeight = 2 * distance * Math.tan(verticalFovRadians / 2)
 		const unitsPerPixelY = visibleHeight / height
@@ -1368,7 +1522,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private drawPreview() {
-		this.previewRootGroup.position.set(this.previewPan.x, this.previewPan.y, 0)
+		this.previewCamera.position.z = this.getEffectivePreviewCameraDistance()
+		const quickActionsOffset = this.getQuickActionsPreviewOffset()
+		this.previewRootGroup.position.set(this.previewPan.x + quickActionsOffset.x, this.previewPan.y + quickActionsOffset.y, 0)
 		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
 		this.previewRenderer.render(this.previewScene, this.previewCamera)
 	}
@@ -1434,8 +1590,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedSketchPointIndex = null
 		this.refreshReferencePlaneStyles()
 		this.updateReferencePlaneHandles()
+		if (mesh) {
+			this.alignPreviewToSelectedPlane()
+		}
 		this.updateSketchOverlay()
 		this.updatePreviewCursor()
+		this.updateQuickActionsRail()
 		this.drawPreview()
 	}
 

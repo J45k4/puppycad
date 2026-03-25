@@ -1425,7 +1425,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					name: resolvedName,
 					editor,
 					visible,
-					paneToolbar: editor.createPaneToolbar(),
 					getState: () => editor.getState()
 				}
 			}

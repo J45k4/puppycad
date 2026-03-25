@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test"
-import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_ROTATION, type PartProjectItemData, type ProjectFileEntry, type SchemanticProjectItemData, normalizeProjectFile } from "../src/project-file"
+import {
+	PART_PROJECT_DEFAULT_HEIGHT,
+	PART_PROJECT_DEFAULT_PREVIEW_DISTANCE,
+	PART_PROJECT_DEFAULT_ROTATION,
+	type PartProjectItemData,
+	type ProjectFileEntry,
+	type SchemanticProjectItemData,
+	normalizeProjectFile
+} from "../src/project-file"
 
 describe("normalizeProjectFile", () => {
 	it("normalizes schemantic project items", () => {
@@ -114,6 +122,7 @@ describe("normalizeProjectFile", () => {
 							rawHeight: null
 						},
 						height: Number.POSITIVE_INFINITY,
+						previewDistance: Number.NaN,
 						previewRotation: { yaw: Number.NaN, pitch: 0.2 }
 					}
 				}
@@ -140,6 +149,7 @@ describe("normalizeProjectFile", () => {
 		])
 		expect(data.isSketchClosed).toBe(false)
 		expect(data.height).toBe(PART_PROJECT_DEFAULT_HEIGHT)
+		expect(data.previewDistance).toBe(PART_PROJECT_DEFAULT_PREVIEW_DISTANCE)
 		expect(data.previewRotation.yaw).toBeCloseTo(PART_PROJECT_DEFAULT_ROTATION.yaw)
 		expect(data.previewRotation.pitch).toBeCloseTo(0.2)
 		expect(data.sketchVisible).toBe(true)
@@ -228,6 +238,7 @@ describe("normalizeProjectFile", () => {
 		const nestedPartData = nestedPart.data as PartProjectItemData
 		expect(nestedPartData.sketchPoints).toEqual([])
 		expect(nestedPartData.height).toBe(PART_PROJECT_DEFAULT_HEIGHT)
+		expect(nestedPartData.previewDistance).toBe(PART_PROJECT_DEFAULT_PREVIEW_DISTANCE)
 		expect(nestedPartData.sketchVisible).toBe(true)
 		expect(nestedPartData.referencePlaneVisibility).toEqual({
 			Front: true,
@@ -255,6 +266,7 @@ describe("normalizeProjectFile", () => {
 								sketchPoints: [],
 								isSketchClosed: false,
 								height: 30,
+								previewDistance: 40,
 								previewRotation: { yaw: 0, pitch: 0 },
 								sketchVisible: false,
 								referencePlaneVisibility: {
@@ -291,6 +303,7 @@ describe("normalizeProjectFile", () => {
 			isSketchClosed: false,
 			extrudedModel: undefined,
 			height: 30,
+			previewDistance: 40,
 			previewRotation: { yaw: 0, pitch: 0 },
 			sketchVisible: false,
 			referencePlaneVisibility: {

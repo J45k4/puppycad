@@ -60,12 +60,14 @@ export type PartProjectItemData = {
 	isSketchClosed: boolean
 	extrudedModel?: PartProjectExtrudedModel
 	height: number
+	previewDistance: number
 	previewRotation: PartProjectPreviewRotation
 	sketchVisible: boolean
 	referencePlaneVisibility: PartProjectReferencePlaneVisibility
 }
 
 export const PART_PROJECT_DEFAULT_HEIGHT = 30
+export const PART_PROJECT_DEFAULT_PREVIEW_DISTANCE = 44
 
 export const PART_PROJECT_DEFAULT_ROTATION: PartProjectPreviewRotation = {
 	yaw: Math.PI / 4,
@@ -485,6 +487,7 @@ function clonePartProjectItemData(data: PartProjectItemData | undefined): PartPr
 						rawHeight: data.extrudedModel.rawHeight
 					},
 		height: data.height,
+		previewDistance: data.previewDistance,
 		previewRotation: {
 			yaw: data.previewRotation.yaw,
 			pitch: data.previewRotation.pitch
@@ -510,6 +513,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		isSketchClosed: unknown
 		extrudedModel: unknown
 		height: unknown
+		previewDistance: unknown
 		previewRotation: unknown
 		sketchVisible: unknown
 		referencePlaneVisibility: unknown
@@ -528,6 +532,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 	const sketchName = typeof value.sketchName === "string" && value.sketchName.trim().length > 0 ? value.sketchName.trim() : undefined
 
 	const heightValue = typeof value.height === "number" && Number.isFinite(value.height) ? value.height : defaults.height
+	const previewDistance = extractFiniteNumber(value.previewDistance, defaults.previewDistance)
 
 	const previewRotationValue = value.previewRotation
 	const previewRotation: PartProjectPreviewRotation = {
@@ -551,6 +556,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		isSketchClosed,
 		extrudedModel,
 		height: heightValue,
+		previewDistance,
 		previewRotation,
 		sketchVisible,
 		referencePlaneVisibility
@@ -633,6 +639,7 @@ function createDefaultPartProjectItemData(): PartProjectItemData {
 		isSketchClosed: false,
 		extrudedModel: undefined,
 		height: PART_PROJECT_DEFAULT_HEIGHT,
+		previewDistance: PART_PROJECT_DEFAULT_PREVIEW_DISTANCE,
 		previewRotation: { ...PART_PROJECT_DEFAULT_ROTATION },
 		sketchVisible: true,
 		referencePlaneVisibility: {
