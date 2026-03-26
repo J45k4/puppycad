@@ -470,9 +470,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					const sketchName = state.sketchName?.trim() || node.editor.getSketchName() || "Sketch 1"
 					addSketchChild(1, sketchName)
 				}
-				if (state.extrudedModel) {
-					addSyntheticChild("extrude-1", `Extrude 1 (${state.extrudedModel.rawHeight.toFixed(1)}u)`)
-				}
+				state.extrudedModels.forEach((model, index) => {
+					addSyntheticChild(`extrude-${index + 1}`, `Extrude ${index + 1} (${model.rawHeight.toFixed(1)}u)`)
+				})
 				return {
 					kind: "folder" as const,
 					id,

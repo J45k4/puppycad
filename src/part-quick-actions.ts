@@ -1,4 +1,5 @@
 export type ReferencePlaneName = "Top" | "Front" | "Right"
+export type SketchSurfaceKind = "reference-plane" | "solid-face"
 
 export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "undo" | "reset" | "finish-sketch" | "extrude"
 
@@ -22,8 +23,9 @@ export type PartQuickActionsModel = {
 
 export type PartQuickActionsState = {
 	activeTool: "view" | "sketch"
-	selectedPlaneName: ReferencePlaneName | null
-	selectedPlaneVisible: boolean
+	selectedSurfaceLabel: string | null
+	selectedSurfaceKind: SketchSurfaceKind | null
+	selectedSurfaceVisible: boolean
 	activeSketchTool: "line" | "rectangle" | null
 	sketchPointCount: number
 	isSketchClosed: boolean
@@ -44,15 +46,19 @@ const HIDDEN_MODEL: PartQuickActionsModel = {
 }
 
 export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQuickActionsModel {
-	if (!state.selectedPlaneName || !state.selectedPlaneVisible) {
+	if (!state.selectedSurfaceLabel || !state.selectedSurfaceKind || !state.selectedSurfaceVisible) {
 		return HIDDEN_MODEL
 	}
 
 	if (state.activeTool === "view") {
+		const description =
+			state.selectedSurfaceKind === "reference-plane"
+				? `Start a sketch on the ${state.selectedSurfaceLabel.toLowerCase()} reference plane.`
+				: `Start a sketch on ${state.selectedSurfaceLabel.toLowerCase()}.`
 		return {
 			visible: true,
-			title: `${state.selectedPlaneName} Plane`,
-			description: `Start a sketch on the ${state.selectedPlaneName.toLowerCase()} reference plane.`,
+			title: state.selectedSurfaceKind === "reference-plane" ? `${state.selectedSurfaceLabel} Plane` : state.selectedSurfaceLabel,
+			description,
 			primaryActions: [
 				{
 					id: "start-sketch",
@@ -68,7 +74,7 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 
 	return {
 		visible: true,
-		title: `Sketch: ${state.selectedPlaneName}`,
+		title: `Sketch: ${state.selectedSurfaceLabel}`,
 		description: "Choose a drawing tool or use the sketch actions below.",
 		primaryActions: [
 			{

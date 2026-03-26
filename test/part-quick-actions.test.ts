@@ -6,8 +6,9 @@ describe("derivePartQuickActionsModel", () => {
 	it("hides the rail when no plane is selected", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
-			selectedPlaneName: null,
-			selectedPlaneVisible: false,
+			selectedSurfaceLabel: null,
+			selectedSurfaceKind: null,
+			selectedSurfaceVisible: false,
 			activeSketchTool: "line",
 			sketchPointCount: 0,
 			isSketchClosed: false,
@@ -23,8 +24,9 @@ describe("derivePartQuickActionsModel", () => {
 	it("shows only sketch when a visible plane is selected in view mode", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
-			selectedPlaneName: "Front",
-			selectedPlaneVisible: true,
+			selectedSurfaceLabel: "Front",
+			selectedSurfaceKind: "reference-plane",
+			selectedSurfaceVisible: true,
 			activeSketchTool: "line",
 			sketchPointCount: 0,
 			isSketchClosed: false,
@@ -43,8 +45,9 @@ describe("derivePartQuickActionsModel", () => {
 	it("shows sketch tools and commands in sketch mode", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "sketch",
-			selectedPlaneName: "Top",
-			selectedPlaneVisible: true,
+			selectedSurfaceLabel: "Top",
+			selectedSurfaceKind: "reference-plane",
+			selectedSurfaceVisible: true,
 			activeSketchTool: "rectangle",
 			sketchPointCount: 2,
 			isSketchClosed: false,
@@ -67,8 +70,9 @@ describe("derivePartQuickActionsModel", () => {
 	it("matches current disabled rules for sketch commands", () => {
 		const openModel = derivePartQuickActionsModel({
 			activeTool: "sketch",
-			selectedPlaneName: "Right",
-			selectedPlaneVisible: true,
+			selectedSurfaceLabel: "Right",
+			selectedSurfaceKind: "reference-plane",
+			selectedSurfaceVisible: true,
 			activeSketchTool: "line",
 			sketchPointCount: 2,
 			isSketchClosed: false,
@@ -86,8 +90,9 @@ describe("derivePartQuickActionsModel", () => {
 
 		const closedModel = derivePartQuickActionsModel({
 			activeTool: "sketch",
-			selectedPlaneName: "Right",
-			selectedPlaneVisible: true,
+			selectedSurfaceLabel: "Right",
+			selectedSurfaceKind: "reference-plane",
+			selectedSurfaceVisible: true,
 			activeSketchTool: "line",
 			sketchPointCount: 4,
 			isSketchClosed: true,
@@ -107,8 +112,9 @@ describe("derivePartQuickActionsModel", () => {
 	it("hides the rail again when the selected plane is cleared or hidden", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "sketch",
-			selectedPlaneName: "Front",
-			selectedPlaneVisible: false,
+			selectedSurfaceLabel: "Front",
+			selectedSurfaceKind: "reference-plane",
+			selectedSurfaceVisible: false,
 			activeSketchTool: "line",
 			sketchPointCount: 3,
 			isSketchClosed: false,
@@ -118,5 +124,25 @@ describe("derivePartQuickActionsModel", () => {
 		})
 
 		expect(model.visible).toBe(false)
+	})
+
+	it("shows sketch on a selected solid face in view mode", () => {
+		const model = derivePartQuickActionsModel({
+			activeTool: "view",
+			selectedSurfaceLabel: "Top Face",
+			selectedSurfaceKind: "solid-face",
+			selectedSurfaceVisible: true,
+			activeSketchTool: "line",
+			sketchPointCount: 0,
+			isSketchClosed: false,
+			hasSketchBreaks: false,
+			hasExtrudedModel: true,
+			hasPendingLineStart: false
+		})
+
+		expect(model.visible).toBe(true)
+		expect(model.title).toBe("Top Face")
+		expect(model.description).toBe("Start a sketch on top face.")
+		expect(model.primaryActions.map((action) => action.id)).toEqual(["start-sketch"])
 	})
 })

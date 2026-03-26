@@ -1,6 +1,6 @@
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
 import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "./project-file"
-import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "./part-quick-actions"
+import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName, type SketchSurfaceKind } from "./part-quick-actions"
 import { UiComponent } from "./ui"
 import * as THREE from "three"
 
@@ -21,6 +21,28 @@ type ReferencePlaneHandle = {
 	mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
 	xSign: -1 | 1
 	ySign: -1 | 1
+}
+type ExtrudedFaceVisual = {
+	name: string
+	solidMesh: THREE.Mesh
+	mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+	fillMaterial: THREE.MeshBasicMaterial
+	interactionPlane: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>
+	interactionMaterial: THREE.MeshBasicMaterial
+	width: number
+	height: number
+	normal: THREE.Vector3
+}
+type SketchSurfaceSelection = {
+	kind: SketchSurfaceKind
+	name: string
+	mesh: THREE.Mesh
+	interactionMesh: THREE.Mesh
+	normal: THREE.Vector3
+}
+type PreviewSolidVisual = {
+	mesh: THREE.Mesh
+	edges: THREE.LineSegments
 }
 
 export type PartEditorState = PartProjectItemData
@@ -50,7 +72,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewRootGroup: THREE.Group
 	private readonly previewContentGroup: THREE.Group
 	private readonly previewReferenceGroup: THREE.Group
+	private readonly previewExtrudedFaceGroup = new THREE.Group()
 	private readonly previewReferencePlanes: ReferencePlaneVisual[] = []
+	private readonly previewExtrudedFaces: ExtrudedFaceVisual[] = []
 	private readonly previewReferenceHandleGeometry = new THREE.RingGeometry(0.028, 0.04, 24)
 	private readonly previewReferenceHandleMaterial = new THREE.MeshBasicMaterial({
 		color: 0x94a3b8,
@@ -68,8 +92,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		Right: true
 	}
 	private sketchVisible = true
-	private previewMesh: THREE.Mesh | null = null
-	private previewEdges: THREE.LineSegments | null = null
+	private readonly previewSolids: PreviewSolidVisual[] = []
 	private sketchOverlayCommittedLine: THREE.Line | THREE.LineLoop | THREE.LineSegments | null = null
 	private sketchOverlayPreviewLine: THREE.Line | THREE.LineLoop | null = null
 	private sketchOverlayPoints: THREE.Points | null = null
@@ -98,7 +121,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly quickActionsStatusSection: HTMLDivElement
 	private sketchPoints: Point2D[] = []
 	private isSketchClosed = false
-	private extrudedModel: ExtrudedModel | null = null
+	private extrudedModels: ExtrudedModel[] = []
 	private readonly previewRotation: PartProjectPreviewRotation = {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
 		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
@@ -114,6 +137,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewPointer = new THREE.Vector2()
 	private hoveredReferencePlane: THREE.Mesh | null = null
 	private selectedReferencePlane: THREE.Mesh | null = null
+	private hoveredExtrudedFace: THREE.Mesh | null = null
+	private selectedExtrudedFace: THREE.Mesh | null = null
 	private pointerOverSelectedPlane = false
 	private activeResizeHandle: ReferencePlaneHandle | null = null
 	private resizingReferencePlane: THREE.Mesh | null = null
@@ -130,6 +155,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private selectedSketchPointIndex: number | null = null
 	private draggingSketchPointIndex: number | null = null
 	private sketchBreakIndices = new Set<number>()
+	private currentSketchSurfaceKey: string | null = null
 
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
@@ -358,6 +384,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.previewReferenceGroup = this.createReferencePlanes()
 		this.previewContentGroup.add(this.previewReferenceGroup)
+		this.previewContentGroup.add(this.previewExtrudedFaceGroup)
 		this.previewContentGroup.add(this.sketchOverlayGroup)
 		this.sketchOverlayGroup.visible = false
 
@@ -407,15 +434,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			sketchPoints: this.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
 			sketchName: this.sketchPoints.length > 0 ? this.sketchName : undefined,
 			isSketchClosed: this.isSketchClosed,
-			extrudedModel:
-				this.extrudedModel === null
-					? undefined
-					: {
-							base: this.extrudedModel.base.map((point) => ({ x: point.x, y: point.y })),
-							height: this.extrudedModel.height,
-							scale: this.extrudedModel.scale,
-							rawHeight: this.extrudedModel.rawHeight
-						},
+			extrudedModels: this.extrudedModels.map((model) => ({
+				base: model.base.map((point) => ({ x: point.x, y: point.y })),
+				height: model.height,
+				scale: model.scale,
+				rawHeight: model.rawHeight,
+				origin: model.origin ? { x: model.origin.x, y: model.origin.y, z: model.origin.z } : undefined,
+				rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
+				startOffset: model.startOffset
+			})),
 			height: heightValue,
 			previewDistance: this.previewBaseDistance,
 			previewRotation: {
@@ -524,17 +551,86 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return this.previewReferencePlanes.find((entry) => entry.mesh === this.selectedReferencePlane)?.name ?? null
 	}
 
-	private updateQuickActionsRail() {
+	private getSelectedExtrudedFace(): ExtrudedFaceVisual | null {
+		if (!this.selectedExtrudedFace) {
+			return null
+		}
+		return this.previewExtrudedFaces.find((entry) => entry.mesh === this.selectedExtrudedFace) ?? null
+	}
+
+	private getFacingNormalForExtrudedFace(face: ExtrudedFaceVisual): THREE.Vector3 {
+		const localNormal = face.normal.clone().normalize()
+		const worldNormal = localNormal.clone().applyQuaternion(face.mesh.getWorldQuaternion(new THREE.Quaternion())).normalize()
+		const faceCenter = face.mesh.getWorldPosition(new THREE.Vector3())
+		const toCamera = this.previewCamera.position.clone().sub(faceCenter).normalize()
+		if (worldNormal.dot(toCamera) < 0) {
+			localNormal.multiplyScalar(-1)
+		}
+		return localNormal
+	}
+
+	private getHoveredExtrudedFace(): ExtrudedFaceVisual | null {
+		if (!this.hoveredExtrudedFace) {
+			return null
+		}
+		return this.previewExtrudedFaces.find((entry) => entry.mesh === this.hoveredExtrudedFace) ?? null
+	}
+
+	private getSelectedSketchSurface(): SketchSurfaceSelection | null {
 		const selectedPlaneName = this.getSelectedReferencePlaneName()
+		if (selectedPlaneName && this.selectedReferencePlane) {
+			return {
+				kind: "reference-plane",
+				name: selectedPlaneName,
+				mesh: this.selectedReferencePlane,
+				interactionMesh: this.selectedReferencePlane,
+				normal: new THREE.Vector3(0, 0, 1).applyEuler(this.selectedReferencePlane.rotation).normalize()
+			}
+		}
+		const selectedFace = this.getSelectedExtrudedFace()
+		if (!selectedFace) {
+			return null
+		}
+		return {
+			kind: "solid-face",
+			name: selectedFace.name,
+			mesh: selectedFace.mesh,
+			interactionMesh: selectedFace.mesh,
+			normal: this.getFacingNormalForExtrudedFace(selectedFace)
+		}
+	}
+
+	private getSelectedSketchSurfaceKey(): string | null {
+		const surface = this.getSelectedSketchSurface()
+		return surface ? `${surface.kind}:${surface.name}` : null
+	}
+
+	private getSelectedSketchSurfaceSize(): { width: number; height: number } {
+		const selectedFace = this.getSelectedExtrudedFace()
+		if (selectedFace) {
+			return {
+				width: selectedFace.width,
+				height: selectedFace.height
+			}
+		}
+		return {
+			width: REFERENCE_PLANE_SIZE,
+			height: REFERENCE_PLANE_SIZE
+		}
+	}
+
+	private updateQuickActionsRail() {
+		const selectedSurface = this.getSelectedSketchSurface()
 		const model = derivePartQuickActionsModel({
 			activeTool: this.activeTool,
-			selectedPlaneName,
-			selectedPlaneVisible: selectedPlaneName ? this.referencePlaneVisibility[selectedPlaneName] : false,
+			selectedSurfaceLabel: selectedSurface?.name ?? null,
+			selectedSurfaceKind: selectedSurface?.kind ?? null,
+			selectedSurfaceVisible: !!selectedSurface,
 			activeSketchTool: this.activeSketchTool,
 			sketchPointCount: this.sketchPoints.length,
 			isSketchClosed: this.isSketchClosed,
 			hasSketchBreaks: this.sketchBreakIndices.size > 0,
-			hasExtrudedModel: this.extrudedModel !== null,
+			hasExtrudedModel: this.extrudedModels.length > 0,
 			hasPendingLineStart: this.pendingLineStart !== null
 		})
 
@@ -651,12 +747,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	public enterSketchMode(): void {
-		if (this.isSketchClosed) {
+		const selectedSurface = this.getSelectedSketchSurface()
+		const selectedSurfaceKey = this.getSelectedSketchSurfaceKey()
+		if (selectedSurface?.kind === "solid-face" && selectedSurfaceKey) {
+			this.clearSketchDraftOnly()
+			this.currentSketchSurfaceKey = selectedSurfaceKey
+		} else if (selectedSurfaceKey && selectedSurfaceKey !== this.currentSketchSurfaceKey) {
+			this.clearSketchDraftOnly()
+			this.currentSketchSurfaceKey = selectedSurfaceKey
+		} else if (this.isSketchClosed) {
 			this.isSketchClosed = false
-			this.updateControls()
-			this.updateStatus()
 		}
-		this.alignPreviewToSelectedPlane()
+		this.updateStatus()
+		this.updateControls()
 		this.setActiveTool("sketch")
 	}
 
@@ -671,7 +774,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchHoverPoint = null
 		this.sketchHoverSnapIndex = null
 		this.selectedSketchPointIndex = null
-		this.extrudedModel = null
+		this.extrudedModels = []
 		this.drawSketch()
 		this.syncPreviewGeometry()
 		this.updateSketchOverlay()
@@ -693,7 +796,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchHoverPoint = null
 		this.sketchHoverSnapIndex = null
 		this.selectedSketchPointIndex = null
-		if (tool === "sketch" && !this.selectedReferencePlane) {
+		if (tool === "sketch" && !this.getSelectedSketchSurface()) {
 			const defaultPlane = this.previewReferencePlanes[0]?.mesh ?? null
 			if (defaultPlane) {
 				this.setSelectedReferencePlane(defaultPlane)
@@ -704,27 +807,30 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.updateQuickActionsRail()
 	}
 
-	private alignPreviewToSelectedPlane() {
-		const selectedPlaneName = this.getSelectedReferencePlaneName()
-		if (!selectedPlaneName) {
-			return
-		}
-		const rotation = this.getAlignedPreviewRotationForPlane(selectedPlaneName)
-		this.previewRotation.yaw = rotation.yaw
-		this.previewRotation.pitch = rotation.pitch
-		this.previewPan.x = 0
-		this.previewPan.y = 0
+	private clearSketchDraftOnly() {
+		this.sketchPoints = []
+		this.sketchBreakIndices.clear()
+		this.isSketchClosed = false
+		this.pendingRectangleStart = null
+		this.pendingLineStart = null
+		this.pendingLineStartSourceIndex = null
+		this.lineToolNeedsFreshStart = true
+		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
+		this.draggingSketchPointIndex = null
+		this.activeSketchTool = "line"
 	}
 
-	private getAlignedPreviewRotationForPlane(planeName: ReferencePlaneName): PartProjectPreviewRotation {
-		switch (planeName) {
-			case "Front":
-				return { yaw: 0, pitch: 0 }
-			case "Top":
-				return { yaw: 0, pitch: Math.PI / 2 }
-			case "Right":
-				return { yaw: -Math.PI / 2, pitch: 0 }
+	private handleSelectedSketchSurfaceChanged() {
+		const selectedSurfaceKey = this.getSelectedSketchSurfaceKey()
+		if (!selectedSurfaceKey || selectedSurfaceKey === this.currentSketchSurfaceKey) {
+			return
 		}
+		this.clearSketchDraftOnly()
+		this.currentSketchSurfaceKey = selectedSurfaceKey
+		this.updateStatus()
+		this.updateControls()
 	}
 
 	private setActiveSketchTool(tool: SketchTool | null) {
@@ -784,14 +890,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.lineToolNeedsFreshStart = true
 		this.selectedSketchPointIndex = null
 		this.isSketchClosed = state?.isSketchClosed ?? false
-		this.extrudedModel = state?.extrudedModel
-			? {
-					base: state.extrudedModel.base.map((point) => ({ x: point.x, y: point.y })),
-					height: state.extrudedModel.height,
-					scale: state.extrudedModel.scale,
-					rawHeight: state.extrudedModel.rawHeight
-				}
-			: null
+		this.extrudedModels = (state?.extrudedModels ?? []).map((model) => ({
+			base: model.base.map((point) => ({ x: point.x, y: point.y })),
+			height: model.height,
+			scale: model.scale,
+			rawHeight: model.rawHeight,
+			origin: model.origin ? { x: model.origin.x, y: model.origin.y, z: model.origin.z } : undefined,
+			rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
+			startOffset: model.startOffset
+		}))
 		this.sketchVisible = state?.sketchVisible ?? true
 		this.referencePlaneVisibility = {
 			Front: state?.referencePlaneVisibility?.Front ?? true,
@@ -953,7 +1060,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchHoverPoint = null
 		this.sketchHoverSnapIndex = null
 		this.selectedSketchPointIndex = null
-		this.extrudedModel = null
+		this.extrudedModels = []
 		this.drawSketch()
 		this.syncPreviewGeometry()
 		this.updateSketchOverlay()
@@ -991,8 +1098,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!normalized) {
 			return
 		}
-		this.extrudedModel = normalized
+		this.extrudedModels.push(normalized)
 		this.syncPreviewGeometry()
+		this.setActiveTool("view")
 		this.drawPreview()
 		this.updateStatus()
 		this.updateControls()
@@ -1005,6 +1113,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const isRightMouseClick = event.pointerType === "mouse" ? event.button === 2 : event.isPrimary && event.button === 0
 		const isMiddleMouseClick = event.pointerType === "mouse" && event.button === 1
 		if (isLeftMouseClick) {
+			const selectedInteractionMesh = this.getSelectedSketchSurface()?.interactionMesh ?? null
 			const clickedHandle = this.getReferenceHandleAt(event.clientX, event.clientY)
 			if (clickedHandle && this.selectedReferencePlane) {
 				event.preventDefault()
@@ -1014,8 +1123,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.previewCanvas.style.cursor = "nwse-resize"
 				return
 			}
-			if (this.activeTool === "sketch" && this.selectedReferencePlane && this.activeSketchTool === null) {
-				const pointIndex = this.getSketchPointIndexAtClient(event.clientX, event.clientY, this.selectedReferencePlane)
+			if (this.activeTool === "sketch" && selectedInteractionMesh && this.activeSketchTool === null) {
+				const pointIndex = this.getSketchPointIndexAtClient(event.clientX, event.clientY)
 				if (pointIndex !== null) {
 					event.preventDefault()
 					this.draggingSketchPointIndex = pointIndex
@@ -1027,7 +1136,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 					return
 				}
 			}
-			if (this.activeTool === "sketch" && this.selectedReferencePlane && this.isPointInsideReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)) {
+			if (this.activeTool === "sketch" && selectedInteractionMesh && this.isPointInsideSelectedSketchSurface(event.clientX, event.clientY)) {
 				event.preventDefault()
 				if (this.activeSketchTool === null) {
 					this.selectedSketchPointIndex = null
@@ -1036,6 +1145,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 					return
 				}
 				this.handleSketchPlanePointInput(event.clientX, event.clientY)
+				return
+			}
+			const clickedFace = this.getExtrudedFaceAt(event.clientX, event.clientY)
+			if (this.activeTool === "view" && clickedFace) {
+				event.preventDefault()
+				this.setSelectedExtrudedFace(clickedFace)
 				return
 			}
 			const clickedPlane = this.getReferencePlaneAt(event.clientX, event.clientY)
@@ -1065,6 +1180,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			if (this.selectedReferencePlane) {
 				this.setSelectedReferencePlane(null)
 			}
+			if (this.selectedExtrudedFace) {
+				this.setSelectedExtrudedFace(null)
+			}
 		}
 		const isRotatePointer = isRightMouseClick || (event.pointerType !== "mouse" && event.isPrimary && event.button === 0)
 		if (!isRotatePointer && !isMiddleMouseClick) {
@@ -1080,10 +1198,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerMove = (event: PointerEvent) => {
-		if (this.draggingSketchPointIndex !== null && this.selectedReferencePlane) {
+		const selectedInteractionMesh = this.getSelectedSketchSurface()?.interactionMesh ?? null
+		if (this.draggingSketchPointIndex !== null && selectedInteractionMesh) {
 			event.preventDefault()
 			this.sketchHoverSnapIndex = null
-			const localPoint = this.getPointOnReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)
+			const localPoint = this.getPointOnSelectedSketchSurface(event.clientX, event.clientY)
 			if (!localPoint) {
 				return
 			}
@@ -1108,8 +1227,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		if ((!this.isRotatingPreview && !this.isPanningPreview) || !this.lastRotationPointer) {
-			if (this.activeTool === "sketch" && this.selectedReferencePlane) {
-				const localPoint = this.getPointOnReferencePlane(event.clientX, event.clientY, this.selectedReferencePlane)
+			if (this.activeTool === "sketch" && selectedInteractionMesh) {
+				const localPoint = this.getPointOnSelectedSketchSurface(event.clientX, event.clientY)
 				const clamped = localPoint ? this.clampPointToPlane(localPoint.x, localPoint.y) : null
 				if (clamped) {
 					this.sketchHoverPoint = this.getLineSnapPointIfNeeded(this.planeLocalToSketchPoint(clamped))
@@ -1123,6 +1242,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		this.setHoveredReferencePlane(null)
+		this.setHoveredExtrudedFace(null)
 		this.sketchHoverPoint = null
 		this.sketchHoverSnapIndex = null
 		this.updateSketchOverlay()
@@ -1284,8 +1404,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const pointText = pointCount === 1 ? "point" : "points"
 		const sketchState = this.isSketchClosed ? "Sketch closed" : "Sketch open"
 		this.statusText.textContent = `${sketchState}. ${pointCount} ${pointText}.`
-		if (this.extrudedModel) {
-			this.extrudeSummary.textContent = `Extruded height: ${this.extrudedModel.rawHeight.toFixed(1)} units`
+		const latestExtrudedModel = this.extrudedModels[this.extrudedModels.length - 1] ?? null
+		if (latestExtrudedModel) {
+			this.extrudeSummary.textContent = `Extruded height: ${latestExtrudedModel.rawHeight.toFixed(1)} units`
 		} else {
 			this.extrudeSummary.textContent = ""
 		}
@@ -1294,7 +1415,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private updateControls() {
 		this.finishButton.disabled = this.isSketchClosed || this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0
 		this.undoButton.disabled = this.isSketchClosed || (this.sketchPoints.length === 0 && !this.pendingLineStart)
-		this.resetButton.disabled = this.sketchPoints.length === 0 && !this.extrudedModel && !this.pendingLineStart
+		this.resetButton.disabled = this.sketchPoints.length === 0 && this.extrudedModels.length === 0 && !this.pendingLineStart
 		this.extrudeButton.disabled = !this.isSketchClosed
 		this.heightInput.disabled = !this.isSketchClosed
 		this.finishButton.style.backgroundColor = this.finishButton.disabled ? "#e2e8f0" : "#fff"
@@ -1321,7 +1442,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchCtx.lineTo(SKETCH_CANVAS_SIZE, SKETCH_CANVAS_SIZE / 2)
 		this.sketchCtx.stroke()
 
-		if (this.sketchPoints.length > 0) {
+		const visibleSketchPoints = this.getVisibleSketchPoints()
+		if (visibleSketchPoints.length > 0) {
 			this.sketchCtx.lineWidth = 2
 			this.sketchCtx.strokeStyle = "#2563eb"
 			const ranges = this.getSketchRanges()
@@ -1359,7 +1481,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.sketchCtx.fill()
 			}
 
-			for (const point of this.sketchPoints) {
+			for (const point of visibleSketchPoints) {
 				this.drawSketchPoint(point, "#1d4ed8")
 			}
 			if (this.selectedSketchPointIndex !== null) {
@@ -1442,8 +1564,37 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private getVisibleSketchPoints(): Point2D[] {
+		if (!this.pendingLineStart) {
+			return [...this.sketchPoints]
+		}
+		const alreadyVisible = this.sketchPoints.some((point) => point.x === this.pendingLineStart?.x && point.y === this.pendingLineStart?.y)
+		return alreadyVisible ? [...this.sketchPoints] : [...this.sketchPoints, this.pendingLineStart]
+	}
+
+	private getSketchOverlayPalette() {
+		if (this.getSelectedSketchSurface()?.kind === "solid-face") {
+			return {
+				committedLine: 0xf59e0b,
+				previewLine: 0x0f172a,
+				points: 0xf59e0b,
+				pointSize: 0.05
+			}
+		}
+		return {
+			committedLine: 0x2563eb,
+			previewLine: 0x0f172a,
+			points: 0x1d4ed8,
+			pointSize: 0.03
+		}
+	}
+
 	private normalizeSketch(height: number): ExtrudedModel | null {
 		if (this.sketchPoints.length < 3 || this.sketchBreakIndices.size > 0) {
+			return null
+		}
+		const selectedSurface = this.getSelectedSketchSurface()
+		if (!selectedSurface) {
 			return null
 		}
 		const xs = this.sketchPoints.map((p) => p.x)
@@ -1468,7 +1619,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			base,
 			height: height / scale,
 			scale,
-			rawHeight: height
+			rawHeight: height,
+			origin: {
+				x: selectedSurface.mesh.position.x,
+				y: selectedSurface.mesh.position.y,
+				z: selectedSurface.mesh.position.z
+			},
+			rotation: {
+				x: selectedSurface.mesh.quaternion.x,
+				y: selectedSurface.mesh.quaternion.y,
+				z: selectedSurface.mesh.quaternion.z,
+				w: selectedSurface.mesh.quaternion.w
+			},
+			startOffset: 0
 		}
 	}
 
@@ -1535,9 +1698,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 		if (this.activeTool === "sketch") {
-			const overSelected = this.selectedReferencePlane ? this.getPointOnReferencePlane(clientX, clientY, this.selectedReferencePlane) !== null : false
+			const overSelected = this.isPointInsideSelectedSketchSurface(clientX, clientY)
 			this.pointerOverSelectedPlane = overSelected
 			this.setHoveredReferencePlane(null)
+			this.setHoveredExtrudedFace(null)
 			this.updatePreviewCursor()
 			return
 		}
@@ -1547,6 +1711,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewCanvas.style.cursor = "nwse-resize"
 			return
 		}
+		const hoveredFace = this.getExtrudedFaceAt(clientX, clientY)
+		if (hoveredFace) {
+			this.setHoveredReferencePlane(null)
+			this.setHoveredExtrudedFace(hoveredFace)
+			return
+		}
+		this.setHoveredExtrudedFace(null)
 		this.setHoveredReferencePlane(this.getReferencePlaneAt(clientX, clientY))
 	}
 
@@ -1579,19 +1750,97 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.drawPreview()
 	}
 
+	private getExtrudedFaceAt(clientX: number, clientY: number): THREE.Mesh | null {
+		if (this.previewSolids.length === 0 || this.previewExtrudedFaces.length === 0) {
+			return null
+		}
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		this.previewPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+		this.previewPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+		const intersection = this.previewRaycaster.intersectObjects(
+			this.previewSolids.map((solid) => solid.mesh),
+			false
+		)[0]
+		if (!intersection?.face) {
+			return null
+		}
+		const hitNormal = intersection.face.normal.clone().transformDirection(intersection.object.matrixWorld).normalize()
+		const hitPoint = intersection.point.clone()
+		let bestFace: ExtrudedFaceVisual | null = null
+		let bestScore = Number.NEGATIVE_INFINITY
+		for (const face of this.previewExtrudedFaces) {
+			if (face.solidMesh !== intersection.object) {
+				continue
+			}
+			const faceNormal = face.normal.clone().applyQuaternion(this.previewRootGroup.quaternion).normalize()
+			const faceOrigin = face.mesh.getWorldPosition(new THREE.Vector3())
+			const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(faceNormal, faceOrigin)
+			const distance = Math.abs(plane.distanceToPoint(hitPoint))
+			const normalScore = Math.abs(faceNormal.dot(hitNormal))
+			const score = normalScore - distance * 12
+			if (score > bestScore) {
+				bestScore = score
+				bestFace = face
+			}
+		}
+		return bestFace?.mesh ?? null
+	}
+
+	private setHoveredExtrudedFace(mesh: THREE.Mesh | null) {
+		if (this.hoveredExtrudedFace === mesh) {
+			return
+		}
+		this.hoveredExtrudedFace = mesh
+		this.refreshExtrudedFaceStyles()
+		this.updatePreviewCursor()
+		this.drawPreview()
+	}
+
 	private setSelectedReferencePlane(mesh: THREE.Mesh | null) {
 		if (this.selectedReferencePlane === mesh) {
 			return
 		}
 		this.selectedReferencePlane = mesh
+		if (mesh) {
+			this.selectedExtrudedFace = null
+		}
 		this.pointerOverSelectedPlane = false
 		this.sketchHoverPoint = null
 		this.sketchHoverSnapIndex = null
 		this.selectedSketchPointIndex = null
 		this.refreshReferencePlaneStyles()
+		this.refreshExtrudedFaceStyles()
 		this.updateReferencePlaneHandles()
+		if (mesh && this.activeTool === "sketch") {
+			this.handleSelectedSketchSurfaceChanged()
+		}
+		this.updateSketchOverlay()
+		this.updatePreviewCursor()
+		this.updateQuickActionsRail()
+		this.drawPreview()
+	}
+
+	private setSelectedExtrudedFace(mesh: THREE.Mesh | null) {
+		if (this.selectedExtrudedFace === mesh) {
+			return
+		}
+		this.selectedExtrudedFace = mesh
 		if (mesh) {
-			this.alignPreviewToSelectedPlane()
+			this.selectedReferencePlane = null
+		}
+		this.pointerOverSelectedPlane = false
+		this.sketchHoverPoint = null
+		this.sketchHoverSnapIndex = null
+		this.selectedSketchPointIndex = null
+		this.refreshReferencePlaneStyles()
+		this.refreshExtrudedFaceStyles()
+		this.updateReferencePlaneHandles()
+		if (mesh && this.activeTool === "sketch") {
+			this.handleSelectedSketchSurfaceChanged()
 		}
 		this.updateSketchOverlay()
 		this.updatePreviewCursor()
@@ -1654,20 +1903,50 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return plane.worldToLocal(worldPoint.clone())
 	}
 
+	private getPointOnFaceMesh(clientX: number, clientY: number, mesh: THREE.Mesh): THREE.Vector3 | null {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		this.previewPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+		this.previewPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+		const intersection = this.previewRaycaster.intersectObject(mesh, false)[0]
+		if (!intersection) {
+			return null
+		}
+		return mesh.worldToLocal(intersection.point.clone())
+	}
+
+	private getPointOnSelectedSketchSurface(clientX: number, clientY: number): THREE.Vector3 | null {
+		const selectedSurface = this.getSelectedSketchSurface()
+		if (!selectedSurface) {
+			return null
+		}
+		if (selectedSurface.kind === "solid-face") {
+			return this.getPointOnFaceMesh(clientX, clientY, selectedSurface.mesh)
+		}
+		return this.getPointOnReferencePlane(clientX, clientY, selectedSurface.mesh)
+	}
+
+	private isPointInsideSelectedSketchSurface(clientX: number, clientY: number): boolean {
+		return this.getPointOnSelectedSketchSurface(clientX, clientY) !== null
+	}
+
 	private isPointInsideReferencePlane(clientX: number, clientY: number, plane: THREE.Mesh): boolean {
 		const localPoint = this.getPointOnReferencePlane(clientX, clientY, plane)
 		if (!localPoint) {
 			return false
 		}
-		const half = REFERENCE_PLANE_SIZE / 2
-		return Math.abs(localPoint.x) <= half && Math.abs(localPoint.y) <= half
+		const { width, height } = this.getSelectedSketchSurfaceSize()
+		return Math.abs(localPoint.x) <= width / 2 && Math.abs(localPoint.y) <= height / 2
 	}
 
-	private getSketchPointIndexAtClient(clientX: number, clientY: number, plane: THREE.Mesh): number | null {
+	private getSketchPointIndexAtClient(clientX: number, clientY: number): number | null {
 		if (this.sketchPoints.length === 0) {
 			return null
 		}
-		const localPoint = this.getPointOnReferencePlane(clientX, clientY, plane)
+		const localPoint = this.getPointOnSelectedSketchSurface(clientX, clientY)
 		if (!localPoint) {
 			return null
 		}
@@ -1694,36 +1973,39 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private planeLocalToSketchPoint(point: Point2D): Point2D {
+		const { width, height } = this.getSelectedSketchSurfaceSize()
 		return {
-			x: (point.x / REFERENCE_PLANE_SIZE + 0.5) * SKETCH_CANVAS_SIZE,
-			y: (0.5 - point.y / REFERENCE_PLANE_SIZE) * SKETCH_CANVAS_SIZE
+			x: (point.x / width + 0.5) * SKETCH_CANVAS_SIZE,
+			y: (0.5 - point.y / height) * SKETCH_CANVAS_SIZE
 		}
 	}
 
 	private sketchPointToPlaneLocal(point: Point2D): Point2D {
+		const { width, height } = this.getSelectedSketchSurfaceSize()
 		return {
-			x: (point.x / SKETCH_CANVAS_SIZE - 0.5) * REFERENCE_PLANE_SIZE,
-			y: (0.5 - point.y / SKETCH_CANVAS_SIZE) * REFERENCE_PLANE_SIZE
+			x: (point.x / SKETCH_CANVAS_SIZE - 0.5) * width,
+			y: (0.5 - point.y / SKETCH_CANVAS_SIZE) * height
 		}
 	}
 
 	private clampPointToPlane(x: number, y: number): Point2D {
-		const half = REFERENCE_PLANE_SIZE / 2
+		const { width, height } = this.getSelectedSketchSurfaceSize()
 		return {
-			x: THREE.MathUtils.clamp(x, -half, half),
-			y: THREE.MathUtils.clamp(y, -half, half)
+			x: THREE.MathUtils.clamp(x, -width / 2, width / 2),
+			y: THREE.MathUtils.clamp(y, -height / 2, height / 2)
 		}
 	}
 
 	private handleSketchPlanePointInput(clientX: number, clientY: number) {
-		if (!this.selectedReferencePlane || this.isSketchClosed) {
+		const selectedInteractionMesh = this.getSelectedSketchSurface()?.interactionMesh ?? null
+		if (!selectedInteractionMesh || this.isSketchClosed) {
 			return
 		}
 		if (!this.activeSketchTool) {
 			return
 		}
 		this.selectedSketchPointIndex = null
-		const localPoint = this.getPointOnReferencePlane(clientX, clientY, this.selectedReferencePlane)
+		const localPoint = this.getPointOnSelectedSketchSurface(clientX, clientY)
 		if (!localPoint) {
 			return
 		}
@@ -1982,7 +2264,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private createSketchSnapIndicatorObject(point: Point2D, color: number, zOffset: number, sizePx = SKETCH_SNAP_MARKER_SIZE): THREE.LineLoop {
 		const center = this.sketchPointToPlaneLocal(point)
-		const halfSize = (sizePx / SKETCH_CANVAS_SIZE) * REFERENCE_PLANE_SIZE * 0.5
+		const { width, height } = this.getSelectedSketchSurfaceSize()
+		const halfSize = (sizePx / SKETCH_CANVAS_SIZE) * Math.max(width, height) * 0.5
 		const vertices = [
 			center.x - halfSize,
 			center.y - halfSize,
@@ -2046,8 +2329,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (typeof hoverOverride !== "undefined") {
 			this.sketchHoverPoint = hoverOverride
 		}
-		const shouldShow = this.activeTool === "sketch" && this.previewReferenceGroup.visible && this.sketchVisible && !!this.selectedReferencePlane
-		if (!shouldShow || !this.selectedReferencePlane) {
+		const selectedSurface = this.getSelectedSketchSurface()
+		const selectedInteractionMesh = selectedSurface?.interactionMesh ?? null
+		const shouldShow = this.activeTool === "sketch" && this.sketchVisible && !!selectedInteractionMesh
+		if (!shouldShow || !selectedInteractionMesh) {
 			this.sketchOverlayGroup.visible = false
 			this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
 			this.disposeSketchOverlayObject(this.sketchOverlayPreviewLine)
@@ -2064,19 +2349,20 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 
-		if (this.sketchOverlayParentPlane !== this.selectedReferencePlane) {
+		if (this.sketchOverlayParentPlane !== selectedInteractionMesh) {
 			this.sketchOverlayGroup.removeFromParent()
-			this.selectedReferencePlane.add(this.sketchOverlayGroup)
-			this.sketchOverlayParentPlane = this.selectedReferencePlane
+			selectedInteractionMesh.add(this.sketchOverlayGroup)
+			this.sketchOverlayParentPlane = selectedInteractionMesh
 		}
 		this.sketchOverlayGroup.visible = true
 		this.sketchOverlayGroup.position.set(0, 0, 0.004)
+		const palette = this.getSketchOverlayPalette()
 
 		this.disposeSketchOverlayObject(this.sketchOverlayCommittedLine)
 		if (this.sketchBreakIndices.size === 0) {
-			this.sketchOverlayCommittedLine = this.createSketchLineObject(this.sketchPoints, 0x2563eb, 0, this.isSketchClosed)
+			this.sketchOverlayCommittedLine = this.createSketchLineObject(this.sketchPoints, palette.committedLine, 0, this.isSketchClosed)
 		} else {
-			this.sketchOverlayCommittedLine = this.createSketchSegmentObject(this.sketchPoints, 0x2563eb, 0)
+			this.sketchOverlayCommittedLine = this.createSketchSegmentObject(this.sketchPoints, palette.committedLine, 0)
 		}
 		if (this.sketchOverlayCommittedLine) {
 			this.sketchOverlayCommittedLine.renderOrder = 6
@@ -2102,7 +2388,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				}
 			}
 		}
-		this.sketchOverlayPreviewLine = previewPoints ? this.createSketchLineObject(previewPoints, 0x0f172a, 0.001, this.activeSketchTool === "rectangle") : null
+		this.sketchOverlayPreviewLine = previewPoints ? this.createSketchLineObject(previewPoints, palette.previewLine, 0.001, this.activeSketchTool === "rectangle") : null
 		if (this.sketchOverlayPreviewLine) {
 			const material = this.sketchOverlayPreviewLine.material as THREE.LineBasicMaterial
 			material.opacity = 0.7
@@ -2111,16 +2397,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		this.disposeSketchOverlayObject(this.sketchOverlayPoints)
-		if (this.sketchPoints.length > 0) {
-			const vertices = this.sketchPoints.flatMap((point) => {
+		const visibleSketchPoints = this.getVisibleSketchPoints()
+		if (visibleSketchPoints.length > 0) {
+			const vertices = visibleSketchPoints.flatMap((point) => {
 				const local = this.sketchPointToPlaneLocal(point)
 				return [local.x, local.y, 0.002]
 			})
 			const geometry = new THREE.BufferGeometry()
 			geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
 			const material = new THREE.PointsMaterial({
-				color: 0x1d4ed8,
-				size: 0.03,
+				color: palette.points,
+				size: palette.pointSize,
 				sizeAttenuation: true,
 				depthTest: false
 			})
@@ -2161,7 +2448,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.disposeSketchOverlayObject(this.sketchOverlayLabel)
 		this.sketchOverlayLabel = this.createReferenceLabelSprite(this.sketchName)
-		this.sketchOverlayLabel.position.set(-REFERENCE_PLANE_SIZE / 2 + 0.16, REFERENCE_PLANE_SIZE / 2 - 0.08, 0.003)
+		const { width, height } = this.getSelectedSketchSurfaceSize()
+		this.sketchOverlayLabel.position.set(-width / 2 + 0.16, height / 2 - 0.08, 0.003)
 		this.sketchOverlayLabel.renderOrder = 11
 		this.sketchOverlayGroup.add(this.sketchOverlayLabel)
 
@@ -2203,6 +2491,27 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				plane.mesh.renderOrder = 1
 				plane.edge.renderOrder = 2
 			}
+		}
+	}
+
+	private refreshExtrudedFaceStyles() {
+		for (const face of this.previewExtrudedFaces) {
+			const isSelected = face.mesh === this.selectedExtrudedFace
+			const isHovered = face.mesh === this.hoveredExtrudedFace
+			if (isSelected) {
+				face.fillMaterial.color.setHex(this.activeTool === "sketch" ? 0xffffff : 0xf59e0b)
+				face.fillMaterial.opacity = this.activeTool === "sketch" ? 0.08 : 0.22
+			} else if (isHovered) {
+				face.fillMaterial.color.setHex(0xf59e0b)
+				face.fillMaterial.opacity = 0.12
+			} else {
+				face.fillMaterial.color.setHex(0xffffff)
+				face.fillMaterial.opacity = 0.001
+			}
+			face.mesh.renderOrder = isSelected ? 5 : isHovered ? 4 : 2
+			face.interactionMaterial.color.setHex(this.activeTool === "sketch" ? 0xffffff : 0x7dd3fc)
+			face.interactionMaterial.opacity = isSelected && this.activeTool === "sketch" ? 0.28 : 0.1
+			face.interactionPlane.visible = isSelected && this.activeTool === "sketch"
 		}
 	}
 
@@ -2261,7 +2570,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewCanvas.style.cursor = "crosshair"
 			return
 		}
-		this.previewCanvas.style.cursor = this.hoveredReferencePlane ? "pointer" : "grab"
+		this.previewCanvas.style.cursor = this.hoveredReferencePlane || this.hoveredExtrudedFace ? "pointer" : "grab"
 	}
 
 	private createReferencePlanes(): THREE.Group {
@@ -2333,11 +2642,97 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return sprite
 	}
 
+	private clearExtrudedFaceVisuals() {
+		for (const face of this.previewExtrudedFaces) {
+			face.mesh.removeFromParent()
+			face.mesh.geometry.dispose()
+			face.fillMaterial.dispose()
+			face.interactionPlane.removeFromParent()
+			face.interactionPlane.geometry.dispose()
+			face.interactionPlane.material.dispose()
+		}
+		this.previewExtrudedFaces.length = 0
+		this.hoveredExtrudedFace = null
+		this.selectedExtrudedFace = null
+	}
+
+	private createExtrudedFaceVisual(solidMesh: THREE.Mesh, name: string, vertices: THREE.Vector3[]): ExtrudedFaceVisual | null {
+		if (vertices.length < 3) {
+			return null
+		}
+		const origin = vertices[0]?.clone()
+		const edgeX = origin && vertices[1] ? vertices[1].clone().sub(origin) : null
+		const edgeYSource = origin && vertices[2] ? vertices[2].clone().sub(origin) : null
+		if (!origin || !edgeX || !edgeYSource || edgeX.lengthSq() < 1e-6 || edgeYSource.lengthSq() < 1e-6) {
+			return null
+		}
+		const normal = edgeX.clone().cross(edgeYSource).normalize()
+		if (normal.lengthSq() < 1e-6) {
+			return null
+		}
+		const basisX = edgeX.normalize()
+		const basisY = normal.clone().cross(basisX).normalize()
+		const projected = vertices.map((vertex) => {
+			const relative = vertex.clone().sub(origin)
+			return new THREE.Vector2(relative.dot(basisX), relative.dot(basisY))
+		})
+		const xs = projected.map((point) => point.x)
+		const ys = projected.map((point) => point.y)
+		const minX = Math.min(...xs)
+		const maxX = Math.max(...xs)
+		const minY = Math.min(...ys)
+		const maxY = Math.max(...ys)
+		const width = Math.max(maxX - minX, 0.2)
+		const height = Math.max(maxY - minY, 0.2)
+		const center = new THREE.Vector2((minX + maxX) / 2, (minY + maxY) / 2)
+		const shape = new THREE.Shape(projected.map((point) => point.clone().sub(center)))
+		const geometry = new THREE.ShapeGeometry(shape)
+		const fillMaterial = new THREE.MeshBasicMaterial({
+			color: 0xffffff,
+			transparent: true,
+			opacity: 0.001,
+			side: THREE.DoubleSide,
+			depthWrite: false,
+			depthTest: false
+		})
+		const mesh = new THREE.Mesh(geometry, fillMaterial)
+		mesh.position.copy(origin.clone().addScaledVector(basisX, center.x).addScaledVector(basisY, center.y))
+		mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(basisX, basisY, normal))
+
+		const interactionMaterial = new THREE.MeshBasicMaterial({
+			color: 0xffffff,
+			transparent: true,
+			opacity: 0.1,
+			side: THREE.DoubleSide,
+			depthWrite: false,
+			depthTest: false
+		})
+		const interactionPlane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), interactionMaterial)
+		interactionPlane.position.copy(mesh.position)
+		interactionPlane.quaternion.copy(mesh.quaternion)
+		interactionPlane.visible = false
+		interactionPlane.renderOrder = 3
+
+		this.previewExtrudedFaceGroup.add(mesh)
+		this.previewExtrudedFaceGroup.add(interactionPlane)
+		return {
+			name,
+			solidMesh,
+			mesh,
+			fillMaterial,
+			interactionPlane,
+			interactionMaterial,
+			width,
+			height,
+			normal
+		}
+	}
+
 	private syncPreviewGeometry() {
-		if (this.previewMesh) {
-			this.previewContentGroup.remove(this.previewMesh)
-			this.previewMesh.geometry.dispose()
-			const meshMaterial = this.previewMesh.material
+		for (const solid of this.previewSolids) {
+			this.previewContentGroup.remove(solid.mesh)
+			solid.mesh.geometry.dispose()
+			const meshMaterial = solid.mesh.material
 			if (Array.isArray(meshMaterial)) {
 				for (const material of meshMaterial) {
 					material.dispose()
@@ -2345,13 +2740,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			} else {
 				meshMaterial.dispose()
 			}
-			this.previewMesh = null
-		}
-
-		if (this.previewEdges) {
-			this.previewContentGroup.remove(this.previewEdges)
-			this.previewEdges.geometry.dispose()
-			const edgeMaterial = this.previewEdges.material
+			this.previewContentGroup.remove(solid.edges)
+			solid.edges.geometry.dispose()
+			const edgeMaterial = solid.edges.material
 			if (Array.isArray(edgeMaterial)) {
 				for (const material of edgeMaterial) {
 					material.dispose()
@@ -2359,44 +2750,91 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			} else {
 				edgeMaterial.dispose()
 			}
-			this.previewEdges = null
 		}
+		this.previewSolids.length = 0
 
-		if (!this.extrudedModel || this.extrudedModel.base.length < 3) {
+		this.clearExtrudedFaceVisuals()
+
+		if (this.extrudedModels.length === 0) {
 			this.previewReferenceGroup.visible = true
 			return
 		}
 
-		const { base, height } = this.extrudedModel
-		const shapePoints = base.map((point) => new THREE.Vector2(point.x, point.y))
-		const shape = new THREE.Shape(shapePoints)
-		const geometry = new THREE.ExtrudeGeometry(shape, {
-			depth: height,
-			bevelEnabled: false,
-			steps: 1
-		})
-		geometry.translate(0, 0, -height / 2)
-		geometry.computeVertexNormals()
+		this.extrudedModels.forEach((model, modelIndex) => {
+			if (model.base.length < 3) {
+				return
+			}
+			const { base, height } = model
+			const startOffset = typeof model.startOffset === "number" ? model.startOffset : -height / 2
+			const endOffset = startOffset + height
+			const shapePoints = base.map((point) => new THREE.Vector2(point.x, point.y))
+			const shape = new THREE.Shape(shapePoints)
+			const geometry = new THREE.ExtrudeGeometry(shape, {
+				depth: height,
+				bevelEnabled: false,
+				steps: 1
+			})
+			geometry.translate(0, 0, startOffset)
+			geometry.computeVertexNormals()
 
-		const material = new THREE.MeshStandardMaterial({
-			color: 0x3b82f6,
-			roughness: 0.35,
-			metalness: 0.05
-		})
-		this.previewMesh = new THREE.Mesh(geometry, material)
-		this.previewContentGroup.add(this.previewMesh)
+			const material = new THREE.MeshStandardMaterial({
+				color: 0x3b82f6,
+				roughness: 0.35,
+				metalness: 0.05
+			})
+			const mesh = new THREE.Mesh(geometry, material)
+			if (model.origin) {
+				mesh.position.set(model.origin.x, model.origin.y, model.origin.z)
+			}
+			if (model.rotation) {
+				mesh.quaternion.set(model.rotation.x, model.rotation.y, model.rotation.z, model.rotation.w)
+			}
+			this.previewContentGroup.add(mesh)
 
-		const edgeGeometry = new THREE.EdgesGeometry(geometry)
-		const edgeMaterial = new THREE.LineBasicMaterial({
-			color: 0xe2e8f0,
-			transparent: true,
-			opacity: 0.8
+			const edgeGeometry = new THREE.EdgesGeometry(geometry)
+			const edgeMaterial = new THREE.LineBasicMaterial({
+				color: 0xe2e8f0,
+				transparent: true,
+				opacity: 0.8
+			})
+			const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial)
+			edges.position.copy(mesh.position)
+			edges.quaternion.copy(mesh.quaternion)
+			this.previewContentGroup.add(edges)
+			this.previewSolids.push({ mesh, edges })
+
+			const localToWorld = (point: THREE.Vector3) => point.clone().applyQuaternion(mesh.quaternion).add(mesh.position)
+			const topVertices = base.map((point) => localToWorld(new THREE.Vector3(point.x, point.y, endOffset)))
+			const bottomVertices = [...base].reverse().map((point) => localToWorld(new THREE.Vector3(point.x, point.y, startOffset)))
+			const topFace = this.createExtrudedFaceVisual(mesh, modelIndex === 0 ? "Top Face" : `Top Face ${modelIndex + 1}`, topVertices)
+			if (topFace) {
+				this.previewExtrudedFaces.push(topFace)
+			}
+			const bottomFace = this.createExtrudedFaceVisual(mesh, modelIndex === 0 ? "Bottom Face" : `Bottom Face ${modelIndex + 1}`, bottomVertices)
+			if (bottomFace) {
+				this.previewExtrudedFaces.push(bottomFace)
+			}
+			for (let index = 0; index < base.length; index += 1) {
+				const start = base[index]
+				const end = base[(index + 1) % base.length]
+				if (!start || !end) {
+					continue
+				}
+				const face = this.createExtrudedFaceVisual(mesh, `Side Face ${index + 1}`, [
+					localToWorld(new THREE.Vector3(start.x, start.y, startOffset)),
+					localToWorld(new THREE.Vector3(end.x, end.y, startOffset)),
+					localToWorld(new THREE.Vector3(end.x, end.y, endOffset)),
+					localToWorld(new THREE.Vector3(start.x, start.y, endOffset))
+				])
+				if (face) {
+					this.previewExtrudedFaces.push(face)
+				}
+			}
 		})
-		this.previewEdges = new THREE.LineSegments(edgeGeometry, edgeMaterial)
-		this.previewContentGroup.add(this.previewEdges)
 
 		this.previewReferenceGroup.visible = false
 		this.setHoveredReferencePlane(null)
 		this.setSelectedReferencePlane(null)
+		this.refreshExtrudedFaceStyles()
 	}
 }

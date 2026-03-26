@@ -159,16 +159,18 @@ describe("normalizeProjectFile", () => {
 			Right: true
 		})
 
-		expect(data.extrudedModel).toEqual({
-			base: [
-				{ x: 0, y: 0 },
-				{ x: 10, y: 0 },
-				{ x: 0, y: 10 }
-			],
-			height: PART_PROJECT_DEFAULT_HEIGHT,
-			scale: 2,
-			rawHeight: PART_PROJECT_DEFAULT_HEIGHT
-		})
+		expect(data.extrudedModels).toEqual([
+			{
+				base: [
+					{ x: 0, y: 0 },
+					{ x: 10, y: 0 },
+					{ x: 0, y: 10 }
+				],
+				height: PART_PROJECT_DEFAULT_HEIGHT,
+				scale: 2,
+				rawHeight: PART_PROJECT_DEFAULT_HEIGHT
+			}
+		])
 	})
 
 	it("normalizes other project file types and nested folders", () => {
@@ -301,7 +303,7 @@ describe("normalizeProjectFile", () => {
 		expect(partEntry.data).toEqual({
 			sketchPoints: [],
 			isSketchClosed: false,
-			extrudedModel: undefined,
+			extrudedModels: [],
 			height: 30,
 			previewDistance: 40,
 			previewRotation: { yaw: 0, pitch: 0 },

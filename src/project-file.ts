@@ -35,12 +35,17 @@ export type SchemanticProjectItemData = {
 }
 
 export type PartProjectPoint = { x: number; y: number }
+export type PartProjectVector3 = { x: number; y: number; z: number }
+export type PartProjectQuaternion = { x: number; y: number; z: number; w: number }
 
 export type PartProjectExtrudedModel = {
 	base: PartProjectPoint[]
 	height: number
 	scale: number
 	rawHeight: number
+	origin?: PartProjectVector3
+	rotation?: PartProjectQuaternion
+	startOffset?: number
 }
 
 export type PartProjectPreviewRotation = {
@@ -58,7 +63,7 @@ export type PartProjectItemData = {
 	sketchPoints: PartProjectPoint[]
 	sketchName?: string
 	isSketchClosed: boolean
-	extrudedModel?: PartProjectExtrudedModel
+	extrudedModels: PartProjectExtrudedModel[]
 	height: number
 	previewDistance: number
 	previewRotation: PartProjectPreviewRotation
@@ -477,15 +482,15 @@ function clonePartProjectItemData(data: PartProjectItemData | undefined): PartPr
 		sketchPoints: data.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
 		sketchName: sketchName || undefined,
 		isSketchClosed: data.isSketchClosed,
-		extrudedModel:
-			data.extrudedModel === undefined
-				? undefined
-				: {
-						base: data.extrudedModel.base.map((point) => ({ x: point.x, y: point.y })),
-						height: data.extrudedModel.height,
-						scale: data.extrudedModel.scale,
-						rawHeight: data.extrudedModel.rawHeight
-					},
+		extrudedModels: data.extrudedModels.map((model) => ({
+			base: model.base.map((point) => ({ x: point.x, y: point.y })),
+			height: model.height,
+			scale: model.scale,
+			rawHeight: model.rawHeight,
+			origin: model.origin ? { x: model.origin.x, y: model.origin.y, z: model.origin.z } : undefined,
+			rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
+			startOffset: model.startOffset
+		})),
 		height: data.height,
 		previewDistance: data.previewDistance,
 		previewRotation: {
@@ -511,6 +516,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		sketchPoints: unknown
 		sketchName: unknown
 		isSketchClosed: unknown
+		extrudedModels: unknown
 		extrudedModel: unknown
 		height: unknown
 		previewDistance: unknown
@@ -546,7 +552,14 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 				: defaults.previewRotation.pitch
 	}
 
-	const extrudedModel = normalizePartProjectExtrudedModel(value.extrudedModel)
+	const extrudedModelsInput = Array.isArray(value.extrudedModels) ? value.extrudedModels : []
+	const extrudedModels = extrudedModelsInput.map((entry) => normalizePartProjectExtrudedModel(entry)).filter((entry): entry is PartProjectExtrudedModel => entry !== undefined)
+	if (extrudedModels.length === 0) {
+		const legacyExtrudedModel = normalizePartProjectExtrudedModel(value.extrudedModel)
+		if (legacyExtrudedModel) {
+			extrudedModels.push(legacyExtrudedModel)
+		}
+	}
 	const sketchVisible = typeof value.sketchVisible === "boolean" ? value.sketchVisible : defaults.sketchVisible
 	const referencePlaneVisibility = normalizePartProjectReferencePlaneVisibility(value.referencePlaneVisibility, defaults.referencePlaneVisibility)
 
@@ -554,7 +567,7 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		sketchPoints,
 		sketchName,
 		isSketchClosed,
-		extrudedModel,
+		extrudedModels,
 		height: heightValue,
 		previewDistance,
 		previewRotation,
@@ -589,6 +602,9 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 		height: unknown
 		scale: unknown
 		rawHeight: unknown
+		origin: unknown
+		rotation: unknown
+		startOffset: unknown
 	}>
 
 	const baseInput = Array.isArray(value.base) ? value.base : []
@@ -607,12 +623,18 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 	const height = extractFiniteNumber(value.height, PART_PROJECT_DEFAULT_HEIGHT)
 	const scale = extractFiniteNumber(value.scale, 1)
 	const rawHeight = extractFiniteNumber(value.rawHeight, PART_PROJECT_DEFAULT_HEIGHT)
+	const origin = normalizePartProjectVector3(value.origin)
+	const rotation = normalizePartProjectQuaternion(value.rotation)
+	const startOffset = typeof value.startOffset === "number" && Number.isFinite(value.startOffset) ? value.startOffset : undefined
 
 	return {
 		base,
 		height,
 		scale,
-		rawHeight
+		rawHeight,
+		origin,
+		rotation,
+		startOffset
 	}
 }
 
@@ -629,6 +651,35 @@ function normalizePartProjectPoint(input: unknown): PartProjectPoint | null {
 	return { x, y }
 }
 
+function normalizePartProjectVector3(input: unknown): PartProjectVector3 | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const candidate = input as Partial<PartProjectVector3>
+	const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? candidate.x : null
+	const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? candidate.y : null
+	const z = typeof candidate.z === "number" && Number.isFinite(candidate.z) ? candidate.z : null
+	if (x === null || y === null || z === null) {
+		return undefined
+	}
+	return { x, y, z }
+}
+
+function normalizePartProjectQuaternion(input: unknown): PartProjectQuaternion | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const candidate = input as Partial<PartProjectQuaternion>
+	const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? candidate.x : null
+	const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? candidate.y : null
+	const z = typeof candidate.z === "number" && Number.isFinite(candidate.z) ? candidate.z : null
+	const w = typeof candidate.w === "number" && Number.isFinite(candidate.w) ? candidate.w : null
+	if (x === null || y === null || z === null || w === null) {
+		return undefined
+	}
+	return { x, y, z, w }
+}
+
 function extractFiniteNumber(value: unknown, defaultValue: number): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : defaultValue
 }
@@ -637,7 +688,7 @@ function createDefaultPartProjectItemData(): PartProjectItemData {
 	return {
 		sketchPoints: [],
 		isSketchClosed: false,
-		extrudedModel: undefined,
+		extrudedModels: [],
 		height: PART_PROJECT_DEFAULT_HEIGHT,
 		previewDistance: PART_PROJECT_DEFAULT_PREVIEW_DISTANCE,
 		previewRotation: { ...PART_PROJECT_DEFAULT_ROTATION },
