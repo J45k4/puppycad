@@ -80,6 +80,10 @@ export type BoardShape = { type: "polygon"; points: Vec2[] }
 
 export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
 
+export type ScalarVariableValue = number | string | boolean
+
+export type Variables = Record<string, ScalarVariableValue>
+
 export type SchemanticProjectComponentData = {
 	type?: string
 }
@@ -178,12 +182,14 @@ export type CenterPointCircle = {
 export type SketchEntity = LineEntity | MidpointLine | CenteredRectangle | CornerRectangle | AlignedRectangle | CenterPointCircle
 
 export type Profile = {
-	
+	id: string
+	vertices: PartProjectPoint[]
+	loops: number[][]
 }
 
 export type Sketch = {
 	entities: SketchEntity[]
-	profile: Profile[]
+	profiles: Profile[]
 }
 
 export type ExtrudeTarget =
@@ -258,55 +264,55 @@ export type Chamfer = {
 }
 
 export type Part = {
+	id: string
+	name: string
 	sketches: Sketch[]
 	extrudes: Extrude[]
 	fillets: Fillet[]
 	chamfers: Chamfer[]
+	variables?: Variables
+}
+
+export type PartProjectItemData = {
 	sketchPoints: PartProjectPoint[]
 	sketchName?: string
 	isSketchClosed: boolean
 	extrudedModels: PartProjectExtrudedModel[]
 	height: number
+	variables?: Variables
 }
 
-export type PartProjectItemData = Part
+export type ProjectFileSchemanticItem = {
+	type: "schemantic"
+	name: string
+	data?: SchemanticProjectItemData
+	visible?: boolean
+}
 
-export type ProjectFileItem =
-	| {
-			type: "schemantic"
-			name: string
-			data?: SchemanticProjectItemData
-			visible?: boolean
-	  }
-	| {
-			type: "part"
-			name: string
-			data?: Part
-			visible?: boolean
-	  }
-	| {
-			type: Exclude<ProjectFileType, "schemantic" | "part">
-			name: string
-			visible?: boolean
-	  }
+export type ProjectFilePartItem = {
+	type: "part"
+	name: string
+	data?: Part
+	visible?: boolean
+}
+
+export type ProjectFileOtherItem = {
+	type: Exclude<ProjectFileType, "schemantic" | "part">
+	name: string
+	visible?: boolean
+}
+
+export type ProjectFileItem = ProjectFileSchemanticItem | ProjectFilePartItem | ProjectFileOtherItem
 
 export type ProjectFileFolder = {
 	kind: "folder"
 	name: string
-	items: ProjectFileEntry[]
+	items: ProjectItem[]
 	visible?: boolean
 }
 
-export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
-
-export type ProjectFileVersion = 2
+export type ProjectItem = ProjectFileItem | ProjectFileFolder
 
 export type Project = {
-	version: ProjectFileVersion
-	items: ProjectFileEntry[]
-	selectedPath: number[] | null
+	items: ProjectItem[]
 }
-
-export type ProjectFile = Project
-
-export type PuppyCadProject = Project

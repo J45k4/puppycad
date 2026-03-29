@@ -1,12 +1,13 @@
 import type {
 	PartProjectExtrudedModel,
 	Part,
+	PartProjectItemData,
 	PartProjectPoint,
 	PartProjectPreviewRotation,
 	PartProjectQuaternion,
 	PartProjectVector3,
 	Project,
-	ProjectFileEntry,
+	ProjectItem,
 	ProjectFileFolder,
 	ProjectFileType,
 	SchemanticProjectComponent,
@@ -19,7 +20,7 @@ import type {
 export type {
 	PartProjectExtrudedModel,
 	Part,
-	Part as PartProjectItemData,
+	PartProjectItemData,
 	PartProjectPoint,
 	PartProjectPreviewRotation,
 	PartProjectQuaternion,
@@ -27,7 +28,7 @@ export type {
 	PartProjectVector3,
 	Project as ProjectFile,
 	Project,
-	ProjectFileEntry,
+	ProjectItem as ProjectFileEntry,
 	ProjectFileFolder,
 	ProjectFileType,
 	SchemanticProjectComponent,
@@ -53,7 +54,7 @@ export const PART_PROJECT_DEFAULT_ROTATION: PartProjectPreviewRotation = {
 export const PROJECT_FILE_MIME_TYPE = "application/json"
 
 export function createProjectFile(args: {
-	items: ProjectFileEntry[]
+	items: ProjectItem[]
 	selectedPath: number[] | null
 }): Project {
 	return {
@@ -106,10 +107,10 @@ export function normalizeProjectFile(input: unknown): Project | null {
 	}
 }
 
-function normalizeProjectFileEntries(input: unknown): ProjectFileEntry[] {
+function normalizeProjectFileEntries(input: unknown): ProjectItem[] {
 	const itemsInput = Array.isArray(input) ? input : []
 	const usedNames = new Set<string>()
-	const items: ProjectFileEntry[] = []
+	const items: ProjectItem[] = []
 
 	for (const rawItem of itemsInput) {
 		if (!rawItem || typeof rawItem !== "object") {
@@ -196,13 +197,13 @@ function isFolderEntry(rawItem: unknown): rawItem is { kind?: unknown; items?: u
 	return type === "folder"
 }
 
-function validateSelectedPath(path: number[] | null, items: ProjectFileEntry[]): number[] | null {
+function validateSelectedPath(path: number[] | null, items: ProjectItem[]): number[] | null {
 	if (!path || path.length === 0) {
 		return null
 	}
 
 	const result: number[] = []
-	let currentItems: ProjectFileEntry[] = items
+	let currentItems: ProjectItem[] = items
 
 	for (let i = 0; i < path.length; i += 1) {
 		const index = path[i]
@@ -229,11 +230,11 @@ function validateSelectedPath(path: number[] | null, items: ProjectFileEntry[]):
 	return result
 }
 
-function isFolderProjectEntry(entry: ProjectFileEntry): entry is ProjectFileFolder {
+function isFolderProjectEntry(entry: ProjectItem): entry is ProjectFileFolder {
 	return (entry as ProjectFileFolder).kind === "folder"
 }
 
-function cloneProjectFileEntry(entry: ProjectFileEntry): ProjectFileEntry {
+function cloneProjectFileEntry(entry: ProjectItem): ProjectItem {
 	if (isFolderProjectEntry(entry)) {
 		return {
 			kind: "folder",
@@ -410,7 +411,7 @@ function normalizeConnectionEndpoint(endpoint: SchemanticProjectConnectionEndpoi
 	return { componentId, edge, ratio }
 }
 
-function clonePartProjectItemData(data: Part | undefined): Part | undefined {
+function clonePartProjectItemData(data: PartProjectItemData | undefined): PartProjectItemData | undefined {
 	if (!data) {
 		return undefined
 	}
@@ -428,11 +429,12 @@ function clonePartProjectItemData(data: Part | undefined): Part | undefined {
 			rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
 			startOffset: model.startOffset
 		})),
-		height: data.height
+		height: data.height,
+		variables: data.variables ? { ...data.variables } : undefined
 	}
 }
 
-function normalizePartProjectItemData(input: unknown): Part {
+function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 	const defaults = createDefaultPartProjectItemData()
 	if (!input || typeof input !== "object") {
 		return defaults
@@ -445,6 +447,7 @@ function normalizePartProjectItemData(input: unknown): Part {
 		extrudedModels: unknown
 		extrudedModel: unknown
 		height: unknown
+		variables: unknown
 	}>
 
 	const sketchPointsInput = Array.isArray(value.sketchPoints) ? value.sketchPoints : []
@@ -470,12 +473,15 @@ function normalizePartProjectItemData(input: unknown): Part {
 		}
 	}
 
+	const variables = normalizeVariables(value.variables)
+
 	return {
 		sketchPoints,
 		sketchName,
 		isSketchClosed,
 		extrudedModels,
-		height: heightValue
+		height: heightValue,
+		variables
 	}
 }
 
@@ -571,13 +577,37 @@ function extractFiniteNumber(value: unknown, defaultValue: number): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : defaultValue
 }
 
-function createDefaultPartProjectItemData(): Part {
+function createDefaultPartProjectItemData(): PartProjectItemData {
 	return {
 		sketchPoints: [],
 		isSketchClosed: false,
 		extrudedModels: [],
 		height: PART_PROJECT_DEFAULT_HEIGHT
 	}
+}
+
+function normalizeVariables(input: unknown): PartProjectItemData["variables"] {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const entries = Object.entries(input)
+	const variables: NonNullable<PartProjectItemData["variables"]> = {}
+	for (const [key, value] of entries) {
+		const name = key.trim()
+		if (!name) {
+			continue
+		}
+		if (typeof value === "number") {
+			if (Number.isFinite(value)) {
+				variables[name] = value
+			}
+			continue
+		}
+		if (typeof value === "string" || typeof value === "boolean") {
+			variables[name] = value
+		}
+	}
+	return Object.keys(variables).length > 0 ? variables : undefined
 }
 
 function normalizeVisibleFlag(rawItem: unknown): boolean | undefined {
