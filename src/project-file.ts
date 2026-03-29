@@ -1,75 +1,46 @@
+import type {
+	PartProjectExtrudedModel,
+	Part,
+	PartProjectPoint,
+	PartProjectPreviewRotation,
+	PartProjectQuaternion,
+	PartProjectVector3,
+	Project,
+	ProjectFileEntry,
+	ProjectFileFolder,
+	ProjectFileType,
+	SchemanticProjectComponent,
+	SchemanticProjectComponentData,
+	SchemanticProjectConnection,
+	SchemanticProjectConnectionEndpoint,
+	SchemanticProjectItemData
+} from "./puppycad-types"
+
+export type {
+	PartProjectExtrudedModel,
+	Part,
+	Part as PartProjectItemData,
+	PartProjectPoint,
+	PartProjectPreviewRotation,
+	PartProjectQuaternion,
+	PartProjectReferencePlaneVisibility,
+	PartProjectVector3,
+	Project as ProjectFile,
+	Project,
+	ProjectFileEntry,
+	ProjectFileFolder,
+	ProjectFileType,
+	SchemanticProjectComponent,
+	SchemanticProjectComponentData,
+	SchemanticProjectConnection,
+	SchemanticProjectConnectionEndpoint,
+	SchemanticProjectItemData,
+	PuppyCadProject
+} from "./puppycad-types"
+
 export const PROJECT_FILE_VERSION = 2 as const
 
 export const PROJECT_FILE_TYPES = ["schemantic", "pcb", "part", "assembly", "diagram"] as const
-
-export type ProjectFileType = (typeof PROJECT_FILE_TYPES)[number]
-
-export type SchemanticProjectComponentData = {
-	type?: string
-}
-
-export type SchemanticProjectComponent = {
-	id: number
-	x: number
-	y: number
-	width: number
-	height: number
-	data?: SchemanticProjectComponentData
-}
-
-export type SchemanticProjectConnectionEndpoint = {
-	componentId: number
-	edge: "left" | "right" | "top" | "bottom"
-	ratio: number
-}
-
-export type SchemanticProjectConnection = {
-	from: SchemanticProjectConnectionEndpoint
-	to: SchemanticProjectConnectionEndpoint
-	style?: "solid" | "dashed"
-}
-
-export type SchemanticProjectItemData = {
-	components: SchemanticProjectComponent[]
-	connections: SchemanticProjectConnection[]
-}
-
-export type PartProjectPoint = { x: number; y: number }
-export type PartProjectVector3 = { x: number; y: number; z: number }
-export type PartProjectQuaternion = { x: number; y: number; z: number; w: number }
-
-export type PartProjectExtrudedModel = {
-	base: PartProjectPoint[]
-	height: number
-	scale: number
-	rawHeight: number
-	origin?: PartProjectVector3
-	rotation?: PartProjectQuaternion
-	startOffset?: number
-}
-
-export type PartProjectPreviewRotation = {
-	yaw: number
-	pitch: number
-}
-
-export type PartProjectReferencePlaneVisibility = {
-	Front: boolean
-	Top: boolean
-	Right: boolean
-}
-
-export type PartProjectItemData = {
-	sketchPoints: PartProjectPoint[]
-	sketchName?: string
-	isSketchClosed: boolean
-	extrudedModels: PartProjectExtrudedModel[]
-	height: number
-	previewDistance: number
-	previewRotation: PartProjectPreviewRotation
-	sketchVisible: boolean
-	referencePlaneVisibility: PartProjectReferencePlaneVisibility
-}
 
 export const PART_PROJECT_DEFAULT_HEIGHT = 30
 export const PART_PROJECT_DEFAULT_PREVIEW_DISTANCE = 44
@@ -79,46 +50,12 @@ export const PART_PROJECT_DEFAULT_ROTATION: PartProjectPreviewRotation = {
 	pitch: Math.PI / 5
 }
 
-export type ProjectFileItem =
-	| {
-			type: "schemantic"
-			name: string
-			data?: SchemanticProjectItemData
-			visible?: boolean
-	  }
-	| {
-			type: "part"
-			name: string
-			data?: PartProjectItemData
-			visible?: boolean
-	  }
-	| {
-			type: Exclude<ProjectFileType, "schemantic" | "part">
-			name: string
-			visible?: boolean
-	  }
-
-export type ProjectFileFolder = {
-	kind: "folder"
-	name: string
-	items: ProjectFileEntry[]
-	visible?: boolean
-}
-
-export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
-
-export type ProjectFile = {
-	version: typeof PROJECT_FILE_VERSION
-	items: ProjectFileEntry[]
-	selectedPath: number[] | null
-}
-
 export const PROJECT_FILE_MIME_TYPE = "application/json"
 
 export function createProjectFile(args: {
 	items: ProjectFileEntry[]
 	selectedPath: number[] | null
-}): ProjectFile {
+}): Project {
 	return {
 		version: PROJECT_FILE_VERSION,
 		items: args.items.map(cloneProjectFileEntry),
@@ -126,11 +63,11 @@ export function createProjectFile(args: {
 	}
 }
 
-export function serializeProjectFile(file: ProjectFile): string {
+export function serializeProjectFile(file: Project): string {
 	return JSON.stringify(file, null, 2)
 }
 
-export function normalizeProjectFile(input: unknown): ProjectFile | null {
+export function normalizeProjectFile(input: unknown): Project | null {
 	if (!input || typeof input !== "object") {
 		return null
 	}
@@ -473,7 +410,7 @@ function normalizeConnectionEndpoint(endpoint: SchemanticProjectConnectionEndpoi
 	return { componentId, edge, ratio }
 }
 
-function clonePartProjectItemData(data: PartProjectItemData | undefined): PartProjectItemData | undefined {
+function clonePartProjectItemData(data: Part | undefined): Part | undefined {
 	if (!data) {
 		return undefined
 	}
@@ -491,22 +428,11 @@ function clonePartProjectItemData(data: PartProjectItemData | undefined): PartPr
 			rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
 			startOffset: model.startOffset
 		})),
-		height: data.height,
-		previewDistance: data.previewDistance,
-		previewRotation: {
-			yaw: data.previewRotation.yaw,
-			pitch: data.previewRotation.pitch
-		},
-		sketchVisible: data.sketchVisible,
-		referencePlaneVisibility: {
-			Front: data.referencePlaneVisibility.Front,
-			Top: data.referencePlaneVisibility.Top,
-			Right: data.referencePlaneVisibility.Right
-		}
+		height: data.height
 	}
 }
 
-function normalizePartProjectItemData(input: unknown): PartProjectItemData {
+function normalizePartProjectItemData(input: unknown): Part {
 	const defaults = createDefaultPartProjectItemData()
 	if (!input || typeof input !== "object") {
 		return defaults
@@ -519,10 +445,6 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		extrudedModels: unknown
 		extrudedModel: unknown
 		height: unknown
-		previewDistance: unknown
-		previewRotation: unknown
-		sketchVisible: unknown
-		referencePlaneVisibility: unknown
 	}>
 
 	const sketchPointsInput = Array.isArray(value.sketchPoints) ? value.sketchPoints : []
@@ -538,19 +460,6 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 	const sketchName = typeof value.sketchName === "string" && value.sketchName.trim().length > 0 ? value.sketchName.trim() : undefined
 
 	const heightValue = typeof value.height === "number" && Number.isFinite(value.height) ? value.height : defaults.height
-	const previewDistance = extractFiniteNumber(value.previewDistance, defaults.previewDistance)
-
-	const previewRotationValue = value.previewRotation
-	const previewRotation: PartProjectPreviewRotation = {
-		yaw:
-			previewRotationValue && typeof previewRotationValue === "object"
-				? extractFiniteNumber((previewRotationValue as { yaw?: unknown }).yaw, defaults.previewRotation.yaw)
-				: defaults.previewRotation.yaw,
-		pitch:
-			previewRotationValue && typeof previewRotationValue === "object"
-				? extractFiniteNumber((previewRotationValue as { pitch?: unknown }).pitch, defaults.previewRotation.pitch)
-				: defaults.previewRotation.pitch
-	}
 
 	const extrudedModelsInput = Array.isArray(value.extrudedModels) ? value.extrudedModels : []
 	const extrudedModels = extrudedModelsInput.map((entry) => normalizePartProjectExtrudedModel(entry)).filter((entry): entry is PartProjectExtrudedModel => entry !== undefined)
@@ -560,35 +469,13 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 			extrudedModels.push(legacyExtrudedModel)
 		}
 	}
-	const sketchVisible = typeof value.sketchVisible === "boolean" ? value.sketchVisible : defaults.sketchVisible
-	const referencePlaneVisibility = normalizePartProjectReferencePlaneVisibility(value.referencePlaneVisibility, defaults.referencePlaneVisibility)
 
 	return {
 		sketchPoints,
 		sketchName,
 		isSketchClosed,
 		extrudedModels,
-		height: heightValue,
-		previewDistance,
-		previewRotation,
-		sketchVisible,
-		referencePlaneVisibility
-	}
-}
-
-function normalizePartProjectReferencePlaneVisibility(input: unknown, defaults: PartProjectReferencePlaneVisibility): PartProjectReferencePlaneVisibility {
-	if (!input || typeof input !== "object") {
-		return {
-			Front: defaults.Front,
-			Top: defaults.Top,
-			Right: defaults.Right
-		}
-	}
-	const value = input as Partial<PartProjectReferencePlaneVisibility>
-	return {
-		Front: typeof value.Front === "boolean" ? value.Front : defaults.Front,
-		Top: typeof value.Top === "boolean" ? value.Top : defaults.Top,
-		Right: typeof value.Right === "boolean" ? value.Right : defaults.Right
+		height: heightValue
 	}
 }
 
@@ -684,20 +571,12 @@ function extractFiniteNumber(value: unknown, defaultValue: number): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : defaultValue
 }
 
-function createDefaultPartProjectItemData(): PartProjectItemData {
+function createDefaultPartProjectItemData(): Part {
 	return {
 		sketchPoints: [],
 		isSketchClosed: false,
 		extrudedModels: [],
-		height: PART_PROJECT_DEFAULT_HEIGHT,
-		previewDistance: PART_PROJECT_DEFAULT_PREVIEW_DISTANCE,
-		previewRotation: { ...PART_PROJECT_DEFAULT_ROTATION },
-		sketchVisible: true,
-		referencePlaneVisibility: {
-			Front: true,
-			Top: true,
-			Right: true
-		}
+		height: PART_PROJECT_DEFAULT_HEIGHT
 	}
 }
 

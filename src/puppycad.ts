@@ -1,13 +1,26 @@
 // PuppyCad – Core type & class skeleton
 // MIT License – © PuppyCorp
 
-export type UUID = string
+import type { BoardShape, LayerDefinition, LayerMaterial, Motion, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./puppycad-types"
 
-type NamedReference = { id: UUID; name: string }
-type SchematicReference = NamedReference & {
-	nets?: NamedReference[]
-	components?: NamedReference[]
-}
+export type {
+	BoardShape,
+	FeatureContext,
+	FootprintOutline,
+	FootprintSpec,
+	LayerDefinition,
+	LayerMaterial,
+	NamedReference,
+	Pad,
+	Part,
+	PartProjectItemData,
+	PortKind,
+	ProjectFile,
+	PuppyCadProject,
+	SchematicReference,
+	TraceSegment,
+	UUID
+} from "./puppycad-types"
 
 export abstract class Entity {
 	readonly id: UUID
@@ -97,36 +110,6 @@ export enum PadShape {
 	Polygon = "polygon"
 }
 
-/** Represents a single pad in a footprint */
-export type Pad = {
-	type?: "smd" | "through"
-	pin: Pin
-	x: number // mm, relative to footprint origin
-	y: number // mm, relative to footprint origin
-	width: number // mm
-	height: number // mm
-	shape: PadShape
-	rotation?: number // degrees
-	net?: string // optional net name
-}
-
-/** Represents the outline (body) of a footprint */
-export interface FootprintOutline {
-	points: { x: number; y: number }[] // closed polygon, mm units
-	lineWidth?: number // mm
-}
-
-/** Represents an electronic component footprint spec */
-export interface FootprintSpec {
-	pads: Pad[]
-	outline?: FootprintOutline
-	referenceOrigin?: {
-		x: number
-		y: number
-	}
-	description?: string
-}
-
 /** Represents an electronic component footprint */
 export class Footprint extends Entity {
 	public points: Vec2[] = []
@@ -163,9 +146,6 @@ export class Footprint extends Entity {
 }
 
 // ---- Simulation / Kinematics -----------------------------------------------
-export interface Motion {
-	step(dt: number): void
-}
 export class RotationalMotion implements Motion {
 	constructor(
 		public entity: Entity,
@@ -311,8 +291,6 @@ export class AlignmentConstraint extends Constraint {
 	}
 }
 
-export type PortKind = "mechanical" | "electrical"
-
 export class Port extends Entity {
 	kind: PortKind
 	constructor(name: string, kind: PortKind = "mechanical") {
@@ -378,10 +356,6 @@ export class Sketch extends Entity {
 
 export class Body extends Entity {
 	// Placeholder for B‑Rep or mesh representation
-}
-
-export interface FeatureContext {
-	target: Body | Sketch
 }
 
 export class Assembly extends Group {
@@ -594,40 +568,6 @@ export class Schematic extends Entity {
 	}
 }
 
-// Union of common PCB layer materials
-export type LayerMaterial =
-	// Conductors
-	| "copper" // rolled annealed copper foil
-	// Dielectrics & cores
-	| "FR4" // epoxy-glass laminate
-	| "CEM1" // paper-epoxy laminate
-	| "Rogers_RT/duroid" // high-frequency PTFE laminate
-	| "polyimide" // flexible-board substrate
-	| "ceramic_filler" // low-loss, high-temp substrate
-	| "aluminum_core" // metal-core PCB for thermal dissipation
-	// Masks & inks
-	| "epoxy_soldermask" // liquid photoimageable solder-resist
-	| "coverlay_polyimide" // flex-board protective overlay
-	| "silkscreen_ink" // epoxy or acrylic legend ink
-	// Fabrication & tooling
-	| "photoresist" // for drill/route patterning
-	| "adhesive_prepreg" // bonding layer between cores
-
-// Extend LayerDefinition to include material
-export interface LayerDefinition {
-	name: string
-	type: "copper" | "dielectric" | "soldermask" | "silkscreen" | "fabrication" | "drill" | "keepout"
-	material?: LayerMaterial
-	thickness?: number
-}
-
-export interface TraceSegment {
-	start: Vec3
-	end: Vec3
-	width: number
-	layer: string
-	curvature?: number
-}
 export class Trace extends Entity {
 	constructor(
 		name: string,
@@ -658,8 +598,6 @@ export class Layer extends Entity {
 		this.traces = args.traces ?? []
 	}
 }
-
-export type BoardShape = { type: "polygon"; points: Vec2[] }
 
 export class Via extends Entity {
 	public pos: Vec2

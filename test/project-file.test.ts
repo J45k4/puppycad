@@ -1,13 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import {
-	PART_PROJECT_DEFAULT_HEIGHT,
-	PART_PROJECT_DEFAULT_PREVIEW_DISTANCE,
-	PART_PROJECT_DEFAULT_ROTATION,
-	type PartProjectItemData,
-	type ProjectFileEntry,
-	type SchemanticProjectItemData,
-	normalizeProjectFile
-} from "../src/project-file"
+import { PART_PROJECT_DEFAULT_HEIGHT, type PartProjectItemData, type ProjectFileEntry, type SchemanticProjectItemData, normalizeProjectFile } from "../src/project-file"
 
 describe("normalizeProjectFile", () => {
 	it("normalizes schemantic project items", () => {
@@ -143,34 +135,27 @@ describe("normalizeProjectFile", () => {
 		expect(item.name).toBe("Part 1")
 
 		const data = item.data as PartProjectItemData
-		expect(data.sketchPoints).toEqual([
-			{ x: 0, y: 0 },
-			{ x: 10, y: 5 }
-		])
-		expect(data.isSketchClosed).toBe(false)
-		expect(data.height).toBe(PART_PROJECT_DEFAULT_HEIGHT)
-		expect(data.previewDistance).toBe(PART_PROJECT_DEFAULT_PREVIEW_DISTANCE)
-		expect(data.previewRotation.yaw).toBeCloseTo(PART_PROJECT_DEFAULT_ROTATION.yaw)
-		expect(data.previewRotation.pitch).toBeCloseTo(0.2)
-		expect(data.sketchVisible).toBe(true)
-		expect(data.referencePlaneVisibility).toEqual({
-			Front: true,
-			Top: true,
-			Right: true
+		expect(data).toEqual({
+			sketchPoints: [
+				{ x: 0, y: 0 },
+				{ x: 10, y: 5 }
+			],
+			sketchName: undefined,
+			isSketchClosed: false,
+			extrudedModels: [
+				{
+					base: [
+						{ x: 0, y: 0 },
+						{ x: 10, y: 0 },
+						{ x: 0, y: 10 }
+					],
+					height: PART_PROJECT_DEFAULT_HEIGHT,
+					scale: 2,
+					rawHeight: PART_PROJECT_DEFAULT_HEIGHT
+				}
+			],
+			height: PART_PROJECT_DEFAULT_HEIGHT
 		})
-
-		expect(data.extrudedModels).toEqual([
-			{
-				base: [
-					{ x: 0, y: 0 },
-					{ x: 10, y: 0 },
-					{ x: 0, y: 10 }
-				],
-				height: PART_PROJECT_DEFAULT_HEIGHT,
-				scale: 2,
-				rawHeight: PART_PROJECT_DEFAULT_HEIGHT
-			}
-		])
 	})
 
 	it("normalizes other project file types and nested folders", () => {
@@ -238,14 +223,12 @@ describe("normalizeProjectFile", () => {
 		}
 		expect(nestedPart.name).toBe("Part 1")
 		const nestedPartData = nestedPart.data as PartProjectItemData
-		expect(nestedPartData.sketchPoints).toEqual([])
-		expect(nestedPartData.height).toBe(PART_PROJECT_DEFAULT_HEIGHT)
-		expect(nestedPartData.previewDistance).toBe(PART_PROJECT_DEFAULT_PREVIEW_DISTANCE)
-		expect(nestedPartData.sketchVisible).toBe(true)
-		expect(nestedPartData.referencePlaneVisibility).toEqual({
-			Front: true,
-			Top: true,
-			Right: true
+		expect(nestedPartData).toEqual({
+			sketchPoints: [],
+			sketchName: undefined,
+			isSketchClosed: false,
+			extrudedModels: [],
+			height: PART_PROJECT_DEFAULT_HEIGHT
 		})
 
 		expect(file.selectedPath).toEqual([3, 0])
@@ -266,6 +249,7 @@ describe("normalizeProjectFile", () => {
 							visible: false,
 							data: {
 								sketchPoints: [],
+								sketchName: undefined,
 								isSketchClosed: false,
 								height: 30,
 								previewDistance: 40,
@@ -302,17 +286,10 @@ describe("normalizeProjectFile", () => {
 		expect(partEntry.visible).toBe(false)
 		expect(partEntry.data).toEqual({
 			sketchPoints: [],
+			sketchName: undefined,
 			isSketchClosed: false,
 			extrudedModels: [],
-			height: 30,
-			previewDistance: 40,
-			previewRotation: { yaw: 0, pitch: 0 },
-			sketchVisible: false,
-			referencePlaneVisibility: {
-				Front: false,
-				Top: true,
-				Right: false
-			}
+			height: 30
 		})
 	})
 })

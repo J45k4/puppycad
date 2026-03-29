@@ -1,7 +1,7 @@
 import { AssemblyEditor } from "./assembly"
 import { createDiagramEditor } from "./diagram"
 import { PartEditor } from "./part"
-import type { PartEditorState } from "./part"
+import type { PartEditorState, PartEditorViewState } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
 import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
@@ -29,6 +29,7 @@ type PartProjectItem = BaseProjectItem & {
 	type: "part"
 	editor: PartEditor
 	getState: () => PartEditorState
+	getViewState: () => PartEditorViewState
 }
 
 type OtherProjectItem = BaseProjectItem & {
@@ -417,6 +418,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			}
 			if (node.type === "part") {
 				const state = node.getState()
+				const viewState = node.getViewState()
 				const childItems: ProjectListEntry[] = []
 				const addPlaneChild = (suffix: string, name: "Top" | "Front" | "Right") => {
 					const childId = `${id}:${suffix}`
@@ -432,7 +434,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						id: childId,
 						name,
 						metadata: { draggable: false, synthetic: true },
-						visible: state.referencePlaneVisibility[name]
+						visible: viewState.referencePlaneVisibility[name]
 					})
 				}
 				const addSketchChild = (sketchIndex: number, name: string) => {
@@ -449,7 +451,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						id: childId,
 						name,
 						metadata: { draggable: false, synthetic: true },
-						visible: state.sketchVisible
+						visible: viewState.sketchVisible
 					})
 				}
 				const addSyntheticChild = (suffix: string, name: string) => {
@@ -1425,7 +1427,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					name: resolvedName,
 					editor,
 					visible,
-					getState: () => editor.getState()
+					getState: () => editor.getState(),
+					getViewState: () => editor.getViewState()
 				}
 			}
 			case "assembly":

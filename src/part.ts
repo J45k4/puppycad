@@ -47,6 +47,11 @@ type PreviewSolidVisual = {
 
 export type PartEditorState = PartProjectItemData
 
+export type PartEditorViewState = {
+	sketchVisible: boolean
+	referencePlaneVisibility: PartProjectReferencePlaneVisibility
+}
+
 type PartEditorOptions = {
 	initialState?: PartEditorState
 	onStateChange?: () => void
@@ -429,7 +434,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	public getState(): PartEditorState {
-		const heightValue = this.getHeightFromInput()
 		return {
 			sketchPoints: this.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
 			sketchName: this.sketchPoints.length > 0 ? this.sketchName : undefined,
@@ -443,12 +447,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
 				startOffset: model.startOffset
 			})),
-			height: heightValue,
-			previewDistance: this.previewBaseDistance,
-			previewRotation: {
-				yaw: this.previewRotation.yaw,
-				pitch: this.previewRotation.pitch
-			},
+			height: this.getHeightFromInput()
+		}
+	}
+
+	public getViewState(): PartEditorViewState {
+		return {
 			sketchVisible: this.sketchVisible,
 			referencePlaneVisibility: {
 				Front: this.referencePlaneVisibility.Front,
@@ -880,8 +884,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private restoreState(state?: PartEditorState) {
 		const height = state && Number.isFinite(state.height) ? state.height : PART_PROJECT_DEFAULT_HEIGHT
-		const previewDistance = state && Number.isFinite(state.previewDistance) ? state.previewDistance : PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
-		const rotation = state?.previewRotation ?? PART_PROJECT_DEFAULT_ROTATION
 		this.sketchPoints = state?.sketchPoints?.map((point) => ({ x: point.x, y: point.y })) ?? []
 		this.sketchName = state?.sketchName?.trim() ? state.sketchName.trim() : "Sketch 1"
 		this.sketchBreakIndices.clear()
@@ -899,18 +901,18 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
 			startOffset: model.startOffset
 		}))
-		this.sketchVisible = state?.sketchVisible ?? true
+		this.sketchVisible = true
 		this.referencePlaneVisibility = {
-			Front: state?.referencePlaneVisibility?.Front ?? true,
-			Top: state?.referencePlaneVisibility?.Top ?? true,
-			Right: state?.referencePlaneVisibility?.Right ?? true
+			Front: true,
+			Top: true,
+			Right: true
 		}
 		this.refreshReferencePlaneStyles()
 		this.updateReferencePlaneHandles()
 		this.heightInput.value = String(height)
-		this.previewBaseDistance = THREE.MathUtils.clamp(previewDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
-		this.previewRotation.yaw = rotation.yaw
-		this.previewRotation.pitch = rotation.pitch
+		this.previewBaseDistance = PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
+		this.previewRotation.yaw = PART_PROJECT_DEFAULT_ROTATION.yaw
+		this.previewRotation.pitch = PART_PROJECT_DEFAULT_ROTATION.pitch
 		this.drawSketch()
 		this.syncPreviewGeometry()
 		this.updateSketchOverlay()
