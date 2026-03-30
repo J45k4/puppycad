@@ -282,6 +282,40 @@ export type PartProjectItemData = {
 	variables?: Variables
 }
 
+export type AssemblyMateType = "fasten" | "revolute" | "prismatic" | "planar" | "ball"
+
+export type AssemblyMateReference = {
+	instanceId: string
+	connectorId: string
+}
+
+export type Transform3D = {
+	translation?: PartProjectVector3
+	rotation?: PartProjectVector3
+	scale?: PartProjectVector3
+}
+
+export type AssemblyInstance = {
+	id: string
+	partId: string
+	transform?: Transform3D
+}
+
+export type AssemblyMate = {
+	type: AssemblyMateType
+	a: AssemblyMateReference
+	b: AssemblyMateReference
+	params?: Variables
+}
+
+export type Assembly = {
+	id: string
+	name: string
+	instances: AssemblyInstance[]
+	mates?: AssemblyMate[]
+	variables?: Variables
+}
+
 export type ProjectFileSchemanticItem = {
 	type: "schemantic"
 	name: string
@@ -292,27 +326,44 @@ export type ProjectFileSchemanticItem = {
 export type ProjectFilePartItem = {
 	type: "part"
 	name: string
-	data?: Part
+	data?: PartProjectItemData
+	visible?: boolean
+}
+
+export type ProjectFileAssemblyItem = {
+	type: "assembly"
+	name: string
+	data?: Assembly
 	visible?: boolean
 }
 
 export type ProjectFileOtherItem = {
-	type: Exclude<ProjectFileType, "schemantic" | "part">
+	type: Exclude<ProjectFileType, "schemantic" | "part" | "assembly">
 	name: string
 	visible?: boolean
 }
 
-export type ProjectFileItem = ProjectFileSchemanticItem | ProjectFilePartItem | ProjectFileOtherItem
+export type ProjectFileItem = ProjectFileSchemanticItem | ProjectFilePartItem | ProjectFileAssemblyItem | ProjectFileOtherItem
 
 export type ProjectFileFolder = {
 	kind: "folder"
 	name: string
-	items: ProjectItem[]
+	items: ProjectFileEntry[]
 	visible?: boolean
 }
 
-export type ProjectItem = ProjectFileItem | ProjectFileFolder
+export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
+
+export type ProjectItem = ProjectFileEntry
+
+export type ProjectFileVersion = 2
 
 export type Project = {
-	items: ProjectItem[]
+	version: ProjectFileVersion
+	items: ProjectFileEntry[]
+	selectedPath: number[] | null
 }
+
+export type ProjectFile = Project
+
+export type PuppyCadProject = Project

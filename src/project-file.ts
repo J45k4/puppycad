@@ -1,6 +1,5 @@
 import type {
 	PartProjectExtrudedModel,
-	Part,
 	PartProjectItemData,
 	PartProjectPoint,
 	PartProjectPreviewRotation,
