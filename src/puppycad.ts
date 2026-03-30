@@ -1,11 +1,31 @@
 // PuppyCad – Core type & class skeleton
 // MIT License – © PuppyCorp
 
-import type { BoardShape, LayerDefinition, LayerMaterial, Motion, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./puppycad-types"
+import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./puppycad-types"
 
 export type {
+	BaseFeature,
 	BoardShape,
+	Chamfer,
+	ChamferEdgeTarget,
+	ChamferFeature,
+	CompositeFeature,
+	Extrude,
+	ExtrudeBlindExtent,
+	ExtrudeExtent,
+	ExtrudeFeature,
+	ExtrudeTarget,
+	ExtrudeThroughAllExtent,
+	ExtrudeUpToFaceExtent,
+	ExtrudeUpToNextExtent,
+	ExtrudeUpToPartExtent,
+	ExtrudeUpToVertexExtent,
+	Feature,
+	FeatureId,
 	FeatureContext,
+	Fillet,
+	FilletEdgeTarget,
+	FilletFeature,
 	FootprintOutline,
 	FootprintSpec,
 	LayerDefinition,
@@ -17,9 +37,14 @@ export type {
 	PortKind,
 	ProjectFile,
 	PuppyCadProject,
+	ScalarVariableValue,
 	SchematicReference,
+	SketchEntity,
+	SketchFeature,
+	Transform3D,
 	TraceSegment,
-	UUID
+	UUID,
+	Variables
 } from "./puppycad-types"
 
 export abstract class Entity {
@@ -52,6 +77,10 @@ export abstract class Entity {
 	public equal(other: Entity): boolean {
 		return this.id === other.id
 	}
+}
+
+export interface Motion {
+	step(dt: number): void
 }
 
 export class Vec3 {
@@ -344,14 +373,14 @@ export class Face {
 	edges: Edge[] = []
 }
 
-export class Feature {}
+export class RuntimeFeature {}
 
 export class Sketch extends Entity {
 	// TODO: 2‑D curve definitions (lines, arcs, splines)
 	extrusionDepth = 0
 	direction: { x: number; y: number; z: number } = { x: 0, y: 0, z: 1 }
 	operation: "add" | "cut" | "intersect" = "add" // boolean operation type
-	features: Feature[] = []
+	features: RuntimeFeature[] = []
 }
 
 export class Body extends Entity {

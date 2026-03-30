@@ -37,10 +37,6 @@ export interface FootprintSpec {
 	description?: string
 }
 
-export interface Motion {
-	step(dt: number): void
-}
-
 export type PortKind = "mechanical" | "electrical"
 
 export interface FeatureContext {
@@ -187,7 +183,18 @@ export type Profile = {
 	loops: number[][]
 }
 
-export type Sketch = {
+export type FeatureId = string
+
+export type BaseFeature = {
+	id: FeatureId
+	type: string
+	name?: string
+	suppressed?: boolean
+	dependsOn?: FeatureId[]
+}
+
+export type SketchFeature = BaseFeature & {
+	type: "sketch"
 	entities: SketchEntity[]
 	profiles: Profile[]
 }
@@ -234,7 +241,7 @@ export type ExtrudeThroughAllExtent = {
 
 export type ExtrudeExtent = ExtrudeBlindExtent | ExtrudeUpToNextExtent | ExtrudeUpToFaceExtent | ExtrudeUpToPartExtent | ExtrudeUpToVertexExtent | ExtrudeThroughAllExtent
 
-export type Extrude = {
+export type ExtrudeFeature = BaseFeature & {
 	type: "extrude"
 	target: ExtrudeTarget
 	extent: ExtrudeExtent
@@ -248,7 +255,7 @@ export type FilletEdgeTarget = {
 	edgeId: string
 }
 
-export type Fillet = {
+export type FilletFeature = BaseFeature & {
 	type: "fillet"
 	target: FilletEdgeTarget
 	radius: number
@@ -256,20 +263,31 @@ export type Fillet = {
 
 export type ChamferEdgeTarget = FilletEdgeTarget
 
-export type Chamfer = {
+export type ChamferFeature = BaseFeature & {
 	type: "chamfer"
 	target: ChamferEdgeTarget
 	d1: number
 	d2?: number
 }
 
+export type CompositeFeature = BaseFeature & {
+	type: "composite"
+	features: Feature[]
+	variables?: Variables
+	transform?: Transform3D
+}
+
+export type Feature = SketchFeature | ExtrudeFeature | FilletFeature | ChamferFeature | CompositeFeature
+
+export type Sketch = SketchFeature
+export type Extrude = ExtrudeFeature
+export type Fillet = FilletFeature
+export type Chamfer = ChamferFeature
+
 export type Part = {
 	id: string
 	name: string
-	sketches: Sketch[]
-	extrudes: Extrude[]
-	fillets: Fillet[]
-	chamfers: Chamfer[]
+	features: Feature[]
 	variables?: Variables
 }
 
