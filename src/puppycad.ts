@@ -1,29 +1,36 @@
 // PuppyCad – Core type & class skeleton
 // MIT License – © PuppyCorp
 
-import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./puppycad-types"
+import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./contract"
 
 export type {
 	BaseFeature,
 	BoardShape,
-	Chamfer,
 	ChamferEdgeTarget,
 	ChamferFeature,
+	CompositeAliasReference,
 	CompositeFeature,
-	Extrude,
+	CompositeEdgeAlias,
+	CompositeFaceAlias,
+	CompositeFeatureAlias,
+	CompositeProfileAlias,
+	EdgeReference,
+	ExtrudeEdgeReference,
+	ExtrudeEdgeSelector,
+	ExtrudeFaceReference,
+	ExtrudeFaceSelector,
 	ExtrudeBlindExtent,
 	ExtrudeExtent,
 	ExtrudeFeature,
-	ExtrudeTarget,
 	ExtrudeThroughAllExtent,
 	ExtrudeUpToFaceExtent,
 	ExtrudeUpToNextExtent,
 	ExtrudeUpToPartExtent,
 	ExtrudeUpToVertexExtent,
+	FaceReference,
 	Feature,
 	FeatureId,
 	FeatureContext,
-	Fillet,
 	FilletEdgeTarget,
 	FilletFeature,
 	FootprintOutline,
@@ -33,19 +40,27 @@ export type {
 	NamedReference,
 	Pad,
 	Part,
-	PartProjectItemData,
 	PortKind,
-	ProjectFile,
-	PuppyCadProject,
+	ProfileReference,
+	ProfileSelector,
 	ScalarVariableValue,
+	ResolvedAliasReference,
+	ResolvedAliases,
+	ResolvedEdgeReference,
+	ResolvedFaceReference,
+	ResolvedProfileReference,
 	SchematicReference,
+	SketchProfileReference,
 	SketchEntity,
 	SketchFeature,
+	SketchTarget,
 	Transform3D,
 	TraceSegment,
 	UUID,
 	Variables
-} from "./puppycad-types"
+} from "./contract"
+
+export type { PartProjectItemData, ProjectFile, PuppyCadProject } from "./project-file"
 
 export abstract class Entity {
 	readonly id: UUID

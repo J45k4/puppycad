@@ -1,197 +1,389 @@
-export type ContractSchema = "puppycad.contract@0.1"
+import type { Body, Sketch as RuntimeSketch, Vec2, Vec3 } from "./puppycad"
+import type { Pin } from "./puppycad"
 
-export interface PuppyCadContract {
-	schema: ContractSchema
-	id: `contract.${string}` // globally unique
-	version: string // semver of THIS contract document
-	publishedAt: string // ISO timestamp
-	publisher: Publisher // who signs it
-	scope: "device" | "line" | "facility" | "company"
-	name: string
+export type UUID = string
+
+export type NamedReference = { id: UUID; name: string }
+
+export type SchematicReference = NamedReference & {
+	nets?: NamedReference[]
+	components?: NamedReference[]
+}
+
+export type Pad = {
+	type?: "smd" | "through"
+	pin: Pin
+	x: number
+	y: number
+	width: number
+	height: number
+	shape: "rectangular" | "circular" | "oval" | "polygon"
+	rotation?: number
+	net?: string
+}
+
+export interface FootprintOutline {
+	points: { x: number; y: number }[]
+	lineWidth?: number
+}
+
+export interface FootprintSpec {
+	pads: Pad[]
+	outline?: FootprintOutline
+	referenceOrigin?: {
+		x: number
+		y: number
+	}
 	description?: string
-	visibility: "public" | "private" | "customer-only"
-	regions?: string[] // ISO country/region codes served
-	certifications?: string[] // ISO9001, AS9100, CE, RoHS, ITAR, etc.
-
-	processes: ProcessCapability[] // CNC, 3DP, Injection, PCB-FAB, PCB-ASM, SheetMetal...
-
-	materials?: MaterialCatalogItem[] // optional global list
-	logistics?: LogisticsPolicy
-	pricing?: PricingPolicy // base pricing model
-	leadTimes?: LeadTimePolicy // nominal lead times per process/material/tier
-	quality?: QualityPolicy
-	quoting?: QuotingAPI // how to quote
-	ordering?: OrderingAPI // how to place/track orders
-	webhooks?: WebhookSpec[] // status callbacks
-
-	dfmDrivers: DFMDriverRef[] // pointers to rule packs (validation & transforms)
-	transforms?: TransformRef[] // optional rewrite/optimization drivers
-
-	trust?: TrustTelemetry // rolling KPIs (for score computation)
-	terms?: CommercialTerms // SLAs, refund policy, IP/confidentiality
-
-	signatures?: Signature[] // detached signatures (publisher, optionally PuppyCad)
-	meta?: Record<string, unknown> // vendor-defined extras
 }
 
-export interface Publisher {
-	legalName: string
-	duns?: string
-	vatId?: string
-	contact: { email: string; phone?: string; url?: string }
-	address?: string
+export type PortKind = "mechanical" | "electrical"
+
+export interface FeatureContext {
+	target: Body | RuntimeSketch
 }
 
-export type ProcessKind = "CNC" | "Additive:FDM" | "Additive:SLA" | "Additive:SLS" | "InjectionMolding" | "SheetMetal" | "PCB:Fabrication" | "PCB:Assembly"
+export type LayerMaterial =
+	| "copper"
+	| "FR4"
+	| "CEM1"
+	| "Rogers_RT/duroid"
+	| "polyimide"
+	| "ceramic_filler"
+	| "aluminum_core"
+	| "epoxy_soldermask"
+	| "coverlay_polyimide"
+	| "silkscreen_ink"
+	| "photoresist"
+	| "adhesive_prepreg"
 
-export interface ProcessCapability {
-	kind: ProcessKind
-	name?: string // e.g., "Haas VF-2", "Prusa MK4 Farm #3"
-	deviceIds?: string[] // serials/asset tags if scope=device
-	capacity?: Capacity // throughput, build-envelope, lanes
-	constraints: ConstraintSet[] // geometric & process constraints
-	materials?: MaterialCatalogItem[] // supported materials for this process
-	tolerances?: ToleranceSpec // general capability tolerances
-	finishes?: string[] // anodize types, bead blast, etc.
-	costing?: PricingPolicy // overrides
-	leadTimes?: LeadTimePolicy // overrides
-	dfmDrivers?: DFMDriverRef[] // overrides/extends global
+export interface LayerDefinition {
+	name: string
+	type: "copper" | "dielectric" | "soldermask" | "silkscreen" | "fabrication" | "drill" | "keepout"
+	material?: LayerMaterial
+	thickness?: number
 }
 
-export interface Capacity {
-	envelope?: { x: number; y: number; z: number; units: "mm" | "in" }
-	batch?: { parallelJobs?: number; perDay?: number }
-	materialsParallel?: number
+export interface TraceSegment {
+	start: Vec3
+	end: Vec3
+	width: number
+	layer: string
+	curvature?: number
 }
 
-export interface ConstraintSet {
+export type BoardShape = { type: "polygon"; points: Vec2[] }
+
+export type ScalarVariableValue = number | string | boolean
+
+export type Variables = Record<string, ScalarVariableValue>
+
+export type Point2D = { x: number; y: number }
+export type Vector3D = { x: number; y: number; z: number }
+export type Quaternion = { x: number; y: number; z: number; w: number }
+
+export type LineEntity = {
+	type: "line"
+	p0: Point2D
+	p1: Point2D
+}
+
+export type MidpointLine = {
+	type: "midpointLine"
+	midpoint: Point2D
+	length: number
+	angle?: number
+}
+
+export type CenteredRectangle = {
+	type: "centeredRectangle"
+	center: Point2D
+	width: number
+	height: number
+	rotation?: number
+}
+
+export type CornerRectangle = {
+	type: "cornerRectangle"
+	p0: Point2D
+	p1: Point2D
+}
+
+export type AlignedRectangle = {
+	type: "alignedRectangle"
+	p0: Point2D
+	p1: Point2D
+	height: number
+}
+
+export type CenterPointCircle = {
+	type: "centerPointCircle"
+	center: Point2D
+	radius: number
+}
+
+export type SketchEntity = LineEntity | MidpointLine | CenteredRectangle | CornerRectangle | AlignedRectangle | CenterPointCircle
+
+export type Profile = {
 	id: string
-	appliesTo: ("part" | "feature" | "material" | "assembly")[]
-	// Expression DSL or structured rules; simple v0 shape:
-	rules: Rule[]
+	vertices: Point2D[]
+	loops: number[][]
 }
 
-export type Rule =
-	| { code: "thin_wall"; min: number; units: "mm" }
-	| { code: "min_hole_dia"; min: number; units: "mm" }
-	| { code: "max_part_size"; x: number; y: number; z: number; units: "mm" }
-	| { code: "draft_angle_min"; minDeg: number }
-	| { code: "overhang_max"; deg: number } // for 3DP
-	| { code: "no_internal_undercut" } // CNC
-	| { code: "trace_width_min"; min: number; units: "mm" } // PCB
-	| { code: "clearance_min"; min: number; units: "mm" } // PCB
-	| { code: "via_drill_min"; min: number; units: "mm" } // PCB
-	| { code: "layers_max"; max: number } // PCB
-	| { code: string; [k: string]: unknown } // extensible
+export type FeatureId = string
 
-export interface MaterialCatalogItem {
-	code: string // e.g., "AL6061-T6", "PLA", "FR-4"
-	kind: "metal" | "polymer" | "composite" | "pcb" | "resin" | "other"
-	properties?: Record<string, number | string>
-	finishes?: string[]
+export type BaseFeature = {
+	id: FeatureId
+	type: string
+	name?: string
+	suppressed?: boolean
+	dependsOn?: FeatureId[]
 }
 
-export interface ToleranceSpec {
-	general?: string // e.g., "ISO 2768-mK"
-	linear?: { plusMinus: number; units: "mm" }
-	hole?: { h7?: boolean; h9?: boolean; custom?: string }
-	flatness?: { value: number; units: "mm" }
-	surfaceFinishRa?: { value: number; units: "µm" }
+export type CompositeAliasReference = {
+	type: "compositeAlias"
+	compositeFeatureId: FeatureId
+	aliasId: string
 }
 
-export interface LogisticsPolicy {
-	incoterms?: string[] // EXW, FOB, DDP...
-	shipFrom?: string[] // regions/addresses
-	shipMethods?: string[] // DHL, UPS, sea, air
+export type ProfileSelector = {
+	type: "containsPoint"
+	point: Point2D
 }
 
-export interface PricingPolicy {
-	model: "table" | "formula" | "quote-only"
-	currency?: string
-	// v0 simple fields; can be per-process override
-	baseSetupFee?: number
-	perPart?: number // simple FDM example
-	perVolumeCm3?: number // 3DP variable cost
-	cncPerHour?: number // CNC example
-	discounts?: { moq: number; percentOff: number }[]
+export type SketchProfileReference = {
+	type: "sketchProfile"
+	sketchFeatureId: FeatureId
+	selector: ProfileSelector
 }
 
-export interface LeadTimePolicy {
-	standardDays?: number
-	expediteDays?: number
-	expediteMultiplier?: number
-	notes?: string
+export type ProfileReference = SketchProfileReference | CompositeAliasReference
+
+export type ExtrudeFaceSelector =
+	| {
+			type: "cap"
+			side: "top" | "bottom"
+	  }
+	| {
+			type: "side"
+			index: number
+	  }
+
+export type ExtrudeFaceReference = {
+	type: "extrudeFace"
+	extrudeFeatureId: FeatureId
+	selector: ExtrudeFaceSelector
 }
 
-export interface QualityPolicy {
-	inspections?: ("visual" | "dimensional" | "CMM" | "Xray" | "AOI")[]
-	sampling?: string // e.g., "ANSI/ASQ Z1.4 AQL 1.0"
-	reports?: ("material-cert" | "fpv" | "cofc" | "ppap")[]
+export type FaceReference = ExtrudeFaceReference | CompositeAliasReference
+
+export type ExtrudeEdgeSelector =
+	| {
+			type: "capLoop"
+			side: "top" | "bottom"
+			index: number
+	  }
+	| {
+			type: "side"
+			index: number
+	  }
+
+export type ExtrudeEdgeReference = {
+	type: "extrudeEdge"
+	extrudeFeatureId: FeatureId
+	selector: ExtrudeEdgeSelector
 }
 
-export interface DFMDriverRef {
-	id: `driver.${string}` // unique name in registry
-	version: string // semver
-	uri?: string // where to fetch (if public)
-	visibility?: "public" | "private" | "customer-only"
-	// Optional inline minimal rules for portability:
-	inlineRules?: ConstraintSet[]
+export type EdgeReference = ExtrudeEdgeReference | CompositeAliasReference
+
+export type SketchTarget =
+	| {
+			type: "plane"
+			plane: "XY" | "YZ" | "XZ"
+	  }
+	| {
+			type: "face"
+			face: FaceReference
+	  }
+
+export type SketchFeature = BaseFeature & {
+	type: "sketch"
+	target: SketchTarget
+	entities: SketchEntity[]
+	profiles: Profile[]
 }
 
-export interface TransformRef {
-	id: `transform.${string}`
-	version: string
-	purpose: "3DP->Injection" | "3DP->CNC" | "CostReduce" | "SplitForMachining" | string
-	uri?: string
+export type ExtrudeBlindExtent = {
+	type: "blind"
+	distance: number
 }
 
-export interface QuotingAPI {
-	mode: "api" | "email" | "portal"
-	endpoint?: string // HTTPS endpoint if mode=api
-	auth?: { kind: "apikey" | "oauth2" | "signed-url"; doc?: string }
-	supportsBatch?: boolean
-	// Minimal quote request/response shapes (opaque pass-through allowed):
-	requestSchemaRef?: string
-	responseSchemaRef?: string
+export type ExtrudeUpToNextExtent = {
+	type: "upToNext"
 }
 
-export interface OrderingAPI {
-	mode: "api" | "email" | "portal"
-	endpoint?: string
-	auth?: { kind: "apikey" | "oauth2" | "signed-url"; doc?: string }
-	requiresQuoteId?: boolean
-	statusPoll?: { endpoint?: string; intervalSec?: number }
-	cancellationWindowHours?: number
+export type ExtrudeUpToFaceExtent = {
+	type: "upToFace"
+	face: FaceReference
 }
 
-export interface WebhookSpec {
-	event: "quote.created" | "order.accepted" | "order.in_production" | "order.shipped" | "order.delivered" | string
-	url: string
-	secret?: string
+export type ExtrudeUpToPartExtent = {
+	type: "upToPart"
+	partId: string
 }
 
-export interface TrustTelemetry {
-	windowDays: number // e.g., last 90 days
-	onTimeDeliveryPct?: number
-	rejectionRatePct?: number
-	avgResponseHours?: number
-	avgDeviationDays?: number
-	customerNps?: number
-	lastAudit?: string // ISO date
+export type ExtrudeUpToVertexExtent = {
+	type: "upToVertex"
+	vertexId: string
 }
 
-export interface CommercialTerms {
-	ndaRequired?: boolean
-	ipRetention: "customer" | "supplier" | "joint"
-	warrantyDays?: number
-	refundPolicy?: string
-	sla?: { responseHours?: number; remakePolicy?: string }
+export type ExtrudeThroughAllExtent = {
+	type: "throughAll"
 }
 
-export interface Signature {
-	by: "publisher" | "puppycad" | string
-	alg: "ed25519" | "secp256k1" | "rsa-pss"
-	sig: string // base64url
-	keyId?: string
-	signedAt: string // ISO
+export type ExtrudeExtent = ExtrudeBlindExtent | ExtrudeUpToNextExtent | ExtrudeUpToFaceExtent | ExtrudeUpToPartExtent | ExtrudeUpToVertexExtent | ExtrudeThroughAllExtent
+
+export type ExtrudeFeature = BaseFeature & {
+	type: "extrude"
+	target: ProfileReference
+	extent: ExtrudeExtent
+	operation: "newBody" | "add" | "remove" | "intersect"
+	direction?: "positive" | "negative"
+}
+
+export type FilletEdgeTarget = {
+	edge: EdgeReference
+}
+
+export type FilletFeature = BaseFeature & {
+	type: "fillet"
+	target: FilletEdgeTarget
+	radius: number
+}
+
+export type ChamferEdgeTarget = FilletEdgeTarget
+
+export type ChamferFeature = BaseFeature & {
+	type: "chamfer"
+	target: ChamferEdgeTarget
+	d1: number
+	d2?: number
+}
+
+export type CompositeFeature = BaseFeature & {
+	type: "composite"
+	features: Feature[]
+	aliases?: CompositeFeatureAlias[]
+	variables?: Variables
+	transform?: Transform3D
+}
+
+export type Feature = SketchFeature | ExtrudeFeature | FilletFeature | ChamferFeature | CompositeFeature
+
+export type CompositeProfileAlias = {
+	id: string
+	type: "profile"
+	source: SketchProfileReference
+}
+
+export type CompositeFaceAlias = {
+	id: string
+	type: "face"
+	source: ExtrudeFaceReference
+}
+
+export type CompositeEdgeAlias = {
+	id: string
+	type: "edge"
+	source: ExtrudeEdgeReference
+}
+
+export type CompositeFeatureAlias = CompositeProfileAlias | CompositeFaceAlias | CompositeEdgeAlias
+
+export type ResolvedProfileReference = {
+	type: "profile"
+	sketchFeatureId: FeatureId
+	profileId: string
+}
+
+export type ResolvedFaceReference = {
+	type: "face"
+	solidId: string
+	faceId: string
+}
+
+export type ResolvedEdgeReference = {
+	type: "edge"
+	solidId: string
+	edgeId: string
+}
+
+export type ResolvedAliasReference = ResolvedProfileReference | ResolvedFaceReference | ResolvedEdgeReference
+
+export type ResolvedAliases = Record<FeatureId, Record<string, ResolvedAliasReference>>
+
+export type SolidVertex = {
+	id: string
+	position: Vector3D
+}
+
+export type SolidEdge = {
+	id: string
+	vertexIds: string[]
+}
+
+export type SolidFace = {
+	id: string
+	edgeIds: string[]
+}
+
+export type Solid = {
+	id: string
+	featureId: FeatureId
+	vertices: SolidVertex[]
+	edges: SolidEdge[]
+	faces: SolidFace[]
+}
+
+export type Part = {
+	id: string
+	name: string
+	features: Feature[]
+	solids?: Solid[]
+	resolvedAliases?: ResolvedAliases
+	variables?: Variables
+}
+
+export type AssemblyMateType = "fasten" | "revolute" | "prismatic" | "planar" | "ball"
+
+export type AssemblyMateReference = {
+	instanceId: string
+	connectorId: string
+}
+
+export type Transform3D = {
+	translation?: Vector3D
+	rotation?: Vector3D
+	scale?: Vector3D
+}
+
+export type AssemblyInstance = {
+	id: string
+	partId: string
+	transform?: Transform3D
+}
+
+export type AssemblyMate = {
+	type: AssemblyMateType
+	a: AssemblyMateReference
+	b: AssemblyMateReference
+	params?: Variables
+}
+
+export type Assembly = {
+	id: string
+	name: string
+	instances: AssemblyInstance[]
+	mates?: AssemblyMate[]
+	variables?: Variables
 }

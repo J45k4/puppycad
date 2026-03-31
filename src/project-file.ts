@@ -1,42 +1,120 @@
-import type {
-	PartProjectExtrudedModel,
-	PartProjectItemData,
-	PartProjectPoint,
-	PartProjectPreviewRotation,
-	PartProjectQuaternion,
-	PartProjectVector3,
-	Project,
-	ProjectItem,
-	ProjectFileFolder,
-	ProjectFileType,
-	SchemanticProjectComponent,
-	SchemanticProjectComponentData,
-	SchemanticProjectConnection,
-	SchemanticProjectConnectionEndpoint,
-	SchemanticProjectItemData
-} from "./puppycad-types"
+import type { Assembly, Point2D, Quaternion, Variables, Vector3D } from "./contract"
 
-export type {
-	PartProjectExtrudedModel,
-	Part,
-	PartProjectItemData,
-	PartProjectPoint,
-	PartProjectPreviewRotation,
-	PartProjectQuaternion,
-	PartProjectReferencePlaneVisibility,
-	PartProjectVector3,
-	Project as ProjectFile,
-	Project,
-	ProjectItem as ProjectFileEntry,
-	ProjectFileFolder,
-	ProjectFileType,
-	SchemanticProjectComponent,
-	SchemanticProjectComponentData,
-	SchemanticProjectConnection,
-	SchemanticProjectConnectionEndpoint,
-	SchemanticProjectItemData,
-	PuppyCadProject
-} from "./puppycad-types"
+export type { Part, Point2D, Quaternion, Vector3D } from "./contract"
+
+export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
+
+export type SchemanticProjectComponentData = {
+	type?: string
+}
+
+export type SchemanticProjectComponent = {
+	id: number
+	x: number
+	y: number
+	width: number
+	height: number
+	data?: SchemanticProjectComponentData
+}
+
+export type SchemanticProjectConnectionEndpoint = {
+	componentId: number
+	edge: "left" | "right" | "top" | "bottom"
+	ratio: number
+}
+
+export type SchemanticProjectConnection = {
+	from: SchemanticProjectConnectionEndpoint
+	to: SchemanticProjectConnectionEndpoint
+	style?: "solid" | "dashed"
+}
+
+export type SchemanticProjectItemData = {
+	components: SchemanticProjectComponent[]
+	connections: SchemanticProjectConnection[]
+}
+
+export type PartProjectExtrudedModel = {
+	base: Point2D[]
+	height: number
+	scale: number
+	rawHeight: number
+	origin?: Vector3D
+	rotation?: Quaternion
+	startOffset?: number
+}
+
+export type PartProjectPreviewRotation = {
+	yaw: number
+	pitch: number
+}
+
+export type PartProjectReferencePlaneVisibility = {
+	Front: boolean
+	Top: boolean
+	Right: boolean
+}
+
+export type PartProjectItemData = {
+	sketchPoints: Point2D[]
+	sketchName?: string
+	isSketchClosed: boolean
+	extrudedModels: PartProjectExtrudedModel[]
+	height: number
+	variables?: Variables
+}
+
+export type ProjectFileSchemanticItem = {
+	type: "schemantic"
+	name: string
+	data?: SchemanticProjectItemData
+	visible?: boolean
+}
+
+export type ProjectFilePartItem = {
+	type: "part"
+	name: string
+	data?: PartProjectItemData
+	visible?: boolean
+}
+
+export type ProjectFileAssemblyItem = {
+	type: "assembly"
+	name: string
+	data?: Assembly
+	visible?: boolean
+}
+
+export type ProjectFileOtherItem = {
+	type: Exclude<ProjectFileType, "schemantic" | "part" | "assembly">
+	name: string
+	visible?: boolean
+}
+
+export type ProjectFileItem = ProjectFileSchemanticItem | ProjectFilePartItem | ProjectFileAssemblyItem | ProjectFileOtherItem
+
+export type ProjectFileFolder = {
+	kind: "folder"
+	name: string
+	items: ProjectFileEntry[]
+	visible?: boolean
+}
+
+export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
+
+export type ProjectItem = ProjectFileEntry
+
+export type ProjectFileVersion = 2
+
+export type Project = {
+	version: ProjectFileVersion
+	items: ProjectFileEntry[]
+	selectedPath: number[] | null
+}
+
+export type ProjectFile = Project
+
+export type PuppyCadProject = Project
 
 export const PROJECT_FILE_VERSION = 2 as const
 
@@ -450,9 +528,9 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 	}>
 
 	const sketchPointsInput = Array.isArray(value.sketchPoints) ? value.sketchPoints : []
-	const sketchPoints: PartProjectPoint[] = []
+	const sketchPoints: Point2D[] = []
 	for (const raw of sketchPointsInput) {
-		const point = normalizePartProjectPoint(raw)
+		const point = normalizePoint2D(raw)
 		if (point) {
 			sketchPoints.push(point)
 		}
@@ -500,9 +578,9 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 	}>
 
 	const baseInput = Array.isArray(value.base) ? value.base : []
-	const base: PartProjectPoint[] = []
+	const base: Point2D[] = []
 	for (const raw of baseInput) {
-		const point = normalizePartProjectPoint(raw)
+		const point = normalizePoint2D(raw)
 		if (point) {
 			base.push(point)
 		}
@@ -515,8 +593,8 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 	const height = extractFiniteNumber(value.height, PART_PROJECT_DEFAULT_HEIGHT)
 	const scale = extractFiniteNumber(value.scale, 1)
 	const rawHeight = extractFiniteNumber(value.rawHeight, PART_PROJECT_DEFAULT_HEIGHT)
-	const origin = normalizePartProjectVector3(value.origin)
-	const rotation = normalizePartProjectQuaternion(value.rotation)
+	const origin = normalizeVector3D(value.origin)
+	const rotation = normalizeQuaternion(value.rotation)
 	const startOffset = typeof value.startOffset === "number" && Number.isFinite(value.startOffset) ? value.startOffset : undefined
 
 	return {
@@ -530,11 +608,11 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 	}
 }
 
-function normalizePartProjectPoint(input: unknown): PartProjectPoint | null {
+function normalizePoint2D(input: unknown): Point2D | null {
 	if (!input || typeof input !== "object") {
 		return null
 	}
-	const candidate = input as Partial<PartProjectPoint>
+	const candidate = input as Partial<Point2D>
 	const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? candidate.x : null
 	const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? candidate.y : null
 	if (x === null || y === null) {
@@ -543,11 +621,11 @@ function normalizePartProjectPoint(input: unknown): PartProjectPoint | null {
 	return { x, y }
 }
 
-function normalizePartProjectVector3(input: unknown): PartProjectVector3 | undefined {
+function normalizeVector3D(input: unknown): Vector3D | undefined {
 	if (!input || typeof input !== "object") {
 		return undefined
 	}
-	const candidate = input as Partial<PartProjectVector3>
+	const candidate = input as Partial<Vector3D>
 	const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? candidate.x : null
 	const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? candidate.y : null
 	const z = typeof candidate.z === "number" && Number.isFinite(candidate.z) ? candidate.z : null
@@ -557,11 +635,11 @@ function normalizePartProjectVector3(input: unknown): PartProjectVector3 | undef
 	return { x, y, z }
 }
 
-function normalizePartProjectQuaternion(input: unknown): PartProjectQuaternion | undefined {
+function normalizeQuaternion(input: unknown): Quaternion | undefined {
 	if (!input || typeof input !== "object") {
 		return undefined
 	}
-	const candidate = input as Partial<PartProjectQuaternion>
+	const candidate = input as Partial<Quaternion>
 	const x = typeof candidate.x === "number" && Number.isFinite(candidate.x) ? candidate.x : null
 	const y = typeof candidate.y === "number" && Number.isFinite(candidate.y) ? candidate.y : null
 	const z = typeof candidate.z === "number" && Number.isFinite(candidate.z) ? candidate.z : null
