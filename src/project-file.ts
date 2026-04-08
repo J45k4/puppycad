@@ -1,6 +1,8 @@
-import type { Assembly, Point2D, Quaternion, Variables, Vector3D } from "./contract"
+import type { Assembly, Variables } from "./contract"
+import type { Point2D, Quaternion, Vector3D } from "./types"
 
-export type { Part, Point2D, Quaternion, Vector3D } from "./contract"
+export type { Part } from "./contract"
+export type { Point2D, Point3D, Quaternion, Transform2D, Transform3D, Vector3D } from "./types"
 
 export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
 

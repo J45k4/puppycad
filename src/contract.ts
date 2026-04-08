@@ -1,5 +1,8 @@
-import type { Body, Sketch as RuntimeSketch, Vec2, Vec3 } from "./puppycad"
+import type { Body, Sketch as RuntimeSketch } from "./puppycad"
 import type { Pin } from "./puppycad"
+import type { Point2D, Transform3D, Vector3D } from "./types"
+
+export type { Point2D, Point3D, Quaternion, Transform2D, Transform3D, Vector3D } from "./types"
 
 export type UUID = string
 
@@ -23,17 +26,14 @@ export type Pad = {
 }
 
 export interface FootprintOutline {
-	points: { x: number; y: number }[]
+	points: Point2D[]
 	lineWidth?: number
 }
 
 export interface FootprintSpec {
 	pads: Pad[]
 	outline?: FootprintOutline
-	referenceOrigin?: {
-		x: number
-		y: number
-	}
+	referenceOrigin?: Point2D
 	description?: string
 }
 
@@ -65,37 +65,40 @@ export interface LayerDefinition {
 }
 
 export interface TraceSegment {
-	start: Vec3
-	end: Vec3
+	start: Vector3D
+	end: Vector3D
 	width: number
 	layer: string
 	curvature?: number
 }
 
-export type BoardShape = { type: "polygon"; points: Vec2[] }
+export type BoardShape = { type: "polygon"; points: Point2D[] }
 
 export type ScalarVariableValue = number | string | boolean
 
 export type Variables = Record<string, ScalarVariableValue>
 
-export type Point2D = { x: number; y: number }
-export type Vector3D = { x: number; y: number; z: number }
-export type Quaternion = { x: number; y: number; z: number; w: number }
+export type SketchEntityId = string
+export type AnchorRef = `${SketchEntityId}:${string}`
 
-export type LineEntity = {
+type BaseSketchEntity = {
+	id?: SketchEntityId
+}
+
+export type LineEntity = BaseSketchEntity & {
 	type: "line"
 	p0: Point2D
 	p1: Point2D
 }
 
-export type MidpointLine = {
+export type MidpointLine = BaseSketchEntity & {
 	type: "midpointLine"
 	midpoint: Point2D
 	length: number
 	angle?: number
 }
 
-export type CenteredRectangle = {
+export type CenteredRectangle = BaseSketchEntity & {
 	type: "centeredRectangle"
 	center: Point2D
 	width: number
@@ -103,20 +106,20 @@ export type CenteredRectangle = {
 	rotation?: number
 }
 
-export type CornerRectangle = {
+export type CornerRectangle = BaseSketchEntity & {
 	type: "cornerRectangle"
 	p0: Point2D
 	p1: Point2D
 }
 
-export type AlignedRectangle = {
+export type AlignedRectangle = BaseSketchEntity & {
 	type: "alignedRectangle"
 	p0: Point2D
 	p1: Point2D
 	height: number
 }
 
-export type CenterPointCircle = {
+export type CenterPointCircle = BaseSketchEntity & {
 	type: "centerPointCircle"
 	center: Point2D
 	radius: number
@@ -206,11 +209,94 @@ export type SketchTarget =
 			face: FaceReference
 	  }
 
+export type SketchConstraint =
+	| {
+			id?: string
+			type: "coincident"
+			a: AnchorRef
+			b: AnchorRef
+	  }
+	| {
+			id?: string
+			type: "parallel"
+			eA: SketchEntityId
+			eB: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "perpendicular"
+			eA: SketchEntityId
+			eB: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "equal"
+			eA: SketchEntityId
+			eB: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "horizontal"
+			e: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "vertical"
+			e: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "tangent"
+			a: SketchEntityId
+			b: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "concentric"
+			a: SketchEntityId
+			b: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "midpoint"
+			point: AnchorRef
+			on: SketchEntityId
+	  }
+	| {
+			id?: string
+			type: "symmetry"
+			a: SketchEntityId
+			b: SketchEntityId
+			about: SketchEntityId
+	  }
+
+export type SketchDimension =
+	| {
+			id: string
+			type: "distance"
+			between: [AnchorRef, AnchorRef]
+			value: number
+	  }
+	| {
+			id: string
+			type: "diameter" | "radius"
+			of: SketchEntityId
+			value: number
+	  }
+	| {
+			id: string
+			type: "angle"
+			between: [SketchEntityId, SketchEntityId]
+			value: number
+	  }
+
 export type SketchFeature = BaseFeature & {
 	type: "sketch"
 	target: SketchTarget
 	entities: SketchEntity[]
 	profiles: Profile[]
+	constraints?: SketchConstraint[]
+	dimensions?: SketchDimension[]
 }
 
 export type ExtrudeBlindExtent = {
@@ -359,12 +445,6 @@ export type AssemblyMateType = "fasten" | "revolute" | "prismatic" | "planar" | 
 export type AssemblyMateReference = {
 	instanceId: string
 	connectorId: string
-}
-
-export type Transform3D = {
-	translation?: Vector3D
-	rotation?: Vector3D
-	scale?: Vector3D
 }
 
 export type AssemblyInstance = {
