@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Window } from "happy-dom"
-import { DockLayout } from "../src/dock-layout"
+import { DockLayout } from "../src/ui/dock-layout"
 
 describe("DockLayout", () => {
 	beforeEach(() => {

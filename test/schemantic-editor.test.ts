@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Window } from "happy-dom"
-import type { CanvasComponent, Connection, EditorCanvasOptions } from "../src/canvas"
-import { SchemanticEditor } from "../src/schemantic"
-import type { SchemanticEditorState } from "../src/schemantic"
+import type { CanvasComponent, Connection, EditorCanvasOptions } from "../src/ui/canvas"
+import { SchemanticEditor } from "../src/ui/schemantic"
+import type { SchemanticEditorState } from "../src/ui/schemantic"
 
 type SchematicComponentData = { type?: string }
 

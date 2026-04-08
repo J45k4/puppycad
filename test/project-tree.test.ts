@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { ProjectTree } from "../src/project-tree"
+import { ProjectTree } from "../src/ui/project-tree"
 
 describe("ProjectTree move behaviour", () => {
 	it("moves a file into another folder", () => {

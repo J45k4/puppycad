@@ -1,4 +1,4 @@
-import index from "./index.html"
+import index from "./ui/index.html"
 import { postMcp } from "./mcp"
 import { postProject } from "./server/save-project"
 

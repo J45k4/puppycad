@@ -1,7 +1,7 @@
-import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "./project-file"
-import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "./project-file"
-import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName, type SketchSurfaceKind } from "./part-quick-actions"
-import type { Point2D } from "./types"
+import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
+import type { PartProjectExtrudedModel, PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../project-file"
+import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName, type SketchSurfaceKind } from "../part-quick-actions"
+import type { Point2D } from "../types"
 import { UiComponent } from "./ui"
 import * as THREE from "three"
 

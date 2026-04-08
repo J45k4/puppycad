@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Window } from "happy-dom"
 
-import { ProjectList } from "../src/project-list"
+import { ProjectList } from "../src/ui/project-list"
 
 describe("ProjectList context menu", () => {
 	beforeEach(() => {
