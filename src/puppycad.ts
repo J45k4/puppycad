@@ -49,6 +49,8 @@ export type {
 	ResolvedEdgeReference,
 	ResolvedFaceReference,
 	ResolvedProfileReference,
+	PartProjectItemData,
+	Project,
 	SchematicReference,
 	SketchProfileReference,
 	SketchEntity,
@@ -59,8 +61,6 @@ export type {
 	UUID,
 	Variables
 } from "./contract"
-
-export type { PartProjectItemData, ProjectFile, PuppyCadProject } from "./project-file"
 
 export abstract class Entity {
 	readonly id: UUID

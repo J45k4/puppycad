@@ -1,7 +1,7 @@
 import { EditorCanvas } from "./canvas"
 import type { CanvasComponent, EditorCanvasOptions } from "./canvas"
 import { SelectGroup, UiComponent } from "./ui"
-import type { SchemanticProjectItemData } from "../project-file"
+import type { SchemanticProjectItemData } from "../contract"
 
 type SchematicComponentData = {
 	type?: string

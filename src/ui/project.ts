@@ -4,14 +4,14 @@ import { PartEditor } from "./part"
 import type { PartEditorState, PartEditorViewState } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
+import type { Project, ProjectDocumentType, ProjectFolder as PersistedProjectFolder, ProjectNode as PersistedProjectNode } from "../contract"
 import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "../project-file"
-import type { ProjectFile, ProjectFileEntry, ProjectFileFolder, ProjectFileType } from "../project-file"
 import { DockLayout, type DockOrientation, type DockLayoutState } from "./dock-layout"
 import { ItemList, Modal, UiComponent, TreeList, showTextPromptModal, type TreeNode } from "./ui"
 import { ProjectList, type ProjectListEntry } from "./project-list"
 
 type BaseProjectItem = {
-	type: ProjectFileType
+	type: ProjectDocumentType
 	name: string
 	editor: UiComponent<HTMLDivElement>
 	visible: boolean
@@ -33,7 +33,7 @@ type PartProjectItem = BaseProjectItem & {
 }
 
 type OtherProjectItem = BaseProjectItem & {
-	type: Exclude<ProjectFileType, "schemantic" | "part">
+	type: Exclude<ProjectDocumentType, "schemantic" | "part">
 }
 
 export type ProjectItem = SchemanticProjectItem | PartProjectItem | OtherProjectItem
@@ -47,7 +47,7 @@ type ProjectFolder = {
 
 type ProjectNode = ProjectItem | ProjectFolder
 
-type NewNodeType = ProjectFileType | "folder"
+type NewNodeType = ProjectDocumentType | "folder"
 
 function isFolder(node: ProjectNode): node is ProjectFolder {
 	return (node as ProjectFolder).kind === "folder"
@@ -1234,7 +1234,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private addItem(type: ProjectFileType) {
+	private addItem(type: ProjectDocumentType) {
 		const container = this.getContainerForNewNode()
 		const item = this.createProjectItem(type, undefined, container)
 		container.push(item)
@@ -1390,7 +1390,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private createProjectItem(
-		type: ProjectFileType,
+		type: ProjectDocumentType,
 		name?: string,
 		existingNodes: ProjectNode[] = this.items,
 		schemanticState?: SchemanticEditorState,
@@ -1456,7 +1456,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private resolveItemName(type: ProjectFileType, desiredName: string | undefined, siblings: ProjectNode[]): string {
+	private resolveItemName(type: ProjectDocumentType, desiredName: string | undefined, siblings: ProjectNode[]): string {
 		return this.resolveName(desiredName, siblings, () => {
 			const base = `${type.charAt(0).toUpperCase()}${type.slice(1)}`
 			return this.generateUniqueName(base, siblings)
@@ -1624,11 +1624,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readonly")
 			const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
 			const request = store.get(storeKey)
-			let result = await this.promisifyRequest<ProjectFile | undefined>(request)
+			let result = await this.promisifyRequest<Project | undefined>(request)
 			if (!result && this.projectId === "default") {
 				this.log("loadFromIndexedDB:legacy-fallback")
 				const legacyRequest = store.get(ProjectTreeView.LEGACY_STORE_KEY)
-				result = await this.promisifyRequest<ProjectFile | undefined>(legacyRequest)
+				result = await this.promisifyRequest<Project | undefined>(legacyRequest)
 			}
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve()
@@ -1661,7 +1661,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		return openProjectDatabase()
 	}
 
-	private buildProjectFile(): ProjectFile {
+	private buildProjectFile(): Project {
 		const items = this.buildProjectFileEntries(this.items)
 		return createProjectFile({
 			items,
@@ -1669,7 +1669,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		})
 	}
 
-	private buildProjectFileEntries(nodes: ProjectNode[]): ProjectFileEntry[] {
+	private buildProjectFileEntries(nodes: ProjectNode[]): PersistedProjectNode[] {
 		return nodes.map((node) => {
 			if (isFolder(node)) {
 				return {
@@ -1699,7 +1699,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		})
 	}
 
-	private restoreFromProjectFile(projectFile: ProjectFile) {
+	private restoreFromProjectFile(projectFile: Project) {
 		this.isRestoring = true
 		try {
 			this.items = this.createNodesFromEntries(projectFile.items)
@@ -1721,7 +1721,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private createNodesFromEntries(entries: ProjectFileEntry[]): ProjectNode[] {
+	private createNodesFromEntries(entries: PersistedProjectNode[]): ProjectNode[] {
 		const nodes: ProjectNode[] = []
 		for (const entry of entries) {
 			if (this.isFolderEntry(entry)) {
@@ -1737,8 +1737,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		return nodes
 	}
 
-	private isFolderEntry(entry: ProjectFileEntry): entry is ProjectFileFolder {
-		return (entry as ProjectFileFolder).kind === "folder"
+	private isFolderEntry(entry: PersistedProjectNode): entry is PersistedProjectFolder {
+		return (entry as PersistedProjectFolder).kind === "folder"
 	}
 
 	private async saveProjectToFile() {

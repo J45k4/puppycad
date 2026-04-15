@@ -1,6 +1,6 @@
 import type { Body, Sketch as RuntimeSketch } from "./puppycad"
 import type { Pin } from "./puppycad"
-import type { Point2D, Transform3D, Vector3D } from "./types"
+import type { Point2D, Quaternion, Transform3D, Vector3D } from "./types"
 
 export type { Point2D, Point3D, Quaternion, Transform2D, Transform3D, Vector3D } from "./types"
 
@@ -466,4 +466,112 @@ export type Assembly = {
 	instances: AssemblyInstance[]
 	mates?: AssemblyMate[]
 	variables?: Variables
+}
+
+export type ProjectDocumentType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
+
+export type SchemanticProjectComponentData = {
+	type?: string
+}
+
+export type SchemanticProjectComponent = {
+	id: number
+	x: number
+	y: number
+	width: number
+	height: number
+	data?: SchemanticProjectComponentData
+}
+
+export type SchemanticProjectConnectionEndpoint = {
+	componentId: number
+	edge: "left" | "right" | "top" | "bottom"
+	ratio: number
+}
+
+export type SchemanticProjectConnection = {
+	from: SchemanticProjectConnectionEndpoint
+	to: SchemanticProjectConnectionEndpoint
+	style?: "solid" | "dashed"
+}
+
+export type SchemanticProjectItemData = {
+	components: SchemanticProjectComponent[]
+	connections: SchemanticProjectConnection[]
+}
+
+export type PartProjectExtrudedModel = {
+	base: Point2D[]
+	height: number
+	scale: number
+	rawHeight: number
+	origin?: Vector3D
+	rotation?: Quaternion
+	startOffset?: number
+}
+
+export type PartProjectPreviewRotation = {
+	yaw: number
+	pitch: number
+}
+
+export type PartProjectReferencePlaneVisibility = {
+	Front: boolean
+	Top: boolean
+	Right: boolean
+}
+
+export type PartProjectItemData = {
+	sketchPoints: Point2D[]
+	sketchName?: string
+	isSketchClosed: boolean
+	extrudedModels: PartProjectExtrudedModel[]
+	height: number
+	variables?: Variables
+}
+
+export type ProjectSchemanticDocument = {
+	type: "schemantic"
+	name: string
+	data?: SchemanticProjectItemData
+	visible?: boolean
+}
+
+export type ProjectPartDocument = {
+	type: "part"
+	name: string
+	data?: PartProjectItemData
+	visible?: boolean
+}
+
+export type ProjectAssemblyDocument = {
+	type: "assembly"
+	name: string
+	data?: Assembly
+	visible?: boolean
+}
+
+export type ProjectOtherDocument = {
+	type: Exclude<ProjectDocumentType, "schemantic" | "part" | "assembly">
+	name: string
+	visible?: boolean
+}
+
+export type ProjectDocument = ProjectSchemanticDocument | ProjectPartDocument | ProjectAssemblyDocument | ProjectOtherDocument
+
+export type ProjectFolder = {
+	kind: "folder"
+	name: string
+	items: ProjectNode[]
+	visible?: boolean
+}
+
+export type ProjectNode = ProjectDocument | ProjectFolder
+
+export type ProjectVersion = 2
+
+export type Project = {
+	version: ProjectVersion
+	items: ProjectNode[]
+	selectedPath: number[] | null
 }

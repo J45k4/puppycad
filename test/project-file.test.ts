@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { PART_PROJECT_DEFAULT_HEIGHT, type PartProjectItemData, type ProjectFileEntry, type SchemanticProjectItemData, normalizeProjectFile } from "../src/project-file"
+import type { PartProjectItemData, ProjectNode, SchemanticProjectItemData } from "../src/contract"
+import { PART_PROJECT_DEFAULT_HEIGHT, normalizeProjectFile } from "../src/project-file"
 
 describe("normalizeProjectFile", () => {
 	it("normalizes schemantic project items", () => {
@@ -61,7 +62,7 @@ describe("normalizeProjectFile", () => {
 		}
 
 		expect(file.items).toHaveLength(1)
-		const item = file.items[0] as Extract<ProjectFileEntry, { type: "schemantic" }>
+		const item = file.items[0] as Extract<ProjectNode, { type: "schemantic" }>
 
 		expect(item.type).toBe("schemantic")
 		expect(item.name).toBe("Schemantic 1")
@@ -129,7 +130,7 @@ describe("normalizeProjectFile", () => {
 		}
 
 		expect(file.items).toHaveLength(1)
-		const item = file.items[0] as Extract<ProjectFileEntry, { type: "part" }>
+		const item = file.items[0] as Extract<ProjectNode, { type: "part" }>
 
 		expect(item.type).toBe("part")
 		expect(item.name).toBe("Part 1")

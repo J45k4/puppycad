@@ -1,122 +1,18 @@
-import type { Assembly, Variables } from "./contract"
+import type {
+	PartProjectExtrudedModel,
+	PartProjectItemData,
+	PartProjectPreviewRotation,
+	Project,
+	ProjectDocumentType,
+	ProjectFolder,
+	ProjectNode,
+	SchemanticProjectComponent,
+	SchemanticProjectComponentData,
+	SchemanticProjectConnection,
+	SchemanticProjectConnectionEndpoint,
+	SchemanticProjectItemData
+} from "./contract"
 import type { Point2D, Quaternion, Vector3D } from "./types"
-
-export type { Part } from "./contract"
-export type { Point2D, Point3D, Quaternion, Transform2D, Transform3D, Vector3D } from "./types"
-
-export type ProjectFileType = "schemantic" | "pcb" | "part" | "assembly" | "diagram"
-
-export type SchemanticProjectComponentData = {
-	type?: string
-}
-
-export type SchemanticProjectComponent = {
-	id: number
-	x: number
-	y: number
-	width: number
-	height: number
-	data?: SchemanticProjectComponentData
-}
-
-export type SchemanticProjectConnectionEndpoint = {
-	componentId: number
-	edge: "left" | "right" | "top" | "bottom"
-	ratio: number
-}
-
-export type SchemanticProjectConnection = {
-	from: SchemanticProjectConnectionEndpoint
-	to: SchemanticProjectConnectionEndpoint
-	style?: "solid" | "dashed"
-}
-
-export type SchemanticProjectItemData = {
-	components: SchemanticProjectComponent[]
-	connections: SchemanticProjectConnection[]
-}
-
-export type PartProjectExtrudedModel = {
-	base: Point2D[]
-	height: number
-	scale: number
-	rawHeight: number
-	origin?: Vector3D
-	rotation?: Quaternion
-	startOffset?: number
-}
-
-export type PartProjectPreviewRotation = {
-	yaw: number
-	pitch: number
-}
-
-export type PartProjectReferencePlaneVisibility = {
-	Front: boolean
-	Top: boolean
-	Right: boolean
-}
-
-export type PartProjectItemData = {
-	sketchPoints: Point2D[]
-	sketchName?: string
-	isSketchClosed: boolean
-	extrudedModels: PartProjectExtrudedModel[]
-	height: number
-	variables?: Variables
-}
-
-export type ProjectFileSchemanticItem = {
-	type: "schemantic"
-	name: string
-	data?: SchemanticProjectItemData
-	visible?: boolean
-}
-
-export type ProjectFilePartItem = {
-	type: "part"
-	name: string
-	data?: PartProjectItemData
-	visible?: boolean
-}
-
-export type ProjectFileAssemblyItem = {
-	type: "assembly"
-	name: string
-	data?: Assembly
-	visible?: boolean
-}
-
-export type ProjectFileOtherItem = {
-	type: Exclude<ProjectFileType, "schemantic" | "part" | "assembly">
-	name: string
-	visible?: boolean
-}
-
-export type ProjectFileItem = ProjectFileSchemanticItem | ProjectFilePartItem | ProjectFileAssemblyItem | ProjectFileOtherItem
-
-export type ProjectFileFolder = {
-	kind: "folder"
-	name: string
-	items: ProjectFileEntry[]
-	visible?: boolean
-}
-
-export type ProjectFileEntry = ProjectFileItem | ProjectFileFolder
-
-export type ProjectItem = ProjectFileEntry
-
-export type ProjectFileVersion = 2
-
-export type Project = {
-	version: ProjectFileVersion
-	items: ProjectFileEntry[]
-	selectedPath: number[] | null
-}
-
-export type ProjectFile = Project
-
-export type PuppyCadProject = Project
 
 export const PROJECT_FILE_VERSION = 2 as const
 
@@ -133,7 +29,7 @@ export const PART_PROJECT_DEFAULT_ROTATION: PartProjectPreviewRotation = {
 export const PROJECT_FILE_MIME_TYPE = "application/json"
 
 export function createProjectFile(args: {
-	items: ProjectItem[]
+	items: ProjectNode[]
 	selectedPath: number[] | null
 }): Project {
 	return {
@@ -186,10 +82,10 @@ export function normalizeProjectFile(input: unknown): Project | null {
 	}
 }
 
-function normalizeProjectFileEntries(input: unknown): ProjectItem[] {
+function normalizeProjectFileEntries(input: unknown): ProjectNode[] {
 	const itemsInput = Array.isArray(input) ? input : []
 	const usedNames = new Set<string>()
-	const items: ProjectItem[] = []
+	const items: ProjectNode[] = []
 
 	for (const rawItem of itemsInput) {
 		if (!rawItem || typeof rawItem !== "object") {
@@ -210,7 +106,7 @@ function normalizeProjectFileEntries(input: unknown): ProjectItem[] {
 		}
 
 		const type = (rawItem as { type?: unknown }).type
-		if (!isProjectFileType(type)) {
+		if (!isProjectDocumentType(type)) {
 			continue
 		}
 
@@ -276,13 +172,13 @@ function isFolderEntry(rawItem: unknown): rawItem is { kind?: unknown; items?: u
 	return type === "folder"
 }
 
-function validateSelectedPath(path: number[] | null, items: ProjectItem[]): number[] | null {
+function validateSelectedPath(path: number[] | null, items: ProjectNode[]): number[] | null {
 	if (!path || path.length === 0) {
 		return null
 	}
 
 	const result: number[] = []
-	let currentItems: ProjectItem[] = items
+	let currentItems: ProjectNode[] = items
 
 	for (let i = 0; i < path.length; i += 1) {
 		const index = path[i]
@@ -309,11 +205,11 @@ function validateSelectedPath(path: number[] | null, items: ProjectItem[]): numb
 	return result
 }
 
-function isFolderProjectEntry(entry: ProjectItem): entry is ProjectFileFolder {
-	return (entry as ProjectFileFolder).kind === "folder"
+function isFolderProjectEntry(entry: ProjectNode): entry is ProjectFolder {
+	return (entry as ProjectFolder).kind === "folder"
 }
 
-function cloneProjectFileEntry(entry: ProjectItem): ProjectItem {
+function cloneProjectFileEntry(entry: ProjectNode): ProjectNode {
 	if (isFolderProjectEntry(entry)) {
 		return {
 			kind: "folder",
@@ -355,14 +251,14 @@ function cloneSelectedPath(path: number[] | null): number[] | null {
 	return path.slice()
 }
 
-function isProjectFileType(value: unknown): value is ProjectFileType {
+function isProjectDocumentType(value: unknown): value is ProjectDocumentType {
 	if (typeof value !== "string") {
 		return false
 	}
 	return (PROJECT_FILE_TYPES as readonly string[]).includes(value)
 }
 
-function generateDefaultName(type: ProjectFileType, usedNames: Set<string>): string {
+function generateDefaultName(type: ProjectDocumentType, usedNames: Set<string>): string {
 	const base = `${type.charAt(0).toUpperCase()}${type.slice(1)}`
 	return generateUniqueName(base, usedNames)
 }
