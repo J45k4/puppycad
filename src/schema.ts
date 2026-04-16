@@ -1,5 +1,20 @@
 import type { Point2D } from "./types"
 
+export type SketchPlane = "XY" | "YZ" | "XZ"
+export type ReferencePlaneName = "Front" | "Top" | "Right"
+
+export const REFERENCE_PLANE_TO_SKETCH_PLANE: Record<ReferencePlaneName, SketchPlane> = {
+	Front: "XY",
+	Top: "XZ",
+	Right: "YZ"
+}
+
+export const SKETCH_PLANE_TO_REFERENCE_PLANE: Record<SketchPlane, ReferencePlaneName> = {
+	XY: "Front",
+	XZ: "Top",
+	YZ: "Right"
+}
+
 export type Line = {
 	id: string
 	type: "line"
@@ -14,6 +29,8 @@ export type CornerRectangle = {
 	p1: Point2D
 }
 
+export type SketchEntity = Line | CornerRectangle
+
 export type Loop = {
 	id: string
 	vertexIndices: number[]
@@ -23,15 +40,6 @@ export type Profile = {
 	id: string
 	outerLoopId: string
 	holeLoopIds: string[]
-}
-
-export type DepthExtrude = {
-	depth: number
-}
-
-export type LoopExtrudeTarget = {
-	type: "loopExtrudeTarget"
-	
 }
 
 export type ProfileReference = {
@@ -48,15 +56,10 @@ export type SolidExtrude = {
 	depth: number
 }
 
-export type SketchTarget =
-	| {
-			type: "plane"
-			plane: "XY" | "YZ" | "XZ"
-	  }
-	| {
-			type: "face"
-			faceId: string
-	  }
+export type SketchTarget = {
+	type: "plane"
+	plane: SketchPlane
+}
 
 export type Sketch = {
 	type: "sketch"
@@ -64,8 +67,15 @@ export type Sketch = {
 	name?: string
 	dirty: boolean
 	target: SketchTarget
-	entities: (Line | CornerRectangle)[]
+	entities: SketchEntity[]
 	vertices: Point2D[]
 	loops: Loop[]
 	profiles: Profile[]
+}
+
+export type PartFeature = Sketch | SolidExtrude
+
+export type PartDocument = {
+	features: PartFeature[]
+	migrationWarnings?: string[]
 }

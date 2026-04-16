@@ -1,5 +1,4 @@
 import type {
-	PartProjectExtrudedModel,
 	PartProjectItemData,
 	PartProjectPreviewRotation,
 	Project,
@@ -12,9 +11,11 @@ import type {
 	SchemanticProjectConnectionEndpoint,
 	SchemanticProjectItemData
 } from "./contract"
+import { materializeSketch } from "./cad/sketch"
+import type { PartFeature, Sketch, SketchEntity, SketchPlane, SolidExtrude } from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
-export const PROJECT_FILE_VERSION = 2 as const
+export const PROJECT_FILE_VERSION = 3 as const
 
 export const PROJECT_FILE_TYPES = ["schemantic", "pcb", "part", "assembly", "diagram"] as const
 
@@ -56,7 +57,7 @@ export function normalizeProjectFile(input: unknown): Project | null {
 	}>
 
 	const rawVersion = typeof value.version === "number" ? value.version : 1
-	if (rawVersion !== 1 && rawVersion !== PROJECT_FILE_VERSION) {
+	if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== PROJECT_FILE_VERSION) {
 		return null
 	}
 
@@ -390,23 +391,7 @@ function clonePartProjectItemData(data: PartProjectItemData | undefined): PartPr
 	if (!data) {
 		return undefined
 	}
-	const sketchName = typeof data.sketchName === "string" ? data.sketchName.trim() : ""
-	return {
-		sketchPoints: data.sketchPoints.map((point) => ({ x: point.x, y: point.y })),
-		sketchName: sketchName || undefined,
-		isSketchClosed: data.isSketchClosed,
-		extrudedModels: data.extrudedModels.map((model) => ({
-			base: model.base.map((point) => ({ x: point.x, y: point.y })),
-			height: model.height,
-			scale: model.scale,
-			rawHeight: model.rawHeight,
-			origin: model.origin ? { x: model.origin.x, y: model.origin.y, z: model.origin.z } : undefined,
-			rotation: model.rotation ? { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z, w: model.rotation.w } : undefined,
-			startOffset: model.startOffset
-		})),
-		height: data.height,
-		variables: data.variables ? { ...data.variables } : undefined
-	}
+	return structuredClone(data) as PartProjectItemData
 }
 
 function normalizePartProjectItemData(input: unknown): PartProjectItemData {
@@ -415,52 +400,248 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		return defaults
 	}
 
-	const value = input as Partial<{
-		sketchPoints: unknown
-		sketchName: unknown
-		isSketchClosed: unknown
-		extrudedModels: unknown
-		extrudedModel: unknown
-		height: unknown
-		variables: unknown
-	}>
+	const value = input as { features?: unknown }
+	if (Array.isArray(value.features)) {
+		return normalizeSchemaPartProjectItemData(value)
+	}
 
-	const sketchPointsInput = Array.isArray(value.sketchPoints) ? value.sketchPoints : []
+	return normalizeLegacyPartProjectItemData(input)
+}
+
+type LegacyPartProjectItemData = Partial<{
+	sketchPoints: unknown
+	sketchName: unknown
+	isSketchClosed: unknown
+	extrudedModels: unknown
+	extrudedModel: unknown
+}>
+
+type LegacyExtrudedModel = {
+	base: Point2D[]
+	height: number
+	scale: number
+	rawHeight: number
+	origin?: Vector3D
+	rotation?: Quaternion
+	startOffset?: number
+}
+
+function normalizeSchemaPartProjectItemData(input: { features?: unknown; migrationWarnings?: unknown }): PartProjectItemData {
+	const featuresInput = Array.isArray(input.features) ? input.features : []
+	const features = featuresInput.map((feature, index) => normalizePartFeature(feature, index)).filter((feature): feature is PartFeature => feature !== undefined)
+	const migrationWarnings = normalizeMigrationWarnings(input.migrationWarnings)
+
+	return {
+		features,
+		...(migrationWarnings.length > 0 ? { migrationWarnings } : {})
+	}
+}
+
+function normalizePartFeature(input: unknown, index: number): PartFeature | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+
+	const type = (input as { type?: unknown }).type
+	if (type === "sketch") {
+		const value = input as Partial<Sketch>
+		const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `part-sketch-${index + 1}`
+		const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : undefined
+		const plane = normalizeSketchPlane(value.target?.plane)
+		if (!plane) {
+			return undefined
+		}
+		const entities = normalizeSketchEntities(value.entities)
+		return materializeSketch({
+			type: "sketch",
+			id,
+			name,
+			dirty: value.dirty === true,
+			target: {
+				type: "plane",
+				plane
+			},
+			entities,
+			vertices: [],
+			loops: [],
+			profiles: []
+		})
+	}
+
+	if (type === "extrude") {
+		const value = input as Partial<SolidExtrude>
+		const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `part-extrude-${index + 1}`
+		const depth = extractFiniteNumber(value.depth, PART_PROJECT_DEFAULT_HEIGHT)
+		if (!value.target || typeof value.target !== "object") {
+			return undefined
+		}
+		const sketchId = typeof value.target.sketchId === "string" && value.target.sketchId.trim() ? value.target.sketchId.trim() : null
+		const profileId = typeof value.target.profileId === "string" && value.target.profileId.trim() ? value.target.profileId.trim() : null
+		if (!sketchId || !profileId) {
+			return undefined
+		}
+		const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : undefined
+		return {
+			type: "extrude",
+			id,
+			name,
+			target: {
+				type: "profileRef",
+				sketchId,
+				profileId
+			},
+			depth
+		}
+	}
+
+	return undefined
+}
+
+function normalizeSketchEntities(input: unknown): SketchEntity[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+
+	const entities: SketchEntity[] = []
+	for (let index = 0; index < input.length; index += 1) {
+		const entity = input[index]
+		if (!entity || typeof entity !== "object") {
+			continue
+		}
+
+		const id = typeof entity.id === "string" && entity.id.trim() ? entity.id.trim() : `entity-${index + 1}`
+		if (entity.type === "line") {
+			const p0 = normalizePoint2D(entity.p0)
+			const p1 = normalizePoint2D(entity.p1)
+			if (!p0 || !p1) {
+				continue
+			}
+			entities.push({ id, type: "line", p0, p1 })
+			continue
+		}
+
+		if (entity.type === "cornerRectangle") {
+			const p0 = normalizePoint2D(entity.p0)
+			const p1 = normalizePoint2D(entity.p1)
+			if (!p0 || !p1) {
+				continue
+			}
+			entities.push({ id, type: "cornerRectangle", p0, p1 })
+		}
+	}
+
+	return entities
+}
+
+function normalizeLegacyPartProjectItemData(input: unknown): PartProjectItemData {
+	const defaults = createDefaultPartProjectItemData()
+	if (!input || typeof input !== "object") {
+		return defaults
+	}
+
+	const value = input as LegacyPartProjectItemData
+	const features: PartFeature[] = []
+	const warnings: string[] = []
+	let featureIndex = 1
+
+	const sketchPoints = normalizeLegacySketchPoints(value.sketchPoints)
+	const sketchName = typeof value.sketchName === "string" && value.sketchName.trim() ? value.sketchName.trim() : "Sketch 1"
+	const isSketchClosed = value.isSketchClosed === true
+
+	if (sketchPoints.length >= 2) {
+		const sketch = materializeSketch({
+			type: "sketch",
+			id: `legacy-sketch-${featureIndex}`,
+			name: sketchName,
+			dirty: !isSketchClosed,
+			target: {
+				type: "plane",
+				plane: "XY"
+			},
+			entities: buildLegacySketchEntities(sketchPoints, isSketchClosed, `legacy-sketch-${featureIndex}`),
+			vertices: [],
+			loops: [],
+			profiles: []
+		})
+		features.push(sketch)
+		featureIndex += 1
+	}
+
+	const extrudedModelsInput = Array.isArray(value.extrudedModels) ? value.extrudedModels : []
+	const normalizedLegacyExtrusions = extrudedModelsInput.map((entry) => normalizeLegacyExtrudedModel(entry)).filter((entry): entry is LegacyExtrudedModel => entry !== undefined)
+
+	if (normalizedLegacyExtrusions.length === 0) {
+		const legacyExtrudedModel = normalizeLegacyExtrudedModel(value.extrudedModel)
+		if (legacyExtrudedModel) {
+			normalizedLegacyExtrusions.push(legacyExtrudedModel)
+		}
+	}
+
+	for (let index = 0; index < normalizedLegacyExtrusions.length; index += 1) {
+		const entry = normalizedLegacyExtrusions[index]
+		if (!entry) {
+			continue
+		}
+		const converted = convertLegacyExtrudedModel(entry, index + 1, featureIndex)
+		if (!converted) {
+			warnings.push(`Skipped unsupported legacy extrusion ${index + 1}.`)
+			continue
+		}
+		features.push(converted.sketch, converted.extrude)
+		featureIndex += 2
+	}
+
+	return {
+		features,
+		...(warnings.length > 0 ? { migrationWarnings: warnings } : {})
+	}
+}
+
+function normalizeLegacySketchPoints(input: unknown): Point2D[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
 	const sketchPoints: Point2D[] = []
-	for (const raw of sketchPointsInput) {
+	for (const raw of input) {
 		const point = normalizePoint2D(raw)
 		if (point) {
 			sketchPoints.push(point)
 		}
 	}
-
-	const isSketchClosed = typeof value.isSketchClosed === "boolean" ? value.isSketchClosed : defaults.isSketchClosed
-	const sketchName = typeof value.sketchName === "string" && value.sketchName.trim().length > 0 ? value.sketchName.trim() : undefined
-
-	const heightValue = typeof value.height === "number" && Number.isFinite(value.height) ? value.height : defaults.height
-
-	const extrudedModelsInput = Array.isArray(value.extrudedModels) ? value.extrudedModels : []
-	const extrudedModels = extrudedModelsInput.map((entry) => normalizePartProjectExtrudedModel(entry)).filter((entry): entry is PartProjectExtrudedModel => entry !== undefined)
-	if (extrudedModels.length === 0) {
-		const legacyExtrudedModel = normalizePartProjectExtrudedModel(value.extrudedModel)
-		if (legacyExtrudedModel) {
-			extrudedModels.push(legacyExtrudedModel)
-		}
-	}
-
-	const variables = normalizeVariables(value.variables)
-
-	return {
-		sketchPoints,
-		sketchName,
-		isSketchClosed,
-		extrudedModels,
-		height: heightValue,
-		variables
-	}
+	return sketchPoints
 }
 
-function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedModel | undefined {
+function buildLegacySketchEntities(points: Point2D[], isClosed: boolean, idPrefix: string): SketchEntity[] {
+	const entities: SketchEntity[] = []
+	for (let index = 0; index < points.length - 1; index += 1) {
+		const start = points[index]
+		const end = points[index + 1]
+		if (!start || !end) {
+			continue
+		}
+		entities.push({
+			id: `${idPrefix}-line-${entities.length + 1}`,
+			type: "line",
+			p0: clonePoint2D(start),
+			p1: clonePoint2D(end)
+		})
+	}
+	if (isClosed && points.length >= 3) {
+		const start = points[points.length - 1]
+		const end = points[0]
+		if (start && end && (start.x !== end.x || start.y !== end.y)) {
+			entities.push({
+				id: `${idPrefix}-line-${entities.length + 1}`,
+				type: "line",
+				p0: clonePoint2D(start),
+				p1: clonePoint2D(end)
+			})
+		}
+	}
+	return entities
+}
+
+function normalizeLegacyExtrudedModel(input: unknown): LegacyExtrudedModel | undefined {
 	if (!input || typeof input !== "object") {
 		return undefined
 	}
@@ -504,6 +685,85 @@ function normalizePartProjectExtrudedModel(input: unknown): PartProjectExtrudedM
 		rotation,
 		startOffset
 	}
+}
+
+function convertLegacyExtrudedModel(input: LegacyExtrudedModel, index: number, featureIndex: number): { sketch: Sketch; extrude: SolidExtrude } | null {
+	const plane = resolveLegacySketchPlane(input.rotation)
+	if (!plane) {
+		return null
+	}
+	if (input.origin && (Math.abs(input.origin.x) > 1e-4 || Math.abs(input.origin.y) > 1e-4 || Math.abs(input.origin.z) > 1e-4)) {
+		return null
+	}
+
+	const reconstructedPoints = input.base.map((point) => ({
+		x: point.x * input.scale,
+		y: -point.y * input.scale
+	}))
+	if (reconstructedPoints.length < 3) {
+		return null
+	}
+
+	const sketchId = `legacy-extrude-sketch-${featureIndex}`
+	const sketch = materializeSketch({
+		type: "sketch",
+		id: sketchId,
+		name: `Legacy Sketch ${index}`,
+		dirty: false,
+		target: {
+			type: "plane",
+			plane
+		},
+		entities: buildLegacySketchEntities(reconstructedPoints, true, sketchId),
+		vertices: [],
+		loops: [],
+		profiles: []
+	})
+	const profileId = sketch.profiles[0]?.id
+	if (!profileId) {
+		return null
+	}
+
+	return {
+		sketch,
+		extrude: {
+			type: "extrude",
+			id: `legacy-extrude-${featureIndex + 1}`,
+			name: `Extrude ${index}`,
+			target: {
+				type: "profileRef",
+				sketchId,
+				profileId
+			},
+			depth: input.rawHeight
+		}
+	}
+}
+
+function resolveLegacySketchPlane(rotation: Quaternion | undefined): SketchPlane | null {
+	if (!rotation) {
+		return "XY"
+	}
+
+	const normalized = normalizeQuaternion(rotation)
+	if (!normalized) {
+		return null
+	}
+
+	const canonicalRotations: Array<{ plane: SketchPlane; quaternion: Quaternion }> = [
+		{ plane: "XY", quaternion: { x: 0, y: 0, z: 0, w: 1 } },
+		{ plane: "XZ", quaternion: { x: -Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 } },
+		{ plane: "YZ", quaternion: { x: 0, y: Math.SQRT1_2, z: 0, w: Math.SQRT1_2 } }
+	]
+
+	for (const candidate of canonicalRotations) {
+		const dotProduct = normalized.x * candidate.quaternion.x + normalized.y * candidate.quaternion.y + normalized.z * candidate.quaternion.z + normalized.w * candidate.quaternion.w
+		if (Math.abs(dotProduct) >= 0.999) {
+			return candidate.plane
+		}
+	}
+
+	return null
 }
 
 function normalizePoint2D(input: unknown): Point2D | null {
@@ -554,35 +814,23 @@ function extractFiniteNumber(value: unknown, defaultValue: number): number {
 
 function createDefaultPartProjectItemData(): PartProjectItemData {
 	return {
-		sketchPoints: [],
-		isSketchClosed: false,
-		extrudedModels: [],
-		height: PART_PROJECT_DEFAULT_HEIGHT
+		features: []
 	}
 }
 
-function normalizeVariables(input: unknown): PartProjectItemData["variables"] {
-	if (!input || typeof input !== "object") {
-		return undefined
+function normalizeSketchPlane(input: unknown): SketchPlane | null {
+	return input === "XY" || input === "YZ" || input === "XZ" ? input : null
+}
+
+function normalizeMigrationWarnings(input: unknown): string[] {
+	if (!Array.isArray(input)) {
+		return []
 	}
-	const entries = Object.entries(input)
-	const variables: NonNullable<PartProjectItemData["variables"]> = {}
-	for (const [key, value] of entries) {
-		const name = key.trim()
-		if (!name) {
-			continue
-		}
-		if (typeof value === "number") {
-			if (Number.isFinite(value)) {
-				variables[name] = value
-			}
-			continue
-		}
-		if (typeof value === "string" || typeof value === "boolean") {
-			variables[name] = value
-		}
-	}
-	return Object.keys(variables).length > 0 ? variables : undefined
+	return input.filter((warning): warning is string => typeof warning === "string" && warning.trim().length > 0).map((warning) => warning.trim())
+}
+
+function clonePoint2D(point: Point2D): Point2D {
+	return { x: point.x, y: point.y }
 }
 
 function normalizeVisibleFlag(rawItem: unknown): boolean | undefined {

@@ -6,15 +6,14 @@ describe("derivePartQuickActionsModel", () => {
 	it("hides the rail when no plane is selected", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
-			selectedSurfaceLabel: null,
-			selectedSurfaceKind: null,
-			selectedSurfaceVisible: false,
+			selectedExtrudeLabel: null,
+			selectedPlaneLabel: null,
+			selectedPlaneVisible: false,
 			activeSketchTool: "line",
-			sketchPointCount: 0,
-			isSketchClosed: false,
-			hasSketchBreaks: false,
-			hasExtrudedModel: false,
-			hasPendingLineStart: false
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
 		})
 
 		expect(model.visible).toBe(false)
@@ -24,15 +23,14 @@ describe("derivePartQuickActionsModel", () => {
 	it("shows only sketch when a visible plane is selected in view mode", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
-			selectedSurfaceLabel: "Front",
-			selectedSurfaceKind: "reference-plane",
-			selectedSurfaceVisible: true,
+			selectedExtrudeLabel: null,
+			selectedPlaneLabel: "Front",
+			selectedPlaneVisible: true,
 			activeSketchTool: "line",
-			sketchPointCount: 0,
-			isSketchClosed: false,
-			hasSketchBreaks: false,
-			hasExtrudedModel: false,
-			hasPendingLineStart: false
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
 		})
 
 		expect(model.visible).toBe(true)
@@ -45,15 +43,14 @@ describe("derivePartQuickActionsModel", () => {
 	it("shows sketch tools and commands in sketch mode", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "sketch",
-			selectedSurfaceLabel: "Top",
-			selectedSurfaceKind: "reference-plane",
-			selectedSurfaceVisible: true,
+			selectedExtrudeLabel: null,
+			selectedPlaneLabel: "Top",
+			selectedPlaneVisible: true,
 			activeSketchTool: "rectangle",
-			sketchPointCount: 2,
-			isSketchClosed: false,
-			hasSketchBreaks: false,
-			hasExtrudedModel: false,
-			hasPendingLineStart: false
+			canUndo: true,
+			canReset: true,
+			canFinishSketch: false,
+			canExtrude: false
 		})
 
 		expect(model.visible).toBe(true)
@@ -62,87 +59,54 @@ describe("derivePartQuickActionsModel", () => {
 			{ id: "tool-line", label: "Line", active: false },
 			{ id: "tool-rectangle", label: "Rectangle", active: true }
 		])
-		expect(model.commandActions.map((action) => action.id)).toEqual(["undo", "reset", "finish-sketch", "extrude"])
-		expect(model.showHeightInput).toBe(true)
-		expect(model.showStatus).toBe(true)
-	})
-
-	it("matches current disabled rules for sketch commands", () => {
-		const openModel = derivePartQuickActionsModel({
-			activeTool: "sketch",
-			selectedSurfaceLabel: "Right",
-			selectedSurfaceKind: "reference-plane",
-			selectedSurfaceVisible: true,
-			activeSketchTool: "line",
-			sketchPointCount: 2,
-			isSketchClosed: false,
-			hasSketchBreaks: true,
-			hasExtrudedModel: false,
-			hasPendingLineStart: false
-		})
-
-		expect(openModel.commandActions).toEqual([
+		expect(model.commandActions).toEqual([
 			{ id: "undo", label: "Undo", disabled: false },
 			{ id: "reset", label: "Reset", disabled: false },
 			{ id: "finish-sketch", label: "Finish Sketch", disabled: true },
 			{ id: "extrude", label: "Extrude", disabled: true }
 		])
+		expect(model.showHeightInput).toBe(true)
+		expect(model.showStatus).toBe(true)
+	})
 
-		const closedModel = derivePartQuickActionsModel({
+	it("reflects finish and extrude readiness", () => {
+		const model = derivePartQuickActionsModel({
 			activeTool: "sketch",
-			selectedSurfaceLabel: "Right",
-			selectedSurfaceKind: "reference-plane",
-			selectedSurfaceVisible: true,
+			selectedExtrudeLabel: null,
+			selectedPlaneLabel: "Right",
+			selectedPlaneVisible: true,
 			activeSketchTool: "line",
-			sketchPointCount: 4,
-			isSketchClosed: true,
-			hasSketchBreaks: false,
-			hasExtrudedModel: true,
-			hasPendingLineStart: false
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: true,
+			canExtrude: true
 		})
 
-		expect(closedModel.commandActions).toEqual([
+		expect(model.commandActions).toEqual([
 			{ id: "undo", label: "Undo", disabled: true },
-			{ id: "reset", label: "Reset", disabled: false },
-			{ id: "finish-sketch", label: "Finish Sketch", disabled: true },
+			{ id: "reset", label: "Reset", disabled: true },
+			{ id: "finish-sketch", label: "Finish Sketch", disabled: false },
 			{ id: "extrude", label: "Extrude", disabled: false }
 		])
 	})
 
-	it("hides the rail again when the selected plane is cleared or hidden", () => {
-		const model = derivePartQuickActionsModel({
-			activeTool: "sketch",
-			selectedSurfaceLabel: "Front",
-			selectedSurfaceKind: "reference-plane",
-			selectedSurfaceVisible: false,
-			activeSketchTool: "line",
-			sketchPointCount: 3,
-			isSketchClosed: false,
-			hasSketchBreaks: false,
-			hasExtrudedModel: false,
-			hasPendingLineStart: false
-		})
-
-		expect(model.visible).toBe(false)
-	})
-
-	it("shows sketch on a selected solid face in view mode", () => {
+	it("shows extrude editing controls when an extrude is selected", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
-			selectedSurfaceLabel: "Top Face",
-			selectedSurfaceKind: "solid-face",
-			selectedSurfaceVisible: true,
-			activeSketchTool: "line",
-			sketchPointCount: 0,
-			isSketchClosed: false,
-			hasSketchBreaks: false,
-			hasExtrudedModel: true,
-			hasPendingLineStart: false
+			selectedExtrudeLabel: "Extrude 1",
+			selectedPlaneLabel: null,
+			selectedPlaneVisible: false,
+			activeSketchTool: null,
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
 		})
 
 		expect(model.visible).toBe(true)
-		expect(model.title).toBe("Top Face")
-		expect(model.description).toBe("Start a sketch on top face.")
-		expect(model.primaryActions.map((action) => action.id)).toEqual(["start-sketch"])
+		expect(model.title).toBe("Extrude: Extrude 1")
+		expect(model.commandActions).toEqual([{ id: "delete-extrude", label: "Delete Extrude" }])
+		expect(model.showHeightInput).toBe(true)
+		expect(model.showStatus).toBe(true)
 	})
 })

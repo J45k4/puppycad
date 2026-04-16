@@ -61,7 +61,13 @@ type SyntheticProjectEntry =
 	| {
 			kind: "part-sketch"
 			part: PartProjectItem
-			sketchIndex: number
+			sketchId: string
+			id: string
+	  }
+	| {
+			kind: "part-extrude"
+			part: PartProjectItem
+			extrudeId: string
 			id: string
 	  }
 	| {
@@ -210,13 +216,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				if (syntheticEntry?.kind === "part-sketch") {
 					return [
 						{
-							label: "Edit",
-							onSelect: () => {
-								syntheticEntry.part.editor.enterSketchMode()
-								this.onItemSelected?.(syntheticEntry.part)
-							}
-						},
-						{
 							label: "Rename",
 							onSelect: () => {
 								void this.renamePartSketch(syntheticEntry)
@@ -226,6 +225,16 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 							label: "Delete",
 							onSelect: () => {
 								void this.deletePartSketch(syntheticEntry)
+							}
+						}
+					]
+				}
+				if (syntheticEntry?.kind === "part-extrude") {
+					return [
+						{
+							label: "Delete",
+							onSelect: () => {
+								void this.deletePartExtrude(syntheticEntry)
 							}
 						}
 					]
@@ -417,7 +426,6 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				}
 			}
 			if (node.type === "part") {
-				const state = node.getState()
 				const viewState = node.getViewState()
 				const childItems: ProjectListEntry[] = []
 				const addPlaneChild = (suffix: string, name: "Top" | "Front" | "Right") => {
@@ -437,13 +445,13 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						visible: viewState.referencePlaneVisibility[name]
 					})
 				}
-				const addSketchChild = (sketchIndex: number, name: string) => {
-					const childId = `${id}:sketch-${sketchIndex}`
+				const addSketchChild = (sketchId: string, name: string) => {
+					const childId = `${id}:sketch-${sketchId}`
 					this.syntheticSelectionTargets.set(childId, node)
 					this.syntheticEntries.set(childId, {
 						kind: "part-sketch",
 						part: node,
-						sketchIndex,
+						sketchId,
 						id: childId
 					})
 					childItems.push({
@@ -454,9 +462,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						visible: viewState.sketchVisible
 					})
 				}
-				const addSyntheticChild = (suffix: string, name: string) => {
-					const childId = `${id}:${suffix}`
+				const addExtrudeChild = (extrudeId: string, name: string) => {
+					const childId = `${id}:extrude-${extrudeId}`
 					this.syntheticSelectionTargets.set(childId, node)
+					this.syntheticEntries.set(childId, {
+						kind: "part-extrude",
+						part: node,
+						extrudeId,
+						id: childId
+					})
 					childItems.push({
 						kind: "file" as const,
 						id: childId,
@@ -468,13 +482,12 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				addPlaneChild("plane-top", "Top")
 				addPlaneChild("plane-front", "Front")
 				addPlaneChild("plane-right", "Right")
-				if (state.sketchPoints.length > 0) {
-					const sketchName = state.sketchName?.trim() || node.editor.getSketchName() || "Sketch 1"
-					addSketchChild(1, sketchName)
+				for (const sketch of node.editor.listSketches()) {
+					addSketchChild(sketch.id, sketch.name)
 				}
-				state.extrudedModels.forEach((model, index) => {
-					addSyntheticChild(`extrude-${index + 1}`, `Extrude ${index + 1} (${model.rawHeight.toFixed(1)}u)`)
-				})
+				for (const extrude of node.editor.listExtrudes()) {
+					addExtrudeChild(extrude.id, `${extrude.name} (${extrude.depth.toFixed(1)}u)`)
+				}
 				return {
 					kind: "folder" as const,
 					id,
@@ -520,8 +533,10 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			this.selectedSyntheticId = id
 			this.itemsListContainer.setSelected(syntheticEntry.part)
 			if (syntheticEntry.kind === "part-sketch") {
-				syntheticEntry.part.editor.enterSketchMode()
-			} else {
+				syntheticEntry.part.editor.selectSketch(syntheticEntry.sketchId)
+			} else if (syntheticEntry.kind === "part-extrude") {
+				syntheticEntry.part.editor.selectExtrude(syntheticEntry.extrudeId)
+			} else if (syntheticEntry.kind === "part-plane") {
 				syntheticEntry.part.editor.selectReferencePlane(syntheticEntry.plane)
 			}
 			this.onItemSelected?.(syntheticEntry.part)
@@ -561,7 +576,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			syntheticEntry.part.editor.setReferencePlaneVisible(syntheticEntry.plane, visible)
 			return
 		}
-		syntheticEntry.part.editor.setSketchVisible(visible)
+		if (syntheticEntry.kind === "part-sketch") {
+			syntheticEntry.part.editor.setSketchVisible(visible)
+		}
 	}
 
 	private canMoveNodes(sourceId: string, destinationId: string | null): boolean {
@@ -1334,7 +1351,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (typeof window === "undefined") {
 			return
 		}
-		const currentName = entry.part.editor.getSketchName()
+		const currentName = entry.part.editor.getSketchName(entry.sketchId)
 		const nextName = await showTextPromptModal({
 			title: "Rename Sketch",
 			initialValue: currentName,
@@ -1348,18 +1365,30 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!trimmed) {
 			return
 		}
-		entry.part.editor.setSketchName(trimmed)
+		entry.part.editor.setSketchName(trimmed, entry.sketchId)
 		this.renderItems()
 		this.handleSelectionById(entry.id)
 		this.schedulePersist()
 	}
 
 	private async deletePartSketch(entry: Extract<SyntheticProjectEntry, { kind: "part-sketch" }>) {
-		const confirmed = typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(`Delete sketch "${entry.part.editor.getSketchName()}"?`)
+		const confirmed = typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(`Delete sketch "${entry.part.editor.getSketchName(entry.sketchId)}"?`)
 		if (!confirmed) {
 			return
 		}
-		entry.part.editor.deleteSketch()
+		entry.part.editor.deleteSketch(entry.sketchId)
+		this.renderItems()
+		this.handleNodeSelection(entry.part)
+		this.schedulePersist()
+	}
+
+	private async deletePartExtrude(entry: Extract<SyntheticProjectEntry, { kind: "part-extrude" }>) {
+		const confirmed =
+			typeof window === "undefined" || typeof window.confirm !== "function" ? true : window.confirm(`Delete extrude "${entry.part.editor.getExtrudeName(entry.extrudeId)}"?`)
+		if (!confirmed) {
+			return
+		}
+		entry.part.editor.deleteExtrude(entry.extrudeId)
 		this.renderItems()
 		this.handleNodeSelection(entry.part)
 		this.schedulePersist()

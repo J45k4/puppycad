@@ -1,6 +1,7 @@
 import type { Body, Sketch as RuntimeSketch } from "./puppycad"
 import type { Pin } from "./puppycad"
-import type { Point2D, Quaternion, Transform3D, Vector3D } from "./types"
+import type { PartDocument } from "./schema"
+import type { Point2D, Transform3D, Vector3D } from "./types"
 
 export type { Point2D, Point3D, Quaternion, Transform2D, Transform3D, Vector3D } from "./types"
 
@@ -500,16 +501,6 @@ export type SchemanticProjectItemData = {
 	connections: SchemanticProjectConnection[]
 }
 
-export type PartProjectExtrudedModel = {
-	base: Point2D[]
-	height: number
-	scale: number
-	rawHeight: number
-	origin?: Vector3D
-	rotation?: Quaternion
-	startOffset?: number
-}
-
 export type PartProjectPreviewRotation = {
 	yaw: number
 	pitch: number
@@ -521,14 +512,7 @@ export type PartProjectReferencePlaneVisibility = {
 	Right: boolean
 }
 
-export type PartProjectItemData = {
-	sketchPoints: Point2D[]
-	sketchName?: string
-	isSketchClosed: boolean
-	extrudedModels: PartProjectExtrudedModel[]
-	height: number
-	variables?: Variables
-}
+export type PartProjectItemData = PartDocument
 
 export type ProjectSchemanticDocument = {
 	type: "schemantic"
@@ -568,7 +552,7 @@ export type ProjectFolder = {
 
 export type ProjectNode = ProjectDocument | ProjectFolder
 
-export type ProjectVersion = 2
+export type ProjectVersion = 3
 
 export type Project = {
 	version: ProjectVersion

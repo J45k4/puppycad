@@ -1,8 +1,6 @@
-import type { AlignedRectangle, CenteredRectangle, CenterPointCircle, CornerRectangle, MidpointLine, Profile, SketchFeature } from "../contract"
+import type { CornerRectangle, Loop, Profile, Sketch } from "../schema"
 import type { Point2D } from "../types"
-import { solveSketchConstraints } from "./constraints"
 
-const DEFAULT_CIRCLE_SEGMENTS = 32
 const DEFAULT_TOLERANCE = 1e-6
 
 type Segment = {
@@ -22,25 +20,16 @@ type LoopDescriptor = {
 	depth: number
 }
 
-export interface SketchProfileEngineOptions {
-	circleSegments?: number
+export interface MaterializeSketchOptions {
 	tolerance?: number
 }
 
-type SketchProfileInput = Pick<SketchFeature, "id" | "type" | "target" | "entities" | "profiles" | "constraints" | "dimensions">
-
-export function getProfilesFromSketch(sketch: SketchProfileInput, options: SketchProfileEngineOptions = {}): Profile[] {
-	if (sketch.profiles.length > 0) {
-		return cloneProfiles(sketch.profiles)
-	}
-
-	const { sketch: solvedSketch } = solveSketchConstraints(sketch)
+export function materializeSketch(sketch: Sketch, options: MaterializeSketchOptions = {}): Sketch {
 	const tolerance = options.tolerance ?? DEFAULT_TOLERANCE
-	const circleSegments = normalizeCircleSegments(options.circleSegments)
 	const directLoops: Point2D[][] = []
 	const segments: Segment[] = []
 
-	for (const entity of solvedSketch.entities) {
+	for (const entity of sketch.entities) {
 		switch (entity.type) {
 			case "line":
 				segments.push({
@@ -48,20 +37,8 @@ export function getProfilesFromSketch(sketch: SketchProfileInput, options: Sketc
 					end: clonePoint(entity.p1)
 				})
 				break
-			case "midpointLine":
-				segments.push(midpointLineToSegment(entity))
-				break
-			case "centeredRectangle":
-				directLoops.push(centeredRectangleToLoop(entity))
-				break
 			case "cornerRectangle":
 				directLoops.push(cornerRectangleToLoop(entity))
-				break
-			case "alignedRectangle":
-				directLoops.push(alignedRectangleToLoop(entity))
-				break
-			case "centerPointCircle":
-				directLoops.push(circleToLoop(entity, circleSegments))
 				break
 			default:
 				assertNever(entity)
@@ -69,45 +46,44 @@ export function getProfilesFromSketch(sketch: SketchProfileInput, options: Sketc
 	}
 
 	const allLoops = [...directLoops, ...traceClosedLoops(segments, tolerance)]
-	return buildProfilesFromLoops(solvedSketch.id, allLoops, tolerance)
-}
+	const topology = buildTopologyFromLoops(sketch.id, allLoops, tolerance)
 
-function cloneProfiles(profiles: Profile[]): Profile[] {
-	return profiles.map((profile) => ({
-		id: profile.id,
-		vertices: profile.vertices.map(clonePoint),
-		loops: profile.loops.map((loop) => [...loop])
-	}))
-}
-
-function midpointLineToSegment(line: MidpointLine): Segment {
-	const angle = line.angle ?? 0
-	const halfLength = line.length / 2
-	const dx = Math.cos(angle) * halfLength
-	const dy = Math.sin(angle) * halfLength
 	return {
-		start: {
-			x: line.midpoint.x - dx,
-			y: line.midpoint.y - dy
-		},
-		end: {
-			x: line.midpoint.x + dx,
-			y: line.midpoint.y + dy
-		}
+		...sketch,
+		vertices: topology.vertices,
+		loops: topology.loops,
+		profiles: topology.profiles
 	}
 }
 
-function centeredRectangleToLoop(rectangle: CenteredRectangle): Point2D[] {
-	const halfWidth = rectangle.width / 2
-	const halfHeight = rectangle.height / 2
-	const corners = [
-		{ x: -halfWidth, y: -halfHeight },
-		{ x: halfWidth, y: -halfHeight },
-		{ x: halfWidth, y: halfHeight },
-		{ x: -halfWidth, y: halfHeight }
-	]
+export function resolveLoopPoints(sketch: Pick<Sketch, "vertices" | "loops">, loopId: string): Point2D[] {
+	const loop = sketch.loops.find((entry) => entry.id === loopId)
+	if (!loop) {
+		throw new Error(`Loop "${loopId}" does not exist on this sketch.`)
+	}
 
-	return applyRotationAndTranslation(corners, rectangle.rotation ?? 0, rectangle.center)
+	const points = loop.vertexIndices.map((vertexIndex) => {
+		const point = sketch.vertices[vertexIndex]
+		if (!point) {
+			throw new Error(`Loop "${loopId}" references missing vertex ${vertexIndex}.`)
+		}
+		return clonePoint(point)
+	})
+
+	if (points.length < 3) {
+		throw new Error(`Loop "${loopId}" does not contain a valid polygon.`)
+	}
+
+	return points
+}
+
+export function resolveProfileLoops(sketch: Pick<Sketch, "vertices" | "loops" | "profiles">, profileId: string): Point2D[][] {
+	const profile = sketch.profiles.find((entry) => entry.id === profileId)
+	if (!profile) {
+		throw new Error(`Profile "${profileId}" does not exist on this sketch.`)
+	}
+
+	return [resolveLoopPoints(sketch, profile.outerLoopId), ...profile.holeLoopIds.map((loopId) => resolveLoopPoints(sketch, loopId))]
 }
 
 function cornerRectangleToLoop(rectangle: CornerRectangle): Point2D[] {
@@ -121,42 +97,6 @@ function cornerRectangleToLoop(rectangle: CornerRectangle): Point2D[] {
 		{ x: maxX, y: maxY },
 		{ x: minX, y: maxY }
 	]
-}
-
-function alignedRectangleToLoop(rectangle: AlignedRectangle): Point2D[] {
-	const dx = rectangle.p1.x - rectangle.p0.x
-	const dy = rectangle.p1.y - rectangle.p0.y
-	const length = Math.hypot(dx, dy)
-	if (length <= DEFAULT_TOLERANCE) {
-		return []
-	}
-
-	const offsetX = (-dy / length) * rectangle.height
-	const offsetY = (dx / length) * rectangle.height
-
-	return [clonePoint(rectangle.p0), clonePoint(rectangle.p1), { x: rectangle.p1.x + offsetX, y: rectangle.p1.y + offsetY }, { x: rectangle.p0.x + offsetX, y: rectangle.p0.y + offsetY }]
-}
-
-function circleToLoop(circle: CenterPointCircle, segments: number): Point2D[] {
-	const points: Point2D[] = []
-	for (let index = 0; index < segments; index += 1) {
-		const angle = (index / segments) * Math.PI * 2
-		points.push({
-			x: circle.center.x + Math.cos(angle) * circle.radius,
-			y: circle.center.y + Math.sin(angle) * circle.radius
-		})
-	}
-	return points
-}
-
-function applyRotationAndTranslation(points: Point2D[], angle: number, center: Point2D): Point2D[] {
-	const cosAngle = Math.cos(angle)
-	const sinAngle = Math.sin(angle)
-
-	return points.map((point) => ({
-		x: center.x + point.x * cosAngle - point.y * sinAngle,
-		y: center.y + point.x * sinAngle + point.y * cosAngle
-	}))
 }
 
 function traceClosedLoops(segments: Segment[], tolerance: number): Point2D[][] {
@@ -179,20 +119,8 @@ function traceClosedLoops(segments: Segment[], tolerance: number): Point2D[][] {
 		const segmentIndex = indexedSegments.length
 
 		indexedSegments.push({ startIndex, endIndex })
-
-		const startAdjacency = adjacency.get(startIndex)
-		if (startAdjacency) {
-			startAdjacency.push(segmentIndex)
-		} else {
-			adjacency.set(startIndex, [segmentIndex])
-		}
-
-		const endAdjacency = adjacency.get(endIndex)
-		if (endAdjacency) {
-			endAdjacency.push(segmentIndex)
-		} else {
-			adjacency.set(endIndex, [segmentIndex])
-		}
+		pushAdjacency(adjacency, startIndex, segmentIndex)
+		pushAdjacency(adjacency, endIndex, segmentIndex)
 	}
 
 	const processedSegments = new Set<number>()
@@ -220,6 +148,15 @@ function traceClosedLoops(segments: Segment[], tolerance: number): Point2D[][] {
 	}
 
 	return loops
+}
+
+function pushAdjacency(adjacency: Map<number, number[]>, vertexIndex: number, segmentIndex: number): void {
+	const existing = adjacency.get(vertexIndex)
+	if (existing) {
+		existing.push(segmentIndex)
+		return
+	}
+	adjacency.set(vertexIndex, [segmentIndex])
 }
 
 function indexPoint(point: Point2D, indexedPoints: Point2D[], pointIndexByKey: Map<string, number>, tolerance: number): number {
@@ -326,7 +263,7 @@ function traceLoop(componentSegmentIndexes: number[], indexedSegments: IndexedSe
 	return usedSegments.size === componentSegmentIndexes.length ? orderedPoints : []
 }
 
-function buildProfilesFromLoops(sketchId: string, loops: Point2D[][], tolerance: number): Profile[] {
+function buildTopologyFromLoops(sketchId: string, loops: Point2D[][], tolerance: number): Pick<Sketch, "vertices" | "loops" | "profiles"> {
 	const loopDescriptors: LoopDescriptor[] = []
 
 	for (const loop of loops) {
@@ -369,11 +306,7 @@ function buildProfilesFromLoops(sketchId: string, loops: Point2D[][], tolerance:
 
 			const candidateAreaMagnitude = Math.abs(candidateLoop.area)
 			const loopAreaMagnitude = Math.abs(loopDescriptors[loopIndex]?.area ?? 0)
-			if (candidateAreaMagnitude <= loopAreaMagnitude) {
-				continue
-			}
-
-			if (candidateAreaMagnitude >= parentArea) {
+			if (candidateAreaMagnitude <= loopAreaMagnitude || candidateAreaMagnitude >= parentArea) {
 				continue
 			}
 
@@ -404,6 +337,21 @@ function buildProfilesFromLoops(sketchId: string, loops: Point2D[][], tolerance:
 		}
 	}
 
+	const vertices: Point2D[] = []
+	const builtLoops: Loop[] = []
+	const descriptorLoopIds = new Map<number, string>()
+
+	const addLoop = (points: Point2D[]): string => {
+		const id = `${sketchId}-loop-${builtLoops.length + 1}`
+		const vertexIndices = points.map((point) => {
+			const index = vertices.length
+			vertices.push(clonePoint(point))
+			return index
+		})
+		builtLoops.push({ id, vertexIndices })
+		return id
+	}
+
 	const profiles: Profile[] = []
 	let profileIndex = 1
 
@@ -413,21 +361,29 @@ function buildProfilesFromLoops(sketchId: string, loops: Point2D[][], tolerance:
 			continue
 		}
 
-		const polygons = [
-			orientLoop(descriptor.points, true),
-			...loopDescriptors
-				.filter((candidate) => candidate.parentIndex === loopIndex && candidate.depth === descriptor.depth + 1)
-				.map((candidate) => orientLoop(candidate.points, false))
-		]
+		const outerPoints = orientLoop(descriptor.points, true)
+		const outerLoopId = descriptorLoopIds.get(loopIndex) ?? addLoop(outerPoints)
+		descriptorLoopIds.set(loopIndex, outerLoopId)
+
+		const holeLoopIds = loopDescriptors
+			.map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+			.filter(({ candidate }) => candidate && candidate.parentIndex === loopIndex && candidate.depth === descriptor.depth + 1)
+			.map(({ candidate, candidateIndex }) => {
+				const holePoints = orientLoop(candidate.points, false)
+				const holeLoopId = descriptorLoopIds.get(candidateIndex) ?? addLoop(holePoints)
+				descriptorLoopIds.set(candidateIndex, holeLoopId)
+				return holeLoopId
+			})
 
 		profiles.push({
 			id: `${sketchId}-profile-${profileIndex}`,
-			...polygonsToProfile(polygons)
+			outerLoopId,
+			holeLoopIds
 		})
 		profileIndex += 1
 	}
 
-	return profiles
+	return { vertices, loops: builtLoops, profiles }
 }
 
 function normalizeLoop(loop: Point2D[]): Point2D[] | null {
@@ -458,19 +414,6 @@ function orientLoop(loop: Point2D[], ccw: boolean): Point2D[] {
 	const area = signedArea(loop)
 	const shouldReverse = ccw ? area < 0 : area > 0
 	return shouldReverse ? [...loop].reverse() : loop.map(clonePoint)
-}
-
-function polygonsToProfile(polygons: Point2D[][]): Omit<Profile, "id"> {
-	const vertices: Point2D[] = []
-	const loops = polygons.map((polygon) =>
-		polygon.map((point) => {
-			const index = vertices.length
-			vertices.push(clonePoint(point))
-			return index
-		})
-	)
-
-	return { vertices, loops }
 }
 
 function pointInPolygon(point: Point2D, polygon: Point2D[], tolerance: number): boolean {
@@ -537,14 +480,6 @@ function pointKey(point: Point2D, tolerance: number): string {
 
 function clonePoint(point: Point2D): Point2D {
 	return { x: point.x, y: point.y }
-}
-
-function normalizeCircleSegments(value: number | undefined): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return DEFAULT_CIRCLE_SEGMENTS
-	}
-
-	return Math.max(3, Math.round(value))
 }
 
 function assertNever(value: never): never {

@@ -1,7 +1,6 @@
 export type ReferencePlaneName = "Top" | "Front" | "Right"
-export type SketchSurfaceKind = "reference-plane" | "solid-face"
 
-export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "undo" | "reset" | "finish-sketch" | "extrude"
+export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "undo" | "reset" | "finish-sketch" | "extrude" | "delete-extrude"
 
 export type PartQuickActionItem = {
 	id: PartQuickActionId
@@ -23,15 +22,14 @@ export type PartQuickActionsModel = {
 
 export type PartQuickActionsState = {
 	activeTool: "view" | "sketch"
-	selectedSurfaceLabel: string | null
-	selectedSurfaceKind: SketchSurfaceKind | null
-	selectedSurfaceVisible: boolean
+	selectedExtrudeLabel: string | null
+	selectedPlaneLabel: string | null
+	selectedPlaneVisible: boolean
 	activeSketchTool: "line" | "rectangle" | null
-	sketchPointCount: number
-	isSketchClosed: boolean
-	hasSketchBreaks: boolean
-	hasExtrudedModel: boolean
-	hasPendingLineStart: boolean
+	canUndo: boolean
+	canReset: boolean
+	canFinishSketch: boolean
+	canExtrude: boolean
 }
 
 const HIDDEN_MODEL: PartQuickActionsModel = {
@@ -46,19 +44,33 @@ const HIDDEN_MODEL: PartQuickActionsModel = {
 }
 
 export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQuickActionsModel {
-	if (!state.selectedSurfaceLabel || !state.selectedSurfaceKind || !state.selectedSurfaceVisible) {
+	if (state.selectedExtrudeLabel) {
+		return {
+			visible: true,
+			title: `Extrude: ${state.selectedExtrudeLabel}`,
+			description: "Adjust the blind depth below or delete this extrude feature.",
+			primaryActions: [],
+			sketchToolActions: [],
+			commandActions: [
+				{
+					id: "delete-extrude",
+					label: "Delete Extrude"
+				}
+			],
+			showHeightInput: true,
+			showStatus: true
+		}
+	}
+
+	if (!state.selectedPlaneLabel || !state.selectedPlaneVisible) {
 		return HIDDEN_MODEL
 	}
 
 	if (state.activeTool === "view") {
-		const description =
-			state.selectedSurfaceKind === "reference-plane"
-				? `Start a sketch on the ${state.selectedSurfaceLabel.toLowerCase()} reference plane.`
-				: `Start a sketch on ${state.selectedSurfaceLabel.toLowerCase()}.`
 		return {
 			visible: true,
-			title: state.selectedSurfaceKind === "reference-plane" ? `${state.selectedSurfaceLabel} Plane` : state.selectedSurfaceLabel,
-			description,
+			title: `${state.selectedPlaneLabel} Plane`,
+			description: `Start a sketch on the ${state.selectedPlaneLabel.toLowerCase()} reference plane.`,
 			primaryActions: [
 				{
 					id: "start-sketch",
@@ -74,7 +86,7 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 
 	return {
 		visible: true,
-		title: `Sketch: ${state.selectedSurfaceLabel}`,
+		title: `Sketch: ${state.selectedPlaneLabel}`,
 		description: "Choose a drawing tool or use the sketch actions below.",
 		primaryActions: [
 			{
@@ -98,22 +110,22 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 			{
 				id: "undo",
 				label: "Undo",
-				disabled: state.isSketchClosed || (state.sketchPointCount === 0 && !state.hasPendingLineStart)
+				disabled: !state.canUndo
 			},
 			{
 				id: "reset",
 				label: "Reset",
-				disabled: state.sketchPointCount === 0 && !state.hasExtrudedModel && !state.hasPendingLineStart
+				disabled: !state.canReset
 			},
 			{
 				id: "finish-sketch",
 				label: "Finish Sketch",
-				disabled: state.isSketchClosed || state.sketchPointCount < 3 || state.hasSketchBreaks
+				disabled: !state.canFinishSketch
 			},
 			{
 				id: "extrude",
 				label: "Extrude",
-				disabled: !state.isSketchClosed
+				disabled: !state.canExtrude
 			}
 		],
 		showHeightInput: true,

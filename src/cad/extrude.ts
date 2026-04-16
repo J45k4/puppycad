@@ -1,68 +1,71 @@
-import type { ExtrudeEdgeSelector, ExtrudeFaceSelector, FeatureId, Profile, Solid, SolidEdge, SolidFace, SolidVertex } from "../contract"
-import type { Vector3D } from "../types"
+import type { PartDocument, ProfileReference, SketchPlane, SolidExtrude } from "../schema"
+import { materializeSketch, resolveProfileLoops } from "./sketch"
+import type { Point2D, Vector3D } from "../types"
 
-export interface ExtrudeProfileOptions {
-	featureId: FeatureId
-	distance: number
-	direction?: "positive" | "negative"
-	plane?: "XY" | "YZ" | "XZ"
+export interface ExtrudeFeatureOptions {
 	solidId?: string
 	startOffset?: number
 }
 
+export type SolidVertex = {
+	id: string
+	position: Vector3D
+}
+
+export type SolidEdge = {
+	id: string
+	vertexIds: string[]
+}
+
+export type SolidFace = {
+	id: string
+	edgeIds: string[]
+}
+
+export type Solid = {
+	id: string
+	featureId: string
+	vertices: SolidVertex[]
+	edges: SolidEdge[]
+	faces: SolidFace[]
+}
+
 export interface ExtrudedSolid {
 	solid: Solid
-	faces: {
-		top: string
-		bottom: string
-		sides: string[]
-	}
-	edges: {
-		top: string[]
-		bottom: string[]
-		sides: string[]
-		topLoops: string[][]
-		bottomLoops: string[][]
-	}
-	vertices: {
-		top: string[]
-		bottom: string[]
-		topLoops: string[][]
-		bottomLoops: string[][]
-	}
+	plane: SketchPlane
+	depth: number
+	profileLoops: Point2D[][]
 }
 
-type NormalizedProfileLoop = {
-	vertexIndexes: number[]
+type NormalizedLoop = {
+	points: Point2D[]
 }
 
-const DEFAULT_PLANE = "XY"
-const DEFAULT_DIRECTION = "positive"
+const DEFAULT_PLANE: SketchPlane = "XY"
 
-export function extrudeProfile(profile: Profile, options: ExtrudeProfileOptions): ExtrudedSolid {
-	if (!Number.isFinite(options.distance) || options.distance <= 0) {
-		throw new Error("Extrude distance must be a finite number greater than zero.")
+export function extrudeSolidFeature(part: Pick<PartDocument, "features">, feature: SolidExtrude, options: ExtrudeFeatureOptions = {}): ExtrudedSolid {
+	if (!Number.isFinite(feature.depth) || feature.depth <= 0) {
+		throw new Error("Extrude depth must be a finite number greater than zero.")
 	}
 
-	const plane = options.plane ?? DEFAULT_PLANE
-	const direction = options.direction ?? DEFAULT_DIRECTION
+	const sketch = resolveSketchForProfile(part, feature.target)
+	const materializedSketch = materializeSketch(sketch)
+	const profileLoops = resolveProfileLoops(materializedSketch, feature.target.profileId)
+	const normalizedLoops = normalizeLoops(profileLoops)
+	if (normalizedLoops.length === 0) {
+		throw new Error(`Profile "${feature.target.profileId}" does not contain any valid closed loops.`)
+	}
+
+	const solidId = options.solidId ?? `${feature.id}-solid`
 	const startOffset = options.startOffset ?? 0
-	const signedDistance = direction === "negative" ? -options.distance : options.distance
-	const endOffset = startOffset + signedDistance
-	const solidId = options.solidId ?? `${options.featureId}-solid`
-	const loops = normalizeProfileLoops(profile)
-
-	if (loops.length === 0) {
-		throw new Error(`Profile "${profile.id}" does not contain any valid closed loops.`)
-	}
+	const endOffset = startOffset + feature.depth
+	const plane = materializedSketch.target.plane ?? DEFAULT_PLANE
 
 	const vertices: SolidVertex[] = []
 	const edges: SolidEdge[] = []
 	const faces: SolidFace[] = []
-	const bottomVertexIds = new Map<number, string>()
-	const topVertexIds = new Map<number, string>()
-	const sideEdgeIds = new Map<number, string>()
-	const referencedVertexIndexes: number[] = []
+	const bottomVertexIds = new Map<string, string>()
+	const topVertexIds = new Map<string, string>()
 
 	const addVertex = (position: Vector3D): string => {
 		const id = `${solidId}-vertex-${vertices.length + 1}`
@@ -82,152 +85,99 @@ export function extrudeProfile(profile: Profile, options: ExtrudeProfileOptions)
 		return id
 	}
 
-	for (const loop of loops) {
-		for (const vertexIndex of loop.vertexIndexes) {
-			if (bottomVertexIds.has(vertexIndex)) {
-				continue
-			}
-
-			const point = profile.vertices[vertexIndex]
+	for (let loopIndex = 0; loopIndex < normalizedLoops.length; loopIndex += 1) {
+		const loop = normalizedLoops[loopIndex]
+		if (!loop) {
+			continue
+		}
+		for (let pointIndex = 0; pointIndex < loop.points.length; pointIndex += 1) {
+			const point = loop.points[pointIndex]
 			if (!point) {
 				continue
 			}
-
-			referencedVertexIndexes.push(vertexIndex)
-			bottomVertexIds.set(vertexIndex, addVertex(projectPoint(point, plane, startOffset)))
-			topVertexIds.set(vertexIndex, addVertex(projectPoint(point, plane, endOffset)))
+			const pointKey = `${loopIndex}:${pointIndex}`
+			bottomVertexIds.set(pointKey, addVertex(projectPoint(point, plane, startOffset)))
+			topVertexIds.set(pointKey, addVertex(projectPoint(point, plane, endOffset)))
 		}
 	}
 
-	for (const vertexIndex of referencedVertexIndexes) {
-		const bottomVertexId = bottomVertexIds.get(vertexIndex)
-		const topVertexId = topVertexIds.get(vertexIndex)
-		if (!bottomVertexId || !topVertexId) {
+	const bottomFaceEdges: string[] = []
+	const topFaceEdges: string[] = []
+
+	for (let loopIndex = 0; loopIndex < normalizedLoops.length; loopIndex += 1) {
+		const loop = normalizedLoops[loopIndex]
+		if (!loop) {
 			continue
 		}
 
-		sideEdgeIds.set(vertexIndex, addEdge([bottomVertexId, topVertexId]))
-	}
+		for (let pointIndex = 0; pointIndex < loop.points.length; pointIndex += 1) {
+			const nextIndex = (pointIndex + 1) % loop.points.length
+			const bottomStartId = getRequiredId(bottomVertexIds, `${loopIndex}:${pointIndex}`, "bottom vertex")
+			const bottomEndId = getRequiredId(bottomVertexIds, `${loopIndex}:${nextIndex}`, "bottom vertex")
+			const topStartId = getRequiredId(topVertexIds, `${loopIndex}:${pointIndex}`, "top vertex")
+			const topEndId = getRequiredId(topVertexIds, `${loopIndex}:${nextIndex}`, "top vertex")
 
-	const bottomLoopVertexIds = loops.map((loop) => loop.vertexIndexes.map((vertexIndex) => getRequiredId(bottomVertexIds, vertexIndex, "bottom vertex")))
-	const topLoopVertexIds = loops.map((loop) => loop.vertexIndexes.map((vertexIndex) => getRequiredId(topVertexIds, vertexIndex, "top vertex")))
-	const flatBottomVertexIds = bottomLoopVertexIds.flat()
-	const flatTopVertexIds = topLoopVertexIds.flat()
-	const bottomLoopEdgeIds: string[][] = []
-	const topLoopEdgeIds: string[][] = []
-	const sideFaceIds: string[] = []
-
-	for (const loop of loops) {
-		const loopBottomEdges: string[] = []
-		const loopTopEdges: string[] = []
-
-		for (let index = 0; index < loop.vertexIndexes.length; index += 1) {
-			const startVertexIndex = loop.vertexIndexes[index]
-			const endVertexIndex = loop.vertexIndexes[(index + 1) % loop.vertexIndexes.length]
-
-			if (startVertexIndex === undefined || endVertexIndex === undefined) {
-				continue
-			}
-
-			const bottomStartId = getRequiredId(bottomVertexIds, startVertexIndex, "bottom vertex")
-			const bottomEndId = getRequiredId(bottomVertexIds, endVertexIndex, "bottom vertex")
-			const topStartId = getRequiredId(topVertexIds, startVertexIndex, "top vertex")
-			const topEndId = getRequiredId(topVertexIds, endVertexIndex, "top vertex")
 			const bottomEdgeId = addEdge([bottomStartId, bottomEndId])
 			const topEdgeId = addEdge([topStartId, topEndId])
+			const sideStartEdgeId = addEdge([bottomStartId, topStartId])
+			const sideEndEdgeId = addEdge([bottomEndId, topEndId])
 
-			loopBottomEdges.push(bottomEdgeId)
-			loopTopEdges.push(topEdgeId)
-
-			const sideEndEdgeId = getRequiredId(sideEdgeIds, endVertexIndex, "side edge")
-			const sideStartEdgeId = getRequiredId(sideEdgeIds, startVertexIndex, "side edge")
-
-			sideFaceIds.push(addFace([bottomEdgeId, sideEndEdgeId, topEdgeId, sideStartEdgeId]))
+			bottomFaceEdges.push(bottomEdgeId)
+			topFaceEdges.push(topEdgeId)
+			addFace([bottomEdgeId, sideEndEdgeId, topEdgeId, sideStartEdgeId])
 		}
-
-		bottomLoopEdgeIds.push(loopBottomEdges)
-		topLoopEdgeIds.push(loopTopEdges)
 	}
 
-	const bottomFaceId = addFace(bottomLoopEdgeIds.flat())
-	const topFaceId = addFace(topLoopEdgeIds.flat())
+	addFace(bottomFaceEdges)
+	addFace(topFaceEdges)
 
 	return {
 		solid: {
 			id: solidId,
-			featureId: options.featureId,
+			featureId: feature.id,
 			vertices,
 			edges,
 			faces
 		},
-		faces: {
-			top: topFaceId,
-			bottom: bottomFaceId,
-			sides: sideFaceIds
-		},
-		edges: {
-			top: topLoopEdgeIds.flat(),
-			bottom: bottomLoopEdgeIds.flat(),
-			sides: referencedVertexIndexes.map((vertexIndex) => getRequiredId(sideEdgeIds, vertexIndex, "side edge")),
-			topLoops: topLoopEdgeIds,
-			bottomLoops: bottomLoopEdgeIds
-		},
-		vertices: {
-			top: flatTopVertexIds,
-			bottom: flatBottomVertexIds,
-			topLoops: topLoopVertexIds,
-			bottomLoops: bottomLoopVertexIds
-		}
+		plane,
+		depth: feature.depth,
+		profileLoops: normalizedLoops.map((loop) => loop.points.map(clonePoint))
 	}
 }
 
-export function resolveExtrudeFaceId(extrusion: ExtrudedSolid, selector: ExtrudeFaceSelector): string | null {
-	if (selector.type === "cap") {
-		return selector.side === "top" ? extrusion.faces.top : extrusion.faces.bottom
+function resolveSketchForProfile(part: Pick<PartDocument, "features">, reference: ProfileReference) {
+	const sketch = part.features.find((feature) => feature.type === "sketch" && feature.id === reference.sketchId)
+	if (!sketch || sketch.type !== "sketch") {
+		throw new Error(`Sketch "${reference.sketchId}" does not exist.`)
 	}
-
-	return extrusion.faces.sides[selector.index] ?? null
+	return sketch
 }
 
-export function resolveExtrudeEdgeId(extrusion: ExtrudedSolid, selector: ExtrudeEdgeSelector): string | null {
-	if (selector.type === "capLoop") {
-		const edges = selector.side === "top" ? extrusion.edges.top : extrusion.edges.bottom
-		return edges[selector.index] ?? null
-	}
-
-	return extrusion.edges.sides[selector.index] ?? null
+function normalizeLoops(profileLoops: Point2D[][]): NormalizedLoop[] {
+	return profileLoops.map((loop) => normalizeLoop(loop)).filter((loop): loop is NormalizedLoop => loop !== null)
 }
 
-function normalizeProfileLoops(profile: Profile): NormalizedProfileLoop[] {
-	const loops: NormalizedProfileLoop[] = []
-
-	for (const loop of profile.loops) {
-		const normalizedIndexes: number[] = []
-
-		for (const vertexIndex of loop) {
-			if (!Number.isInteger(vertexIndex) || vertexIndex < 0 || vertexIndex >= profile.vertices.length) {
-				continue
-			}
-
-			const previousIndex = normalizedIndexes[normalizedIndexes.length - 1]
-			if (previousIndex !== vertexIndex) {
-				normalizedIndexes.push(vertexIndex)
-			}
-		}
-
-		if (normalizedIndexes.length >= 2 && normalizedIndexes[0] === normalizedIndexes[normalizedIndexes.length - 1]) {
-			normalizedIndexes.pop()
-		}
-
-		if (normalizedIndexes.length >= 3) {
-			loops.push({ vertexIndexes: normalizedIndexes })
+function normalizeLoop(loop: Point2D[]): NormalizedLoop | null {
+	const points: Point2D[] = []
+	for (const point of loop) {
+		const previous = points[points.length - 1]
+		if (!previous || previous.x !== point.x || previous.y !== point.y) {
+			points.push(clonePoint(point))
 		}
 	}
 
-	return loops
+	if (points.length >= 2) {
+		const first = points[0]
+		const last = points[points.length - 1]
+		if (first && last && first.x === last.x && first.y === last.y) {
+			points.pop()
+		}
+	}
+
+	return points.length >= 3 ? { points } : null
 }
 
-function projectPoint(point: Profile["vertices"][number], plane: ExtrudeProfileOptions["plane"], extrusionOffset: number): Vector3D {
+function projectPoint(point: Point2D, plane: SketchPlane, extrusionOffset: number): Vector3D {
 	switch (plane) {
 		case "YZ":
 			return { x: extrusionOffset, y: point.x, z: point.y }
@@ -238,11 +188,14 @@ function projectPoint(point: Profile["vertices"][number], plane: ExtrudeProfileO
 	}
 }
 
-function getRequiredId(store: Map<number, string>, index: number, label: string): string {
-	const id = store.get(index)
+function getRequiredId(store: Map<string, string>, key: string, label: string): string {
+	const id = store.get(key)
 	if (!id) {
-		throw new Error(`Missing ${label} for profile vertex ${index}.`)
+		throw new Error(`Missing ${label} for ${key}.`)
 	}
-
 	return id
+}
+
+function clonePoint(point: Point2D): Point2D {
+	return { x: point.x, y: point.y }
 }

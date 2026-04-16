@@ -89,9 +89,9 @@ describe("normalizeProjectFile", () => {
 		expect(file.selectedPath).toEqual([0])
 	})
 
-	it("normalizes part project items", () => {
+	it("adapts legacy part project items into schema features", () => {
 		const input = {
-			version: 2,
+			version: 3,
 			items: [
 				{
 					type: "part",
@@ -114,9 +114,7 @@ describe("normalizeProjectFile", () => {
 							scale: 2,
 							rawHeight: null
 						},
-						height: Number.POSITIVE_INFINITY,
-						previewDistance: Number.NaN,
-						previewRotation: { yaw: Number.NaN, pitch: 0.2 }
+						height: Number.POSITIVE_INFINITY
 					}
 				}
 			],
@@ -136,26 +134,29 @@ describe("normalizeProjectFile", () => {
 		expect(item.name).toBe("Part 1")
 
 		const data = item.data as PartProjectItemData
-		expect(data).toEqual({
-			sketchPoints: [
-				{ x: 0, y: 0 },
-				{ x: 10, y: 5 }
-			],
-			sketchName: undefined,
-			isSketchClosed: false,
-			extrudedModels: [
-				{
-					base: [
-						{ x: 0, y: 0 },
-						{ x: 10, y: 0 },
-						{ x: 0, y: 10 }
-					],
-					height: PART_PROJECT_DEFAULT_HEIGHT,
-					scale: 2,
-					rawHeight: PART_PROJECT_DEFAULT_HEIGHT
-				}
-			],
-			height: PART_PROJECT_DEFAULT_HEIGHT
+		expect(data.features).toHaveLength(3)
+		expect(data.features[0]).toMatchObject({
+			type: "sketch",
+			name: "Sketch 1",
+			dirty: true,
+			target: {
+				type: "plane",
+				plane: "XY"
+			},
+			entities: [{ type: "line" }]
+		})
+		expect(data.features[1]).toMatchObject({
+			type: "sketch",
+			name: "Legacy Sketch 1",
+			dirty: false,
+			target: {
+				type: "plane",
+				plane: "XY"
+			}
+		})
+		expect(data.features[2]).toMatchObject({
+			type: "extrude",
+			depth: PART_PROJECT_DEFAULT_HEIGHT
 		})
 	})
 
@@ -224,13 +225,7 @@ describe("normalizeProjectFile", () => {
 		}
 		expect(nestedPart.name).toBe("Part 1")
 		const nestedPartData = nestedPart.data as PartProjectItemData
-		expect(nestedPartData).toEqual({
-			sketchPoints: [],
-			sketchName: undefined,
-			isSketchClosed: false,
-			extrudedModels: [],
-			height: PART_PROJECT_DEFAULT_HEIGHT
-		})
+		expect(nestedPartData).toEqual({ features: [] })
 
 		expect(file.selectedPath).toEqual([3, 0])
 	})
@@ -285,12 +280,119 @@ describe("normalizeProjectFile", () => {
 			throw new Error("Expected nested part entry")
 		}
 		expect(partEntry.visible).toBe(false)
-		expect(partEntry.data).toEqual({
-			sketchPoints: [],
-			sketchName: undefined,
-			isSketchClosed: false,
-			extrudedModels: [],
-			height: 30
+		expect(partEntry.data).toEqual({ features: [] })
+	})
+
+	it("preserves schema-based part features", () => {
+		const input = {
+			version: 3,
+			items: [
+				{
+					type: "part",
+					name: "Part",
+					data: {
+						features: [
+							{
+								type: "sketch",
+								id: "sketch-1",
+								name: "Sketch 1",
+								dirty: false,
+								target: {
+									type: "plane",
+									plane: "XZ"
+								},
+								entities: [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 10 } }]
+							},
+							{
+								type: "extrude",
+								id: "extrude-1",
+								target: {
+									type: "profileRef",
+									sketchId: "sketch-1",
+									profileId: "sketch-1-profile-1"
+								},
+								depth: 18
+							}
+						]
+					}
+				}
+			],
+			selectedPath: [0]
+		}
+
+		const file = normalizeProjectFile(input)
+		expect(file).not.toBeNull()
+		if (!file) {
+			throw new Error("normalizeProjectFile returned null")
+		}
+
+		const part = file.items[0]
+		if (!part || !("type" in part) || part.type !== "part") {
+			throw new Error("Expected part item")
+		}
+
+		expect(part.data).toMatchObject({
+			features: [
+				{
+					type: "sketch",
+					id: "sketch-1",
+					target: {
+						type: "plane",
+						plane: "XZ"
+					},
+					profiles: [{ id: "sketch-1-profile-1" }]
+				},
+				{
+					type: "extrude",
+					id: "extrude-1",
+					depth: 18
+				}
+			]
+		})
+	})
+
+	it("skips unsupported legacy extrusions and records a warning", () => {
+		const input = {
+			version: 3,
+			items: [
+				{
+					type: "part",
+					name: "Part",
+					data: {
+						extrudedModels: [
+							{
+								base: [
+									{ x: 0, y: 0 },
+									{ x: 1, y: 0 },
+									{ x: 0, y: 1 }
+								],
+								height: 1,
+								scale: 10,
+								rawHeight: 10,
+								origin: { x: 3, y: 0, z: 0 },
+								rotation: { x: 0, y: 0, z: 0, w: 1 }
+							}
+						]
+					}
+				}
+			],
+			selectedPath: [0]
+		}
+
+		const file = normalizeProjectFile(input)
+		expect(file).not.toBeNull()
+		if (!file) {
+			throw new Error("normalizeProjectFile returned null")
+		}
+
+		const part = file.items[0]
+		if (!part || !("type" in part) || part.type !== "part") {
+			throw new Error("Expected part item")
+		}
+
+		expect(part.data).toEqual({
+			features: [],
+			migrationWarnings: ["Skipped unsupported legacy extrusion 1."]
 		})
 	})
 })
