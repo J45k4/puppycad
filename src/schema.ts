@@ -9,6 +9,7 @@ export type Line = {
 
 export type CornerRectangle = {
 	id: string
+	type: "cornerRectangle"
 	p0: Point2D
 	p1: Point2D
 }
