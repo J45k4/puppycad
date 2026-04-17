@@ -1,6 +1,7 @@
 import type { PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../contract"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors, resolveSketchTargetFrame, type ExtrudedFaceDescriptor, type ExtrudedSolid, type SketchFrame3D } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
+import { applyPartAction, type PartAction } from "../part-actions"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
 import { REFERENCE_PLANE_TO_SKETCH_PLANE, SKETCH_PLANE_TO_REFERENCE_PLANE, type FaceReference, type PartFeature, type Sketch, type SketchEntity, type Solid, type SolidExtrude } from "../schema"
@@ -403,6 +404,74 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	public dispatchPartAction(action: PartAction): void {
+		const deletedExtrude = action.type === "deleteExtrude" ? this.resolveExtrude(action.extrudeId) : null
+		const nextState = applyPartAction(
+			{
+				features: this.features,
+				...(this.migrationWarnings.length > 0 ? { migrationWarnings: [...this.migrationWarnings] } : {})
+			},
+			action
+		)
+		if (nextState.features === this.features) {
+			return
+		}
+
+		this.features = nextState.features
+		this.syncSelectionAfterPartAction(action, deletedExtrude)
+		this.syncPreviewGeometry()
+		this.drawSketch()
+		this.updateStatus()
+		this.updateControls()
+		this.emitStateChange()
+	}
+
+	private syncSelectionAfterPartAction(action: PartAction, deletedExtrude: SolidExtrude | null): void {
+		switch (action.type) {
+			case "createSketch": {
+				const sketch = this.resolveSketch(action.sketchId)
+				if (!sketch) {
+					break
+				}
+				this.selectedSketchId = sketch.id
+				this.selectedExtrudeId = sketch.target.type === "face" ? sketch.target.face.extrudeId : null
+				this.selectedFaceId = sketch.target.type === "face" ? sketch.target.face.faceId : null
+				this.selectedReferencePlane = sketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane] : null
+				this.activeTool = "sketch"
+				this.activeSketchTool = "line"
+				break
+			}
+			case "createExtrude":
+				this.selectedExtrudeId = action.extrudeId
+				this.selectedFaceId = null
+				this.selectedSketchId = null
+				this.activeTool = "view"
+				break
+			case "deleteExtrude": {
+				const targetSketch = deletedExtrude ? this.resolveSketch(deletedExtrude.target.sketchId) : null
+				if (targetSketch) {
+					this.selectedReferencePlane = this.getReferencePlaneForSketchTarget(targetSketch.target)
+				}
+				this.activeTool = "view"
+				break
+			}
+			default:
+				break
+		}
+
+		if (this.selectedSketchId && !this.resolveSketch(this.selectedSketchId)) {
+			this.selectedSketchId = null
+			this.activeTool = "view"
+		}
+		if (this.selectedExtrudeId && !this.resolveExtrude(this.selectedExtrudeId)) {
+			this.selectedExtrudeId = null
+			this.selectedFaceId = null
+		}
+		if (this.selectedFaceId && !this.selectedExtrudeId) {
+			this.selectedFaceId = null
+		}
+	}
+
 	public enterSketchMode(): void {
 		const existingDirtySketch = this.features.find((feature) => feature.type === "sketch" && feature.dirty)
 		if (existingDirtySketch && existingDirtySketch.type === "sketch") {
@@ -430,12 +499,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 
-		const sketchId = `sketch-${this.features.filter((feature) => feature.type === "sketch").length + 1}-${createId()}`
-		const nextSketch = materializeSketch({
-			type: "sketch",
-			id: sketchId,
+		this.pendingLineStart = null
+		this.pendingRectangleStart = null
+		this.sketchHoverPoint = null
+		if (selectedPlane) {
+			this.focusReferencePlaneForSketch(selectedPlane)
+		}
+		this.dispatchPartAction({
+			type: "createSketch",
+			sketchId: `sketch-${this.features.filter((feature) => feature.type === "sketch").length + 1}-${createId()}`,
 			name: this.getNextSketchName(),
-			dirty: true,
 			target: selectedFace
 				? {
 						type: "face",
@@ -444,31 +517,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				: {
 						type: "plane",
 						plane: REFERENCE_PLANE_TO_SKETCH_PLANE[selectedPlane as ReferencePlaneName]
-					},
-			entities: [],
-			vertices: [],
-			loops: [],
-			profiles: []
+					}
 		})
-
-		this.features = [...this.features, nextSketch]
-		this.selectedReferencePlane = selectedPlane
-		this.selectedSketchId = nextSketch.id
-		this.selectedExtrudeId = selectedFace?.extrudeId ?? null
-		this.selectedFaceId = selectedFace?.faceId ?? null
-		this.activeTool = "sketch"
-		this.activeSketchTool = "line"
-		this.pendingLineStart = null
-		this.pendingRectangleStart = null
-		this.sketchHoverPoint = null
-		if (selectedPlane) {
-			this.focusReferencePlaneForSketch(selectedPlane)
-		}
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
 	}
 
 	public selectReferencePlane(planeName: ReferencePlaneName): void {
@@ -611,19 +661,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!sketch || sketch.name === trimmed) {
 			return
 		}
-		this.features = this.features.map((feature) => {
-			if (feature.type !== "sketch" || feature.id !== sketch.id) {
-				return feature
-			}
-			return {
-				...feature,
-				name: trimmed
-			}
+		this.dispatchPartAction({
+			type: "renameSketch",
+			sketchId: sketch.id,
+			name: trimmed
 		})
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.emitStateChange()
 	}
 
 	public deleteSketch(sketchId?: string): void {
@@ -631,27 +673,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!sketch) {
 			return
 		}
-		const removedFeatureIds = this.collectDependentFeatureIds([sketch.id])
-		this.features = this.features.filter((feature) => !removedFeatureIds.has(feature.id))
-		if (this.selectedSketchId && removedFeatureIds.has(this.selectedSketchId)) {
-			this.selectedSketchId = null
-			this.activeTool = "view"
-		}
-		if (this.selectedExtrudeId && removedFeatureIds.has(this.selectedExtrudeId)) {
-			this.selectedExtrudeId = null
-			this.selectedFaceId = null
-		}
-		if (this.selectedFaceId && !this.selectedExtrudeId) {
-			this.selectedFaceId = null
-		}
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
+		this.dispatchPartAction({
+			type: "deleteSketch",
+			sketchId: sketch.id
+		})
 	}
 
 	public deleteExtrude(extrudeId?: string): void {
@@ -659,28 +687,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!extrude) {
 			return
 		}
-		const removedFeatureIds = this.collectDependentFeatureIds([extrude.id])
-		this.features = this.features.filter((feature) => !removedFeatureIds.has(feature.id))
-		if (this.selectedExtrudeId && removedFeatureIds.has(this.selectedExtrudeId)) {
-			this.selectedExtrudeId = null
-			this.selectedFaceId = null
-		}
-		if (this.selectedSketchId && removedFeatureIds.has(this.selectedSketchId)) {
-			this.selectedSketchId = null
-		}
-		const targetSketch = this.features.find((feature) => feature.type === "sketch" && feature.id === extrude.target.sketchId)
-		if (targetSketch?.type === "sketch") {
-			this.selectedReferencePlane = this.getReferencePlaneForSketchTarget(targetSketch.target)
-		}
-		this.activeTool = "view"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
+		this.dispatchPartAction({
+			type: "deleteExtrude",
+			extrudeId: extrude.id
+		})
 	}
 
 	private restoreState(state?: PartEditorState): void {
@@ -838,10 +851,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 
-		this.updateSketch(sketch.id, (current) => ({
-			...current,
-			entities: current.entities.slice(0, -1)
-		}))
+		this.dispatchPartAction({
+			type: "undoSketchEntity",
+			sketchId: sketch.id
+		})
 	}
 
 	private handleReset(): void {
@@ -857,10 +870,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 
-		this.updateSketch(sketch.id, (current) => ({
-			...current,
-			entities: []
-		}))
+		this.dispatchPartAction({
+			type: "resetSketch",
+			sketchId: sketch.id
+		})
 	}
 
 	private handleFinishSketch = (): void => {
@@ -872,20 +885,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
-		this.features = this.features.map((feature) => {
-			if (feature.type !== "sketch" || feature.id !== sketch.id) {
-				return feature
-			}
-			return materializeSketch({
-				...feature,
-				dirty: false
-			})
+		this.dispatchPartAction({
+			type: "finishSketch",
+			sketchId: sketch.id
 		})
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
 	}
 
 	private handleExtrude = (): void => {
@@ -904,28 +907,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 
-		const nextExtrude: SolidExtrude = {
-			type: "extrude",
-			id: `extrude-${this.features.filter((feature) => feature.type === "extrude").length + 1}-${createId()}`,
-			name: `Extrude ${this.features.filter((feature) => feature.type === "extrude").length + 1}`,
-			target: {
-				type: "profileRef",
-				sketchId: sketch.id,
-				profileId: profile.id
-			},
+		const extrudeCount = this.features.filter((feature) => feature.type === "extrude").length
+		this.dispatchPartAction({
+			type: "createExtrude",
+			extrudeId: `extrude-${extrudeCount + 1}-${createId()}`,
+			name: `Extrude ${extrudeCount + 1}`,
+			sketchId: sketch.id,
+			profileId: profile.id,
 			depth
-		}
-
-		this.features = [...this.features, nextExtrude]
-		this.selectedExtrudeId = nextExtrude.id
-		this.selectedFaceId = null
-		this.selectedSketchId = null
-		this.activeTool = "view"
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
+		})
 	}
 
 	private handleDeleteSelectedExtrude(): void {
@@ -952,20 +942,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.updateControls()
 			return
 		}
-		this.features = this.features.map((feature) => {
-			if (feature.type !== "extrude" || feature.id !== extrude.id) {
-				return feature
-			}
-			return {
-				...feature,
-				depth
-			}
+		this.dispatchPartAction({
+			type: "setExtrudeDepth",
+			extrudeId: extrude.id,
+			depth
 		})
 		this.heightInput.value = String(depth)
-		this.syncPreviewGeometry()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
 	}
 
 	private handleSketchCanvasClick = (event: MouseEvent): void => {
@@ -1147,10 +1129,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!sketch) {
 			return
 		}
-		this.updateSketch(sketch.id, (current) => ({
-			...current,
-			entities: [...current.entities, entity]
-		}))
+		this.dispatchPartAction({
+			type: "addSketchEntity",
+			sketchId: sketch.id,
+			entity
+		})
 	}
 
 	private handleSketchPoint(point: Point2D): void {
@@ -1199,20 +1182,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pendingLineStart = null
 		this.sketchHoverPoint = null
 		this.appendEntityToSelectedSketch(nextEntity)
-	}
-
-	private updateSketch(sketchId: string, updater: (sketch: Sketch) => Sketch): void {
-		this.features = this.features.map((feature) => {
-			if (feature.type !== "sketch" || feature.id !== sketchId) {
-				return feature
-			}
-			return materializeSketch(updater(feature))
-		})
-		this.syncPreviewGeometry()
-		this.drawSketch()
-		this.updateStatus()
-		this.updateControls()
-		this.emitStateChange()
 	}
 
 	private getSelectedSketch(): Sketch | null {
@@ -1280,29 +1249,6 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			x: offset.dot(xAxis),
 			y: offset.dot(yAxis)
 		}
-	}
-
-	private collectDependentFeatureIds(seedFeatureIds: Iterable<string>): Set<string> {
-		const removedIds = new Set(seedFeatureIds)
-		let changed = true
-		while (changed) {
-			changed = false
-			for (const feature of this.features) {
-				if (removedIds.has(feature.id)) {
-					continue
-				}
-				if (feature.type === "extrude" && removedIds.has(feature.target.sketchId)) {
-					removedIds.add(feature.id)
-					changed = true
-					continue
-				}
-				if (feature.type === "sketch" && feature.target.type === "face" && removedIds.has(feature.target.face.extrudeId)) {
-					removedIds.add(feature.id)
-					changed = true
-				}
-			}
-		}
-		return removedIds
 	}
 
 	private getEditableSketch(): Sketch | null {
