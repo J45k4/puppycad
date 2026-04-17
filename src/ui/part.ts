@@ -110,7 +110,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
 		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
 	}
-	private readonly previewPan = { x: 0, y: 0 }
+	private readonly previewPan = new THREE.Vector3()
+	private readonly previewOrbitPivot = new THREE.Vector3()
 	private readonly previewPointer = new THREE.Vector2()
 	private readonly previewRaycaster = new THREE.Raycaster()
 	private readonly migrationWarnings: string[]
@@ -1035,6 +1036,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.isPanningPreview = isMiddleMouseClick
 		this.reverseRotatePreview = isRightMouseClick
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
+		if (isRotatePointer) {
+			this.setPreviewOrbitPivot(this.getOrbitAnchorPoint(event.clientX, event.clientY))
+		}
 		this.previewCanvas.setPointerCapture(event.pointerId)
 		this.previewCanvas.style.cursor = "grabbing"
 	}
@@ -1580,12 +1584,36 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const rect = this.previewCanvas.getBoundingClientRect()
 		const width = Math.max(1, rect.width || this.previewContainer.clientWidth || 960)
 		const height = Math.max(1, rect.height || this.previewContainer.clientHeight || 640)
-		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(this.previewBaseDistance))
+		const cameraDistance = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(cameraDistance - (this.previewPan.z + this.previewOrbitPivot.z)))
 		const verticalFovRadians = THREE.MathUtils.degToRad(this.previewCamera.fov)
 		const visibleHeight = 2 * distance * Math.tan(verticalFovRadians / 2)
 		return {
 			x: (visibleHeight * this.previewCamera.aspect) / width,
 			y: visibleHeight / height
+		}
+	}
+
+	private getPreviewPointerPosition(clientX: number, clientY: number): THREE.Vector2 | null {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		const width = rect.width || this.previewContainer.clientWidth || 960
+		const height = rect.height || this.previewContainer.clientHeight || 640
+		if (width <= 0 || height <= 0) {
+			return null
+		}
+		return new THREE.Vector2(((clientX - rect.left) / width) * 2 - 1, -((clientY - rect.top) / height) * 2 + 1)
+	}
+
+	private getPreviewViewportCenterClientPoint(): { x: number; y: number } | null {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		const width = rect.width || this.previewContainer.clientWidth || 960
+		const height = rect.height || this.previewContainer.clientHeight || 640
+		if (width <= 0 || height <= 0) {
+			return null
+		}
+		return {
+			x: rect.left + width / 2,
+			y: rect.top + height / 2
 		}
 	}
 
@@ -1627,19 +1655,77 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return null
 	}
 
-	private getExtrudeAt(clientX: number, clientY: number): string | null {
+	private getOrbitAnchorPoint(clientX: number, clientY: number): THREE.Vector3 | null {
+		const sketch = this.getEditableSketch()
+		if (sketch) {
+			if (sketch.target.type === "face") {
+				const faceHit = this.getPreviewFaceIntersection(clientX, clientY, sketch.target.face)
+				return faceHit ? this.previewContentGroup.worldToLocal(faceHit.intersectionPoint.clone()) : null
+			}
+			const selectedPlane = SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane]
+			const planeHit = this.getReferencePlaneIntersection(clientX, clientY, selectedPlane)
+			return planeHit ? this.previewContentGroup.worldToLocal(planeHit.intersectionPoint.clone()) : null
+		}
+
+		const faceHit = this.getPreviewFaceIntersection(clientX, clientY)
+		if (faceHit) {
+			return this.previewContentGroup.worldToLocal(faceHit.intersectionPoint.clone())
+		}
+		const solidHit = this.getPreviewSolidIntersection(clientX, clientY)
+		if (solidHit) {
+			return this.previewContentGroup.worldToLocal(solidHit.intersectionPoint.clone())
+		}
+		const planeHit = this.getReferencePlaneIntersection(clientX, clientY)
+		if (planeHit) {
+			return this.previewContentGroup.worldToLocal(planeHit.intersectionPoint.clone())
+		}
+		const viewportCenter = this.getPreviewViewportCenterClientPoint()
+		if (viewportCenter && (Math.abs(viewportCenter.x - clientX) > 1e-3 || Math.abs(viewportCenter.y - clientY) > 1e-3)) {
+			const centerOrbitAnchor = this.getOrbitAnchorPoint(viewportCenter.x, viewportCenter.y)
+			if (centerOrbitAnchor) {
+				return centerOrbitAnchor
+			}
+		}
+		return this.getPreviewDepthAnchorPoint(viewportCenter?.x ?? clientX, viewportCenter?.y ?? clientY)
+	}
+
+	private setPreviewOrbitPivot(nextPivot: THREE.Vector3 | null): void {
+		const targetPivot = nextPivot ? nextPivot.clone() : new THREE.Vector3()
+		if (this.previewOrbitPivot.distanceToSquared(targetPivot) <= 1e-12) {
+			return
+		}
+		const rotation = new THREE.Euler(this.previewRotation.pitch, this.previewRotation.yaw, 0, this.previewRootGroup.rotation.order)
+		const currentRotatedPivot = this.previewOrbitPivot.clone().applyEuler(rotation)
+		const nextRotatedPivot = targetPivot.clone().applyEuler(rotation)
+		this.previewPan.add(this.previewOrbitPivot).sub(currentRotatedPivot).sub(targetPivot).add(nextRotatedPivot)
+		this.previewOrbitPivot.copy(targetPivot)
+	}
+
+	private getPreviewDepthAnchorPoint(clientX: number, clientY: number): THREE.Vector3 | null {
 		if (!this.setPreviewRaycaster(clientX, clientY)) {
 			return null
 		}
-		const intersections = this.previewRaycaster.intersectObjects(
-			this.previewSolids.filter((solid) => solid.mesh.visible).map((solid) => solid.mesh),
-			false
-		)
-		const mesh = intersections[0]?.object
-		if (!(mesh instanceof THREE.Mesh)) {
-			return null
+		const fallbackDistance = Math.max(6, Math.min(24, this.previewBaseDistance * 0.65))
+		const cameraForward = this.previewCamera.getWorldDirection(new THREE.Vector3()).normalize()
+		const planePoint =
+			this.previewOrbitPivot.lengthSq() > 1e-12
+				? this.previewContentGroup.localToWorld(this.previewOrbitPivot.clone())
+				: this.previewCamera.position.clone().add(cameraForward.clone().multiplyScalar(fallbackDistance))
+		const denominator = this.previewRaycaster.ray.direction.dot(cameraForward)
+		if (Math.abs(denominator) <= 1e-6) {
+			const fallbackPoint = this.previewRaycaster.ray.origin.clone().add(this.previewRaycaster.ray.direction.clone().multiplyScalar(fallbackDistance))
+			return this.previewContentGroup.worldToLocal(fallbackPoint)
 		}
-		return this.previewSolids.find((solid) => solid.mesh === mesh)?.extrudeId ?? null
+		const distanceAlongRay = planePoint.clone().sub(this.previewRaycaster.ray.origin).dot(cameraForward) / denominator
+		const anchorWorldPoint =
+			distanceAlongRay > 0
+				? this.previewRaycaster.ray.origin.clone().add(this.previewRaycaster.ray.direction.clone().multiplyScalar(distanceAlongRay))
+				: this.previewRaycaster.ray.origin.clone().add(this.previewRaycaster.ray.direction.clone().multiplyScalar(fallbackDistance))
+		return this.previewContentGroup.worldToLocal(anchorWorldPoint)
+	}
+
+	private getExtrudeAt(clientX: number, clientY: number): string | null {
+		return this.getPreviewSolidIntersection(clientX, clientY)?.solid.extrudeId ?? null
 	}
 
 	private getSelectedSketchPoint(clientX: number, clientY: number): Point2D | null {
@@ -1658,7 +1744,30 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return hit ? this.worldPointToSketchPoint(hit.intersectionPoint, hit.face.frame) : null
 	}
 
-	private getReferencePlaneIntersection(clientX: number, clientY: number, onlyPlane?: ReferencePlaneName): { name: ReferencePlaneName; point: Point2D } | null {
+	private getPreviewSolidIntersection(clientX: number, clientY: number): { solid: PreviewSolidVisual; intersectionPoint: THREE.Vector3 } | null {
+		if (!this.setPreviewRaycaster(clientX, clientY)) {
+			return null
+		}
+		const visibleSolids = this.previewSolids.filter((solid) => solid.mesh.visible)
+		const intersections = this.previewRaycaster.intersectObjects(
+			visibleSolids.map((solid) => solid.mesh),
+			false
+		)
+		const intersection = intersections[0]
+		const mesh = intersection?.object
+		if (!(mesh instanceof THREE.Mesh) || !intersection) {
+			return null
+		}
+		const solid = visibleSolids.find((entry) => entry.mesh === mesh)
+		return solid
+			? {
+					solid,
+					intersectionPoint: intersection.point.clone()
+				}
+			: null
+	}
+
+	private getReferencePlaneIntersection(clientX: number, clientY: number, onlyPlane?: ReferencePlaneName): { name: ReferencePlaneName; point: Point2D; intersectionPoint: THREE.Vector3 } | null {
 		if (!this.setPreviewRaycaster(clientX, clientY)) {
 			return null
 		}
@@ -1682,19 +1791,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			point: {
 				x: localPoint.x,
 				y: localPoint.y
-			}
+			},
+			intersectionPoint: intersection.point.clone()
 		}
 	}
 
 	private setPreviewRaycaster(clientX: number, clientY: number): boolean {
-		const rect = this.previewCanvas.getBoundingClientRect()
-		const width = rect.width || this.previewContainer.clientWidth || 960
-		const height = rect.height || this.previewContainer.clientHeight || 640
-		if (width <= 0 || height <= 0) {
+		const pointer = this.getPreviewPointerPosition(clientX, clientY)
+		if (!pointer) {
 			return false
 		}
-		this.previewPointer.x = ((clientX - rect.left) / width) * 2 - 1
-		this.previewPointer.y = -((clientY - rect.top) / height) * 2 + 1
+		this.previewPointer.copy(pointer)
 		this.syncPreviewView()
 		this.previewCamera.updateMatrixWorld()
 		this.previewScene.updateMatrixWorld(true)
@@ -1720,8 +1827,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.previewRotation.pitch = 0
 				break
 		}
-		this.previewPan.x = 0
-		this.previewPan.y = 0
+		this.previewPan.set(0, 0, 0)
+		this.previewOrbitPivot.set(0, 0, 0)
 		this.previewBaseDistance = Math.min(this.previewBaseDistance, 28)
 	}
 
@@ -2155,8 +2262,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private syncPreviewView(): void {
 		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
-		this.previewRootGroup.position.set(this.previewPan.x, this.previewPan.y, 0)
+		this.previewRootGroup.position.copy(this.previewPan).add(this.previewOrbitPivot)
 		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
+		this.previewContentGroup.position.copy(this.previewOrbitPivot).multiplyScalar(-1)
 	}
 
 	private getFirstVisibleReferencePlane(): ReferencePlaneName | null {

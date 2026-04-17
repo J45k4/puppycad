@@ -15,7 +15,7 @@ class FakePreviewRenderer {
 
 let domWindow: HappyDOMWindow
 
-function dispatchPreviewPointer(window: HappyDOMWindow, canvas: HTMLCanvasElement, type: string, x: number, y: number): void {
+function dispatchPreviewPointer(window: HappyDOMWindow, canvas: HTMLCanvasElement, type: string, x: number, y: number, button = 0): void {
 	const event = new window.Event(type, { bubbles: true, cancelable: true }) as unknown as Event & {
 		button: number
 		clientX: number
@@ -24,7 +24,7 @@ function dispatchPreviewPointer(window: HappyDOMWindow, canvas: HTMLCanvasElemen
 		pointerId: number
 		pointerType: string
 	}
-	event.button = 0
+	event.button = button
 	event.clientX = x
 	event.clientY = y
 	event.isPrimary = true
@@ -37,6 +37,12 @@ function clickPreview(window: HappyDOMWindow, canvas: HTMLCanvasElement, x: numb
 	dispatchPreviewPointer(window, canvas, "pointermove", x, y)
 	dispatchPreviewPointer(window, canvas, "pointerdown", x, y)
 	dispatchPreviewPointer(window, canvas, "pointerup", x, y)
+}
+
+function rotatePreview(window: HappyDOMWindow, canvas: HTMLCanvasElement, startX: number, startY: number, endX: number, endY: number): void {
+	dispatchPreviewPointer(window, canvas, "pointerdown", startX, startY, 2)
+	dispatchPreviewPointer(window, canvas, "pointermove", endX, endY)
+	dispatchPreviewPointer(window, canvas, "pointerup", endX, endY, 2)
 }
 
 function clickButton(window: HappyDOMWindow, root: HTMLElement, label: string): void {
@@ -55,6 +61,25 @@ function getPreviewCanvas(root: HTMLElement): HTMLCanvasElement {
 		throw new Error("Expected preview canvas")
 	}
 	return previewCanvas
+}
+
+function findEmptyPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement): { x: number; y: number } {
+	const partEditor = editor as unknown as {
+		getExtrudeAt: (clientX: number, clientY: number) => string | null
+		getExtrudeFaceAt: (clientX: number, clientY: number) => { extrudeId: string; faceId: string } | null
+		getReferencePlaneAt: (clientX: number, clientY: number) => string | null
+	}
+	const rect = previewCanvas.getBoundingClientRect()
+	for (const v of [0.05, 0.15, 0.25, 0.75, 0.85, 0.95]) {
+		for (const u of [0.05, 0.15, 0.25, 0.75, 0.85, 0.95]) {
+			const x = rect.left + rect.width * u
+			const y = rect.top + rect.height * v
+			if (!partEditor.getExtrudeFaceAt(x, y) && !partEditor.getExtrudeAt(x, y) && !partEditor.getReferencePlaneAt(x, y)) {
+				return { x, y }
+			}
+		}
+	}
+	throw new Error("Expected a preview point that misses solids, faces, and planes")
 }
 
 function getExtrudePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string): { x: number; y: number } {
@@ -166,6 +191,58 @@ function getExtrudeFacePreviewPointAt(editor: PartEditor, previewCanvas: HTMLCan
 		THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.5)
 	)
 	const projected = face.mesh.localToWorld(localPoint).project(partEditor.previewCamera)
+	const rect = previewCanvas.getBoundingClientRect()
+	return {
+		x: rect.left + ((projected.x + 1) / 2) * rect.width,
+		y: rect.top + ((1 - projected.y) / 2) * rect.height
+	}
+}
+
+function getExtrudeFacePreviewLocalPointAt(editor: PartEditor, extrudeId: string, faceLabel: string, u: number, v: number): THREE.Vector3 {
+	const partEditor = editor as unknown as {
+		drawPreview: () => void
+		previewContentGroup: THREE.Group
+		previewSolids: Array<{
+			extrudeId: string
+			faces: Array<{
+				label: string
+				mesh: THREE.Mesh
+			}>
+		}>
+	}
+	partEditor.drawPreview()
+	const solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+	expect(solid).toBeDefined()
+	if (!solid) {
+		throw new Error(`Expected extrude preview for ${extrudeId}`)
+	}
+	const face = solid.faces.find((entry) => entry.label === faceLabel)
+	expect(face).toBeDefined()
+	if (!face) {
+		throw new Error(`Expected face "${faceLabel}" for ${extrudeId}`)
+	}
+	face.mesh.geometry.computeBoundingBox()
+	const bounds = face.mesh.geometry.boundingBox
+	expect(bounds).toBeDefined()
+	if (!bounds) {
+		throw new Error(`Expected face bounds for ${faceLabel}`)
+	}
+	const localPoint = new THREE.Vector3(
+		THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, u),
+		THREE.MathUtils.lerp(bounds.min.y, bounds.max.y, v),
+		THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.5)
+	)
+	return partEditor.previewContentGroup.worldToLocal(face.mesh.localToWorld(localPoint))
+}
+
+function projectPreviewLocalPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, localPoint: THREE.Vector3): { x: number; y: number } {
+	const partEditor = editor as unknown as {
+		drawPreview: () => void
+		previewCamera: THREE.PerspectiveCamera
+		previewContentGroup: THREE.Group
+	}
+	partEditor.drawPreview()
+	const projected = partEditor.previewContentGroup.localToWorld(localPoint.clone()).project(partEditor.previewCamera)
 	const rect = previewCanvas.getBoundingClientRect()
 	return {
 		x: rect.left + ((projected.x + 1) / 2) * rect.width,
@@ -379,6 +456,95 @@ describe("PartEditor", () => {
 		expect(editor.root.textContent).toContain("Delete Extrude")
 		const heightInput = editor.root.querySelector('input[type="number"]') as HTMLInputElement | null
 		expect(heightInput?.value).toBe("30")
+	})
+
+	it("rotates around the point under the cursor instead of the world origin", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const extrude = editor.listExtrudes()[0]
+		expect(extrude).toBeDefined()
+		if (!extrude) {
+			throw new Error("Expected extrude")
+		}
+
+		const startPoint = getExtrudeFacePreviewPointAt(editor, previewCanvas, extrude.id, "Bottom Face", 0.75, 0.25)
+		const anchoredPoint = getExtrudeFacePreviewLocalPointAt(editor, extrude.id, "Bottom Face", 0.75, 0.25)
+
+		rotatePreview(domWindow, previewCanvas, startPoint.x, startPoint.y, startPoint.x + 56, startPoint.y + 32)
+
+		const rotatedPoint = projectPreviewLocalPoint(editor, previewCanvas, anchoredPoint)
+		expect(Math.hypot(rotatedPoint.x - startPoint.x, rotatedPoint.y - startPoint.y)).toBeLessThan(2)
+	})
+
+	it("falls back to the view-center target when rotating over empty space", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+		editor.setReferencePlaneVisible("Front", false)
+		editor.setReferencePlaneVisible("Top", false)
+		editor.setReferencePlaneVisible("Right", false)
+
+		const partEditor = editor as unknown as {
+			drawPreview: () => void
+			getOrbitAnchorPoint: (clientX: number, clientY: number) => THREE.Vector3 | null
+			previewBaseDistance: number
+			previewOrbitPivot: THREE.Vector3
+		}
+		partEditor.previewBaseDistance = 48
+		partEditor.drawPreview()
+		const expectedPivot = partEditor.getOrbitAnchorPoint(180, 180)
+		expect(expectedPivot).toBeDefined()
+		if (!expectedPivot) {
+			throw new Error("Expected center fallback pivot")
+		}
+		expect(partEditor.previewOrbitPivot.length()).toBe(0)
+		const emptyPoint = findEmptyPreviewPoint(editor, previewCanvas)
+
+		rotatePreview(domWindow, previewCanvas, emptyPoint.x, emptyPoint.y, emptyPoint.x + 50, emptyPoint.y + 35)
+
+		expect(partEditor.previewOrbitPivot.distanceTo(expectedPivot)).toBeLessThan(1e-6)
 	})
 
 	it("allows selecting an extrude face directly from the preview", () => {
