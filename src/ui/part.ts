@@ -1271,7 +1271,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private worldPointToSketchPoint(worldPoint: THREE.Vector3, frame: SketchFrame3D): Point2D {
-		const partPoint = this.previewRootGroup.worldToLocal(worldPoint.clone())
+		const partPoint = this.previewContentGroup.worldToLocal(worldPoint.clone())
 		const origin = vector3DToThree(frame.origin)
 		const offset = partPoint.sub(origin)
 		const xAxis = vector3DToThree(frame.xAxis).normalize()

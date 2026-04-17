@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "bun:test"
 import { Window as HappyDOMWindow } from "happy-dom"
 import * as THREE from "three"
 import { PartEditor } from "../src/ui/part"
+import type { SketchFrame3D } from "../src/cad/extrude"
 
 class FakePreviewRenderer {
 	public render(): void {}
@@ -247,6 +248,17 @@ function projectPreviewLocalPoint(editor: PartEditor, previewCanvas: HTMLCanvasE
 	return {
 		x: rect.left + ((projected.x + 1) / 2) * rect.width,
 		y: rect.top + ((1 - projected.y) / 2) * rect.height
+	}
+}
+
+function toSketchPoint(localPoint: THREE.Vector3, frame: SketchFrame3D): { x: number; y: number } {
+	const origin = new THREE.Vector3(frame.origin.x, frame.origin.y, frame.origin.z)
+	const xAxis = new THREE.Vector3(frame.xAxis.x, frame.xAxis.y, frame.xAxis.z).normalize()
+	const yAxis = new THREE.Vector3(frame.yAxis.x, frame.yAxis.y, frame.yAxis.z).normalize()
+	const offset = localPoint.clone().sub(origin)
+	return {
+		x: offset.dot(xAxis),
+		y: offset.dot(yAxis)
 	}
 }
 
@@ -661,6 +673,95 @@ describe("PartEditor", () => {
 		expect(state.features[3]).toMatchObject({
 			type: "extrude"
 		})
+	})
+
+	it("keeps side-face sketch input on the selected face after orbiting", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const partEditor = editor as unknown as {
+			drawPreview: () => void
+			previewSolids: Array<{
+				extrudeId: string
+				faces: Array<{
+					faceId: string
+					label: string
+					frame: SketchFrame3D
+				}>
+			}>
+			selectExtrudeFace: (extrudeId: string, faceId?: string) => void
+			setPreviewOrbitPivot: (nextPivot: THREE.Vector3 | null) => void
+		}
+		partEditor.drawPreview()
+		const previewSolid = partEditor.previewSolids.find((entry) => entry.extrudeId === baseExtrude.id)
+		expect(previewSolid).toBeDefined()
+		if (!previewSolid) {
+			throw new Error("Expected preview solid")
+		}
+		const sideFace = previewSolid.faces.find((face) => face.label.startsWith("Side Face"))
+		expect(sideFace).toBeDefined()
+		if (!sideFace) {
+			throw new Error("Expected side face")
+		}
+
+		partEditor.selectExtrudeFace(baseExtrude.id, sideFace.faceId)
+		clickButton(domWindow, editor.root, "Sketch")
+		clickButton(domWindow, editor.root, "Rectangle")
+		partEditor.setPreviewOrbitPivot(new THREE.Vector3(4, -3, 1.5))
+		partEditor.drawPreview()
+
+		const startLocal = getExtrudeFacePreviewLocalPointAt(editor, baseExtrude.id, sideFace.label, 0.25, 0.3)
+		const endLocal = getExtrudeFacePreviewLocalPointAt(editor, baseExtrude.id, sideFace.label, 0.7, 0.75)
+		const startPoint = projectPreviewLocalPoint(editor, previewCanvas, startLocal)
+		const endPoint = projectPreviewLocalPoint(editor, previewCanvas, endLocal)
+		clickPreview(domWindow, previewCanvas, startPoint.x, startPoint.y)
+		clickPreview(domWindow, previewCanvas, endPoint.x, endPoint.y)
+
+		const faceSketch = editor.getState().features[2]
+		expect(faceSketch).toBeDefined()
+		expect(faceSketch?.type).toBe("sketch")
+		if (!faceSketch || faceSketch.type !== "sketch") {
+			throw new Error("Expected face sketch")
+		}
+		const rectangle = faceSketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+
+		const expectedStart = toSketchPoint(startLocal, sideFace.frame)
+		const expectedEnd = toSketchPoint(endLocal, sideFace.frame)
+		expect(rectangle.p0.x).toBeCloseTo(expectedStart.x, 6)
+		expect(rectangle.p0.y).toBeCloseTo(expectedStart.y, 6)
+		expect(rectangle.p1.x).toBeCloseTo(expectedEnd.x, 6)
+		expect(rectangle.p1.y).toBeCloseTo(expectedEnd.y, 6)
 	})
 
 	it("allows extruding a finished face sketch after reselecting it", () => {
