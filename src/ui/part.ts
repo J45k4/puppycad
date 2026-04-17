@@ -20,9 +20,21 @@ type ReferencePlaneVisual = {
 	edgeMaterial: THREE.LineBasicMaterial
 }
 
+type PreviewFaceVisual = {
+	extrudeId: string
+	faceId: string
+	label: string
+	mesh: THREE.Mesh
+	material: THREE.MeshBasicMaterial
+}
+
 type PreviewSolidVisual = {
+	extrudeId: string
 	mesh: THREE.Mesh
 	edges: THREE.LineSegments
+	fillMaterial: THREE.MeshStandardMaterial
+	edgeMaterial: THREE.LineBasicMaterial
+	faces: PreviewFaceVisual[]
 }
 
 type PreviewRendererLike = Pick<THREE.WebGLRenderer, "render" | "setClearColor" | "setPixelRatio" | "setSize">
@@ -112,6 +124,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private selectedReferencePlane: ReferencePlaneName | null = "Front"
 	private selectedSketchId: string | null = null
 	private selectedExtrudeId: string | null = null
+	private selectedFaceId: string | null = null
 	private activeTool: PartStudioTool = "view"
 	private activeSketchTool: SketchTool | null = "line"
 	private pendingRectangleStart: Point2D | null = null
@@ -123,6 +136,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private lastRotationPointer: { x: number; y: number } | null = null
 	private resizeObserver: ResizeObserver | null = null
 	private hoveredReferencePlane: ReferencePlaneName | null = null
+	private hoveredExtrudeId: string | null = null
+	private hoveredFaceId: string | null = null
 
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
@@ -426,6 +441,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedReferencePlane = selectedPlane
 		this.selectedSketchId = nextSketch.id
 		this.selectedExtrudeId = null
+		this.selectedFaceId = null
 		this.activeTool = "sketch"
 		this.activeSketchTool = "line"
 		this.pendingLineStart = null
@@ -449,6 +465,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedReferencePlane = planeName
 		this.selectedSketchId = null
 		this.selectedExtrudeId = null
+		this.selectedFaceId = null
 		this.activeTool = "view"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
@@ -468,6 +485,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.selectedSketchId = sketch.id
 		this.selectedExtrudeId = null
+		this.selectedFaceId = null
 		this.selectedReferencePlane = SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane]
 		this.activeTool = sketch.dirty ? "sketch" : "view"
 		this.pendingLineStart = null
@@ -534,8 +552,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!extrude || extrude.type !== "extrude") {
 			return
 		}
+		this.selectExtrudeFace(extrude.id)
+	}
+
+	private selectExtrudeFace(extrudeId: string, faceId?: string): void {
+		const extrude = this.features.find((feature) => feature.type === "extrude" && feature.id === extrudeId)
+		if (!extrude || extrude.type !== "extrude") {
+			return
+		}
 		const targetSketch = this.features.find((feature) => feature.type === "sketch" && feature.id === extrude.target.sketchId)
 		this.selectedExtrudeId = extrude.id
+		this.selectedFaceId = faceId ?? null
 		this.selectedSketchId = null
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? SKETCH_PLANE_TO_REFERENCE_PLANE[targetSketch.target.plane] : this.selectedReferencePlane
 		this.activeTool = "view"
@@ -603,6 +630,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		if (this.selectedExtrudeId && deletedExtrudeIds.has(this.selectedExtrudeId)) {
 			this.selectedExtrudeId = null
+			this.selectedFaceId = null
 		}
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
@@ -622,6 +650,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.features = this.features.filter((feature) => feature.type !== "extrude" || feature.id !== extrude.id)
 		if (this.selectedExtrudeId === extrude.id) {
 			this.selectedExtrudeId = null
+			this.selectedFaceId = null
 		}
 		const targetSketch = this.features.find((feature) => feature.type === "sketch" && feature.id === extrude.target.sketchId)
 		if (targetSketch?.type === "sketch") {
@@ -644,6 +673,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		})
 		this.selectedSketchId = this.features.find((feature) => feature.type === "sketch" && feature.dirty)?.id ?? this.getLastSketchId()
 		this.selectedExtrudeId = null
+		this.selectedFaceId = null
 		const selectedSketch = this.getSelectedSketch()
 		this.selectedReferencePlane = selectedSketch ? SKETCH_PLANE_TO_REFERENCE_PLANE[selectedSketch.target.plane] : "Front"
 		this.activeTool = selectedSketch?.dirty ? "sketch" : "view"
@@ -868,6 +898,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.features = [...this.features, nextExtrude]
 		this.selectedExtrudeId = nextExtrude.id
+		this.selectedFaceId = null
 		this.selectedSketchId = null
 		this.activeTool = "view"
 		this.syncPreviewGeometry()
@@ -950,11 +981,25 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		if (isLeftMouseClick && this.activeTool === "view") {
+			const faceSelection = this.getExtrudeFaceAt(event.clientX, event.clientY)
+			if (faceSelection) {
+				event.preventDefault()
+				this.selectExtrudeFace(faceSelection.extrudeId, faceSelection.faceId)
+				return
+			}
+			const extrudeId = this.getExtrudeAt(event.clientX, event.clientY)
+			if (extrudeId) {
+				event.preventDefault()
+				this.selectExtrude(extrudeId)
+				return
+			}
 			const plane = this.getReferencePlaneAt(event.clientX, event.clientY)
 			if (plane) {
 				event.preventDefault()
 				this.selectedReferencePlane = plane
 				this.selectedSketchId = null
+				this.selectedExtrudeId = null
+				this.selectedFaceId = null
 				this.refreshReferencePlaneStyles()
 				this.updateControls()
 				this.drawPreview()
@@ -979,15 +1024,23 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if ((!this.isRotatingPreview && !this.isPanningPreview) || !this.lastRotationPointer) {
 			if (this.activeTool === "sketch") {
 				this.hoveredReferencePlane = null
+				this.hoveredExtrudeId = null
+				this.hoveredFaceId = null
 				const point = this.getSelectedPlanePoint(event.clientX, event.clientY)
 				this.sketchHoverPoint = point ? this.snapPoint(point) : null
 				this.updatePreviewCursor()
 				this.drawSketch()
 				return
 			}
-			const hovered = this.activeTool === "view" ? this.getReferencePlaneAt(event.clientX, event.clientY) : null
-			if (hovered !== this.hoveredReferencePlane) {
-				this.hoveredReferencePlane = hovered
+			const hoveredFace = this.activeTool === "view" ? this.getExtrudeFaceAt(event.clientX, event.clientY) : null
+			const hoveredExtrudeId = hoveredFace?.extrudeId ?? (this.activeTool === "view" ? this.getExtrudeAt(event.clientX, event.clientY) : null)
+			const hoveredPlane = hoveredExtrudeId ? null : this.activeTool === "view" ? this.getReferencePlaneAt(event.clientX, event.clientY) : null
+			if (hoveredPlane !== this.hoveredReferencePlane || hoveredExtrudeId !== this.hoveredExtrudeId || hoveredFace?.faceId !== this.hoveredFaceId) {
+				this.hoveredReferencePlane = hoveredPlane
+				this.hoveredExtrudeId = hoveredExtrudeId
+				this.hoveredFaceId = hoveredFace?.faceId ?? null
+				this.refreshFaceStyles()
+				this.refreshSolidStyles()
 				this.refreshReferencePlaneStyles()
 				this.updatePreviewCursor()
 				this.drawPreview()
@@ -1022,7 +1075,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.lastRotationPointer = null
 		if (event.type === "pointerleave" || event.type === "pointercancel") {
 			this.hoveredReferencePlane = null
+			this.hoveredExtrudeId = null
+			this.hoveredFaceId = null
 			this.sketchHoverPoint = null
+			this.refreshFaceStyles()
+			this.refreshSolidStyles()
 			this.refreshReferencePlaneStyles()
 			this.drawSketch()
 		}
@@ -1328,10 +1385,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private updateStatus(): void {
 		const extrude = this.getSelectedExtrude()
 		if (extrude) {
-			const targetSketch = this.features.find((feature) => feature.type === "sketch" && feature.id === extrude.target.sketchId)
-			const sketchLabel = targetSketch?.type === "sketch" ? targetSketch.name?.trim() || "Sketch" : "Sketch"
+			const extrudeLabel = extrude.name?.trim() || "Extrude"
+			const selectedFaceLabel = this.selectedFaceId ? this.getPreviewFaceLabel(extrude.id, this.selectedFaceId) : null
+			if (selectedFaceLabel) {
+				this.statusText.textContent = `${selectedFaceLabel} selected.`
+				this.summaryText.textContent = `On ${extrudeLabel}. Depth ${extrude.depth.toFixed(1)}.`
+				return
+			}
 			this.statusText.textContent = `Extrude selected. Depth ${extrude.depth.toFixed(1)}.`
-			this.summaryText.textContent = `Targets ${sketchLabel}.`
+			this.summaryText.textContent = `Editing ${extrudeLabel}.`
 			return
 		}
 
@@ -1384,6 +1446,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.quickActionsStatusSection.style.display = model.showStatus ? "flex" : "none"
 		this.heightInput.disabled = !selectedExtrude && !this.canExtrude()
 		this.sketchPanel.style.display = "none"
+		this.refreshSolidStyles()
 		this.refreshReferencePlaneStyles()
 		this.updatePreviewCursor()
 		queueFrame(() => this.drawPreview())
@@ -1404,9 +1467,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private drawPreview(): void {
-		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
-		this.previewRootGroup.position.set(this.previewPan.x, this.previewPan.y, 0)
-		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
+		this.syncPreviewView()
 		this.previewRenderer.render(this.previewScene, this.previewCamera)
 	}
 
@@ -1427,6 +1488,45 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return this.getReferencePlaneIntersection(clientX, clientY)?.name ?? null
 	}
 
+	private getExtrudeFaceAt(clientX: number, clientY: number): { extrudeId: string; faceId: string } | null {
+		if (!this.setPreviewRaycaster(clientX, clientY)) {
+			return null
+		}
+		const intersections = this.previewRaycaster.intersectObjects(
+			this.previewSolids.flatMap((solid) => solid.faces.map((face) => face.mesh)),
+			false
+		)
+		const mesh = intersections[0]?.object
+		if (!(mesh instanceof THREE.Mesh)) {
+			return null
+		}
+		for (const solid of this.previewSolids) {
+			const face = solid.faces.find((entry) => entry.mesh === mesh)
+			if (face) {
+				return {
+					extrudeId: face.extrudeId,
+					faceId: face.faceId
+				}
+			}
+		}
+		return null
+	}
+
+	private getExtrudeAt(clientX: number, clientY: number): string | null {
+		if (!this.setPreviewRaycaster(clientX, clientY)) {
+			return null
+		}
+		const intersections = this.previewRaycaster.intersectObjects(
+			this.previewSolids.filter((solid) => solid.mesh.visible).map((solid) => solid.mesh),
+			false
+		)
+		const mesh = intersections[0]?.object
+		if (!(mesh instanceof THREE.Mesh)) {
+			return null
+		}
+		return this.previewSolids.find((solid) => solid.mesh === mesh)?.extrudeId ?? null
+	}
+
 	private getSelectedPlanePoint(clientX: number, clientY: number): Point2D | null {
 		const selectedPlane = this.selectedReferencePlane
 		if (!selectedPlane || !this.referencePlaneVisibility[selectedPlane]) {
@@ -1436,17 +1536,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private getReferencePlaneIntersection(clientX: number, clientY: number, onlyPlane?: ReferencePlaneName): { name: ReferencePlaneName; point: Point2D } | null {
-		const rect = this.previewCanvas.getBoundingClientRect()
-		const width = rect.width || this.previewContainer.clientWidth || 960
-		const height = rect.height || this.previewContainer.clientHeight || 640
-		if (width <= 0 || height <= 0) {
+		if (!this.setPreviewRaycaster(clientX, clientY)) {
 			return null
 		}
-		this.previewPointer.x = ((clientX - rect.left) / width) * 2 - 1
-		this.previewPointer.y = -((clientY - rect.top) / height) * 2 + 1
-		this.previewCamera.updateMatrixWorld()
-		this.previewScene.updateMatrixWorld(true)
-		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
 		const planeVisuals = this.previewReferencePlanes.filter((plane) => plane.mesh.visible && (!onlyPlane || plane.name === onlyPlane))
 		const intersections = this.previewRaycaster.intersectObjects(
 			planeVisuals.map((plane) => plane.mesh),
@@ -1469,6 +1561,22 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				y: localPoint.y
 			}
 		}
+	}
+
+	private setPreviewRaycaster(clientX: number, clientY: number): boolean {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		const width = rect.width || this.previewContainer.clientWidth || 960
+		const height = rect.height || this.previewContainer.clientHeight || 640
+		if (width <= 0 || height <= 0) {
+			return false
+		}
+		this.previewPointer.x = ((clientX - rect.left) / width) * 2 - 1
+		this.previewPointer.y = -((clientY - rect.top) / height) * 2 + 1
+		this.syncPreviewView()
+		this.previewCamera.updateMatrixWorld()
+		this.previewScene.updateMatrixWorld(true)
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+		return true
 	}
 
 	private focusReferencePlaneForSketch(planeName: ReferencePlaneName | null): void {
@@ -1498,6 +1606,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		for (const solid of this.previewSolids) {
 			this.previewSolidsGroup.remove(solid.mesh)
 			this.previewSolidsGroup.remove(solid.edges)
+			for (const face of solid.faces) {
+				this.previewSolidsGroup.remove(face.mesh)
+				face.mesh.geometry.dispose()
+				disposeMaterial(face.mesh.material)
+			}
 			solid.mesh.geometry.dispose()
 			solid.edges.geometry.dispose()
 			disposeMaterial(solid.mesh.material)
@@ -1529,15 +1642,27 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		for (const extrude of this.features.filter((feature): feature is SolidExtrude => feature.type === "extrude")) {
 			try {
 				const extrusion = extrudeSolidFeature(partState, extrude)
-				const visual = this.createExtrudedVisual(extrusion)
+				const visual = this.createExtrudedVisual(extrusion, extrude.id)
 				this.previewSolids.push(visual)
 				this.previewSolidsGroup.add(visual.mesh)
 				this.previewSolidsGroup.add(visual.edges)
+				for (const face of visual.faces) {
+					this.previewSolidsGroup.add(face.mesh)
+				}
 			} catch (_error) {
 				// Skip invalid extrusions during preview replay.
 			}
 		}
 
+		if (this.selectedFaceId && !this.previewSolids.some((solid) => solid.faces.some((face) => face.faceId === this.selectedFaceId))) {
+			this.selectedFaceId = null
+		}
+		if (this.hoveredFaceId && !this.previewSolids.some((solid) => solid.faces.some((face) => face.faceId === this.hoveredFaceId))) {
+			this.hoveredFaceId = null
+		}
+
+		this.refreshFaceStyles()
+		this.refreshSolidStyles()
 		this.refreshReferencePlaneStyles()
 		this.syncSketchDraftPreview()
 		this.drawPreview()
@@ -1679,7 +1804,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return marker
 	}
 
-	private createExtrudedVisual(extrusion: ExtrudedSolid): PreviewSolidVisual {
+	private createExtrudedVisual(extrusion: ExtrudedSolid, extrudeId: string): PreviewSolidVisual {
 		const outerLoop = extrusion.profileLoops[0] ?? []
 		const shape = new THREE.Shape(outerLoop.map((point) => new THREE.Vector2(point.x, point.y)))
 		for (const hole of extrusion.profileLoops.slice(1)) {
@@ -1693,7 +1818,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const material = new THREE.MeshStandardMaterial({
 			color: 0x3b82f6,
 			roughness: 0.35,
-			metalness: 0.05
+			metalness: 0.05,
+			side: THREE.DoubleSide
 		})
 		const mesh = new THREE.Mesh(geometry, material)
 		mesh.quaternion.copy(getPlaneQuaternion(extrusion.plane))
@@ -1707,7 +1833,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial)
 		edges.quaternion.copy(mesh.quaternion)
 
-		return { mesh, edges }
+		const faces = createPreviewFaceVisuals(extrusion, extrudeId, mesh.quaternion)
+		return {
+			extrudeId,
+			mesh,
+			edges,
+			fillMaterial: material,
+			edgeMaterial,
+			faces
+		}
 	}
 
 	private createReferencePlanes(): THREE.Group {
@@ -1812,6 +1946,49 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private refreshSolidStyles(): void {
+		for (const solid of this.previewSolids) {
+			const isSelected = solid.extrudeId === this.selectedExtrudeId
+			const isHovered = solid.extrudeId === this.hoveredExtrudeId
+			if (isSelected) {
+				solid.fillMaterial.color.setHex(0xf59e0b)
+				solid.edgeMaterial.color.setHex(0x7c2d12)
+				solid.edgeMaterial.opacity = 1
+				continue
+			}
+			if (isHovered) {
+				solid.fillMaterial.color.setHex(0x60a5fa)
+				solid.edgeMaterial.color.setHex(0xffffff)
+				solid.edgeMaterial.opacity = 1
+				continue
+			}
+			solid.fillMaterial.color.setHex(0x3b82f6)
+			solid.edgeMaterial.color.setHex(0xe2e8f0)
+			solid.edgeMaterial.opacity = 0.8
+		}
+	}
+
+	private refreshFaceStyles(): void {
+		for (const solid of this.previewSolids) {
+			for (const face of solid.faces) {
+				const isSelected = face.faceId === this.selectedFaceId
+				const isHovered = face.faceId === this.hoveredFaceId
+				if (isSelected) {
+					face.material.color.setHex(0xf59e0b)
+					face.material.opacity = 0.28
+					continue
+				}
+				if (isHovered) {
+					face.material.color.setHex(0x7dd3fc)
+					face.material.opacity = 0.2
+					continue
+				}
+				face.material.color.setHex(0xffffff)
+				face.material.opacity = 0
+			}
+		}
+	}
+
 	private updatePreviewCursor(): void {
 		if (this.isRotatingPreview || this.isPanningPreview) {
 			this.previewCanvas.style.cursor = "grabbing"
@@ -1821,7 +1998,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewCanvas.style.cursor = this.sketchHoverPoint ? "crosshair" : "grab"
 			return
 		}
-		this.previewCanvas.style.cursor = this.hoveredReferencePlane ? "pointer" : "grab"
+		this.previewCanvas.style.cursor = this.hoveredFaceId || this.hoveredExtrudeId || this.hoveredReferencePlane ? "pointer" : "grab"
+	}
+
+	private getPreviewFaceLabel(extrudeId: string, faceId: string): string | null {
+		return this.previewSolids.find((solid) => solid.extrudeId === extrudeId)?.faces.find((face) => face.faceId === faceId)?.label ?? null
+	}
+
+	private syncPreviewView(): void {
+		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		this.previewRootGroup.position.set(this.previewPan.x, this.previewPan.y, 0)
+		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
 	}
 
 	private getFirstVisibleReferencePlane(): ReferencePlaneName | null {
@@ -1884,6 +2071,84 @@ function getPlaneQuaternion(plane: Sketch["target"]["plane"]): THREE.Quaternion 
 		default:
 			return new THREE.Quaternion()
 	}
+}
+
+function createPreviewFaceVisuals(extrusion: ExtrudedSolid, extrudeId: string, quaternion: THREE.Quaternion): PreviewFaceVisual[] {
+	const faceVisuals: PreviewFaceVisual[] = []
+	const totalSideFaces = extrusion.profileLoops.reduce((count, loop) => count + loop.length, 0)
+	const bottomFace = extrusion.solid.faces[totalSideFaces]
+	const topFace = extrusion.solid.faces[totalSideFaces + 1]
+	let sideFaceIndex = 0
+	let faceIndex = 0
+
+	for (const loop of extrusion.profileLoops) {
+		for (let pointIndex = 0; pointIndex < loop.length; pointIndex += 1) {
+			const face = extrusion.solid.faces[faceIndex]
+			const start = loop[pointIndex]
+			const end = loop[(pointIndex + 1) % loop.length]
+			if (face && start && end) {
+				const geometry = createQuadFaceGeometry(
+					new THREE.Vector3(start.x, start.y, 0),
+					new THREE.Vector3(end.x, end.y, 0),
+					new THREE.Vector3(end.x, end.y, extrusion.depth),
+					new THREE.Vector3(start.x, start.y, extrusion.depth)
+				)
+				faceVisuals.push(createPreviewFaceVisual(extrudeId, face.id, `Side Face ${sideFaceIndex + 1}`, geometry, quaternion))
+				sideFaceIndex += 1
+			}
+			faceIndex += 1
+		}
+	}
+
+	if (bottomFace) {
+		faceVisuals.push(createPreviewFaceVisual(extrudeId, bottomFace.id, "Bottom Face", createPlanarFaceGeometry(extrusion.profileLoops, 0), quaternion))
+	}
+	if (topFace) {
+		faceVisuals.push(createPreviewFaceVisual(extrudeId, topFace.id, "Top Face", createPlanarFaceGeometry(extrusion.profileLoops, extrusion.depth), quaternion))
+	}
+
+	return faceVisuals
+}
+
+function createPreviewFaceVisual(extrudeId: string, faceId: string, label: string, geometry: THREE.BufferGeometry, quaternion: THREE.Quaternion): PreviewFaceVisual {
+	const material = new THREE.MeshBasicMaterial({
+		color: 0xffffff,
+		transparent: true,
+		opacity: 0,
+		side: THREE.DoubleSide,
+		depthWrite: false,
+		polygonOffset: true,
+		polygonOffsetFactor: -2,
+		polygonOffsetUnits: -2
+	})
+	const mesh = new THREE.Mesh(geometry, material)
+	mesh.quaternion.copy(quaternion)
+	mesh.renderOrder = 8
+	return {
+		extrudeId,
+		faceId,
+		label,
+		mesh,
+		material
+	}
+}
+
+function createPlanarFaceGeometry(profileLoops: Point2D[][], depth: number): THREE.BufferGeometry {
+	const outerLoop = profileLoops[0] ?? []
+	const shape = new THREE.Shape(outerLoop.map((point) => new THREE.Vector2(point.x, point.y)))
+	for (const hole of profileLoops.slice(1)) {
+		shape.holes.push(new THREE.Path(hole.map((point) => new THREE.Vector2(point.x, point.y))))
+	}
+	const geometry = new THREE.ShapeGeometry(shape)
+	geometry.translate(0, 0, depth)
+	return geometry
+}
+
+function createQuadFaceGeometry(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): THREE.BufferGeometry {
+	const geometry = new THREE.BufferGeometry()
+	geometry.setAttribute("position", new THREE.Float32BufferAttribute([a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z], 3))
+	geometry.computeVertexNormals()
+	return geometry
 }
 
 function sketchPointToPlaneLocal(point: Point2D, plane: Sketch["target"]["plane"]): THREE.Vector3 {
