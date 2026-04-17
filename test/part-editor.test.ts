@@ -165,6 +165,7 @@ describe("PartEditor", () => {
 
 		const state = editor.getState()
 		expect(state.features).toHaveLength(2)
+		expect(state.solids).toHaveLength(1)
 		expect(state.features[0]).toMatchObject({
 			type: "sketch",
 			dirty: false,
@@ -173,6 +174,10 @@ describe("PartEditor", () => {
 		expect(state.features[1]).toMatchObject({
 			type: "extrude",
 			depth: 30
+		})
+		expect(state.solids?.[0]).toMatchObject({
+			featureId: state.features[1]?.id,
+			faces: expect.any(Array)
 		})
 
 		const reloaded = new PartEditor({

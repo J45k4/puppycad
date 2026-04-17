@@ -313,6 +313,15 @@ describe("normalizeProjectFile", () => {
 								},
 								depth: 18
 							}
+						],
+						solids: [
+							{
+								id: "extrude-1-solid",
+								featureId: "extrude-1",
+								vertices: [{ id: "v1", position: { x: 0, y: 0, z: 0 } }],
+								edges: [{ id: "e1", vertexIds: ["v1", "v1"] }],
+								faces: [{ id: "f1", edgeIds: ["e1"] }]
+							}
 						]
 					}
 				}
@@ -346,6 +355,15 @@ describe("normalizeProjectFile", () => {
 					type: "extrude",
 					id: "extrude-1",
 					depth: 18
+				}
+			],
+			solids: [
+				{
+					id: "extrude-1-solid",
+					featureId: "extrude-1",
+					vertices: [{ id: "v1", position: { x: 0, y: 0, z: 0 } }],
+					edges: [{ id: "e1", vertexIds: ["v1", "v1"] }],
+					faces: [{ id: "f1", edgeIds: ["e1"] }]
 				}
 			]
 		})

@@ -12,7 +12,7 @@ import type {
 	SchemanticProjectItemData
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
-import type { PartFeature, Sketch, SketchEntity, SketchPlane, SolidExtrude } from "./schema"
+import type { PartFeature, Sketch, SketchEntity, SketchPlane, Solid, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
 export const PROJECT_FILE_VERSION = 3 as const
@@ -400,8 +400,8 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		return defaults
 	}
 
-	const value = input as { features?: unknown }
-	if (Array.isArray(value.features)) {
+	const value = input as { features?: unknown; solids?: unknown }
+	if (Array.isArray(value.features) || Array.isArray(value.solids)) {
 		return normalizeSchemaPartProjectItemData(value)
 	}
 
@@ -426,13 +426,15 @@ type LegacyExtrudedModel = {
 	startOffset?: number
 }
 
-function normalizeSchemaPartProjectItemData(input: { features?: unknown; migrationWarnings?: unknown }): PartProjectItemData {
+function normalizeSchemaPartProjectItemData(input: { features?: unknown; solids?: unknown; migrationWarnings?: unknown }): PartProjectItemData {
 	const featuresInput = Array.isArray(input.features) ? input.features : []
 	const features = featuresInput.map((feature, index) => normalizePartFeature(feature, index)).filter((feature): feature is PartFeature => feature !== undefined)
+	const solids = normalizeSolids(input.solids)
 	const migrationWarnings = normalizeMigrationWarnings(input.migrationWarnings)
 
 	return {
 		features,
+		...(solids.length > 0 ? { solids } : {}),
 		...(migrationWarnings.length > 0 ? { migrationWarnings } : {})
 	}
 }
@@ -495,6 +497,104 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 	}
 
 	return undefined
+}
+
+function normalizeSolids(input: unknown): Solid[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	return input.map((solid, index) => normalizeSolid(solid, index)).filter((solid): solid is Solid => solid !== undefined)
+}
+
+function normalizeSolid(input: unknown, index: number): Solid | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as Partial<Solid>
+	const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `part-solid-${index + 1}`
+	const featureId = typeof value.featureId === "string" && value.featureId.trim() ? value.featureId.trim() : null
+	if (!featureId) {
+		return undefined
+	}
+	const vertices = normalizeSolidVertices(value.vertices)
+	const edges = normalizeSolidEdges(value.edges)
+	const faces = normalizeSolidFaces(value.faces)
+	return {
+		id,
+		featureId,
+		vertices,
+		edges,
+		faces
+	}
+}
+
+function normalizeSolidVertices(input: unknown): SolidVertex[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	return input.map((vertex, index) => normalizeSolidVertex(vertex, index)).filter((vertex): vertex is SolidVertex => vertex !== undefined)
+}
+
+function normalizeSolidVertex(input: unknown, index: number): SolidVertex | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as Partial<SolidVertex>
+	const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `solid-vertex-${index + 1}`
+	const position = normalizeVector3D(value.position)
+	if (!position) {
+		return undefined
+	}
+	return {
+		id,
+		position
+	}
+}
+
+function normalizeSolidEdges(input: unknown): SolidEdge[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	return input.map((edge, index) => normalizeSolidEdge(edge, index)).filter((edge): edge is SolidEdge => edge !== undefined)
+}
+
+function normalizeSolidEdge(input: unknown, index: number): SolidEdge | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as Partial<SolidEdge>
+	const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `solid-edge-${index + 1}`
+	const vertexIds = normalizeIdList(value.vertexIds)
+	if (vertexIds.length === 0) {
+		return undefined
+	}
+	return {
+		id,
+		vertexIds
+	}
+}
+
+function normalizeSolidFaces(input: unknown): SolidFace[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	return input.map((face, index) => normalizeSolidFace(face, index)).filter((face): face is SolidFace => face !== undefined)
+}
+
+function normalizeSolidFace(input: unknown, index: number): SolidFace | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as Partial<SolidFace>
+	const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `solid-face-${index + 1}`
+	const edgeIds = normalizeIdList(value.edgeIds)
+	if (edgeIds.length === 0) {
+		return undefined
+	}
+	return {
+		id,
+		edgeIds
+	}
 }
 
 function normalizeSketchEntities(input: unknown): SketchEntity[] {
@@ -827,6 +927,13 @@ function normalizeMigrationWarnings(input: unknown): string[] {
 		return []
 	}
 	return input.filter((warning): warning is string => typeof warning === "string" && warning.trim().length > 0).map((warning) => warning.trim())
+}
+
+function normalizeIdList(input: unknown): string[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	return input.filter((id): id is string => typeof id === "string" && id.trim().length > 0).map((id) => id.trim())
 }
 
 function clonePoint2D(point: Point2D): Point2D {

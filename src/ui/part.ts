@@ -3,7 +3,7 @@ import { extrudeSolidFeature, type ExtrudedSolid } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
-import { REFERENCE_PLANE_TO_SKETCH_PLANE, SKETCH_PLANE_TO_REFERENCE_PLANE, type PartFeature, type Sketch, type SketchEntity, type SolidExtrude } from "../schema"
+import { REFERENCE_PLANE_TO_SKETCH_PLANE, SKETCH_PLANE_TO_REFERENCE_PLANE, type PartFeature, type Sketch, type SketchEntity, type Solid, type SolidExtrude } from "../schema"
 import type { Point2D } from "../types"
 import { UiComponent } from "./ui"
 import * as THREE from "three"
@@ -120,6 +120,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 	private sketchVisible = true
 	private features: PartFeature[] = []
+	private solids: Solid[] = []
 	private previewBaseDistance = PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
 	private selectedReferencePlane: ReferencePlaneName | null = "Front"
 	private selectedSketchId: string | null = null
@@ -383,7 +384,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	public getState(): PartEditorState {
 		return {
-			features: structuredClone(this.features) as PartFeature[]
+			features: structuredClone(this.features) as PartFeature[],
+			...(this.solids.length > 0 ? { solids: structuredClone(this.solids) as Solid[] } : {}),
+			...(this.migrationWarnings.length > 0 ? { migrationWarnings: [...this.migrationWarnings] } : {})
 		}
 	}
 
@@ -665,6 +668,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private restoreState(state?: PartEditorState): void {
+		this.solids = []
 		this.features = (state?.features ?? []).map((feature) => {
 			if (feature.type === "sketch") {
 				return materializeSketch(feature)
@@ -1639,9 +1643,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const partState: PartProjectItemData = {
 			features: structuredClone(this.features) as PartFeature[]
 		}
+		const nextSolids: Solid[] = []
 		for (const extrude of this.features.filter((feature): feature is SolidExtrude => feature.type === "extrude")) {
 			try {
 				const extrusion = extrudeSolidFeature(partState, extrude)
+				nextSolids.push(structuredClone(extrusion.solid) as Solid)
 				const visual = this.createExtrudedVisual(extrusion, extrude.id)
 				this.previewSolids.push(visual)
 				this.previewSolidsGroup.add(visual.mesh)
@@ -1653,6 +1659,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				// Skip invalid extrusions during preview replay.
 			}
 		}
+		this.solids = nextSolids
 
 		if (this.selectedFaceId && !this.previewSolids.some((solid) => solid.faces.some((face) => face.faceId === this.selectedFaceId))) {
 			this.selectedFaceId = null

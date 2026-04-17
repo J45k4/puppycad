@@ -1,4 +1,4 @@
-import type { Point2D } from "./types"
+import type { Point2D, Vector3D } from "./types"
 
 export type SketchPlane = "XY" | "YZ" | "XZ"
 export type ReferencePlaneName = "Front" | "Top" | "Right"
@@ -42,6 +42,29 @@ export type Profile = {
 	holeLoopIds: string[]
 }
 
+export type SolidVertex = {
+	id: string
+	position: Vector3D
+}
+
+export type SolidEdge = {
+	id: string
+	vertexIds: string[]
+}
+
+export type SolidFace = {
+	id: string
+	edgeIds: string[]
+}
+
+export type Solid = {
+	id: string
+	featureId: string
+	vertices: SolidVertex[]
+	edges: SolidEdge[]
+	faces: SolidFace[]
+}
+
 export type ProfileReference = {
 	type: "profileRef"
 	sketchId: string
@@ -77,5 +100,6 @@ export type PartFeature = Sketch | SolidExtrude
 
 export type PartDocument = {
 	features: PartFeature[]
+	solids?: Solid[]
 	migrationWarnings?: string[]
 }
