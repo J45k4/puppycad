@@ -7,6 +7,7 @@ describe("derivePartQuickActionsModel", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
 			selectedExtrudeLabel: null,
+			selectedFaceLabel: null,
 			selectedPlaneLabel: null,
 			selectedPlaneVisible: false,
 			activeSketchTool: "line",
@@ -24,6 +25,7 @@ describe("derivePartQuickActionsModel", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
 			selectedExtrudeLabel: null,
+			selectedFaceLabel: null,
 			selectedPlaneLabel: "Front",
 			selectedPlaneVisible: true,
 			activeSketchTool: "line",
@@ -44,6 +46,7 @@ describe("derivePartQuickActionsModel", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "sketch",
 			selectedExtrudeLabel: null,
+			selectedFaceLabel: null,
 			selectedPlaneLabel: "Top",
 			selectedPlaneVisible: true,
 			activeSketchTool: "rectangle",
@@ -73,6 +76,7 @@ describe("derivePartQuickActionsModel", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "sketch",
 			selectedExtrudeLabel: null,
+			selectedFaceLabel: null,
 			selectedPlaneLabel: "Right",
 			selectedPlaneVisible: true,
 			activeSketchTool: "line",
@@ -94,6 +98,7 @@ describe("derivePartQuickActionsModel", () => {
 		const model = derivePartQuickActionsModel({
 			activeTool: "view",
 			selectedExtrudeLabel: "Extrude 1",
+			selectedFaceLabel: null,
 			selectedPlaneLabel: null,
 			selectedPlaneVisible: false,
 			activeSketchTool: null,
@@ -108,5 +113,25 @@ describe("derivePartQuickActionsModel", () => {
 		expect(model.commandActions).toEqual([{ id: "delete-extrude", label: "Delete Extrude" }])
 		expect(model.showHeightInput).toBe(true)
 		expect(model.showStatus).toBe(true)
+	})
+
+	it("shows face sketch actions when a face is selected", () => {
+		const model = derivePartQuickActionsModel({
+			activeTool: "view",
+			selectedExtrudeLabel: "Extrude 1",
+			selectedFaceLabel: "Top Face",
+			selectedPlaneLabel: null,
+			selectedPlaneVisible: false,
+			activeSketchTool: null,
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
+		})
+
+		expect(model.title).toBe("Face: Top Face")
+		expect(model.primaryActions).toEqual([{ id: "start-sketch", label: "Sketch" }])
+		expect(model.commandActions).toEqual([{ id: "delete-extrude", label: "Delete Extrude" }])
+		expect(model.showHeightInput).toBe(true)
 	})
 })

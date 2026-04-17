@@ -23,6 +23,7 @@ export type PartQuickActionsModel = {
 export type PartQuickActionsState = {
 	activeTool: "view" | "sketch"
 	selectedExtrudeLabel: string | null
+	selectedFaceLabel: string | null
 	selectedPlaneLabel: string | null
 	selectedPlaneVisible: boolean
 	activeSketchTool: "line" | "rectangle" | null
@@ -44,7 +45,32 @@ const HIDDEN_MODEL: PartQuickActionsModel = {
 }
 
 export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQuickActionsModel {
-	if (state.selectedExtrudeLabel) {
+	const selectedTargetLabel = state.selectedFaceLabel ?? state.selectedPlaneLabel
+	const selectedTargetVisible = state.selectedFaceLabel ? true : state.selectedPlaneVisible
+
+	if (state.selectedExtrudeLabel && state.activeTool === "view") {
+		if (state.selectedFaceLabel) {
+			return {
+				visible: true,
+				title: `Face: ${state.selectedFaceLabel}`,
+				description: "Start a sketch on this face or adjust the parent extrude below.",
+				primaryActions: [
+					{
+						id: "start-sketch",
+						label: "Sketch"
+					}
+				],
+				sketchToolActions: [],
+				commandActions: [
+					{
+						id: "delete-extrude",
+						label: "Delete Extrude"
+					}
+				],
+				showHeightInput: true,
+				showStatus: true
+			}
+		}
 		return {
 			visible: true,
 			title: `Extrude: ${state.selectedExtrudeLabel}`,
@@ -62,15 +88,15 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 		}
 	}
 
-	if (!state.selectedPlaneLabel || !state.selectedPlaneVisible) {
+	if (!selectedTargetLabel || !selectedTargetVisible) {
 		return HIDDEN_MODEL
 	}
 
 	if (state.activeTool === "view") {
 		return {
 			visible: true,
-			title: `${state.selectedPlaneLabel} Plane`,
-			description: `Start a sketch on the ${state.selectedPlaneLabel.toLowerCase()} reference plane.`,
+			title: state.selectedFaceLabel ? `Face: ${state.selectedFaceLabel}` : `${selectedTargetLabel} Plane`,
+			description: state.selectedFaceLabel ? "Start a sketch on the selected face." : `Start a sketch on the ${selectedTargetLabel.toLowerCase()} reference plane.`,
 			primaryActions: [
 				{
 					id: "start-sketch",
@@ -86,7 +112,7 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 
 	return {
 		visible: true,
-		title: `Sketch: ${state.selectedPlaneLabel}`,
+		title: `Sketch: ${selectedTargetLabel}`,
 		description: "Choose a drawing tool or use the sketch actions below.",
 		primaryActions: [
 			{

@@ -12,7 +12,7 @@ import type {
 	SchemanticProjectItemData
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
-import type { PartFeature, Sketch, SketchEntity, SketchPlane, Solid, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
+import type { FaceReference, PartFeature, Sketch, SketchEntity, SketchPlane, Solid, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
 export const PROJECT_FILE_VERSION = 3 as const
@@ -449,8 +449,8 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 		const value = input as Partial<Sketch>
 		const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `part-sketch-${index + 1}`
 		const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : undefined
-		const plane = normalizeSketchPlane(value.target?.plane)
-		if (!plane) {
+		const target = normalizeSketchTarget(value.target)
+		if (!target) {
 			return undefined
 		}
 		const entities = normalizeSketchEntities(value.entities)
@@ -459,10 +459,7 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 			id,
 			name,
 			dirty: value.dirty === true,
-			target: {
-				type: "plane",
-				plane
-			},
+			target,
 			entities,
 			vertices: [],
 			loops: [],
@@ -920,6 +917,52 @@ function createDefaultPartProjectItemData(): PartProjectItemData {
 
 function normalizeSketchPlane(input: unknown): SketchPlane | null {
 	return input === "XY" || input === "YZ" || input === "XZ" ? input : null
+}
+
+function normalizeSketchTarget(input: unknown): Sketch["target"] | null {
+	if (!input || typeof input !== "object") {
+		return null
+	}
+	const value = input as Partial<Sketch["target"]>
+	if (value.type === "plane") {
+		const plane = normalizeSketchPlane(value.plane)
+		return plane
+			? {
+					type: "plane",
+					plane
+				}
+			: null
+	}
+	if (value.type === "face") {
+		const face = normalizeFaceReference(value.face)
+		return face
+			? {
+					type: "face",
+					face
+				}
+			: null
+	}
+	return null
+}
+
+function normalizeFaceReference(input: unknown): FaceReference | null {
+	if (!input || typeof input !== "object") {
+		return null
+	}
+	const value = input as Partial<FaceReference>
+	if (value.type !== "extrudeFace") {
+		return null
+	}
+	const extrudeId = typeof value.extrudeId === "string" && value.extrudeId.trim() ? value.extrudeId.trim() : null
+	const faceId = typeof value.faceId === "string" && value.faceId.trim() ? value.faceId.trim() : null
+	if (!extrudeId || !faceId) {
+		return null
+	}
+	return {
+		type: "extrudeFace",
+		extrudeId,
+		faceId
+	}
 }
 
 function normalizeMigrationWarnings(input: unknown): string[] {

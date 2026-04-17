@@ -111,9 +111,61 @@ function getExtrudeFacePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanva
 	if (!face) {
 		throw new Error(`Expected face "${faceLabel}" for ${extrudeId}`)
 	}
-	const bounds = new THREE.Box3().setFromObject(face.mesh)
-	const center = bounds.getCenter(new THREE.Vector3())
-	const projected = center.project(partEditor.previewCamera)
+	face.mesh.geometry.computeBoundingBox()
+	const bounds = face.mesh.geometry.boundingBox
+	expect(bounds).toBeDefined()
+	if (!bounds) {
+		throw new Error(`Expected face bounds for ${faceLabel}`)
+	}
+	const localPoint = new THREE.Vector3(
+		THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, 0.5),
+		THREE.MathUtils.lerp(bounds.min.y, bounds.max.y, 0.5),
+		THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.5)
+	)
+	const projected = face.mesh.localToWorld(localPoint).project(partEditor.previewCamera)
+	const rect = previewCanvas.getBoundingClientRect()
+	return {
+		x: rect.left + ((projected.x + 1) / 2) * rect.width,
+		y: rect.top + ((1 - projected.y) / 2) * rect.height
+	}
+}
+
+function getExtrudeFacePreviewPointAt(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string, faceLabel: string, u: number, v: number): { x: number; y: number } {
+	const partEditor = editor as unknown as {
+		drawPreview: () => void
+		previewCamera: THREE.PerspectiveCamera
+		previewSolids: Array<{
+			extrudeId: string
+			faces: Array<{
+				faceId: string
+				label: string
+				mesh: THREE.Mesh
+			}>
+		}>
+	}
+	partEditor.drawPreview()
+	const solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+	expect(solid).toBeDefined()
+	if (!solid) {
+		throw new Error(`Expected extrude preview for ${extrudeId}`)
+	}
+	const face = solid.faces.find((entry) => entry.label === faceLabel)
+	expect(face).toBeDefined()
+	if (!face) {
+		throw new Error(`Expected face "${faceLabel}" for ${extrudeId}`)
+	}
+	face.mesh.geometry.computeBoundingBox()
+	const bounds = face.mesh.geometry.boundingBox
+	expect(bounds).toBeDefined()
+	if (!bounds) {
+		throw new Error(`Expected face bounds for ${faceLabel}`)
+	}
+	const localPoint = new THREE.Vector3(
+		THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, u),
+		THREE.MathUtils.lerp(bounds.min.y, bounds.max.y, v),
+		THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.5)
+	)
+	const projected = face.mesh.localToWorld(localPoint).project(partEditor.previewCamera)
 	const rect = previewCanvas.getBoundingClientRect()
 	return {
 		x: rect.left + ((projected.x + 1) / 2) * rect.width,
@@ -217,7 +269,7 @@ describe("PartEditor", () => {
 			{
 				id: expect.any(String),
 				name: "Sketch 1",
-				plane: "Top",
+				targetLabel: "Top",
 				dirty: false
 			}
 		])
@@ -366,5 +418,139 @@ describe("PartEditor", () => {
 
 		expect(editor.root.textContent).toContain("Bottom Face selected.")
 		expect(editor.root.textContent).toContain("Delete Extrude")
+		const partEditor = editor as unknown as {
+			previewSolids: Array<{
+				extrudeId: string
+				fillMaterial: THREE.MeshStandardMaterial
+				faces: Array<{
+					label: string
+					material: THREE.MeshBasicMaterial
+				}>
+			}>
+		}
+		const previewSolid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrude.id)
+		expect(previewSolid?.fillMaterial.color.getHex()).toBe(0x3b82f6)
+		expect(previewSolid?.faces.find((face) => face.label === "Bottom Face")?.material.color.getHex()).toBe(0xf59e0b)
+	})
+
+	it("supports sketching on a selected extrude face", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const faceCenter = getExtrudeFacePreviewPoint(editor, previewCanvas, baseExtrude.id, "Top Face")
+		clickPreview(domWindow, previewCanvas, faceCenter.x, faceCenter.y)
+		const selectedFaceLabel = editor.root.textContent?.includes("Top Face selected.") ? "Top Face" : "Bottom Face"
+		expect(editor.root.textContent).toContain(`${selectedFaceLabel} selected.`)
+		clickButton(domWindow, editor.root, "Sketch")
+		expect(editor.root.textContent).toContain(`Sketch: ${selectedFaceLabel}`)
+
+		clickButton(domWindow, editor.root, "Rectangle")
+		const start = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.3, 0.3)
+		const end = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.7, 0.7)
+		clickPreview(domWindow, previewCanvas, start.x, start.y)
+		clickPreview(domWindow, previewCanvas, end.x, end.y)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		expect(editor.listSketches()).toHaveLength(2)
+		expect(editor.listExtrudes()).toHaveLength(2)
+		const state = editor.getState()
+		expect(state.features[2]).toMatchObject({
+			type: "sketch",
+			target: {
+				type: "face",
+				face: {
+					type: "extrudeFace",
+					extrudeId: baseExtrude.id
+				}
+			}
+		})
+		expect(state.features[3]).toMatchObject({
+			type: "extrude"
+		})
+	})
+
+	it("allows extruding a finished face sketch after reselecting it", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const faceCenter = getExtrudeFacePreviewPoint(editor, previewCanvas, baseExtrude.id, "Top Face")
+		clickPreview(domWindow, previewCanvas, faceCenter.x, faceCenter.y)
+		const selectedFaceLabel = editor.root.textContent?.includes("Top Face selected.") ? "Top Face" : "Bottom Face"
+		expect(editor.root.textContent).toContain(`${selectedFaceLabel} selected.`)
+		clickButton(domWindow, editor.root, "Sketch")
+		clickButton(domWindow, editor.root, "Rectangle")
+		const start = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.3, 0.3)
+		const end = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.7, 0.7)
+		clickPreview(domWindow, previewCanvas, start.x, start.y)
+		clickPreview(domWindow, previewCanvas, end.x, end.y)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+
+		const faceSketch = editor.listSketches()[1]
+		expect(faceSketch).toBeDefined()
+		if (!faceSketch) {
+			throw new Error("Expected face sketch")
+		}
+
+		editor.selectReferencePlane("Front")
+		editor.selectSketch(faceSketch.id)
+		expect(editor.root.textContent).toContain("Sketch:")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		expect(editor.listExtrudes()).toHaveLength(2)
 	})
 })

@@ -1,10 +1,10 @@
 import type { PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../contract"
-import { extrudeSolidFeature, type ExtrudedSolid } from "../cad/extrude"
+import { extrudeSolidFeature, getExtrudedFaceDescriptors, resolveSketchTargetFrame, type ExtrudedFaceDescriptor, type ExtrudedSolid, type SketchFrame3D } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
-import { REFERENCE_PLANE_TO_SKETCH_PLANE, SKETCH_PLANE_TO_REFERENCE_PLANE, type PartFeature, type Sketch, type SketchEntity, type Solid, type SolidExtrude } from "../schema"
-import type { Point2D } from "../types"
+import { REFERENCE_PLANE_TO_SKETCH_PLANE, SKETCH_PLANE_TO_REFERENCE_PLANE, type FaceReference, type PartFeature, type Sketch, type SketchEntity, type Solid, type SolidExtrude } from "../schema"
+import type { Point2D, Vector3D } from "../types"
 import { UiComponent } from "./ui"
 import * as THREE from "three"
 
@@ -26,6 +26,7 @@ type PreviewFaceVisual = {
 	label: string
 	mesh: THREE.Mesh
 	material: THREE.MeshBasicMaterial
+	frame: SketchFrame3D
 }
 
 type PreviewSolidVisual = {
@@ -55,7 +56,7 @@ type PartEditorOptions = {
 type SketchListEntry = {
 	id: string
 	name: string
-	plane: ReferencePlaneName
+	targetLabel: string
 	dirty: boolean
 }
 
@@ -405,22 +406,26 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const existingDirtySketch = this.features.find((feature) => feature.type === "sketch" && feature.dirty)
 		if (existingDirtySketch && existingDirtySketch.type === "sketch") {
 			this.selectedSketchId = existingDirtySketch.id
-			this.selectedExtrudeId = null
-			this.selectedReferencePlane = SKETCH_PLANE_TO_REFERENCE_PLANE[existingDirtySketch.target.plane]
+			this.selectedExtrudeId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.extrudeId : null
+			this.selectedFaceId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.faceId : null
+			this.selectedReferencePlane = existingDirtySketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[existingDirtySketch.target.plane] : null
 			this.activeTool = "sketch"
 			this.activeSketchTool = this.activeSketchTool ?? "line"
 			this.pendingLineStart = null
 			this.pendingRectangleStart = null
 			this.sketchHoverPoint = null
-			this.focusReferencePlaneForSketch(this.selectedReferencePlane)
+			if (this.selectedReferencePlane) {
+				this.focusReferencePlaneForSketch(this.selectedReferencePlane)
+			}
 			this.drawSketch()
 			this.updateStatus()
 			this.updateControls()
 			return
 		}
 
-		const selectedPlane = this.selectedReferencePlane ?? this.getFirstVisibleReferencePlane()
-		if (!selectedPlane) {
+		const selectedFace = this.getSelectedFaceReference()
+		const selectedPlane = selectedFace ? null : (this.selectedReferencePlane ?? this.getFirstVisibleReferencePlane())
+		if (!selectedFace && !selectedPlane) {
 			return
 		}
 
@@ -430,10 +435,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			id: sketchId,
 			name: this.getNextSketchName(),
 			dirty: true,
-			target: {
-				type: "plane",
-				plane: REFERENCE_PLANE_TO_SKETCH_PLANE[selectedPlane]
-			},
+			target: selectedFace
+				? {
+						type: "face",
+						face: selectedFace
+					}
+				: {
+						type: "plane",
+						plane: REFERENCE_PLANE_TO_SKETCH_PLANE[selectedPlane as ReferencePlaneName]
+					},
 			entities: [],
 			vertices: [],
 			loops: [],
@@ -443,14 +453,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.features = [...this.features, nextSketch]
 		this.selectedReferencePlane = selectedPlane
 		this.selectedSketchId = nextSketch.id
-		this.selectedExtrudeId = null
-		this.selectedFaceId = null
+		this.selectedExtrudeId = selectedFace?.extrudeId ?? null
+		this.selectedFaceId = selectedFace?.faceId ?? null
 		this.activeTool = "sketch"
 		this.activeSketchTool = "line"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
-		this.focusReferencePlaneForSketch(selectedPlane)
+		if (selectedPlane) {
+			this.focusReferencePlaneForSketch(selectedPlane)
+		}
 		this.syncPreviewGeometry()
 		this.drawSketch()
 		this.updateStatus()
@@ -487,14 +499,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		this.selectedSketchId = sketch.id
-		this.selectedExtrudeId = null
-		this.selectedFaceId = null
-		this.selectedReferencePlane = SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane]
-		this.activeTool = sketch.dirty ? "sketch" : "view"
+		this.selectedExtrudeId = sketch.target.type === "face" ? sketch.target.face.extrudeId : null
+		this.selectedFaceId = sketch.target.type === "face" ? sketch.target.face.faceId : null
+		this.selectedReferencePlane = sketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane] : null
+		this.activeTool = "sketch"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
-		if (sketch.dirty) {
+		if (sketch.dirty && this.selectedReferencePlane) {
 			this.focusReferencePlaneForSketch(this.selectedReferencePlane)
 		}
 		this.refreshReferencePlaneStyles()
@@ -535,7 +547,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			.map((sketch) => ({
 				id: sketch.id,
 				name: sketch.name?.trim() || "Sketch",
-				plane: SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane],
+				targetLabel: this.getSketchTargetLabel(sketch.target),
 				dirty: sketch.dirty
 			}))
 	}
@@ -567,7 +579,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedExtrudeId = extrude.id
 		this.selectedFaceId = faceId ?? null
 		this.selectedSketchId = null
-		this.selectedReferencePlane = targetSketch?.type === "sketch" ? SKETCH_PLANE_TO_REFERENCE_PLANE[targetSketch.target.plane] : this.selectedReferencePlane
+		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
@@ -618,21 +630,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!sketch) {
 			return
 		}
-		const deletedExtrudeIds = new Set(
-			this.features.filter((feature): feature is SolidExtrude => feature.type === "extrude" && feature.target.sketchId === sketch.id).map((feature) => feature.id)
-		)
-		this.features = this.features.filter((feature) => {
-			if (feature.type === "sketch") {
-				return feature.id !== sketch.id
-			}
-			return feature.target.sketchId !== sketch.id
-		})
-		if (this.selectedSketchId === sketch.id) {
+		const removedFeatureIds = this.collectDependentFeatureIds([sketch.id])
+		this.features = this.features.filter((feature) => !removedFeatureIds.has(feature.id))
+		if (this.selectedSketchId && removedFeatureIds.has(this.selectedSketchId)) {
 			this.selectedSketchId = null
 			this.activeTool = "view"
 		}
-		if (this.selectedExtrudeId && deletedExtrudeIds.has(this.selectedExtrudeId)) {
+		if (this.selectedExtrudeId && removedFeatureIds.has(this.selectedExtrudeId)) {
 			this.selectedExtrudeId = null
+			this.selectedFaceId = null
+		}
+		if (this.selectedFaceId && !this.selectedExtrudeId) {
 			this.selectedFaceId = null
 		}
 		this.pendingLineStart = null
@@ -650,16 +658,23 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!extrude) {
 			return
 		}
-		this.features = this.features.filter((feature) => feature.type !== "extrude" || feature.id !== extrude.id)
-		if (this.selectedExtrudeId === extrude.id) {
+		const removedFeatureIds = this.collectDependentFeatureIds([extrude.id])
+		this.features = this.features.filter((feature) => !removedFeatureIds.has(feature.id))
+		if (this.selectedExtrudeId && removedFeatureIds.has(this.selectedExtrudeId)) {
 			this.selectedExtrudeId = null
 			this.selectedFaceId = null
 		}
+		if (this.selectedSketchId && removedFeatureIds.has(this.selectedSketchId)) {
+			this.selectedSketchId = null
+		}
 		const targetSketch = this.features.find((feature) => feature.type === "sketch" && feature.id === extrude.target.sketchId)
 		if (targetSketch?.type === "sketch") {
-			this.selectedReferencePlane = SKETCH_PLANE_TO_REFERENCE_PLANE[targetSketch.target.plane]
+			this.selectedReferencePlane = this.getReferencePlaneForSketchTarget(targetSketch.target)
 		}
 		this.activeTool = "view"
+		this.pendingLineStart = null
+		this.pendingRectangleStart = null
+		this.sketchHoverPoint = null
 		this.syncPreviewGeometry()
 		this.drawSketch()
 		this.updateStatus()
@@ -679,7 +694,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedExtrudeId = null
 		this.selectedFaceId = null
 		const selectedSketch = this.getSelectedSketch()
-		this.selectedReferencePlane = selectedSketch ? SKETCH_PLANE_TO_REFERENCE_PLANE[selectedSketch.target.plane] : "Front"
+		this.selectedReferencePlane = selectedSketch ? this.getReferencePlaneForSketchTarget(selectedSketch.target) : "Front"
 		this.activeTool = selectedSketch?.dirty ? "sketch" : "view"
 		this.activeSketchTool = "line"
 		this.pendingLineStart = null
@@ -976,7 +991,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const isMiddleMouseClick = event.pointerType === "mouse" && event.button === 1
 
 		if (isLeftMouseClick && this.activeTool === "sketch") {
-			const point = this.getSelectedPlanePoint(event.clientX, event.clientY)
+			const point = this.getSelectedSketchPoint(event.clientX, event.clientY)
 			if (point) {
 				event.preventDefault()
 				this.handleSketchPoint(point)
@@ -1030,7 +1045,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.hoveredReferencePlane = null
 				this.hoveredExtrudeId = null
 				this.hoveredFaceId = null
-				const point = this.getSelectedPlanePoint(event.clientX, event.clientY)
+				const point = this.getSelectedSketchPoint(event.clientX, event.clientY)
 				this.sketchHoverPoint = point ? this.snapPoint(point) : null
 				this.updatePreviewCursor()
 				this.drawSketch()
@@ -1212,6 +1227,80 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return extrude?.type === "extrude" ? extrude : null
 	}
 
+	private getSelectedFaceReference(): FaceReference | null {
+		if (!this.selectedExtrudeId || !this.selectedFaceId) {
+			return null
+		}
+		return {
+			type: "extrudeFace",
+			extrudeId: this.selectedExtrudeId,
+			faceId: this.selectedFaceId
+		}
+	}
+
+	private getSelectedFaceLabel(): string | null {
+		return this.selectedExtrudeId && this.selectedFaceId ? this.getPreviewFaceLabel(this.selectedExtrudeId, this.selectedFaceId) : null
+	}
+
+	private getReferencePlaneForSketchTarget(target: Sketch["target"]): ReferencePlaneName | null {
+		return target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[target.plane] : null
+	}
+
+	private getSketchTargetLabel(target: Sketch["target"]): string {
+		if (target.type === "plane") {
+			return SKETCH_PLANE_TO_REFERENCE_PLANE[target.plane]
+		}
+		return this.getPreviewFaceLabel(target.face.extrudeId, target.face.faceId) ?? "Face"
+	}
+
+	private resolveSketchFrame(target: Sketch["target"]): SketchFrame3D | null {
+		try {
+			return resolveSketchTargetFrame(
+				{
+					features: this.features
+				},
+				target
+			)
+		} catch (_error) {
+			return null
+		}
+	}
+
+	private worldPointToSketchPoint(worldPoint: THREE.Vector3, frame: SketchFrame3D): Point2D {
+		const partPoint = this.previewRootGroup.worldToLocal(worldPoint.clone())
+		const origin = vector3DToThree(frame.origin)
+		const offset = partPoint.sub(origin)
+		const xAxis = vector3DToThree(frame.xAxis).normalize()
+		const yAxis = vector3DToThree(frame.yAxis).normalize()
+		return {
+			x: offset.dot(xAxis),
+			y: offset.dot(yAxis)
+		}
+	}
+
+	private collectDependentFeatureIds(seedFeatureIds: Iterable<string>): Set<string> {
+		const removedIds = new Set(seedFeatureIds)
+		let changed = true
+		while (changed) {
+			changed = false
+			for (const feature of this.features) {
+				if (removedIds.has(feature.id)) {
+					continue
+				}
+				if (feature.type === "extrude" && removedIds.has(feature.target.sketchId)) {
+					removedIds.add(feature.id)
+					changed = true
+					continue
+				}
+				if (feature.type === "sketch" && feature.target.type === "face" && removedIds.has(feature.target.face.extrudeId)) {
+					removedIds.add(feature.id)
+					changed = true
+				}
+			}
+		}
+		return removedIds
+	}
+
 	private getEditableSketch(): Sketch | null {
 		const selected = this.getSelectedSketch()
 		return selected?.dirty ? selected : null
@@ -1387,10 +1476,21 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updateStatus(): void {
+		const sketch = this.getSelectedSketch()
+		const extrudeCount = this.features.filter((feature) => feature.type === "extrude").length
+		if (this.activeTool === "sketch" && sketch) {
+			const entityCount = sketch.entities.length
+			const profileCount = sketch.profiles.length
+			const sketchState = sketch.dirty ? "Sketch open" : "Sketch finished"
+			this.statusText.textContent = `${sketchState}. ${entityCount} entit${entityCount === 1 ? "y" : "ies"}. ${profileCount} profile${profileCount === 1 ? "" : "s"}.`
+			this.summaryText.textContent = extrudeCount > 0 ? `${extrudeCount} extrude${extrudeCount === 1 ? "" : "s"} in the part.` : ""
+			return
+		}
+
 		const extrude = this.getSelectedExtrude()
 		if (extrude) {
 			const extrudeLabel = extrude.name?.trim() || "Extrude"
-			const selectedFaceLabel = this.selectedFaceId ? this.getPreviewFaceLabel(extrude.id, this.selectedFaceId) : null
+			const selectedFaceLabel = this.getSelectedFaceLabel()
 			if (selectedFaceLabel) {
 				this.statusText.textContent = `${selectedFaceLabel} selected.`
 				this.summaryText.textContent = `On ${extrudeLabel}. Depth ${extrude.depth.toFixed(1)}.`
@@ -1401,30 +1501,30 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return
 		}
 
-		const sketch = this.getSelectedSketch()
-		const extrudeCount = this.features.filter((feature) => feature.type === "extrude").length
 		if (!sketch) {
-			this.statusText.textContent = this.selectedReferencePlane ? `Plane selected: ${this.selectedReferencePlane}.` : "Select a reference plane to start."
+			const selectedFaceLabel = this.getSelectedFaceLabel()
+			this.statusText.textContent = selectedFaceLabel
+				? `${selectedFaceLabel} selected.`
+				: this.selectedReferencePlane
+					? `Plane selected: ${this.selectedReferencePlane}.`
+					: "Select a reference plane or face to start."
 			this.summaryText.textContent = extrudeCount > 0 ? `${extrudeCount} extrude${extrudeCount === 1 ? "" : "s"} in the part.` : ""
 			return
 		}
-
-		const entityCount = sketch.entities.length
-		const profileCount = sketch.profiles.length
-		const sketchState = sketch.dirty ? "Sketch open" : "Sketch finished"
-		this.statusText.textContent = `${sketchState}. ${entityCount} entit${entityCount === 1 ? "y" : "ies"}. ${profileCount} profile${profileCount === 1 ? "" : "s"}.`
-		this.summaryText.textContent = extrudeCount > 0 ? `${extrudeCount} extrude${extrudeCount === 1 ? "" : "s"} in the part.` : ""
 	}
 
 	private updateControls(): void {
-		const selectedExtrude = this.getSelectedExtrude()
-		const selectedPlaneVisible = !!this.selectedReferencePlane && this.referencePlaneVisibility[this.selectedReferencePlane]
+		const selectedExtrude = this.activeTool === "view" ? this.getSelectedExtrude() : null
+		const selectedFaceLabel = this.getSelectedFaceLabel()
 		const sketch = this.getSelectedSketch()
+		const selectedPlaneVisible = !!this.selectedReferencePlane && this.referencePlaneVisibility[this.selectedReferencePlane]
+		const selectedTargetVisible = sketch?.target.type === "face" || !!selectedFaceLabel ? true : selectedPlaneVisible
 		const model = derivePartQuickActionsModel({
 			activeTool: this.activeTool,
 			selectedExtrudeLabel: selectedExtrude?.name?.trim() || (selectedExtrude ? "Extrude" : null),
-			selectedPlaneLabel: this.selectedReferencePlane,
-			selectedPlaneVisible,
+			selectedFaceLabel: selectedFaceLabel,
+			selectedPlaneLabel: this.activeTool === "sketch" ? (sketch ? this.getSketchTargetLabel(sketch.target) : this.selectedReferencePlane) : this.selectedReferencePlane,
+			selectedPlaneVisible: selectedTargetVisible,
 			activeSketchTool: this.activeSketchTool,
 			canUndo: !!this.getEditableSketch() && (!!this.pendingLineStart || !!this.pendingRectangleStart || (sketch?.entities.length ?? 0) > 0),
 			canReset: !!this.getEditableSketch() && (!!this.pendingLineStart || !!this.pendingRectangleStart || (sketch?.entities.length ?? 0) > 0),
@@ -1450,6 +1550,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.quickActionsStatusSection.style.display = model.showStatus ? "flex" : "none"
 		this.heightInput.disabled = !selectedExtrude && !this.canExtrude()
 		this.sketchPanel.style.display = "none"
+		this.refreshFaceStyles()
 		this.refreshSolidStyles()
 		this.refreshReferencePlaneStyles()
 		this.updatePreviewCursor()
@@ -1492,25 +1593,35 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return this.getReferencePlaneIntersection(clientX, clientY)?.name ?? null
 	}
 
-	private getExtrudeFaceAt(clientX: number, clientY: number): { extrudeId: string; faceId: string } | null {
+	private getPreviewFaceIntersection(clientX: number, clientY: number, reference?: FaceReference): { face: PreviewFaceVisual; intersectionPoint: THREE.Vector3 } | null {
 		if (!this.setPreviewRaycaster(clientX, clientY)) {
 			return null
 		}
+		const candidateFaces = this.previewSolids.flatMap((solid) => solid.faces).filter((face) => !reference || (face.extrudeId === reference.extrudeId && face.faceId === reference.faceId))
 		const intersections = this.previewRaycaster.intersectObjects(
-			this.previewSolids.flatMap((solid) => solid.faces.map((face) => face.mesh)),
+			candidateFaces.map((face) => face.mesh),
 			false
 		)
-		const mesh = intersections[0]?.object
-		if (!(mesh instanceof THREE.Mesh)) {
+		const intersection = intersections[0]
+		const mesh = intersection?.object
+		if (!(mesh instanceof THREE.Mesh) || !intersection) {
 			return null
 		}
-		for (const solid of this.previewSolids) {
-			const face = solid.faces.find((entry) => entry.mesh === mesh)
-			if (face) {
-				return {
-					extrudeId: face.extrudeId,
-					faceId: face.faceId
+		const face = candidateFaces.find((entry) => entry.mesh === mesh)
+		return face
+			? {
+					face,
+					intersectionPoint: intersection.point.clone()
 				}
+			: null
+	}
+
+	private getExtrudeFaceAt(clientX: number, clientY: number): { extrudeId: string; faceId: string } | null {
+		const face = this.getPreviewFaceIntersection(clientX, clientY)?.face
+		if (face) {
+			return {
+				extrudeId: face.extrudeId,
+				faceId: face.faceId
 			}
 		}
 		return null
@@ -1531,12 +1642,20 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return this.previewSolids.find((solid) => solid.mesh === mesh)?.extrudeId ?? null
 	}
 
-	private getSelectedPlanePoint(clientX: number, clientY: number): Point2D | null {
-		const selectedPlane = this.selectedReferencePlane
-		if (!selectedPlane || !this.referencePlaneVisibility[selectedPlane]) {
+	private getSelectedSketchPoint(clientX: number, clientY: number): Point2D | null {
+		const sketch = this.getEditableSketch()
+		if (!sketch) {
 			return null
 		}
-		return this.getReferencePlaneIntersection(clientX, clientY, selectedPlane)?.point ?? null
+		if (sketch.target.type === "plane") {
+			const selectedPlane = SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane]
+			if (!this.referencePlaneVisibility[selectedPlane]) {
+				return null
+			}
+			return this.getReferencePlaneIntersection(clientX, clientY, selectedPlane)?.point ?? null
+		}
+		const hit = this.getPreviewFaceIntersection(clientX, clientY, sketch.target.face)
+		return hit ? this.worldPointToSketchPoint(hit.intersectionPoint, hit.face.frame) : null
 	}
 
 	private getReferencePlaneIntersection(clientX: number, clientY: number, onlyPlane?: ReferencePlaneName): { name: ReferencePlaneName; point: Point2D } | null {
@@ -1691,14 +1810,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		if (this.pendingLineStart) {
-			const draft = this.createDraftLineVisual(sketch.target.plane, this.pendingLineStart, this.sketchHoverPoint)
+			const draft = this.createDraftLineVisual(sketch.target, this.pendingLineStart, this.sketchHoverPoint)
 			if (draft) {
 				this.previewSketchDraftGroup.add(draft)
 			}
 		}
 
 		if (this.pendingRectangleStart) {
-			const draft = this.createDraftRectangleVisual(sketch.target.plane, this.pendingRectangleStart, this.sketchHoverPoint)
+			const draft = this.createDraftRectangleVisual(sketch.target, this.pendingRectangleStart, this.sketchHoverPoint)
 			if (draft) {
 				this.previewSketchDraftGroup.add(draft)
 			}
@@ -1709,19 +1828,23 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (sketch.entities.length === 0) {
 			return null
 		}
+		const frame = this.resolveSketchFrame(sketch.target)
+		if (!frame) {
+			return null
+		}
 
 		const segments: number[] = []
 		for (const entity of sketch.entities) {
 			if (entity.type === "line") {
-				const start = sketchPointToPlaneLocal(entity.p0, sketch.target.plane)
-				const end = sketchPointToPlaneLocal(entity.p1, sketch.target.plane)
+				const start = sketchPointToWorld(entity.p0, frame)
+				const end = sketchPointToWorld(entity.p1, frame)
 				segments.push(start.x, start.y, start.z, end.x, end.y, end.z)
 				continue
 			}
 			const corners = rectangleCorners(entity)
 			for (let index = 0; index < corners.length; index += 1) {
-				const start = sketchPointToPlaneLocal(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, sketch.target.plane)
-				const end = sketchPointToPlaneLocal(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, sketch.target.plane)
+				const start = sketchPointToWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame)
+				const end = sketchPointToWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame)
 				segments.push(start.x, start.y, start.z, end.x, end.y, end.z)
 			}
 		}
@@ -1744,35 +1867,43 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (sketch.name) {
 			const label = this.createReferenceLabelSprite(sketch.name)
 			const labelPoint = sketch.vertices[0] ?? extractSketchLabelPoint(sketch)
-			const localPoint = sketchPointToPlaneLocal(labelPoint, sketch.target.plane)
+			const localPoint = sketchPointToWorld(labelPoint, frame)
 			label.position.set(localPoint.x, localPoint.y, localPoint.z)
 			group.add(label)
 		}
 		return group
 	}
 
-	private createDraftLineVisual(plane: Sketch["target"]["plane"], start: Point2D, end: Point2D | null): THREE.Object3D | null {
+	private createDraftLineVisual(target: Sketch["target"], start: Point2D, end: Point2D | null): THREE.Object3D | null {
+		const frame = this.resolveSketchFrame(target)
+		if (!frame) {
+			return null
+		}
 		const group = new THREE.Group()
-		const startMarker = this.createSketchPointMarker(start, plane, 0xf59e0b)
+		const startMarker = this.createSketchPointMarker(start, frame, 0xf59e0b)
 		group.add(startMarker)
 		if (!end) {
 			return group
 		}
 
-		const geometry = new THREE.BufferGeometry().setFromPoints([sketchPointToPlaneLocal(start, plane), sketchPointToPlaneLocal(end, plane)])
+		const geometry = new THREE.BufferGeometry().setFromPoints([sketchPointToWorld(start, frame), sketchPointToWorld(end, frame)])
 		const material = new THREE.LineBasicMaterial({
 			color: 0xf59e0b,
 			transparent: true,
 			opacity: 0.9
 		})
 		group.add(new THREE.Line(geometry, material))
-		group.add(this.createSketchPointMarker(end, plane, 0xf59e0b))
+		group.add(this.createSketchPointMarker(end, frame, 0xf59e0b))
 		return group
 	}
 
-	private createDraftRectangleVisual(plane: Sketch["target"]["plane"], start: Point2D, end: Point2D | null): THREE.Object3D | null {
+	private createDraftRectangleVisual(target: Sketch["target"], start: Point2D, end: Point2D | null): THREE.Object3D | null {
+		const frame = this.resolveSketchFrame(target)
+		if (!frame) {
+			return null
+		}
 		const group = new THREE.Group()
-		group.add(this.createSketchPointMarker(start, plane, 0xf59e0b))
+		group.add(this.createSketchPointMarker(start, frame, 0xf59e0b))
 		if (!end) {
 			return group
 		}
@@ -1785,8 +1916,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		})
 		const segments: number[] = []
 		for (let index = 0; index < corners.length; index += 1) {
-			const segmentStart = sketchPointToPlaneLocal(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, plane)
-			const segmentEnd = sketchPointToPlaneLocal(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, plane)
+			const segmentStart = sketchPointToWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame)
+			const segmentEnd = sketchPointToWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame)
 			segments.push(segmentStart.x, segmentStart.y, segmentStart.z, segmentEnd.x, segmentEnd.y, segmentEnd.z)
 		}
 
@@ -1799,14 +1930,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		})
 		group.add(new THREE.LineSegments(geometry, material))
 		for (const point of corners) {
-			group.add(this.createSketchPointMarker(point, plane, 0xf59e0b))
+			group.add(this.createSketchPointMarker(point, frame, 0xf59e0b))
 		}
 		return group
 	}
 
-	private createSketchPointMarker(point: Point2D, plane: Sketch["target"]["plane"], color: number): THREE.Mesh {
+	private createSketchPointMarker(point: Point2D, frame: SketchFrame3D, color: number): THREE.Mesh {
 		const marker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), new THREE.MeshBasicMaterial({ color }))
-		const localPoint = sketchPointToPlaneLocal(point, plane)
+		const localPoint = sketchPointToWorld(point, frame)
 		marker.position.set(localPoint.x, localPoint.y, localPoint.z)
 		return marker
 	}
@@ -1829,7 +1960,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			side: THREE.DoubleSide
 		})
 		const mesh = new THREE.Mesh(geometry, material)
-		mesh.quaternion.copy(getPlaneQuaternion(extrusion.plane))
+		const sketchQuaternion = getSketchFrameQuaternion(extrusion.frame)
+		mesh.position.copy(vector3DToThree(extrusion.frame.origin))
+		mesh.quaternion.copy(sketchQuaternion)
 
 		const edgeGeometry = new THREE.EdgesGeometry(geometry)
 		const edgeMaterial = new THREE.LineBasicMaterial({
@@ -1838,9 +1971,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			opacity: 0.8
 		})
 		const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial)
+		edges.position.copy(mesh.position)
 		edges.quaternion.copy(mesh.quaternion)
 
-		const faces = createPreviewFaceVisuals(extrusion, extrudeId, mesh.quaternion)
+		const faces = createPreviewFaceVisuals(extrusion, extrudeId, mesh.position, sketchQuaternion)
 		return {
 			extrudeId,
 			mesh,
@@ -1955,12 +2089,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private refreshSolidStyles(): void {
 		for (const solid of this.previewSolids) {
-			const isSelected = solid.extrudeId === this.selectedExtrudeId
+			const hasSelectedFace = solid.extrudeId === this.selectedExtrudeId && !!this.selectedFaceId
+			const isSelected = solid.extrudeId === this.selectedExtrudeId && !hasSelectedFace
 			const isHovered = solid.extrudeId === this.hoveredExtrudeId
 			if (isSelected) {
 				solid.fillMaterial.color.setHex(0xf59e0b)
 				solid.edgeMaterial.color.setHex(0x7c2d12)
 				solid.edgeMaterial.opacity = 1
+				continue
+			}
+			if (hasSelectedFace) {
+				solid.fillMaterial.color.setHex(0x3b82f6)
+				solid.edgeMaterial.color.setHex(0xe2e8f0)
+				solid.edgeMaterial.opacity = 0.8
 				continue
 			}
 			if (isHovered) {
@@ -2069,7 +2210,7 @@ function createNoopPreviewRenderer(): PreviewRendererLike {
 	}
 }
 
-function getPlaneQuaternion(plane: Sketch["target"]["plane"]): THREE.Quaternion {
+function getPlaneQuaternion(plane: "XY" | "YZ" | "XZ"): THREE.Quaternion {
 	switch (plane) {
 		case "XZ":
 			return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, -1, 0)))
@@ -2080,44 +2221,43 @@ function getPlaneQuaternion(plane: Sketch["target"]["plane"]): THREE.Quaternion 
 	}
 }
 
-function createPreviewFaceVisuals(extrusion: ExtrudedSolid, extrudeId: string, quaternion: THREE.Quaternion): PreviewFaceVisual[] {
+function createPreviewFaceVisuals(extrusion: ExtrudedSolid, extrudeId: string, position: THREE.Vector3, quaternion: THREE.Quaternion): PreviewFaceVisual[] {
+	const faceDescriptors = getExtrudedFaceDescriptors(extrusion)
 	const faceVisuals: PreviewFaceVisual[] = []
-	const totalSideFaces = extrusion.profileLoops.reduce((count, loop) => count + loop.length, 0)
-	const bottomFace = extrusion.solid.faces[totalSideFaces]
-	const topFace = extrusion.solid.faces[totalSideFaces + 1]
-	let sideFaceIndex = 0
 	let faceIndex = 0
+	const totalSideFaces = extrusion.profileLoops.reduce((count, loop) => count + loop.length, 0)
 
 	for (const loop of extrusion.profileLoops) {
 		for (let pointIndex = 0; pointIndex < loop.length; pointIndex += 1) {
-			const face = extrusion.solid.faces[faceIndex]
+			const descriptor = faceDescriptors[faceIndex]
 			const start = loop[pointIndex]
 			const end = loop[(pointIndex + 1) % loop.length]
-			if (face && start && end) {
+			if (descriptor && start && end) {
 				const geometry = createQuadFaceGeometry(
 					new THREE.Vector3(start.x, start.y, 0),
 					new THREE.Vector3(end.x, end.y, 0),
 					new THREE.Vector3(end.x, end.y, extrusion.depth),
 					new THREE.Vector3(start.x, start.y, extrusion.depth)
 				)
-				faceVisuals.push(createPreviewFaceVisual(extrudeId, face.id, `Side Face ${sideFaceIndex + 1}`, geometry, quaternion))
-				sideFaceIndex += 1
+				faceVisuals.push(createPreviewFaceVisual(extrudeId, descriptor, geometry, position, quaternion))
 			}
 			faceIndex += 1
 		}
 	}
 
-	if (bottomFace) {
-		faceVisuals.push(createPreviewFaceVisual(extrudeId, bottomFace.id, "Bottom Face", createPlanarFaceGeometry(extrusion.profileLoops, 0), quaternion))
+	const bottomDescriptor = faceDescriptors[totalSideFaces]
+	if (bottomDescriptor) {
+		faceVisuals.push(createPreviewFaceVisual(extrudeId, bottomDescriptor, createPlanarFaceGeometry(extrusion.profileLoops, 0), position, quaternion))
 	}
-	if (topFace) {
-		faceVisuals.push(createPreviewFaceVisual(extrudeId, topFace.id, "Top Face", createPlanarFaceGeometry(extrusion.profileLoops, extrusion.depth), quaternion))
+	const topDescriptor = faceDescriptors[totalSideFaces + 1]
+	if (topDescriptor) {
+		faceVisuals.push(createPreviewFaceVisual(extrudeId, topDescriptor, createPlanarFaceGeometry(extrusion.profileLoops, extrusion.depth), position, quaternion))
 	}
 
 	return faceVisuals
 }
 
-function createPreviewFaceVisual(extrudeId: string, faceId: string, label: string, geometry: THREE.BufferGeometry, quaternion: THREE.Quaternion): PreviewFaceVisual {
+function createPreviewFaceVisual(extrudeId: string, descriptor: ExtrudedFaceDescriptor, geometry: THREE.BufferGeometry, position: THREE.Vector3, quaternion: THREE.Quaternion): PreviewFaceVisual {
 	const material = new THREE.MeshBasicMaterial({
 		color: 0xffffff,
 		transparent: true,
@@ -2129,14 +2269,16 @@ function createPreviewFaceVisual(extrudeId: string, faceId: string, label: strin
 		polygonOffsetUnits: -2
 	})
 	const mesh = new THREE.Mesh(geometry, material)
+	mesh.position.copy(position)
 	mesh.quaternion.copy(quaternion)
 	mesh.renderOrder = 8
 	return {
 		extrudeId,
-		faceId,
-		label,
+		faceId: descriptor.faceId,
+		label: descriptor.label,
 		mesh,
-		material
+		material,
+		frame: descriptor.frame
 	}
 }
 
@@ -2158,14 +2300,25 @@ function createQuadFaceGeometry(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vec
 	return geometry
 }
 
-function sketchPointToPlaneLocal(point: Point2D, plane: Sketch["target"]["plane"]): THREE.Vector3 {
-	switch (plane) {
-		case "YZ":
-			return new THREE.Vector3(0, point.x, point.y)
-		case "XZ":
-			return new THREE.Vector3(point.x, 0, point.y)
-		default:
-			return new THREE.Vector3(point.x, point.y, 0)
+function getSketchFrameQuaternion(frame: SketchFrame3D): THREE.Quaternion {
+	return new THREE.Quaternion().setFromRotationMatrix(
+		new THREE.Matrix4().makeBasis(vector3DToThree(frame.xAxis).normalize(), vector3DToThree(frame.yAxis).normalize(), vector3DToThree(frame.normal).normalize())
+	)
+}
+
+function sketchPointToWorld(point: Point2D, frame: SketchFrame3D): THREE.Vector3 {
+	return vector3DToThree(addScaledVector(addScaledVector(frame.origin, frame.xAxis, point.x), frame.yAxis, point.y))
+}
+
+function vector3DToThree(vector: Vector3D): THREE.Vector3 {
+	return new THREE.Vector3(vector.x, vector.y, vector.z)
+}
+
+function addScaledVector(origin: Vector3D, axis: Vector3D, scalar: number): Vector3D {
+	return {
+		x: origin.x + axis.x * scalar,
+		y: origin.y + axis.y * scalar,
+		z: origin.z + axis.z * scalar
 	}
 }
 

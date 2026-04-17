@@ -65,6 +65,14 @@ export type Solid = {
 	faces: SolidFace[]
 }
 
+export type ExtrudeFaceReference = {
+	type: "extrudeFace"
+	extrudeId: string
+	faceId: string
+}
+
+export type FaceReference = ExtrudeFaceReference
+
 export type ProfileReference = {
 	type: "profileRef"
 	sketchId: string
@@ -79,10 +87,15 @@ export type SolidExtrude = {
 	depth: number
 }
 
-export type SketchTarget = {
-	type: "plane"
-	plane: SketchPlane
-}
+export type SketchTarget =
+	| {
+			type: "plane"
+			plane: SketchPlane
+	  }
+	| {
+			type: "face"
+			face: FaceReference
+	  }
 
 export type Sketch = {
 	type: "sketch"

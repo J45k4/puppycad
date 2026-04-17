@@ -369,6 +369,84 @@ describe("normalizeProjectFile", () => {
 		})
 	})
 
+	it("preserves face-target sketch references in schema-based part features", () => {
+		const input = {
+			version: 3,
+			items: [
+				{
+					type: "part",
+					name: "Part",
+					data: {
+						features: [
+							{
+								type: "sketch",
+								id: "sketch-1",
+								dirty: false,
+								target: {
+									type: "plane",
+									plane: "XY"
+								},
+								entities: [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 10 } }]
+							},
+							{
+								type: "extrude",
+								id: "extrude-1",
+								target: {
+									type: "profileRef",
+									sketchId: "sketch-1",
+									profileId: "sketch-1-profile-1"
+								},
+								depth: 8
+							},
+							{
+								type: "sketch",
+								id: "sketch-2",
+								dirty: false,
+								target: {
+									type: "face",
+									face: {
+										type: "extrudeFace",
+										extrudeId: "extrude-1",
+										faceId: "extrude-1-solid-face-6"
+									}
+								},
+								entities: [{ id: "line-1", type: "line", p0: { x: 1, y: 1 }, p1: { x: 4, y: 1 } }]
+							}
+						]
+					}
+				}
+			],
+			selectedPath: [0]
+		}
+
+		const file = normalizeProjectFile(input)
+		expect(file).not.toBeNull()
+		if (!file) {
+			throw new Error("normalizeProjectFile returned null")
+		}
+
+		const part = file.items[0]
+		if (!part || !("type" in part) || part.type !== "part") {
+			throw new Error("Expected part item")
+		}
+		if (!part.data) {
+			throw new Error("Expected part data")
+		}
+
+		expect(part.data.features[2]).toMatchObject({
+			type: "sketch",
+			id: "sketch-2",
+			target: {
+				type: "face",
+				face: {
+					type: "extrudeFace",
+					extrudeId: "extrude-1",
+					faceId: "extrude-1-solid-face-6"
+				}
+			}
+		})
+	})
+
 	it("skips unsupported legacy extrusions and records a warning", () => {
 		const input = {
 			version: 3,

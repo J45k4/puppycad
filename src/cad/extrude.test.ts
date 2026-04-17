@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import type { PartDocument, Sketch } from "../schema"
-import { extrudeSolidFeature } from "./extrude"
+import type { PartDocument, Sketch, SketchPlane, SolidExtrude } from "../schema"
+import { extrudeSolidFeature, getExtrudedFaceDescriptors } from "./extrude"
 import { materializeSketch } from "./sketch"
 
-function createSketch(id: string, plane: Sketch["target"]["plane"], entities: Sketch["entities"]): Sketch {
+function createSketch(id: string, plane: SketchPlane, entities: Sketch["entities"]): Sketch {
 	return materializeSketch({
 		type: "sketch",
 		id,
@@ -80,9 +80,69 @@ describe("extrudeSolidFeature", () => {
 
 		const extrusion = extrudeSolidFeature(part, part.features[1] as Extract<PartDocument["features"][number], { type: "extrude" }>, { startOffset: 7 })
 
-		expect(extrusion.plane).toBe("YZ")
+		expect(extrusion.frame.normal).toEqual({ x: 1, y: 0, z: 0 })
+		expect(extrusion.frame.xAxis).toEqual({ x: 0, y: 1, z: 0 })
+		expect(extrusion.frame.yAxis).toEqual({ x: 0, y: 0, z: 1 })
 		expect(extrusion.solid.vertices[0]?.position).toEqual({ x: 7, y: 1, z: 2 })
 		expect(extrusion.solid.vertices[1]?.position).toEqual({ x: 10, y: 1, z: 2 })
+	})
+
+	it("extrudes a sketch that targets an extrude face", () => {
+		const baseSketch = createSketch("sketch-base", "XY", [{ id: "base-rect", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 8, y: 6 } }])
+		const baseExtrude: SolidExtrude = {
+			type: "extrude",
+			id: "extrude-base",
+			target: {
+				type: "profileRef",
+				sketchId: baseSketch.id,
+				profileId: baseSketch.profiles[0]?.id ?? ""
+			},
+			depth: 4
+		}
+		const topFaceId = getExtrudedFaceDescriptors(extrudeSolidFeature({ features: [baseSketch, baseExtrude] }, baseExtrude)).find((face) => face.label === "Top Face")?.faceId
+		expect(topFaceId).toBeDefined()
+		if (!topFaceId) {
+			throw new Error("Expected top face id")
+		}
+
+		const faceSketch = materializeSketch({
+			type: "sketch",
+			id: "sketch-face",
+			name: "Sketch 2",
+			dirty: false,
+			target: {
+				type: "face",
+				face: {
+					type: "extrudeFace",
+					extrudeId: baseExtrude.id,
+					faceId: topFaceId
+				}
+			},
+			entities: [{ id: "face-rect", type: "cornerRectangle", p0: { x: 2, y: 1 }, p1: { x: 5, y: 3 } }],
+			vertices: [],
+			loops: [],
+			profiles: []
+		})
+		const faceExtrude: SolidExtrude = {
+			type: "extrude",
+			id: "extrude-face",
+			target: {
+				type: "profileRef",
+				sketchId: faceSketch.id,
+				profileId: faceSketch.profiles[0]?.id ?? ""
+			},
+			depth: 2
+		}
+		const part: PartDocument = {
+			features: [baseSketch, baseExtrude, faceSketch, faceExtrude]
+		}
+
+		const extrusion = extrudeSolidFeature(part, faceExtrude)
+
+		expect(extrusion.frame.origin).toEqual({ x: 0, y: 0, z: 4 })
+		expect(extrusion.frame.normal).toEqual({ x: 0, y: 0, z: 1 })
+		expect(extrusion.solid.vertices[0]?.position).toEqual({ x: 2, y: 1, z: 4 })
+		expect(extrusion.solid.vertices[1]?.position).toEqual({ x: 2, y: 1, z: 6 })
 	})
 
 	it("throws when the profile reference is invalid", () => {
