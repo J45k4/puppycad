@@ -31,6 +31,26 @@ export type CornerRectangle = {
 
 export type SketchEntity = Line | CornerRectangle
 
+export type SketchDimension =
+	| {
+			id: string
+			type: "lineLength"
+			entityId: string
+			value: number
+	  }
+	| {
+			id: string
+			type: "rectangleWidth"
+			entityId: string
+			value: number
+	  }
+	| {
+			id: string
+			type: "rectangleHeight"
+			entityId: string
+			value: number
+	  }
+
 export type Loop = {
 	id: string
 	vertexIndices: number[]
@@ -104,6 +124,7 @@ export type Sketch = {
 	dirty: boolean
 	target: SketchTarget
 	entities: SketchEntity[]
+	dimensions: SketchDimension[]
 	vertices: Point2D[]
 	loops: Loop[]
 	profiles: Profile[]

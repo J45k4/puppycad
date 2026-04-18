@@ -19,6 +19,7 @@ describe("materializeSketch", () => {
 				{ id: "line-3", type: "line", p0: { x: 20, y: 10 }, p1: { x: 0, y: 10 } },
 				{ id: "line-4", type: "line", p0: { x: 0, y: 10 }, p1: { x: 0, y: 0 } }
 			],
+			dimensions: [],
 			vertices: [],
 			loops: [],
 			profiles: []
@@ -72,6 +73,7 @@ describe("materializeSketch", () => {
 					p1: { x: 15, y: 15 }
 				}
 			],
+			dimensions: [],
 			vertices: [],
 			loops: [],
 			profiles: []
@@ -103,6 +105,7 @@ describe("materializeSketch", () => {
 				{ id: "line-1", type: "line", p0: { x: 0, y: 0 }, p1: { x: 10, y: 0 } },
 				{ id: "line-2", type: "line", p0: { x: 10, y: 0 }, p1: { x: 10, y: 10 } }
 			],
+			dimensions: [],
 			vertices: [],
 			loops: [],
 			profiles: []

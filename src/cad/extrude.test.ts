@@ -14,6 +14,7 @@ function createSketch(id: string, plane: SketchPlane, entities: Sketch["entities
 			plane
 		},
 		entities,
+		dimensions: [],
 		vertices: [],
 		loops: [],
 		profiles: []
@@ -119,6 +120,7 @@ describe("extrudeSolidFeature", () => {
 				}
 			},
 			entities: [{ id: "face-rect", type: "cornerRectangle", p0: { x: 2, y: 1 }, p1: { x: 5, y: 3 } }],
+			dimensions: [],
 			vertices: [],
 			loops: [],
 			profiles: []

@@ -1,6 +1,6 @@
 export type ReferencePlaneName = "Top" | "Front" | "Right"
 
-export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "undo" | "reset" | "finish-sketch" | "extrude" | "delete-extrude"
+export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "dimension" | "undo" | "reset" | "finish-sketch" | "extrude" | "delete-extrude"
 
 export type PartQuickActionItem = {
 	id: PartQuickActionId
@@ -27,6 +27,7 @@ export type PartQuickActionsState = {
 	selectedPlaneLabel: string | null
 	selectedPlaneVisible: boolean
 	activeSketchTool: "line" | "rectangle" | null
+	canDimension: boolean
 	canUndo: boolean
 	canReset: boolean
 	canFinishSketch: boolean
@@ -133,6 +134,14 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 			}
 		],
 		commandActions: [
+			...(state.canDimension
+				? [
+						{
+							id: "dimension" as const,
+							label: "Dimension"
+						}
+					]
+				: []),
 			{
 				id: "undo",
 				label: "Undo",

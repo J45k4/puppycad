@@ -64,6 +64,41 @@ function getPreviewCanvas(root: HTMLElement): HTMLCanvasElement {
 	return previewCanvas
 }
 
+function setCanvasRect(canvas: HTMLCanvasElement): void {
+	canvas.getBoundingClientRect = () => ({
+		left: 0,
+		top: 0,
+		width: 360,
+		height: 360,
+		right: 360,
+		bottom: 360,
+		x: 0,
+		y: 0,
+		toJSON: () => ({})
+	})
+}
+
+async function flushAsyncUi(): Promise<void> {
+	await Promise.resolve()
+	await Promise.resolve()
+}
+
+async function submitTextPrompt(window: HappyDOMWindow, value: string, confirmLabel = "Save"): Promise<void> {
+	const input = document.body.querySelector("input.modal-input") as HTMLInputElement | null
+	expect(input).not.toBeNull()
+	if (!input) {
+		throw new Error("Expected modal input")
+	}
+	input.value = value
+	const confirmButton = Array.from(document.body.querySelectorAll("button")).find((entry) => entry.textContent?.trim() === confirmLabel)
+	expect(confirmButton).toBeDefined()
+	if (!confirmButton) {
+		throw new Error(`Expected modal button "${confirmLabel}"`)
+	}
+	confirmButton.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
+	await flushAsyncUi()
+}
+
 function findEmptyPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement): { x: number; y: number } {
 	const partEditor = editor as unknown as {
 		getExtrudeAt: (clientX: number, clientY: number) => string | null
@@ -251,6 +286,31 @@ function projectPreviewLocalPoint(editor: PartEditor, previewCanvas: HTMLCanvasE
 	}
 }
 
+function sketchPointToPreviewLocalPoint(point: { x: number; y: number }, frame: SketchFrame3D): THREE.Vector3 {
+	const origin = new THREE.Vector3(frame.origin.x, frame.origin.y, frame.origin.z)
+	const xAxis = new THREE.Vector3(frame.xAxis.x, frame.xAxis.y, frame.xAxis.z)
+	const yAxis = new THREE.Vector3(frame.yAxis.x, frame.yAxis.y, frame.yAxis.z)
+	return origin.add(xAxis.multiplyScalar(point.x)).add(yAxis.multiplyScalar(point.y))
+}
+
+function getSelectedSketchPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, point: { x: number; y: number }): { x: number; y: number } {
+	const partEditor = editor as unknown as {
+		getSelectedSketch: () => { target: unknown } | null
+		resolveSketchFrame: (target: unknown) => SketchFrame3D | null
+	}
+	const sketch = partEditor.getSelectedSketch()
+	expect(sketch).toBeDefined()
+	if (!sketch) {
+		throw new Error("Expected selected sketch")
+	}
+	const frame = partEditor.resolveSketchFrame(sketch.target)
+	expect(frame).toBeDefined()
+	if (!frame) {
+		throw new Error("Expected sketch frame")
+	}
+	return projectPreviewLocalPoint(editor, previewCanvas, sketchPointToPreviewLocalPoint(point, frame))
+}
+
 function toSketchPoint(localPoint: THREE.Vector3, frame: SketchFrame3D): { x: number; y: number } {
 	const origin = new THREE.Vector3(frame.origin.x, frame.origin.y, frame.origin.z)
 	const xAxis = new THREE.Vector3(frame.xAxis.x, frame.xAxis.y, frame.xAxis.z).normalize()
@@ -267,6 +327,7 @@ describe("PartEditor", () => {
 		domWindow = new HappyDOMWindow()
 		globalThis.window = domWindow as unknown as typeof globalThis.window
 		globalThis.document = domWindow.document as unknown as Document
+		globalThis.HTMLElement = domWindow.HTMLElement as unknown as typeof globalThis.HTMLElement
 		globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
 			callback(0)
 			return 1
@@ -369,6 +430,378 @@ describe("PartEditor", () => {
 				depth: 30
 			}
 		])
+	})
+
+	it("allows selecting a line in an open sketch and applying a length dimension", async () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickPreview(domWindow, previewCanvas, 150, 180)
+		clickPreview(domWindow, previewCanvas, 210, 180)
+
+		const initialSketch = editor.getState().features[0]
+		expect(initialSketch?.type).toBe("sketch")
+		if (!initialSketch || initialSketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		const initialLine = initialSketch.entities[0]
+		expect(initialLine?.type).toBe("line")
+		if (!initialLine || initialLine.type !== "line") {
+			throw new Error("Expected line entity")
+		}
+
+		expect(editor.root.textContent).not.toContain("Dimension")
+
+		const midpoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: (initialLine.p0.x + initialLine.p1.x) / 2,
+			y: (initialLine.p0.y + initialLine.p1.y) / 2
+		})
+		clickPreview(domWindow, previewCanvas, midpoint.x, midpoint.y)
+		expect(editor.root.textContent).toContain("Dimension")
+
+		clickButton(domWindow, editor.root, "Dimension")
+		await flushAsyncUi()
+		await submitTextPrompt(domWindow, "6")
+
+		const state = editor.getState()
+		const sketch = state.features[0]
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		const line = sketch.entities[0]
+		expect(line?.type).toBe("line")
+		if (!line || line.type !== "line") {
+			throw new Error("Expected line entity")
+		}
+		expect(sketch.dimensions).toEqual([
+			{
+				id: expect.any(String),
+				type: "lineLength",
+				entityId: line.id,
+				value: 6
+			}
+		])
+		expect(line.p0).toEqual(initialLine.p0)
+		expect(Math.hypot(line.p1.x - line.p0.x, line.p1.y - line.p0.y)).toBeCloseTo(6, 6)
+
+		const reloaded = new PartEditor({
+			initialState: state,
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const reloadedSketch = reloaded.getState().features[0]
+		expect(reloadedSketch?.type).toBe("sketch")
+		if (!reloadedSketch || reloadedSketch.type !== "sketch") {
+			throw new Error("Expected reloaded sketch")
+		}
+		expect(reloadedSketch.dimensions).toEqual(sketch.dimensions)
+	})
+
+	it("allows selecting rectangle sides and applying width and height dimensions", async () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 140, 140)
+		clickPreview(domWindow, previewCanvas, 220, 220)
+		const initialSketch = editor.getState().features[0]
+		expect(initialSketch?.type).toBe("sketch")
+		if (!initialSketch || initialSketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		const initialRectangle = initialSketch.entities[0]
+		expect(initialRectangle?.type).toBe("cornerRectangle")
+		if (!initialRectangle || initialRectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+
+		const topSidePoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: (initialRectangle.p0.x + initialRectangle.p1.x) / 2,
+			y: Math.max(initialRectangle.p0.y, initialRectangle.p1.y)
+		})
+		clickPreview(domWindow, previewCanvas, topSidePoint.x, topSidePoint.y)
+		clickButton(domWindow, editor.root, "Dimension")
+		await flushAsyncUi()
+		await submitTextPrompt(domWindow, "8")
+
+		let sketch = editor.getState().features[0]
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		let rectangle = sketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+		expect(Math.abs(rectangle.p1.x - rectangle.p0.x)).toBeCloseTo(8, 6)
+
+		const rightSidePoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: Math.max(rectangle.p0.x, rectangle.p1.x),
+			y: (rectangle.p0.y + rectangle.p1.y) / 2
+		})
+		clickPreview(domWindow, previewCanvas, rightSidePoint.x, rightSidePoint.y)
+		clickButton(domWindow, editor.root, "Dimension")
+		await flushAsyncUi()
+		await submitTextPrompt(domWindow, "4")
+
+		sketch = editor.getState().features[0]
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		rectangle = sketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+		expect(Math.abs(rectangle.p1.x - rectangle.p0.x)).toBeCloseTo(8, 6)
+		expect(Math.abs(rectangle.p1.y - rectangle.p0.y)).toBeCloseTo(4, 6)
+		expect(sketch.dimensions).toEqual(
+			expect.arrayContaining([
+				{
+					id: expect.any(String),
+					type: "rectangleWidth",
+					entityId: rectangle.id,
+					value: 8
+				},
+				{
+					id: expect.any(String),
+					type: "rectangleHeight",
+					entityId: rectangle.id,
+					value: 4
+				}
+			])
+		)
+	})
+
+	it("reopens dirty face sketches and allows side selection directly from the preview", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 140, 140)
+		clickPreview(domWindow, previewCanvas, 220, 220)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const faceCenter = getExtrudeFacePreviewPoint(editor, previewCanvas, baseExtrude.id, "Top Face")
+		clickPreview(domWindow, previewCanvas, faceCenter.x, faceCenter.y)
+		const selectedFaceLabel = editor.root.textContent?.includes("Top Face selected.") ? "Top Face" : "Bottom Face"
+		expect(editor.root.textContent).toContain(`${selectedFaceLabel} selected.`)
+		clickButton(domWindow, editor.root, "Sketch")
+		clickButton(domWindow, editor.root, "Rectangle")
+		const start = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.3, 0.3)
+		const end = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.7, 0.7)
+		clickPreview(domWindow, previewCanvas, start.x, start.y)
+		clickPreview(domWindow, previewCanvas, end.x, end.y)
+		const sketch = editor.getState().features.find((feature) => feature.type === "sketch" && feature.dirty)
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected dirty sketch")
+		}
+		const rectangle = sketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+
+		clickButton(domWindow, editor.root, "Exit Sketch")
+		editor.selectSketch(sketch.id)
+
+		const rightSidePoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: Math.max(rectangle.p0.x, rectangle.p1.x),
+			y: (rectangle.p0.y + rectangle.p1.y) / 2
+		})
+		clickPreview(domWindow, previewCanvas, rightSidePoint.x, rightSidePoint.y)
+		expect(editor.root.textContent).toContain("Dimension")
+	})
+
+	it("allows selecting and dimensioning a finished face sketch from the preview", async () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 140, 140)
+		clickPreview(domWindow, previewCanvas, 220, 220)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const faceCenter = getExtrudeFacePreviewPoint(editor, previewCanvas, baseExtrude.id, "Top Face")
+		clickPreview(domWindow, previewCanvas, faceCenter.x, faceCenter.y)
+		const selectedFaceLabel = editor.root.textContent?.includes("Top Face selected.") ? "Top Face" : "Bottom Face"
+		expect(editor.root.textContent).toContain(`${selectedFaceLabel} selected.`)
+		clickButton(domWindow, editor.root, "Sketch")
+		clickButton(domWindow, editor.root, "Rectangle")
+		const start = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.3, 0.3)
+		const end = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.7, 0.7)
+		clickPreview(domWindow, previewCanvas, start.x, start.y)
+		clickPreview(domWindow, previewCanvas, end.x, end.y)
+
+		let sketches = editor.getState().features.filter((feature) => feature.type === "sketch")
+		const faceSketch = sketches[1]
+		expect(faceSketch?.type).toBe("sketch")
+		if (!faceSketch || faceSketch.type !== "sketch") {
+			throw new Error("Expected face sketch")
+		}
+
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		editor.selectSketch(faceSketch.id)
+
+		sketches = editor.getState().features.filter((feature) => feature.type === "sketch")
+		const finishedFaceSketch = sketches[1]
+		expect(finishedFaceSketch?.type).toBe("sketch")
+		if (!finishedFaceSketch || finishedFaceSketch.type !== "sketch") {
+			throw new Error("Expected finished face sketch")
+		}
+		const rectangle = finishedFaceSketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+
+		const rightSidePoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: Math.max(rectangle.p0.x, rectangle.p1.x),
+			y: (rectangle.p0.y + rectangle.p1.y) / 2
+		})
+		clickPreview(domWindow, previewCanvas, rightSidePoint.x, rightSidePoint.y)
+		expect(editor.root.textContent).toContain("Dimension")
+
+		clickButton(domWindow, editor.root, "Dimension")
+		await flushAsyncUi()
+		await submitTextPrompt(domWindow, "5")
+
+		sketches = editor.getState().features.filter((feature) => feature.type === "sketch")
+		const dimensionedFaceSketch = sketches[1]
+		expect(dimensionedFaceSketch?.type).toBe("sketch")
+		if (!dimensionedFaceSketch || dimensionedFaceSketch.type !== "sketch") {
+			throw new Error("Expected dimensioned face sketch")
+		}
+		expect(dimensionedFaceSketch.dirty).toBe(false)
+		expect(dimensionedFaceSketch.dimensions).toEqual([
+			{
+				id: expect.any(String),
+				type: "rectangleHeight",
+				entityId: rectangle.id,
+				value: 5
+			}
+		])
+		const dimensionedRectangle = dimensionedFaceSketch.entities[0]
+		expect(dimensionedRectangle?.type).toBe("cornerRectangle")
+		if (!dimensionedRectangle || dimensionedRectangle.type !== "cornerRectangle") {
+			throw new Error("Expected dimensioned rectangle entity")
+		}
+		expect(Math.abs(dimensionedRectangle.p1.y - dimensionedRectangle.p0.y)).toBeCloseTo(5, 6)
+	})
+
+	it("supports dimensioning a line on a face sketch", async () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 140, 140)
+		clickPreview(domWindow, previewCanvas, 220, 220)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const faceCenter = getExtrudeFacePreviewPoint(editor, previewCanvas, baseExtrude.id, "Top Face")
+		clickPreview(domWindow, previewCanvas, faceCenter.x, faceCenter.y)
+		clickButton(domWindow, editor.root, "Sketch")
+
+		clickPreview(domWindow, previewCanvas, 150, 180)
+		clickPreview(domWindow, previewCanvas, 210, 180)
+
+		let sketches = editor.getState().features.filter((feature) => feature.type === "sketch")
+		const initialFaceSketch = sketches[1]
+		expect(initialFaceSketch?.type).toBe("sketch")
+		if (!initialFaceSketch || initialFaceSketch.type !== "sketch") {
+			throw new Error("Expected face sketch")
+		}
+		const initialLine = initialFaceSketch.entities[0]
+		expect(initialLine?.type).toBe("line")
+		if (!initialLine || initialLine.type !== "line") {
+			throw new Error("Expected face sketch line")
+		}
+
+		const midpoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: (initialLine.p0.x + initialLine.p1.x) / 2,
+			y: (initialLine.p0.y + initialLine.p1.y) / 2
+		})
+		clickPreview(domWindow, previewCanvas, midpoint.x, midpoint.y)
+		clickButton(domWindow, editor.root, "Dimension")
+		await flushAsyncUi()
+		await submitTextPrompt(domWindow, "5")
+
+		sketches = editor.getState().features.filter((feature) => feature.type === "sketch")
+		const faceSketch = sketches[1]
+		expect(faceSketch?.type).toBe("sketch")
+		if (!faceSketch || faceSketch.type !== "sketch") {
+			throw new Error("Expected face sketch")
+		}
+		const line = faceSketch.entities[0]
+		expect(line?.type).toBe("line")
+		if (!line || line.type !== "line") {
+			throw new Error("Expected face sketch line")
+		}
+		expect(faceSketch.target).toMatchObject({
+			type: "face",
+			face: {
+				type: "extrudeFace",
+				extrudeId: baseExtrude.id
+			}
+		})
+		expect(faceSketch.dimensions).toEqual([
+			{
+				id: expect.any(String),
+				type: "lineLength",
+				entityId: line.id,
+				value: 5
+			}
+		])
+		expect(Math.hypot(line.p1.x - line.p0.x, line.p1.y - line.p0.y)).toBeCloseTo(5, 6)
 	})
 
 	it("allows editing and deleting a selected extrude", () => {

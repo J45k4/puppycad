@@ -12,7 +12,7 @@ import type {
 	SchemanticProjectItemData
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
-import type { FaceReference, PartFeature, Sketch, SketchEntity, SketchPlane, Solid, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
+import type { FaceReference, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, Solid, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
 export const PROJECT_FILE_VERSION = 3 as const
@@ -454,6 +454,7 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 			return undefined
 		}
 		const entities = normalizeSketchEntities(value.entities)
+		const dimensions = normalizeSketchDimensions(value.dimensions, entities)
 		return materializeSketch({
 			type: "sketch",
 			id,
@@ -461,6 +462,7 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 			dirty: value.dirty === true,
 			target,
 			entities,
+			dimensions,
 			vertices: [],
 			loops: [],
 			profiles: []
@@ -630,6 +632,54 @@ function normalizeSketchEntities(input: unknown): SketchEntity[] {
 	return entities
 }
 
+function normalizeSketchDimensions(input: unknown, entities: SketchEntity[]): SketchDimension[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+
+	const dimensions: SketchDimension[] = []
+	for (let index = 0; index < input.length; index += 1) {
+		const dimension = input[index]
+		if (!dimension || typeof dimension !== "object") {
+			continue
+		}
+
+		const id = typeof dimension.id === "string" && dimension.id.trim() ? dimension.id.trim() : `dimension-${index + 1}`
+		const entityId = typeof dimension.entityId === "string" && dimension.entityId.trim() ? dimension.entityId.trim() : null
+		const value = extractFiniteNumber((dimension as { value?: unknown }).value, Number.NaN)
+		if (!entityId || !Number.isFinite(value) || value <= 0) {
+			continue
+		}
+
+		const entity = entities.find((candidate) => candidate.id === entityId)
+		if (!entity) {
+			continue
+		}
+
+		const type = (dimension as { type?: unknown }).type
+		if (type === "lineLength" && entity.type === "line") {
+			dimensions.push({
+				id,
+				type,
+				entityId,
+				value
+			})
+			continue
+		}
+
+		if ((type === "rectangleWidth" || type === "rectangleHeight") && entity.type === "cornerRectangle") {
+			dimensions.push({
+				id,
+				type,
+				entityId,
+				value
+			})
+		}
+	}
+
+	return dimensions
+}
+
 function normalizeLegacyPartProjectItemData(input: unknown): PartProjectItemData {
 	const defaults = createDefaultPartProjectItemData()
 	if (!input || typeof input !== "object") {
@@ -656,6 +706,7 @@ function normalizeLegacyPartProjectItemData(input: unknown): PartProjectItemData
 				plane: "XY"
 			},
 			entities: buildLegacySketchEntities(sketchPoints, isSketchClosed, `legacy-sketch-${featureIndex}`),
+			dimensions: [],
 			vertices: [],
 			loops: [],
 			profiles: []
@@ -812,6 +863,7 @@ function convertLegacyExtrudedModel(input: LegacyExtrudedModel, index: number, f
 			plane
 		},
 		entities: buildLegacySketchEntities(reconstructedPoints, true, sketchId),
+		dimensions: [],
 		vertices: [],
 		loops: [],
 		profiles: []

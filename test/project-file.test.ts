@@ -301,7 +301,13 @@ describe("normalizeProjectFile", () => {
 									type: "plane",
 									plane: "XZ"
 								},
-								entities: [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 10 } }]
+								entities: [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 10 } }],
+								dimensions: [
+									{ id: "dimension-width", type: "rectangleWidth", entityId: "rect-1", value: 10 },
+									{ id: "dimension-missing-entity", type: "rectangleWidth", entityId: "missing-rect", value: 12 },
+									{ id: "dimension-invalid-value", type: "rectangleHeight", entityId: "rect-1", value: 0 },
+									{ id: "dimension-invalid-type", type: "lineLength", entityId: "rect-1", value: 10 }
+								]
 							},
 							{
 								type: "extrude",
@@ -349,6 +355,7 @@ describe("normalizeProjectFile", () => {
 						type: "plane",
 						plane: "XZ"
 					},
+					dimensions: [{ id: "dimension-width", type: "rectangleWidth", entityId: "rect-1", value: 10 }],
 					profiles: [{ id: "sketch-1-profile-1" }]
 				},
 				{

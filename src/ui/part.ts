@@ -4,13 +4,35 @@ import { materializeSketch } from "../cad/sketch"
 import { applyPartAction, type PartAction } from "../part-actions"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
-import { REFERENCE_PLANE_TO_SKETCH_PLANE, SKETCH_PLANE_TO_REFERENCE_PLANE, type FaceReference, type PartFeature, type Sketch, type SketchEntity, type Solid, type SolidExtrude } from "../schema"
+import {
+	REFERENCE_PLANE_TO_SKETCH_PLANE,
+	SKETCH_PLANE_TO_REFERENCE_PLANE,
+	type FaceReference,
+	type PartFeature,
+	type Sketch,
+	type SketchDimension,
+	type SketchEntity,
+	type Solid,
+	type SolidExtrude
+} from "../schema"
 import type { Point2D, Vector3D } from "../types"
-import { UiComponent } from "./ui"
+import { UiComponent, showTextPromptModal } from "./ui"
 import * as THREE from "three"
 
 type PartStudioTool = "view" | "sketch"
 type SketchTool = "line" | "rectangle"
+type RectangleSide = "top" | "right" | "bottom" | "left"
+
+type SketchEdgeSelection =
+	| {
+			type: "line"
+			entityId: string
+	  }
+	| {
+			type: "rectangleSide"
+			entityId: string
+			side: RectangleSide
+	  }
 
 type ReferencePlaneVisual = {
 	name: ReferencePlaneName
@@ -74,6 +96,11 @@ const PREVIEW_MIN_CAMERA_DISTANCE = 0.5
 const PREVIEW_MAX_CAMERA_DISTANCE = 50
 const PREVIEW_ZOOM_SENSITIVITY = 0.0015
 const SKETCH_SNAP_DISTANCE = 0.45
+const SKETCH_CANVAS_PADDING = 24
+const SKETCH_EDGE_HIT_TOLERANCE = 16
+const PREVIEW_SKETCH_SURFACE_OFFSET = 0.035
+const PREVIEW_SKETCH_MARKER_OFFSET = 0.05
+const PREVIEW_SKETCH_LABEL_OFFSET = 0.08
 
 export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly sketchCanvas: HTMLCanvasElement
@@ -131,6 +158,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private selectedFaceId: string | null = null
 	private activeTool: PartStudioTool = "view"
 	private activeSketchTool: SketchTool | null = "line"
+	private selectedSketchEdge: SketchEdgeSelection | null = null
 	private pendingRectangleStart: Point2D | null = null
 	private pendingLineStart: Point2D | null = null
 	private sketchHoverPoint: Point2D | null = null
@@ -213,6 +241,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.sketchCtx = getSketchCanvasContext(this.sketchCanvas)
 		this.sketchCtx.scale(getDevicePixelRatio(), getDevicePixelRatio())
+		this.sketchCanvas.addEventListener("click", this.handleSketchCanvasClick)
+		this.sketchCanvas.addEventListener("mousemove", this.handleSketchCanvasHover)
+		this.sketchCanvas.addEventListener("mouseleave", () => {
+			this.sketchHoverPoint = null
+			this.drawSketch()
+		})
 
 		this.previewContainer = document.createElement("div")
 		this.previewContainer.style.flex = "1 1 640px"
@@ -439,12 +473,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.selectedReferencePlane = sketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane] : null
 				this.activeTool = "sketch"
 				this.activeSketchTool = "line"
+				this.selectedSketchEdge = null
 				break
 			}
 			case "createExtrude":
 				this.selectedExtrudeId = action.extrudeId
 				this.selectedFaceId = null
 				this.selectedSketchId = null
+				this.selectedSketchEdge = null
 				this.activeTool = "view"
 				break
 			case "deleteExtrude": {
@@ -452,6 +488,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				if (targetSketch) {
 					this.selectedReferencePlane = this.getReferencePlaneForSketchTarget(targetSketch.target)
 				}
+				this.selectedSketchEdge = null
 				this.activeTool = "view"
 				break
 			}
@@ -461,6 +498,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		if (this.selectedSketchId && !this.resolveSketch(this.selectedSketchId)) {
 			this.selectedSketchId = null
+			this.selectedSketchEdge = null
 			this.activeTool = "view"
 		}
 		if (this.selectedExtrudeId && !this.resolveExtrude(this.selectedExtrudeId)) {
@@ -470,6 +508,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (this.selectedFaceId && !this.selectedExtrudeId) {
 			this.selectedFaceId = null
 		}
+		if (this.selectedSketchEdge && !this.getSelectedSketchEdgeEntity()) {
+			this.selectedSketchEdge = null
+		}
+	}
+
+	private getDefaultSketchTool(_sketch: Sketch | null): SketchTool {
+		return "line"
 	}
 
 	public enterSketchMode(): void {
@@ -480,7 +525,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.selectedFaceId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.faceId : null
 			this.selectedReferencePlane = existingDirtySketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[existingDirtySketch.target.plane] : null
 			this.activeTool = "sketch"
-			this.activeSketchTool = this.activeSketchTool ?? "line"
+			this.activeSketchTool = this.getDefaultSketchTool(existingDirtySketch)
+			this.selectedSketchEdge = null
 			this.pendingLineStart = null
 			this.pendingRectangleStart = null
 			this.sketchHoverPoint = null
@@ -532,10 +578,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedSketchId = null
 		this.selectedExtrudeId = null
 		this.selectedFaceId = null
+		this.selectedSketchEdge = null
 		this.activeTool = "view"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
+		this.syncPreviewSketchGeometry()
 		this.refreshReferencePlaneStyles()
 		this.drawSketch()
 		this.updateStatus()
@@ -552,14 +600,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedSketchId = sketch.id
 		this.selectedExtrudeId = sketch.target.type === "face" ? sketch.target.face.extrudeId : null
 		this.selectedFaceId = sketch.target.type === "face" ? sketch.target.face.faceId : null
+		this.selectedSketchEdge = null
 		this.selectedReferencePlane = sketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane] : null
 		this.activeTool = "sketch"
+		this.activeSketchTool = this.getDefaultSketchTool(sketch)
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
 		if (sketch.dirty && this.selectedReferencePlane) {
 			this.focusReferencePlaneForSketch(this.selectedReferencePlane)
 		}
+		this.syncPreviewSketchGeometry()
 		this.refreshReferencePlaneStyles()
 		this.drawSketch()
 		this.updateStatus()
@@ -630,12 +681,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedExtrudeId = extrude.id
 		this.selectedFaceId = faceId ?? null
 		this.selectedSketchId = null
+		this.selectedSketchEdge = null
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
 		this.heightInput.value = String(extrude.depth)
+		this.syncPreviewSketchGeometry()
 		this.refreshReferencePlaneStyles()
 		this.updateStatus()
 		this.updateControls()
@@ -707,10 +760,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedSketchId = this.features.find((feature) => feature.type === "sketch" && feature.dirty)?.id ?? this.getLastSketchId()
 		this.selectedExtrudeId = null
 		this.selectedFaceId = null
+		this.selectedSketchEdge = null
 		const selectedSketch = this.getSelectedSketch()
 		this.selectedReferencePlane = selectedSketch ? this.getReferencePlaneForSketchTarget(selectedSketch.target) : "Front"
 		this.activeTool = selectedSketch?.dirty ? "sketch" : "view"
-		this.activeSketchTool = "line"
+		this.activeSketchTool = this.getDefaultSketchTool(selectedSketch)
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
@@ -794,28 +848,37 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				return
 			case "exit-sketch":
 				this.activeTool = "view"
+				this.selectedSketchEdge = null
 				this.pendingLineStart = null
 				this.pendingRectangleStart = null
 				this.sketchHoverPoint = null
+				this.syncPreviewSketchGeometry()
 				this.drawSketch()
 				this.updateStatus()
 				this.updateControls()
 				return
 			case "tool-line":
 				this.activeSketchTool = "line"
+				this.selectedSketchEdge = null
 				this.pendingRectangleStart = null
 				this.pendingLineStart = null
 				this.sketchHoverPoint = null
+				this.syncPreviewSketchGeometry()
 				this.drawSketch()
 				this.updateControls()
 				return
 			case "tool-rectangle":
 				this.activeSketchTool = "rectangle"
+				this.selectedSketchEdge = null
 				this.pendingRectangleStart = null
 				this.pendingLineStart = null
 				this.sketchHoverPoint = null
+				this.syncPreviewSketchGeometry()
 				this.drawSketch()
 				this.updateControls()
+				return
+			case "dimension":
+				void this.handleDimension()
 				return
 			case "undo":
 				this.handleUndo()
@@ -951,9 +1014,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleSketchCanvasClick = (event: MouseEvent): void => {
-		const point = this.getCanvasPoint(event)
-		if (!point) {
+		if (this.activeTool !== "sketch") {
 			return
+		}
+		const cursorPoint = this.getCanvasCursorPoint(event)
+		if (!cursorPoint) {
+			return
+		}
+		const point = this.canvasPointToSketchPoint(cursorPoint)
+		if (!this.pendingLineStart && !this.pendingRectangleStart && !this.isNearSketchAnchor(point)) {
+			this.selectSketchEdgeAtCanvasPoint(cursorPoint)
+			if (this.selectedSketchEdge) {
+				return
+			}
 		}
 		this.handleSketchPoint(point)
 	}
@@ -975,6 +1048,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		if (isLeftMouseClick && this.activeTool === "sketch") {
 			const point = this.getSelectedSketchPoint(event.clientX, event.clientY)
+			if (!this.pendingLineStart && !this.pendingRectangleStart && point && !this.isNearSketchAnchor(point)) {
+				const selectedEdge = this.getSketchEdgeAtPreviewPoint(event.clientX, event.clientY)
+				if (selectedEdge) {
+					event.preventDefault()
+					this.selectSketchEdge(selectedEdge)
+					return
+				}
+			}
 			if (point) {
 				event.preventDefault()
 				this.handleSketchPoint(point)
@@ -1002,6 +1083,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.selectedSketchId = null
 				this.selectedExtrudeId = null
 				this.selectedFaceId = null
+				this.selectedSketchEdge = null
 				this.refreshReferencePlaneStyles()
 				this.updateControls()
 				this.drawPreview()
@@ -1148,6 +1230,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const snapped = this.snapPoint(point)
 		if (this.activeSketchTool === "rectangle") {
 			if (!this.pendingRectangleStart) {
+				this.selectedSketchEdge = null
 				this.pendingRectangleStart = snapped
 				this.drawSketch()
 				this.updateControls()
@@ -1167,6 +1250,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 
 		if (!this.pendingLineStart) {
+			this.selectedSketchEdge = null
 			this.pendingLineStart = snapped
 			this.drawSketch()
 			this.updateControls()
@@ -1282,7 +1366,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return !!sketch && !sketch.dirty && sketch.profiles.length === 1
 	}
 
-	private getCanvasPoint(event: MouseEvent): Point2D | null {
+	private canDimension(): boolean {
+		return !!this.getSelectedSketch() && !!this.getSelectedSketchDimensionCandidate()
+	}
+
+	private getCanvasCursorPoint(event: MouseEvent): Point2D | null {
 		const rect = this.sketchCanvas.getBoundingClientRect()
 		if (rect.width <= 0 || rect.height <= 0) {
 			return null
@@ -1290,6 +1378,31 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return {
 			x: event.clientX - rect.left,
 			y: event.clientY - rect.top
+		}
+	}
+
+	private getCanvasPoint(event: MouseEvent): Point2D | null {
+		const point = this.getCanvasCursorPoint(event)
+		return point ? this.canvasPointToSketchPoint(point) : null
+	}
+
+	private getSketchCanvasScale(): number {
+		return (SKETCH_CANVAS_SIZE - SKETCH_CANVAS_PADDING * 2) / REFERENCE_PLANE_SIZE
+	}
+
+	private sketchPointToCanvasPoint(point: Point2D): Point2D {
+		const scale = this.getSketchCanvasScale()
+		return {
+			x: SKETCH_CANVAS_SIZE / 2 + point.x * scale,
+			y: SKETCH_CANVAS_SIZE / 2 - point.y * scale
+		}
+	}
+
+	private canvasPointToSketchPoint(point: Point2D): Point2D {
+		const scale = this.getSketchCanvasScale()
+		return {
+			x: (point.x - SKETCH_CANVAS_SIZE / 2) / scale,
+			y: (SKETCH_CANVAS_SIZE / 2 - point.y) / scale
 		}
 	}
 
@@ -1327,6 +1440,240 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return bestPoint ?? point
 	}
 
+	private isNearSketchAnchor(point: Point2D): boolean {
+		const maxDistanceSquared = SKETCH_SNAP_DISTANCE * SKETCH_SNAP_DISTANCE
+		for (const candidate of this.getActiveAnchorPoints()) {
+			const dx = candidate.x - point.x
+			const dy = candidate.y - point.y
+			if (dx * dx + dy * dy <= maxDistanceSquared) {
+				return true
+			}
+		}
+		return false
+	}
+
+	private getSelectedSketchEdgeEntity(): SketchEntity | null {
+		const sketch = this.getSelectedSketch()
+		if (!sketch || !this.selectedSketchEdge) {
+			return null
+		}
+		return sketch.entities.find((entity) => entity.id === this.selectedSketchEdge?.entityId) ?? null
+	}
+
+	private selectSketchEdgeAtSketchPoint(point: Point2D): void {
+		this.selectSketchEdgeAtCanvasPoint(this.sketchPointToCanvasPoint(point))
+	}
+
+	private selectSketchEdge(selection: SketchEdgeSelection | null): void {
+		this.selectedSketchEdge = selection
+		this.syncPreviewSketchGeometry()
+		this.drawSketch()
+		this.updateControls()
+	}
+
+	private selectSketchEdgeAtCanvasPoint(point: Point2D): void {
+		this.selectSketchEdge(this.getSketchEdgeAtCanvasPoint(point))
+	}
+
+	private getSketchEdgeAtCanvasPoint(point: Point2D): SketchEdgeSelection | null {
+		const sketch = this.getSelectedSketch()
+		if (!sketch) {
+			return null
+		}
+
+		let bestSelection: SketchEdgeSelection | null = null
+		let bestDistanceSquared = SKETCH_EDGE_HIT_TOLERANCE * SKETCH_EDGE_HIT_TOLERANCE
+		for (const entity of sketch.entities) {
+			if (entity.type === "line") {
+				const distanceSquared = distanceToSegmentSquared(point, this.sketchPointToCanvasPoint(entity.p0), this.sketchPointToCanvasPoint(entity.p1))
+				if (distanceSquared <= bestDistanceSquared) {
+					bestDistanceSquared = distanceSquared
+					bestSelection = {
+						type: "line",
+						entityId: entity.id
+					}
+				}
+				continue
+			}
+
+			const corners = rectangleCorners(entity)
+			const sides: RectangleSide[] = ["bottom", "right", "top", "left"]
+			for (let index = 0; index < corners.length; index += 1) {
+				const start = this.sketchPointToCanvasPoint(corners[index] ?? corners[0] ?? { x: 0, y: 0 })
+				const end = this.sketchPointToCanvasPoint(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 })
+				const distanceSquared = distanceToSegmentSquared(point, start, end)
+				if (distanceSquared <= bestDistanceSquared) {
+					bestDistanceSquared = distanceSquared
+					bestSelection = {
+						type: "rectangleSide",
+						entityId: entity.id,
+						side: sides[index] ?? "bottom"
+					}
+				}
+			}
+		}
+
+		return bestSelection
+	}
+
+	private getSketchEdgeAtPreviewPoint(clientX: number, clientY: number): SketchEdgeSelection | null {
+		const sketch = this.getSelectedSketch()
+		if (!sketch) {
+			return null
+		}
+		const frame = this.resolveSketchFrame(sketch.target)
+		if (!frame) {
+			return null
+		}
+
+		const point = { x: clientX, y: clientY }
+		let bestSelection: SketchEdgeSelection | null = null
+		let bestDistanceSquared = SKETCH_EDGE_HIT_TOLERANCE * SKETCH_EDGE_HIT_TOLERANCE
+		for (const entity of sketch.entities) {
+			if (entity.type === "line") {
+				const start = this.projectSketchPointToPreviewPoint(entity.p0, frame)
+				const end = this.projectSketchPointToPreviewPoint(entity.p1, frame)
+				if (!start || !end) {
+					continue
+				}
+				const distanceSquared = distanceToSegmentSquared(point, start, end)
+				if (distanceSquared <= bestDistanceSquared) {
+					bestDistanceSquared = distanceSquared
+					bestSelection = {
+						type: "line",
+						entityId: entity.id
+					}
+				}
+				continue
+			}
+
+			const sides: RectangleSide[] = ["bottom", "right", "top", "left"]
+			for (const side of sides) {
+				const segment = getRectangleSideSegment(entity, side)
+				const start = this.projectSketchPointToPreviewPoint(segment.start, frame)
+				const end = this.projectSketchPointToPreviewPoint(segment.end, frame)
+				if (!start || !end) {
+					continue
+				}
+				const distanceSquared = distanceToSegmentSquared(point, start, end)
+				if (distanceSquared <= bestDistanceSquared) {
+					bestDistanceSquared = distanceSquared
+					bestSelection = {
+						type: "rectangleSide",
+						entityId: entity.id,
+						side
+					}
+				}
+			}
+		}
+
+		return bestSelection
+	}
+
+	private projectSketchPointToPreviewPoint(point: Point2D, frame: SketchFrame3D): Point2D | null {
+		return this.projectPreviewLocalPointToClient(this.sketchPointToPreviewWorld(point, frame))
+	}
+
+	private projectPreviewLocalPointToClient(localPoint: THREE.Vector3): Point2D | null {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		if (rect.width <= 0 || rect.height <= 0) {
+			return null
+		}
+		this.syncPreviewView()
+		this.previewScene.updateMatrixWorld(true)
+		this.previewCamera.updateMatrixWorld(true)
+		const projected = this.previewContentGroup.localToWorld(localPoint.clone()).project(this.previewCamera)
+		if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) {
+			return null
+		}
+		return {
+			x: rect.left + ((projected.x + 1) / 2) * rect.width,
+			y: rect.top + ((1 - projected.y) / 2) * rect.height
+		}
+	}
+
+	private getSelectedSketchDimensionCandidate(): {
+		id: string
+		type: SketchDimension["type"]
+		entityId: string
+		value: number
+		label: string
+	} | null {
+		const sketch = this.getSelectedSketch()
+		if (!sketch || !this.selectedSketchEdge) {
+			return null
+		}
+
+		if (this.selectedSketchEdge.type === "line") {
+			const entity = sketch.entities.find((candidate) => candidate.id === this.selectedSketchEdge?.entityId)
+			if (!entity || entity.type !== "line") {
+				return null
+			}
+			const existing = sketch.dimensions.find((dimension) => dimension.entityId === entity.id && dimension.type === "lineLength")
+			return {
+				id: existing?.id ?? `dimension-${createId()}`,
+				type: "lineLength",
+				entityId: entity.id,
+				value: existing?.value ?? Math.hypot(entity.p1.x - entity.p0.x, entity.p1.y - entity.p0.y),
+				label: "Line Length"
+			}
+		}
+
+		const selectedEdge = this.selectedSketchEdge
+		if (!selectedEdge || selectedEdge.type !== "rectangleSide") {
+			return null
+		}
+
+		const entity = sketch.entities.find((candidate) => candidate.id === selectedEdge.entityId)
+		if (!entity || entity.type !== "cornerRectangle") {
+			return null
+		}
+
+		const dimensionType = selectedEdge.side === "top" || selectedEdge.side === "bottom" ? "rectangleWidth" : "rectangleHeight"
+		const existing = sketch.dimensions.find((dimension) => dimension.entityId === entity.id && dimension.type === dimensionType)
+		return {
+			id: existing?.id ?? `dimension-${createId()}`,
+			type: dimensionType,
+			entityId: entity.id,
+			value: existing?.value ?? (dimensionType === "rectangleWidth" ? Math.abs(entity.p1.x - entity.p0.x) : Math.abs(entity.p1.y - entity.p0.y)),
+			label: dimensionType === "rectangleWidth" ? "Rectangle Width" : "Rectangle Height"
+		}
+	}
+
+	private async handleDimension(): Promise<void> {
+		const sketch = this.getSelectedSketch()
+		const candidate = this.getSelectedSketchDimensionCandidate()
+		if (!sketch || !candidate || typeof window === "undefined") {
+			return
+		}
+
+		const input = await showTextPromptModal({
+			title: candidate.label,
+			initialValue: formatSketchDimensionValue(candidate.value),
+			confirmText: "Save",
+			cancelText: "Cancel"
+		})
+		if (!input) {
+			return
+		}
+
+		const value = Number.parseFloat(input)
+		if (!Number.isFinite(value) || value <= 0) {
+			return
+		}
+
+		this.dispatchPartAction({
+			type: "setSketchDimension",
+			sketchId: sketch.id,
+			dimension: {
+				id: candidate.id,
+				type: candidate.type,
+				entityId: candidate.entityId,
+				value
+			}
+		})
+	}
+
 	private drawSketch(): void {
 		this.syncSketchDraftPreview()
 		this.sketchCtx.clearRect(0, 0, SKETCH_CANVAS_SIZE, SKETCH_CANVAS_SIZE)
@@ -1351,6 +1698,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.drawSketchEntity(entity, "#2563eb")
 		}
 
+		if (this.selectedSketchEdge) {
+			this.drawSelectedSketchEdge(sketch, this.selectedSketchEdge)
+		}
+
 		for (const point of this.getActiveAnchorPoints()) {
 			this.drawSketchPoint(point, "#1d4ed8")
 		}
@@ -1361,9 +1712,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				const points = loop.vertexIndices.map((vertexIndex) => sketch.vertices[vertexIndex]).filter((point): point is Point2D => point !== undefined)
 				if (points.length >= 3) {
 					this.sketchCtx.fillStyle = "rgba(59,130,246,0.2)"
+					const canvasPoints = points.map((point) => this.sketchPointToCanvasPoint(point))
 					this.sketchCtx.beginPath()
-					this.sketchCtx.moveTo(points[0]?.x ?? 0, points[0]?.y ?? 0)
-					for (const point of points.slice(1)) {
+					this.sketchCtx.moveTo(canvasPoints[0]?.x ?? 0, canvasPoints[0]?.y ?? 0)
+					for (const point of canvasPoints.slice(1)) {
 						this.sketchCtx.lineTo(point.x, point.y)
 					}
 					this.sketchCtx.closePath()
@@ -1372,26 +1724,27 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			}
 		}
 
+		this.drawSketchDimensions(sketch)
+
 		if (this.pendingRectangleStart && this.sketchHoverPoint) {
+			const start = this.sketchPointToCanvasPoint(this.pendingRectangleStart)
+			const hover = this.sketchPointToCanvasPoint(this.sketchHoverPoint)
 			this.sketchCtx.setLineDash([4, 4])
 			this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
-			this.sketchCtx.strokeRect(
-				Math.min(this.pendingRectangleStart.x, this.sketchHoverPoint.x),
-				Math.min(this.pendingRectangleStart.y, this.sketchHoverPoint.y),
-				Math.abs(this.sketchHoverPoint.x - this.pendingRectangleStart.x),
-				Math.abs(this.sketchHoverPoint.y - this.pendingRectangleStart.y)
-			)
+			this.sketchCtx.strokeRect(Math.min(start.x, hover.x), Math.min(start.y, hover.y), Math.abs(hover.x - start.x), Math.abs(hover.y - start.y))
 			this.sketchCtx.setLineDash([])
 		}
 
 		if (this.pendingLineStart) {
 			this.drawSketchPoint(this.pendingLineStart, "#f59e0b")
 			if (this.sketchHoverPoint) {
+				const start = this.sketchPointToCanvasPoint(this.pendingLineStart)
+				const hover = this.sketchPointToCanvasPoint(this.sketchHoverPoint)
 				this.sketchCtx.setLineDash([4, 4])
 				this.sketchCtx.strokeStyle = "rgba(15,23,42,0.4)"
 				this.sketchCtx.beginPath()
-				this.sketchCtx.moveTo(this.pendingLineStart.x, this.pendingLineStart.y)
-				this.sketchCtx.lineTo(this.sketchHoverPoint.x, this.sketchHoverPoint.y)
+				this.sketchCtx.moveTo(start.x, start.y)
+				this.sketchCtx.lineTo(hover.x, hover.y)
 				this.sketchCtx.stroke()
 				this.sketchCtx.setLineDash([])
 			}
@@ -1404,25 +1757,91 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.sketchCtx.strokeStyle = color
 		this.sketchCtx.lineWidth = 2
 		if (entity.type === "line") {
+			const start = this.sketchPointToCanvasPoint(entity.p0)
+			const end = this.sketchPointToCanvasPoint(entity.p1)
 			this.sketchCtx.beginPath()
-			this.sketchCtx.moveTo(entity.p0.x, entity.p0.y)
-			this.sketchCtx.lineTo(entity.p1.x, entity.p1.y)
+			this.sketchCtx.moveTo(start.x, start.y)
+			this.sketchCtx.lineTo(end.x, end.y)
 			this.sketchCtx.stroke()
 			return
 		}
-		this.sketchCtx.strokeRect(entity.p0.x, entity.p0.y, entity.p1.x - entity.p0.x, entity.p1.y - entity.p0.y)
+		const corners = rectangleCorners(entity).map((point) => this.sketchPointToCanvasPoint(point))
+		this.sketchCtx.beginPath()
+		this.sketchCtx.moveTo(corners[0]?.x ?? 0, corners[0]?.y ?? 0)
+		for (const point of corners.slice(1)) {
+			this.sketchCtx.lineTo(point.x, point.y)
+		}
+		this.sketchCtx.closePath()
+		this.sketchCtx.stroke()
 	}
 
 	private drawSketchPoint(point: Point2D, color: string): void {
+		const canvasPoint = this.sketchPointToCanvasPoint(point)
 		this.sketchCtx.fillStyle = color
 		this.sketchCtx.beginPath()
-		this.sketchCtx.arc(point.x, point.y, 5, 0, Math.PI * 2)
+		this.sketchCtx.arc(canvasPoint.x, canvasPoint.y, 5, 0, Math.PI * 2)
 		this.sketchCtx.fill()
 		this.sketchCtx.strokeStyle = "#ffffff"
 		this.sketchCtx.lineWidth = 1.5
 		this.sketchCtx.beginPath()
-		this.sketchCtx.arc(point.x, point.y, 5, 0, Math.PI * 2)
+		this.sketchCtx.arc(canvasPoint.x, canvasPoint.y, 5, 0, Math.PI * 2)
 		this.sketchCtx.stroke()
+	}
+
+	private drawSelectedSketchEdge(sketch: Sketch, selection: SketchEdgeSelection): void {
+		const entity = sketch.entities.find((candidate) => candidate.id === selection.entityId)
+		if (!entity) {
+			return
+		}
+
+		this.sketchCtx.strokeStyle = "#f59e0b"
+		this.sketchCtx.lineWidth = 3
+		if (selection.type === "line" && entity.type === "line") {
+			const start = this.sketchPointToCanvasPoint(entity.p0)
+			const end = this.sketchPointToCanvasPoint(entity.p1)
+			this.sketchCtx.beginPath()
+			this.sketchCtx.moveTo(start.x, start.y)
+			this.sketchCtx.lineTo(end.x, end.y)
+			this.sketchCtx.stroke()
+			return
+		}
+
+		if (selection.type === "rectangleSide" && entity.type === "cornerRectangle") {
+			const segment = getRectangleSideSegment(entity, selection.side)
+			const start = this.sketchPointToCanvasPoint(segment.start)
+			const end = this.sketchPointToCanvasPoint(segment.end)
+			this.sketchCtx.beginPath()
+			this.sketchCtx.moveTo(start.x, start.y)
+			this.sketchCtx.lineTo(end.x, end.y)
+			this.sketchCtx.stroke()
+		}
+	}
+
+	private drawSketchDimensions(sketch: Sketch): void {
+		for (const dimension of sketch.dimensions) {
+			const labelPoint = getSketchDimensionLabelPoint(sketch, dimension)
+			if (!labelPoint) {
+				continue
+			}
+			const labelPosition = this.sketchPointToCanvasPoint(labelPoint)
+			const isSelected = isSketchDimensionSelected(this.selectedSketchEdge, dimension)
+			const text = formatSketchDimensionValue(dimension.value)
+			this.sketchCtx.font = "12px sans-serif"
+			const metrics = this.sketchCtx.measureText(text)
+			const width = Math.max(24, metrics.width + 10)
+			const height = 20
+
+			this.sketchCtx.fillStyle = isSelected ? "rgba(245,158,11,0.95)" : "rgba(255,255,255,0.95)"
+			this.sketchCtx.strokeStyle = isSelected ? "#f59e0b" : "#cbd5e1"
+			this.sketchCtx.lineWidth = 1.5
+			this.sketchCtx.fillRect(labelPosition.x - width / 2, labelPosition.y - height / 2, width, height)
+			this.sketchCtx.strokeRect(labelPosition.x - width / 2, labelPosition.y - height / 2, width, height)
+
+			this.sketchCtx.fillStyle = isSelected ? "#ffffff" : "#0f172a"
+			this.sketchCtx.textAlign = "center"
+			this.sketchCtx.textBaseline = "middle"
+			this.sketchCtx.fillText(text, labelPosition.x, labelPosition.y + 0.5)
+		}
 	}
 
 	private updateStatus(): void {
@@ -1476,6 +1895,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			selectedPlaneLabel: this.activeTool === "sketch" ? (sketch ? this.getSketchTargetLabel(sketch.target) : this.selectedReferencePlane) : this.selectedReferencePlane,
 			selectedPlaneVisible: selectedTargetVisible,
 			activeSketchTool: this.activeSketchTool,
+			canDimension: this.canDimension(),
 			canUndo: !!this.getEditableSketch() && (!!this.pendingLineStart || !!this.pendingRectangleStart || (sketch?.entities.length ?? 0) > 0),
 			canReset: !!this.getEditableSketch() && (!!this.pendingLineStart || !!this.pendingRectangleStart || (sketch?.entities.length ?? 0) > 0),
 			canFinishSketch: this.canFinishSketch(),
@@ -1500,6 +1920,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.quickActionsStatusSection.style.display = model.showStatus ? "flex" : "none"
 		this.heightInput.disabled = !selectedExtrude && !this.canExtrude()
 		this.sketchPanel.style.display = "none"
+		this.sketchCanvas.style.cursor = "crosshair"
 		this.refreshFaceStyles()
 		this.refreshSolidStyles()
 		this.refreshReferencePlaneStyles()
@@ -1675,7 +2096,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private getSelectedSketchPoint(clientX: number, clientY: number): Point2D | null {
-		const sketch = this.getEditableSketch()
+		const sketch = this.getSelectedSketch()
 		if (!sketch) {
 			return null
 		}
@@ -1794,23 +2215,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.previewSolids.length = 0
 
-		while (this.previewSketchGroup.children.length > 0) {
-			const child = this.previewSketchGroup.children[0]
-			if (!child) {
-				break
-			}
-			this.previewSketchGroup.remove(child)
-			disposeObject3D(child)
-		}
-
-		if (this.sketchVisible) {
-			for (const sketch of this.features.filter((feature): feature is Sketch => feature.type === "sketch")) {
-				const sketchVisual = this.createSketchVisual(sketch)
-				if (sketchVisual) {
-					this.previewSketchGroup.add(sketchVisual)
-				}
-			}
-		}
+		this.syncPreviewSketchGeometry()
 
 		const partState: PartProjectItemData = {
 			features: structuredClone(this.features) as PartFeature[]
@@ -1845,6 +2250,28 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.refreshReferencePlaneStyles()
 		this.syncSketchDraftPreview()
 		this.drawPreview()
+	}
+
+	private syncPreviewSketchGeometry(): void {
+		while (this.previewSketchGroup.children.length > 0) {
+			const child = this.previewSketchGroup.children[0]
+			if (!child) {
+				break
+			}
+			this.previewSketchGroup.remove(child)
+			disposeObject3D(child)
+		}
+
+		if (!this.sketchVisible) {
+			return
+		}
+
+		for (const sketch of this.features.filter((feature): feature is Sketch => feature.type === "sketch")) {
+			const sketchVisual = this.createSketchVisual(sketch)
+			if (sketchVisual) {
+				this.previewSketchGroup.add(sketchVisual)
+			}
+		}
 	}
 
 	private syncSketchDraftPreview(): void {
@@ -1885,19 +2312,22 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!frame) {
 			return null
 		}
+		const isSelected = sketch.id === this.selectedSketchId
+		const sketchColor = isSelected ? (sketch.target.type === "face" ? 0xf8fafc : 0x1d4ed8) : sketch.dirty ? 0x93c5fd : 0xcbd5e1
+		const markerColor = isSelected ? (sketch.target.type === "face" ? 0xffffff : 0x1d4ed8) : sketchColor
 
 		const segments: number[] = []
 		for (const entity of sketch.entities) {
 			if (entity.type === "line") {
-				const start = sketchPointToWorld(entity.p0, frame)
-				const end = sketchPointToWorld(entity.p1, frame)
+				const start = this.sketchPointToPreviewWorld(entity.p0, frame)
+				const end = this.sketchPointToPreviewWorld(entity.p1, frame)
 				segments.push(start.x, start.y, start.z, end.x, end.y, end.z)
 				continue
 			}
 			const corners = rectangleCorners(entity)
 			for (let index = 0; index < corners.length; index += 1) {
-				const start = sketchPointToWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame)
-				const end = sketchPointToWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame)
+				const start = this.sketchPointToPreviewWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame)
+				const end = this.sketchPointToPreviewWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame)
 				segments.push(start.x, start.y, start.z, end.x, end.y, end.z)
 			}
 		}
@@ -1908,23 +2338,102 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const geometry = new THREE.BufferGeometry()
 		geometry.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3))
 		const material = new THREE.LineBasicMaterial({
-			color: sketch.id === this.selectedSketchId ? 0xf59e0b : 0x2563eb,
+			color: sketchColor,
 			transparent: true,
-			opacity: sketch.dirty ? 1 : 0.8
+			opacity: isSelected ? 1 : sketch.dirty ? 0.95 : 0.8,
+			depthWrite: false,
+			depthTest: !isSelected
 		})
 		const lines = new THREE.LineSegments(geometry, material)
-		lines.renderOrder = 5
+		lines.renderOrder = 6
 
 		const group = new THREE.Group()
 		group.add(lines)
+		if (isSelected) {
+			for (const point of this.getSketchEntityPoints(sketch)) {
+				group.add(this.createSketchPointMarker(point, frame, markerColor))
+			}
+		}
+		if (isSelected && this.selectedSketchEdge) {
+			const selectedEdge = this.createSelectedSketchEdgeVisual(sketch, this.selectedSketchEdge, frame)
+			if (selectedEdge) {
+				group.add(selectedEdge)
+			}
+		}
+		if (isSelected) {
+			for (const dimension of sketch.dimensions) {
+				const label = this.createSketchDimensionVisual(sketch, dimension, frame)
+				if (label) {
+					group.add(label)
+				}
+			}
+		}
 		if (sketch.name) {
-			const label = this.createReferenceLabelSprite(sketch.name)
+			const label = this.createSketchLabelSprite(sketch.name)
 			const labelPoint = sketch.vertices[0] ?? extractSketchLabelPoint(sketch)
-			const localPoint = sketchPointToWorld(labelPoint, frame)
+			const localPoint = this.sketchPointToPreviewWorld(labelPoint, frame, PREVIEW_SKETCH_LABEL_OFFSET)
 			label.position.set(localPoint.x, localPoint.y, localPoint.z)
 			group.add(label)
 		}
 		return group
+	}
+
+	private createSelectedSketchEdgeVisual(sketch: Sketch, selection: SketchEdgeSelection, frame: SketchFrame3D): THREE.Object3D | null {
+		const entity = sketch.entities.find((candidate) => candidate.id === selection.entityId)
+		if (!entity) {
+			return null
+		}
+
+		const points =
+			selection.type === "line" && entity.type === "line"
+				? [entity.p0, entity.p1]
+				: selection.type === "rectangleSide" && entity.type === "cornerRectangle"
+					? (() => {
+							const segment = getRectangleSideSegment(entity, selection.side)
+							return [segment.start, segment.end]
+						})()
+					: null
+		if (!points || points.length !== 2) {
+			return null
+		}
+		const startPoint = points[0]
+		const endPoint = points[1]
+		if (!startPoint || !endPoint) {
+			return null
+		}
+
+		const start = this.sketchPointToPreviewWorld(startPoint, frame, PREVIEW_SKETCH_MARKER_OFFSET)
+		const end = this.sketchPointToPreviewWorld(endPoint, frame, PREVIEW_SKETCH_MARKER_OFFSET)
+		const geometry = new THREE.BufferGeometry().setFromPoints([start, end])
+		const material = new THREE.LineBasicMaterial({
+			color: 0xf59e0b,
+			transparent: true,
+			opacity: 1,
+			depthWrite: false,
+			depthTest: false
+		})
+		const highlight = new THREE.Line(geometry, material)
+		highlight.renderOrder = 9
+
+		const group = new THREE.Group()
+		group.add(highlight)
+		group.add(this.createSketchPointMarker(startPoint, frame, 0xf59e0b))
+		group.add(this.createSketchPointMarker(endPoint, frame, 0xf59e0b))
+		return group
+	}
+
+	private createSketchDimensionVisual(sketch: Sketch, dimension: SketchDimension, frame: SketchFrame3D): THREE.Object3D | null {
+		const labelPoint = getSketchDimensionLabelPoint(sketch, dimension)
+		if (!labelPoint) {
+			return null
+		}
+
+		const isSelected = isSketchDimensionSelected(this.selectedSketchEdge, dimension)
+		const sprite = this.createDimensionLabelSprite(formatSketchDimensionValue(dimension.value), isSelected)
+		const localPoint = this.sketchPointToPreviewWorld(labelPoint, frame, PREVIEW_SKETCH_LABEL_OFFSET + 0.02)
+		sprite.position.copy(localPoint)
+		sprite.renderOrder = 10
+		return sprite
 	}
 
 	private createDraftLineVisual(target: Sketch["target"], start: Point2D, end: Point2D | null): THREE.Object3D | null {
@@ -1939,13 +2448,20 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return group
 		}
 
-		const geometry = new THREE.BufferGeometry().setFromPoints([sketchPointToWorld(start, frame), sketchPointToWorld(end, frame)])
+		const geometry = new THREE.BufferGeometry().setFromPoints([
+			this.sketchPointToPreviewWorld(start, frame, PREVIEW_SKETCH_MARKER_OFFSET),
+			this.sketchPointToPreviewWorld(end, frame, PREVIEW_SKETCH_MARKER_OFFSET)
+		])
 		const material = new THREE.LineBasicMaterial({
 			color: 0xf59e0b,
 			transparent: true,
-			opacity: 0.9
+			opacity: 0.9,
+			depthWrite: false,
+			depthTest: false
 		})
-		group.add(new THREE.Line(geometry, material))
+		const line = new THREE.Line(geometry, material)
+		line.renderOrder = 8
+		group.add(line)
 		group.add(this.createSketchPointMarker(end, frame, 0xf59e0b))
 		return group
 	}
@@ -1969,8 +2485,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		})
 		const segments: number[] = []
 		for (let index = 0; index < corners.length; index += 1) {
-			const segmentStart = sketchPointToWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame)
-			const segmentEnd = sketchPointToWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame)
+			const segmentStart = this.sketchPointToPreviewWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame, PREVIEW_SKETCH_MARKER_OFFSET)
+			const segmentEnd = this.sketchPointToPreviewWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame, PREVIEW_SKETCH_MARKER_OFFSET)
 			segments.push(segmentStart.x, segmentStart.y, segmentStart.z, segmentEnd.x, segmentEnd.y, segmentEnd.z)
 		}
 
@@ -1979,9 +2495,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const material = new THREE.LineBasicMaterial({
 			color: 0xf59e0b,
 			transparent: true,
-			opacity: 0.9
+			opacity: 0.9,
+			depthWrite: false,
+			depthTest: false
 		})
-		group.add(new THREE.LineSegments(geometry, material))
+		const lines = new THREE.LineSegments(geometry, material)
+		lines.renderOrder = 8
+		group.add(lines)
 		for (const point of corners) {
 			group.add(this.createSketchPointMarker(point, frame, 0xf59e0b))
 		}
@@ -1989,9 +2509,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private createSketchPointMarker(point: Point2D, frame: SketchFrame3D, color: number): THREE.Mesh {
-		const marker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), new THREE.MeshBasicMaterial({ color }))
-		const localPoint = sketchPointToWorld(point, frame)
+		const marker = new THREE.Mesh(
+			new THREE.SphereGeometry(0.12, 16, 12),
+			new THREE.MeshBasicMaterial({
+				color,
+				depthWrite: false,
+				depthTest: false
+			})
+		)
+		const localPoint = this.sketchPointToPreviewWorld(point, frame, PREVIEW_SKETCH_MARKER_OFFSET)
 		marker.position.set(localPoint.x, localPoint.y, localPoint.z)
+		marker.renderOrder = 8
 		return marker
 	}
 
@@ -2108,6 +2636,95 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const sprite = new THREE.Sprite(material)
 		sprite.scale.set(0.48, 0.18, 1)
 		return sprite
+	}
+
+	private createSketchLabelSprite(text: string): THREE.Sprite {
+		const canvas = document.createElement("canvas")
+		canvas.width = 208
+		canvas.height = 64
+		const ctx = canvas.getContext("2d")
+		if (ctx) {
+			ctx.clearRect(0, 0, canvas.width, canvas.height)
+			ctx.fillStyle = "rgba(248,250,252,0.94)"
+			ctx.strokeStyle = "rgba(15,23,42,0.16)"
+			ctx.lineWidth = 3
+			if (typeof ctx.roundRect === "function") {
+				ctx.beginPath()
+				ctx.roundRect(10, 10, canvas.width - 20, canvas.height - 20, 18)
+				ctx.fill()
+				ctx.stroke()
+			} else {
+				ctx.fillRect(10, 10, canvas.width - 20, canvas.height - 20)
+				ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20)
+			}
+			ctx.fillStyle = "#0f172a"
+			ctx.font = "700 24px sans-serif"
+			ctx.textAlign = "center"
+			ctx.textBaseline = "middle"
+			ctx.fillText(text, canvas.width / 2, canvas.height / 2)
+		}
+		const texture = new THREE.CanvasTexture(canvas)
+		texture.minFilter = THREE.LinearFilter
+		texture.magFilter = THREE.LinearFilter
+		texture.generateMipmaps = false
+		const material = new THREE.SpriteMaterial({
+			map: texture,
+			transparent: true,
+			depthWrite: false,
+			depthTest: false
+		})
+		const sprite = new THREE.Sprite(material)
+		sprite.scale.set(0.82, 0.25, 1)
+		return sprite
+	}
+
+	private createDimensionLabelSprite(text: string, isSelected: boolean): THREE.Sprite {
+		const canvas = document.createElement("canvas")
+		canvas.width = 196
+		canvas.height = 64
+		const ctx = canvas.getContext("2d")
+		if (ctx) {
+			ctx.clearRect(0, 0, canvas.width, canvas.height)
+			ctx.fillStyle = isSelected ? "#f59e0b" : "rgba(255,255,255,0.95)"
+			ctx.strokeStyle = isSelected ? "#f59e0b" : "#cbd5e1"
+			ctx.lineWidth = 3
+			ctx.fillRect(10, 12, canvas.width - 20, canvas.height - 24)
+			ctx.strokeRect(10, 12, canvas.width - 20, canvas.height - 24)
+			ctx.fillStyle = isSelected ? "#ffffff" : "#0f172a"
+			ctx.font = "700 24px sans-serif"
+			ctx.textAlign = "center"
+			ctx.textBaseline = "middle"
+			ctx.fillText(text, canvas.width / 2, canvas.height / 2)
+		}
+		const texture = new THREE.CanvasTexture(canvas)
+		texture.minFilter = THREE.LinearFilter
+		texture.magFilter = THREE.LinearFilter
+		texture.generateMipmaps = false
+		const material = new THREE.SpriteMaterial({
+			map: texture,
+			transparent: true,
+			depthWrite: false,
+			depthTest: false
+		})
+		const sprite = new THREE.Sprite(material)
+		sprite.scale.set(1.5, 0.5, 1)
+		return sprite
+	}
+
+	private getSketchEntityPoints(sketch: Sketch): Point2D[] {
+		const uniquePoints = new Map<string, Point2D>()
+		for (const entity of sketch.entities) {
+			const points = entity.type === "line" ? [entity.p0, entity.p1] : rectangleCorners(entity)
+			for (const point of points) {
+				uniquePoints.set(`${point.x}:${point.y}`, point)
+			}
+		}
+		return [...uniquePoints.values()]
+	}
+
+	private sketchPointToPreviewWorld(point: Point2D, frame: SketchFrame3D, offset = PREVIEW_SKETCH_SURFACE_OFFSET): THREE.Vector3 {
+		const localPoint = sketchPointToWorld(point, frame)
+		return localPoint.add(vector3DToThree(frame.normal).normalize().multiplyScalar(offset))
 	}
 
 	private refreshReferencePlaneStyles(): void {
@@ -2387,6 +3004,109 @@ function rectangleCorners(entity: Extract<SketchEntity, { type: "cornerRectangle
 		{ x: maxX, y: maxY },
 		{ x: minX, y: maxY }
 	]
+}
+
+function getRectangleSideSegment(entity: Extract<SketchEntity, { type: "cornerRectangle" }>, side: RectangleSide): { start: Point2D; end: Point2D } {
+	const [bottomLeft, bottomRight, topRight, topLeft] = rectangleCorners(entity)
+	switch (side) {
+		case "top":
+			return {
+				start: topLeft ?? { x: 0, y: 0 },
+				end: topRight ?? { x: 0, y: 0 }
+			}
+		case "right":
+			return {
+				start: bottomRight ?? { x: 0, y: 0 },
+				end: topRight ?? { x: 0, y: 0 }
+			}
+		case "left":
+			return {
+				start: bottomLeft ?? { x: 0, y: 0 },
+				end: topLeft ?? { x: 0, y: 0 }
+			}
+		default:
+			return {
+				start: bottomLeft ?? { x: 0, y: 0 },
+				end: bottomRight ?? { x: 0, y: 0 }
+			}
+	}
+}
+
+function getSketchDimensionLabelPoint(sketch: Sketch, dimension: SketchDimension): Point2D | null {
+	const entity = sketch.entities.find((candidate) => candidate.id === dimension.entityId)
+	if (!entity) {
+		return null
+	}
+
+	if (dimension.type === "lineLength" && entity.type === "line") {
+		const midpoint = {
+			x: (entity.p0.x + entity.p1.x) / 2,
+			y: (entity.p0.y + entity.p1.y) / 2
+		}
+		const dx = entity.p1.x - entity.p0.x
+		const dy = entity.p1.y - entity.p0.y
+		const length = Math.hypot(dx, dy)
+		return length <= 1e-9
+			? { x: midpoint.x, y: midpoint.y + 0.8 }
+			: {
+					x: midpoint.x + (-dy / length) * 0.8,
+					y: midpoint.y + (dx / length) * 0.8
+				}
+	}
+
+	if (entity.type !== "cornerRectangle") {
+		return null
+	}
+
+	if (dimension.type === "rectangleWidth") {
+		const segment = getRectangleSideSegment(entity, "top")
+		return {
+			x: (segment.start.x + segment.end.x) / 2,
+			y: Math.max(segment.start.y, segment.end.y) + 0.8
+		}
+	}
+
+	if (dimension.type === "rectangleHeight") {
+		const segment = getRectangleSideSegment(entity, "right")
+		return {
+			x: Math.max(segment.start.x, segment.end.x) + 0.8,
+			y: (segment.start.y + segment.end.y) / 2
+		}
+	}
+
+	return null
+}
+
+function isSketchDimensionSelected(selection: SketchEdgeSelection | null, dimension: SketchDimension): boolean {
+	if (!selection || selection.entityId !== dimension.entityId) {
+		return false
+	}
+	if (selection.type === "line") {
+		return dimension.type === "lineLength"
+	}
+	return dimension.type === "rectangleWidth" ? selection.side === "top" || selection.side === "bottom" : selection.side === "left" || selection.side === "right"
+}
+
+function formatSketchDimensionValue(value: number): string {
+	return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "")
+}
+
+function distanceToSegmentSquared(point: Point2D, start: Point2D, end: Point2D): number {
+	const dx = end.x - start.x
+	const dy = end.y - start.y
+	if (dx === 0 && dy === 0) {
+		const offsetX = point.x - start.x
+		const offsetY = point.y - start.y
+		return offsetX * offsetX + offsetY * offsetY
+	}
+
+	const projection = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)
+	const clamped = Math.max(0, Math.min(1, projection))
+	const closestX = start.x + dx * clamped
+	const closestY = start.y + dy * clamped
+	const offsetX = point.x - closestX
+	const offsetY = point.y - closestY
+	return offsetX * offsetX + offsetY * offsetY
 }
 
 function extractSketchLabelPoint(sketch: Sketch): Point2D {

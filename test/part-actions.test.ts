@@ -15,6 +15,7 @@ function createSketch(id: string, plane: SketchPlane, entities: Sketch["entities
 			plane
 		},
 		entities,
+		dimensions: [],
 		vertices: [],
 		loops: [],
 		profiles: []
@@ -69,6 +70,7 @@ function createBaseFaceChain(): {
 			}
 		},
 		entities: [{ id: "rect-face", type: "cornerRectangle", p0: { x: 2, y: 2 }, p1: { x: 6, y: 5 } }],
+		dimensions: [],
 		vertices: [],
 		loops: [],
 		profiles: []
@@ -265,6 +267,92 @@ describe("applyPartAction", () => {
 		})
 	})
 
+	it("preserves dimensions when finishing a sketch", () => {
+		const sketch = createSketch("sketch-1", "XY", [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 8, y: 6 } }], {
+			dirty: true
+		})
+		const dimensioned = applyPartAction(
+			{ features: [sketch] },
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-width-1",
+					type: "rectangleWidth",
+					entityId: "rect-1",
+					value: 12
+				}
+			}
+		)
+		const finished = applyPartAction(dimensioned, {
+			type: "finishSketch",
+			sketchId: sketch.id
+		})
+
+		expect(finished.features[0]).toMatchObject({
+			type: "sketch",
+			id: sketch.id,
+			dirty: false,
+			dimensions: [
+				{
+					id: "dimension-width-1",
+					type: "rectangleWidth",
+					entityId: "rect-1",
+					value: 12
+				}
+			]
+		})
+	})
+
+	it("allows dimensioning a finished sketch", () => {
+		const sketch = createSketch("sketch-1", "XY", [
+			{
+				id: "line-1",
+				type: "line",
+				p0: { x: 1, y: 2 },
+				p1: { x: 4, y: 2 }
+			}
+		])
+
+		const result = applyPartAction(
+			{ features: [sketch] },
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-1",
+					type: "lineLength",
+					entityId: "line-1",
+					value: 7
+				}
+			}
+		)
+
+		expect(result.features[0]).toMatchObject({
+			type: "sketch",
+			id: sketch.id,
+			dirty: false,
+			dimensions: [
+				{
+					id: "dimension-1",
+					type: "lineLength",
+					entityId: "line-1",
+					value: 7
+				}
+			]
+		})
+		expect(result.features[0]).toMatchObject({
+			entities: [
+				{
+					id: "line-1",
+					type: "line",
+					p0: { x: 1, y: 2 },
+					p1: { x: 8, y: 2 }
+				}
+			]
+		})
+	})
+
 	it("creates an extrude from a finished single-profile sketch", () => {
 		const sketch = createSketch("sketch-1", "XY", [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 12, y: 8 } }])
 		const profile = sketch.profiles[0]
@@ -313,6 +401,143 @@ describe("applyPartAction", () => {
 			type: "extrude",
 			id: extrude.id,
 			depth: 48
+		})
+	})
+
+	it("stores a line-length dimension and updates the line geometry", () => {
+		const sketch = createSketch(
+			"sketch-1",
+			"XY",
+			[
+				{
+					id: "line-1",
+					type: "line",
+					p0: { x: 1, y: 2 },
+					p1: { x: 4, y: 2 }
+				}
+			],
+			{ dirty: true }
+		)
+		const result = applyPartAction(
+			{ features: [sketch] },
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-1",
+					type: "lineLength",
+					entityId: "line-1",
+					value: 9
+				}
+			}
+		)
+
+		const nextSketch = result.features[0]
+		expect(nextSketch?.type).toBe("sketch")
+		if (!nextSketch || nextSketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		expect(nextSketch.dimensions).toEqual([
+			{
+				id: "dimension-1",
+				type: "lineLength",
+				entityId: "line-1",
+				value: 9
+			}
+		])
+		expect(nextSketch.entities[0]).toEqual({
+			id: "line-1",
+			type: "line",
+			p0: { x: 1, y: 2 },
+			p1: { x: 10, y: 2 }
+		})
+	})
+
+	it("stores and replaces rectangle width dimensions without changing height", () => {
+		const sketch = createSketch("sketch-1", "XY", [{ id: "rect-1", type: "cornerRectangle", p0: { x: 1, y: 2 }, p1: { x: 5, y: 8 } }], {
+			dirty: true
+		})
+		const withWidth = applyPartAction(
+			{ features: [sketch] },
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-width-1",
+					type: "rectangleWidth",
+					entityId: "rect-1",
+					value: 10
+				}
+			}
+		)
+		const replacedWidth = applyPartAction(withWidth, {
+			type: "setSketchDimension",
+			sketchId: sketch.id,
+			dimension: {
+				id: "dimension-width-2",
+				type: "rectangleWidth",
+				entityId: "rect-1",
+				value: 7
+			}
+		})
+
+		const nextSketch = replacedWidth.features[0]
+		expect(nextSketch?.type).toBe("sketch")
+		if (!nextSketch || nextSketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		expect(nextSketch.dimensions).toEqual([
+			{
+				id: "dimension-width-2",
+				type: "rectangleWidth",
+				entityId: "rect-1",
+				value: 7
+			}
+		])
+		expect(nextSketch.entities[0]).toEqual({
+			id: "rect-1",
+			type: "cornerRectangle",
+			p0: { x: 1, y: 2 },
+			p1: { x: 8, y: 8 }
+		})
+	})
+
+	it("stores rectangle height dimensions without changing width", () => {
+		const sketch = createSketch("sketch-1", "XY", [{ id: "rect-1", type: "cornerRectangle", p0: { x: 1, y: 2 }, p1: { x: 6, y: 5 } }], {
+			dirty: true
+		})
+		const result = applyPartAction(
+			{ features: [sketch] },
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-height-1",
+					type: "rectangleHeight",
+					entityId: "rect-1",
+					value: 9
+				}
+			}
+		)
+
+		const nextSketch = result.features[0]
+		expect(nextSketch?.type).toBe("sketch")
+		if (!nextSketch || nextSketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		expect(nextSketch.dimensions).toEqual([
+			{
+				id: "dimension-height-1",
+				type: "rectangleHeight",
+				entityId: "rect-1",
+				value: 9
+			}
+		])
+		expect(nextSketch.entities[0]).toEqual({
+			id: "rect-1",
+			type: "cornerRectangle",
+			p0: { x: 1, y: 2 },
+			p1: { x: 6, y: 11 }
 		})
 	})
 
@@ -423,6 +648,49 @@ describe("applyPartAction", () => {
 			const state: PartDocument = {
 				features: [dirtySketch, finishedSketch, extrude]
 			}
+			expect(applyPartAction(state, action)).toBe(state)
+		}
+	})
+
+	it("returns the original state for invalid dimension updates", () => {
+		const sketch = createSketch("sketch-1", "XY", [{ id: "line-1", type: "line", p0: { x: 0, y: 0 }, p1: { x: 3, y: 0 } }], {
+			dirty: true
+		})
+		const invalidActions: PartAction[] = [
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-negative",
+					type: "lineLength",
+					entityId: "line-1",
+					value: -5
+				}
+			},
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-wrong-kind",
+					type: "rectangleWidth",
+					entityId: "line-1",
+					value: 5
+				}
+			},
+			{
+				type: "setSketchDimension",
+				sketchId: sketch.id,
+				dimension: {
+					id: "dimension-missing-entity",
+					type: "lineLength",
+					entityId: "missing-line",
+					value: 5
+				}
+			}
+		]
+
+		for (const action of invalidActions) {
+			const state: PartDocument = { features: [sketch] }
 			expect(applyPartAction(state, action)).toBe(state)
 		}
 	})

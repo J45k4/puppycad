@@ -11,6 +11,7 @@ describe("derivePartQuickActionsModel", () => {
 			selectedPlaneLabel: null,
 			selectedPlaneVisible: false,
 			activeSketchTool: "line",
+			canDimension: false,
 			canUndo: false,
 			canReset: false,
 			canFinishSketch: false,
@@ -29,6 +30,7 @@ describe("derivePartQuickActionsModel", () => {
 			selectedPlaneLabel: "Front",
 			selectedPlaneVisible: true,
 			activeSketchTool: "line",
+			canDimension: false,
 			canUndo: false,
 			canReset: false,
 			canFinishSketch: false,
@@ -50,6 +52,7 @@ describe("derivePartQuickActionsModel", () => {
 			selectedPlaneLabel: "Top",
 			selectedPlaneVisible: true,
 			activeSketchTool: "rectangle",
+			canDimension: false,
 			canUndo: true,
 			canReset: true,
 			canFinishSketch: false,
@@ -80,6 +83,7 @@ describe("derivePartQuickActionsModel", () => {
 			selectedPlaneLabel: "Right",
 			selectedPlaneVisible: true,
 			activeSketchTool: "line",
+			canDimension: false,
 			canUndo: false,
 			canReset: false,
 			canFinishSketch: true,
@@ -102,6 +106,7 @@ describe("derivePartQuickActionsModel", () => {
 			selectedPlaneLabel: null,
 			selectedPlaneVisible: false,
 			activeSketchTool: null,
+			canDimension: false,
 			canUndo: false,
 			canReset: false,
 			canFinishSketch: false,
@@ -123,6 +128,7 @@ describe("derivePartQuickActionsModel", () => {
 			selectedPlaneLabel: null,
 			selectedPlaneVisible: false,
 			activeSketchTool: null,
+			canDimension: false,
 			canUndo: false,
 			canReset: false,
 			canFinishSketch: false,
@@ -133,5 +139,38 @@ describe("derivePartQuickActionsModel", () => {
 		expect(model.primaryActions).toEqual([{ id: "start-sketch", label: "Sketch" }])
 		expect(model.commandActions).toEqual([{ id: "delete-extrude", label: "Delete Extrude" }])
 		expect(model.showHeightInput).toBe(true)
+	})
+
+	it("shows the dimension command only when the current sketch selection supports it", () => {
+		const hidden = derivePartQuickActionsModel({
+			activeTool: "sketch",
+			selectedExtrudeLabel: null,
+			selectedFaceLabel: null,
+			selectedPlaneLabel: "Front",
+			selectedPlaneVisible: true,
+			activeSketchTool: "line",
+			canDimension: false,
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
+		})
+
+		const visible = derivePartQuickActionsModel({
+			activeTool: "sketch",
+			selectedExtrudeLabel: null,
+			selectedFaceLabel: null,
+			selectedPlaneLabel: "Front",
+			selectedPlaneVisible: true,
+			activeSketchTool: "line",
+			canDimension: true,
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
+		})
+
+		expect(hidden.commandActions.map((action) => action.id)).not.toContain("dimension")
+		expect(visible.commandActions[0]).toEqual({ id: "dimension", label: "Dimension" })
 	})
 })

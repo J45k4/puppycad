@@ -1,6 +1,6 @@
 import { resolveSketchTargetFrame } from "./cad/extrude"
 import { materializeSketch } from "./cad/sketch"
-import type { FaceReference, PartDocument, PartFeature, Sketch, SketchEntity, SketchPlane, SolidExtrude } from "./schema"
+import type { FaceReference, PartDocument, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, SolidExtrude } from "./schema"
 
 type PartSketchEntity = Extract<SketchEntity, { type: "line" | "cornerRectangle" }>
 
@@ -47,6 +47,11 @@ export type PartAction =
 			depth: number
 	  }
 	| {
+			type: "setSketchDimension"
+			sketchId: string
+			dimension: SketchDimension
+	  }
+	| {
 			type: "deleteSketch"
 			sketchId: string
 	  }
@@ -62,21 +67,21 @@ export function applyPartAction(state: PartDocument, action: PartAction): PartDo
 		case "renameSketch":
 			return renameSketch(state, action)
 		case "addSketchEntity":
-			return updateSketch(state, action.sketchId, (sketch) => materializeSketch({ ...sketch, entities: [...sketch.entities, action.entity] }), {
+			return updateSketch(state, action.sketchId, (sketch) => materializePartSketch({ ...sketch, entities: [...sketch.entities, action.entity] }), {
 				requireDirty: true
 			})
 		case "undoSketchEntity":
-			return updateSketch(state, action.sketchId, (sketch) => materializeSketch({ ...sketch, entities: sketch.entities.slice(0, -1) }), {
+			return updateSketch(state, action.sketchId, (sketch) => materializePartSketch({ ...sketch, entities: sketch.entities.slice(0, -1) }), {
 				requireDirty: true,
 				isApplicable: (sketch) => sketch.entities.length > 0
 			})
 		case "resetSketch":
-			return updateSketch(state, action.sketchId, (sketch) => materializeSketch({ ...sketch, entities: [] }), {
+			return updateSketch(state, action.sketchId, (sketch) => materializePartSketch({ ...sketch, entities: [] }), {
 				requireDirty: true,
 				isApplicable: (sketch) => sketch.entities.length > 0
 			})
 		case "finishSketch":
-			return updateSketch(state, action.sketchId, (sketch) => materializeSketch({ ...sketch, dirty: false }), {
+			return updateSketch(state, action.sketchId, (sketch) => materializePartSketch({ ...sketch, dirty: false }), {
 				requireDirty: true,
 				isApplicable: (sketch) => materializeSketch(sketch).profiles.length === 1
 			})
@@ -84,6 +89,8 @@ export function applyPartAction(state: PartDocument, action: PartAction): PartDo
 			return createExtrude(state, action)
 		case "setExtrudeDepth":
 			return setExtrudeDepth(state, action)
+		case "setSketchDimension":
+			return setSketchDimension(state, action)
 		case "deleteSketch":
 			return deleteFeatureCascade(state, action.sketchId, "sketch")
 		case "deleteExtrude":
@@ -107,12 +114,13 @@ function createSketch(state: PartDocument, action: Extract<PartAction, { type: "
 		dirty: true,
 		target: action.target,
 		entities: [],
+		dimensions: [],
 		vertices: [],
 		loops: [],
 		profiles: []
 	})
 
-	return withFeatures(state, [...state.features, nextSketch])
+	return withFeatures(state, [...state.features, normalizeSketchDimensions(nextSketch)])
 }
 
 function renameSketch(state: PartDocument, action: Extract<PartAction, { type: "renameSketch" }>): PartDocument {
@@ -150,7 +158,7 @@ function createExtrude(state: PartDocument, action: Extract<PartAction, { type: 
 		return state
 	}
 
-	const materializedSketch = materializeSketch(sketch)
+	const materializedSketch = materializePartSketch(sketch)
 	if (materializedSketch.dirty || materializedSketch.profiles.length !== 1 || materializedSketch.profiles[0]?.id !== action.profileId) {
 		return state
 	}
@@ -196,6 +204,42 @@ function setExtrudeDepth(state: PartDocument, action: Extract<PartAction, { type
 	return withFeatures(state, nextFeatures)
 }
 
+function setSketchDimension(state: PartDocument, action: Extract<PartAction, { type: "setSketchDimension" }>): PartDocument {
+	if (!Number.isFinite(action.dimension.value) || action.dimension.value <= 0) {
+		return state
+	}
+
+	return updateSketch(
+		state,
+		action.sketchId,
+		(sketch) => {
+			const entityIndex = sketch.entities.findIndex((entity) => entity.id === action.dimension.entityId)
+			if (entityIndex < 0) {
+				return sketch
+			}
+
+			const entity = sketch.entities[entityIndex]
+			if (!entity || !canApplyDimensionToEntity(entity, action.dimension)) {
+				return sketch
+			}
+
+			const nextEntities = sketch.entities.slice()
+			nextEntities[entityIndex] = applyDimensionToEntity(entity, action.dimension)
+			return materializePartSketch({
+				...sketch,
+				entities: nextEntities,
+				dimensions: upsertSketchDimension(sketch.dimensions, action.dimension)
+			})
+		},
+		{
+			isApplicable: (sketch) => {
+				const entity = sketch.entities.find((candidate) => candidate.id === action.dimension.entityId)
+				return !!entity && canApplyDimensionToEntity(entity, action.dimension)
+			}
+		}
+	)
+}
+
 function deleteFeatureCascade(state: PartDocument, featureId: string, type: PartFeature["type"]): PartDocument {
 	const feature = state.features.find((candidate) => candidate.type === type && candidate.id === featureId)
 	if (!feature) {
@@ -228,7 +272,7 @@ function updateSketch(
 		return state
 	}
 
-	const nextSketch = updater(sketch)
+	const nextSketch = normalizeSketchDimensions(updater(sketch))
 	if (nextSketch === sketch) {
 		return state
 	}
@@ -236,6 +280,80 @@ function updateSketch(
 	const nextFeatures = state.features.slice()
 	nextFeatures[sketchIndex] = nextSketch
 	return withFeatures(state, nextFeatures)
+}
+
+function materializePartSketch(sketch: Sketch): Sketch {
+	return normalizeSketchDimensions(materializeSketch(sketch))
+}
+
+function normalizeSketchDimensions(sketch: Sketch): Sketch {
+	const dimensions = sketch.dimensions.filter((dimension) => {
+		const entity = sketch.entities.find((candidate) => candidate.id === dimension.entityId)
+		return !!entity && canApplyDimensionToEntity(entity, dimension) && Number.isFinite(dimension.value) && dimension.value > 0
+	})
+	return dimensions.length === sketch.dimensions.length ? sketch : { ...sketch, dimensions }
+}
+
+function canApplyDimensionToEntity(entity: SketchEntity, dimension: SketchDimension): boolean {
+	if (entity.type === "line") {
+		return dimension.type === "lineLength"
+	}
+	return dimension.type === "rectangleWidth" || dimension.type === "rectangleHeight"
+}
+
+function applyDimensionToEntity(entity: SketchEntity, dimension: SketchDimension): SketchEntity {
+	if (entity.type === "line" && dimension.type === "lineLength") {
+		const dx = entity.p1.x - entity.p0.x
+		const dy = entity.p1.y - entity.p0.y
+		const length = Math.hypot(dx, dy)
+		if (length <= 1e-9) {
+			return {
+				...entity,
+				p1: {
+					x: entity.p0.x + dimension.value,
+					y: entity.p0.y
+				}
+			}
+		}
+		const scale = dimension.value / length
+		return {
+			...entity,
+			p1: {
+				x: entity.p0.x + dx * scale,
+				y: entity.p0.y + dy * scale
+			}
+		}
+	}
+
+	if (entity.type === "cornerRectangle" && dimension.type === "rectangleWidth") {
+		const sign = entity.p1.x === entity.p0.x ? 1 : Math.sign(entity.p1.x - entity.p0.x)
+		return {
+			...entity,
+			p1: {
+				x: entity.p0.x + sign * dimension.value,
+				y: entity.p1.y
+			}
+		}
+	}
+
+	if (entity.type === "cornerRectangle" && dimension.type === "rectangleHeight") {
+		const sign = entity.p1.y === entity.p0.y ? 1 : Math.sign(entity.p1.y - entity.p0.y)
+		return {
+			...entity,
+			p1: {
+				x: entity.p1.x,
+				y: entity.p0.y + sign * dimension.value
+			}
+		}
+	}
+
+	return entity
+}
+
+function upsertSketchDimension(dimensions: SketchDimension[], nextDimension: SketchDimension): SketchDimension[] {
+	const nextDimensions = dimensions.filter((dimension) => !(dimension.entityId === nextDimension.entityId && dimension.type === nextDimension.type))
+	nextDimensions.push(nextDimension)
+	return nextDimensions
 }
 
 function collectDependentFeatureIds(features: PartFeature[], seedFeatureIds: Iterable<string>): Set<string> {
