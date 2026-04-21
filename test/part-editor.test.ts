@@ -104,6 +104,7 @@ function findEmptyPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElem
 		getExtrudeAt: (clientX: number, clientY: number) => string | null
 		getExtrudeFaceAt: (clientX: number, clientY: number) => { extrudeId: string; faceId: string } | null
 		getExtrudeEdgeAt: (clientX: number, clientY: number) => { extrudeId: string; edgeId: string } | null
+		getExtrudeCornerAt: (clientX: number, clientY: number) => { extrudeId: string; cornerId: string } | null
 		getReferencePlaneAt: (clientX: number, clientY: number) => string | null
 	}
 	const rect = previewCanvas.getBoundingClientRect()
@@ -111,7 +112,13 @@ function findEmptyPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElem
 		for (const u of [0.05, 0.15, 0.25, 0.75, 0.85, 0.95]) {
 			const x = rect.left + rect.width * u
 			const y = rect.top + rect.height * v
-			if (!partEditor.getExtrudeEdgeAt(x, y) && !partEditor.getExtrudeFaceAt(x, y) && !partEditor.getExtrudeAt(x, y) && !partEditor.getReferencePlaneAt(x, y)) {
+			if (
+				!partEditor.getExtrudeCornerAt(x, y) &&
+				!partEditor.getExtrudeEdgeAt(x, y) &&
+				!partEditor.getExtrudeFaceAt(x, y) &&
+				!partEditor.getExtrudeAt(x, y) &&
+				!partEditor.getReferencePlaneAt(x, y)
+			) {
 				return { x, y }
 			}
 		}
@@ -189,6 +196,46 @@ function getExtrudeEdgePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanva
 	}
 }
 
+function getExtrudeCornerPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string, cornerIndex?: number): { x: number; y: number; cornerId: string; label: string } {
+	const partEditor = editor as unknown as {
+		drawPreview: () => void
+		getExtrudeCornerAt: (clientX: number, clientY: number) => { extrudeId: string; cornerId: string } | null
+		previewCamera: THREE.PerspectiveCamera
+		previewSolids: Array<{
+			extrudeId: string
+			corners: Array<{
+				cornerId: string
+				label: string
+				marker: THREE.Mesh
+			}>
+		}>
+	}
+	partEditor.drawPreview()
+	const solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+	expect(solid).toBeDefined()
+	if (!solid) {
+		throw new Error(`Expected extrude preview for ${extrudeId}`)
+	}
+	const candidateCorners = typeof cornerIndex === "number" ? [solid.corners[cornerIndex]] : solid.corners
+	const rect = previewCanvas.getBoundingClientRect()
+	for (const corner of candidateCorners) {
+		if (!corner) {
+			continue
+		}
+		const projected = corner.marker.getWorldPosition(new THREE.Vector3()).project(partEditor.previewCamera)
+		const previewPoint = {
+			x: rect.left + ((projected.x + 1) / 2) * rect.width,
+			y: rect.top + ((1 - projected.y) / 2) * rect.height,
+			cornerId: corner.cornerId,
+			label: corner.label
+		}
+		if (typeof cornerIndex === "number" || partEditor.getExtrudeCornerAt(previewPoint.x, previewPoint.y)?.cornerId === corner.cornerId) {
+			return previewPoint
+		}
+	}
+	throw new Error(`Expected a visible corner for ${extrudeId}`)
+}
+
 function getOccludedExtrudeEdgePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string): { x: number; y: number; edgeId: string; label: string } {
 	const partEditor = editor as unknown as {
 		drawPreview: () => void
@@ -245,6 +292,58 @@ function getOccludedExtrudeEdgePreviewPoint(editor: PartEditor, previewCanvas: H
 		}
 	}
 	throw new Error("Expected an occluded edge candidate")
+}
+
+function getOccludedExtrudeCornerPreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string): { x: number; y: number; cornerId: string; label: string } {
+	const partEditor = editor as unknown as {
+		drawPreview: () => void
+		previewCamera: THREE.PerspectiveCamera
+		previewScene: THREE.Scene
+		previewSolids: Array<{
+			extrudeId: string
+			mesh: THREE.Mesh
+			corners: Array<{
+				cornerId: string
+				label: string
+				marker: THREE.Mesh
+			}>
+		}>
+	}
+	partEditor.drawPreview()
+	partEditor.previewScene.updateMatrixWorld(true)
+	partEditor.previewCamera.updateMatrixWorld(true)
+	const solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+	expect(solid).toBeDefined()
+	if (!solid) {
+		throw new Error(`Expected extrude preview for ${extrudeId}`)
+	}
+
+	const rect = previewCanvas.getBoundingClientRect()
+	const raycaster = new THREE.Raycaster()
+	for (const corner of solid.corners) {
+		const worldPoint = corner.marker.getWorldPosition(new THREE.Vector3())
+		const projected = worldPoint.clone().project(partEditor.previewCamera)
+		if (projected.z < -1 || projected.z > 1) {
+			continue
+		}
+		const x = rect.left + ((projected.x + 1) / 2) * rect.width
+		const y = rect.top + ((1 - projected.y) / 2) * rect.height
+		raycaster.setFromCamera(new THREE.Vector2(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1), partEditor.previewCamera)
+		const surfaceHit = raycaster.intersectObject(solid.mesh, false)[0]
+		if (!surfaceHit) {
+			continue
+		}
+		const surfaceDepth = surfaceHit.point.clone().project(partEditor.previewCamera).z
+		if (projected.z > surfaceDepth + 0.0002) {
+			return {
+				x,
+				y,
+				cornerId: corner.cornerId,
+				label: corner.label
+			}
+		}
+	}
+	throw new Error("Expected an occluded corner candidate")
 }
 
 function getExtrudeFacePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string, faceLabel: string): { x: number; y: number } {
@@ -1208,6 +1307,71 @@ describe("PartEditor", () => {
 		expect(selectedEdge?.highlightMaterial.color.getHex()).toBe(0xf59e0b)
 	})
 
+	it("allows selecting an extrude corner directly from the preview", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const extrude = editor.listExtrudes()[0]
+		expect(extrude).toBeDefined()
+		if (!extrude) {
+			throw new Error("Expected extrude")
+		}
+
+		editor.selectReferencePlane("Front")
+		const previewPoint = getExtrudeCornerPreviewPoint(editor, previewCanvas, extrude.id)
+		const partEditor = editor as unknown as {
+			getExtrudeCornerAt: (clientX: number, clientY: number) => { extrudeId: string; cornerId: string } | null
+			getExtrudeEdgeAt: (clientX: number, clientY: number) => { extrudeId: string; edgeId: string } | null
+			previewSolids: Array<{
+				extrudeId: string
+				fillMaterial: THREE.MeshStandardMaterial
+				corners: Array<{
+					cornerId: string
+					marker: THREE.Mesh
+					material: THREE.MeshBasicMaterial
+				}>
+			}>
+		}
+		expect(partEditor.getExtrudeCornerAt(previewPoint.x, previewPoint.y)).toEqual({
+			extrudeId: extrude.id,
+			cornerId: previewPoint.cornerId
+		})
+		expect(partEditor.getExtrudeEdgeAt(previewPoint.x, previewPoint.y)).not.toBeNull()
+
+		clickPreview(domWindow, previewCanvas, previewPoint.x, previewPoint.y)
+
+		expect(editor.root.textContent).toContain(`${previewPoint.label} selected.`)
+		expect(editor.root.textContent).toContain(`Corner: ${previewPoint.label}`)
+		expect(editor.root.textContent).toContain("Delete Extrude")
+		const previewSolid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrude.id)
+		expect(previewSolid?.fillMaterial.color.getHex()).toBe(0x3b82f6)
+		const selectedCorner = previewSolid?.corners.find((corner) => corner.cornerId === previewPoint.cornerId)
+		expect(selectedCorner?.marker.visible).toBe(true)
+		expect(selectedCorner?.marker.scale.x).toBeCloseTo(0.15, 6)
+		expect(selectedCorner?.material.color.getHex()).toBe(0xf59e0b)
+	})
+
 	it("clears the current selection when clicking empty preview space", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()
@@ -1316,6 +1480,51 @@ describe("PartEditor", () => {
 		const occludedEdge = getOccludedExtrudeEdgePreviewPoint(editor, previewCanvas, extrude.id)
 
 		expect(partEditor.getExtrudeEdgeAt(occludedEdge.x, occludedEdge.y)?.edgeId).not.toBe(occludedEdge.edgeId)
+	})
+
+	it("does not select extrude corners through an occluding body face", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		previewCanvas.getBoundingClientRect = () => ({
+			left: 0,
+			top: 0,
+			width: 360,
+			height: 360,
+			right: 360,
+			bottom: 360,
+			x: 0,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const extrude = editor.listExtrudes()[0]
+		expect(extrude).toBeDefined()
+		if (!extrude) {
+			throw new Error("Expected extrude")
+		}
+
+		const partEditor = editor as unknown as {
+			drawPreview: () => void
+			getExtrudeCornerAt: (clientX: number, clientY: number) => { extrudeId: string; cornerId: string } | null
+			previewRotation: { yaw: number; pitch: number }
+		}
+		partEditor.previewRotation.yaw = -0.7
+		partEditor.previewRotation.pitch = 0.35
+		partEditor.drawPreview()
+
+		const occludedCorner = getOccludedExtrudeCornerPreviewPoint(editor, previewCanvas, extrude.id)
+
+		expect(partEditor.getExtrudeCornerAt(occludedCorner.x, occludedCorner.y)?.cornerId).not.toBe(occludedCorner.cornerId)
 	})
 
 	it("supports sketching on a selected extrude face", () => {
