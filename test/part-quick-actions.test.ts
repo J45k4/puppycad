@@ -141,6 +141,28 @@ describe("derivePartQuickActionsModel", () => {
 		expect(model.showHeightInput).toBe(true)
 	})
 
+	it("shows parent extrude controls when an edge is selected", () => {
+		const model = derivePartQuickActionsModel({
+			activeTool: "view",
+			selectedExtrudeLabel: "Extrude 1",
+			selectedFaceLabel: null,
+			selectedEdgeLabel: "Edge 1",
+			selectedPlaneLabel: null,
+			selectedPlaneVisible: false,
+			activeSketchTool: null,
+			canDimension: false,
+			canUndo: false,
+			canReset: false,
+			canFinishSketch: false,
+			canExtrude: false
+		})
+
+		expect(model.title).toBe("Edge: Edge 1")
+		expect(model.primaryActions).toEqual([])
+		expect(model.commandActions).toEqual([{ id: "delete-extrude", label: "Delete Extrude" }])
+		expect(model.showHeightInput).toBe(true)
+	})
+
 	it("shows the dimension command only when the current sketch selection supports it", () => {
 		const hidden = derivePartQuickActionsModel({
 			activeTool: "sketch",

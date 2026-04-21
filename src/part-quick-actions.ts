@@ -24,6 +24,7 @@ export type PartQuickActionsState = {
 	activeTool: "view" | "sketch"
 	selectedExtrudeLabel: string | null
 	selectedFaceLabel: string | null
+	selectedEdgeLabel?: string | null
 	selectedPlaneLabel: string | null
 	selectedPlaneVisible: boolean
 	activeSketchTool: "line" | "rectangle" | null
@@ -61,6 +62,23 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 						label: "Sketch"
 					}
 				],
+				sketchToolActions: [],
+				commandActions: [
+					{
+						id: "delete-extrude",
+						label: "Delete Extrude"
+					}
+				],
+				showHeightInput: true,
+				showStatus: true
+			}
+		}
+		if (state.selectedEdgeLabel) {
+			return {
+				visible: true,
+				title: `Edge: ${state.selectedEdgeLabel}`,
+				description: "Adjust the parent extrude below or delete it.",
+				primaryActions: [],
 				sketchToolActions: [],
 				commandActions: [
 					{
