@@ -404,6 +404,56 @@ describe("applyPartAction", () => {
 		})
 	})
 
+	it("creates and updates a chamfer on an extrude edge", () => {
+		const sketch = createSketch("sketch-1", "XY", [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 12, y: 8 } }])
+		const extrude = createExtrude("extrude-1", sketch, 12)
+		const edgeId = extrudeSolidFeature({ features: [sketch, extrude] }, extrude).solid.edges[0]?.id
+		if (!edgeId) {
+			throw new Error("Expected edge id.")
+		}
+
+		const created = applyPartAction(
+			{ features: [sketch, extrude] },
+			{
+				type: "createChamfer",
+				chamferId: "chamfer-1",
+				name: "Chamfer 1",
+				target: {
+					edge: {
+						type: "extrudeEdge",
+						extrudeId: extrude.id,
+						edgeId
+					}
+				},
+				d1: 1.25
+			}
+		)
+		const updated = applyPartAction(created, {
+			type: "setChamferDistances",
+			chamferId: "chamfer-1",
+			d1: 2
+		})
+
+		expect(created.features[2]).toMatchObject({
+			type: "chamfer",
+			id: "chamfer-1",
+			name: "Chamfer 1",
+			target: {
+				edge: {
+					type: "extrudeEdge",
+					extrudeId: extrude.id,
+					edgeId
+				}
+			},
+			d1: 1.25
+		})
+		expect(updated.features[2]).toMatchObject({
+			type: "chamfer",
+			id: "chamfer-1",
+			d1: 2
+		})
+	})
+
 	it("stores a line-length dimension and updates the line geometry", () => {
 		const sketch = createSketch(
 			"sketch-1",

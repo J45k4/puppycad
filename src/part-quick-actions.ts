@@ -1,6 +1,6 @@
 export type ReferencePlaneName = "Top" | "Front" | "Right"
 
-export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "dimension" | "undo" | "reset" | "finish-sketch" | "extrude" | "delete-extrude"
+export type PartQuickActionId = "start-sketch" | "exit-sketch" | "tool-line" | "tool-rectangle" | "dimension" | "undo" | "reset" | "finish-sketch" | "extrude" | "chamfer" | "delete-extrude"
 
 export type PartQuickActionItem = {
 	id: PartQuickActionId
@@ -78,8 +78,13 @@ export function derivePartQuickActionsModel(state: PartQuickActionsState): PartQ
 			return {
 				visible: true,
 				title: `Edge: ${state.selectedEdgeLabel}`,
-				description: "Adjust the parent extrude below or delete it.",
-				primaryActions: [],
+				description: "Chamfer this edge, adjust the parent extrude below, or delete it.",
+				primaryActions: [
+					{
+						id: "chamfer",
+						label: "Chamfer"
+					}
+				],
 				sketchToolActions: [],
 				commandActions: [
 					{

@@ -12,7 +12,7 @@ import type {
 	SchemanticProjectItemData
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
-import type { FaceReference, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, Solid, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
+import type { EdgeReference, FaceReference, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, Solid, SolidChamfer, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
 export const PROJECT_FILE_VERSION = 3 as const
@@ -492,6 +492,28 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 				profileId
 			},
 			depth
+		}
+	}
+
+	if (type === "chamfer") {
+		const value = input as Partial<SolidChamfer>
+		const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : `part-chamfer-${index + 1}`
+		const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : undefined
+		const edge = value.target && typeof value.target === "object" ? normalizeEdgeReference(value.target.edge) : null
+		const d1 = typeof value.d1 === "number" && Number.isFinite(value.d1) && value.d1 > 0 ? value.d1 : 1
+		const d2 = typeof value.d2 === "number" && Number.isFinite(value.d2) && value.d2 > 0 ? value.d2 : undefined
+		if (!edge) {
+			return undefined
+		}
+		return {
+			type: "chamfer",
+			id,
+			name,
+			target: {
+				edge
+			},
+			d1,
+			...(d2 === undefined ? {} : { d2 })
 		}
 	}
 
@@ -1014,6 +1036,26 @@ function normalizeFaceReference(input: unknown): FaceReference | null {
 		type: "extrudeFace",
 		extrudeId,
 		faceId
+	}
+}
+
+function normalizeEdgeReference(input: unknown): EdgeReference | null {
+	if (!input || typeof input !== "object") {
+		return null
+	}
+	const value = input as Partial<EdgeReference>
+	if (value.type !== "extrudeEdge") {
+		return null
+	}
+	const extrudeId = typeof value.extrudeId === "string" && value.extrudeId.trim() ? value.extrudeId.trim() : null
+	const edgeId = typeof value.edgeId === "string" && value.edgeId.trim() ? value.edgeId.trim() : null
+	if (!extrudeId || !edgeId) {
+		return null
+	}
+	return {
+		type: "extrudeEdge",
+		extrudeId,
+		edgeId
 	}
 }
 

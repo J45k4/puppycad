@@ -7,12 +7,14 @@ import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlan
 import {
 	REFERENCE_PLANE_TO_SKETCH_PLANE,
 	SKETCH_PLANE_TO_REFERENCE_PLANE,
+	type EdgeReference,
 	type FaceReference,
 	type PartFeature,
 	type Sketch,
 	type SketchDimension,
 	type SketchEntity,
 	type Solid,
+	type SolidChamfer,
 	type SolidExtrude
 } from "../schema"
 import type { Point2D, Vector3D } from "../types"
@@ -105,6 +107,13 @@ type ExtrudeListEntry = {
 	id: string
 	name: string
 	depth: number
+}
+
+type ChamferListEntry = {
+	id: string
+	name: string
+	d1: number
+	d2?: number
 }
 
 const SKETCH_CANVAS_SIZE = 360
@@ -711,6 +720,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			}))
 	}
 
+	public listChamfers(): ChamferListEntry[] {
+		return this.features
+			.filter((feature): feature is SolidChamfer => feature.type === "chamfer")
+			.map((chamfer, index) => ({
+				id: chamfer.id,
+				name: chamfer.name?.trim() || `Chamfer ${index + 1}`,
+				d1: chamfer.d1,
+				...(chamfer.d2 === undefined ? {} : { d2: chamfer.d2 })
+			}))
+	}
+
 	public selectExtrude(extrudeId: string): void {
 		const extrude = this.features.find((feature) => feature.type === "extrude" && feature.id === extrudeId)
 		if (!extrude || extrude.type !== "extrude") {
@@ -949,7 +969,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			button.style.borderColor = "#60a5fa"
 			button.style.color = "#1d4ed8"
 		}
-		if (actionId === "start-sketch" || actionId === "extrude") {
+		if (actionId === "start-sketch" || actionId === "extrude" || actionId === "chamfer") {
 			button.style.backgroundColor = button.disabled ? "#cbd5f5" : "#2563eb"
 			button.style.borderColor = button.disabled ? "#cbd5f5" : "#1d4ed8"
 			button.style.color = button.disabled ? "#475569" : "#ffffff"
@@ -1022,6 +1042,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				return
 			case "extrude":
 				this.handleExtrude()
+				return
+			case "chamfer":
+				void this.handleChamfer()
 				return
 			case "delete-extrude":
 				this.handleDeleteSelectedExtrude()
@@ -1109,6 +1132,49 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			sketchId: sketch.id,
 			profileId: profile.id,
 			depth
+		})
+	}
+
+	private async handleChamfer(): Promise<void> {
+		const edge = this.getSelectedEdgeReference()
+		if (!edge || typeof window === "undefined") {
+			return
+		}
+
+		const existingChamfer = this.getChamferForEdge(edge)
+		const input = await showTextPromptModal({
+			title: "Chamfer",
+			initialValue: formatSketchDimensionValue(existingChamfer?.d1 ?? 1),
+			confirmText: "Apply",
+			cancelText: "Cancel"
+		})
+		if (!input) {
+			return
+		}
+
+		const distance = Number.parseFloat(input)
+		if (!Number.isFinite(distance) || distance <= 0) {
+			return
+		}
+
+		if (existingChamfer) {
+			this.dispatchPartAction({
+				type: "setChamferDistances",
+				chamferId: existingChamfer.id,
+				d1: distance
+			})
+			return
+		}
+
+		const chamferCount = this.features.filter((feature) => feature.type === "chamfer").length
+		this.dispatchPartAction({
+			type: "createChamfer",
+			chamferId: `chamfer-${chamferCount + 1}-${createId()}`,
+			name: `Chamfer ${chamferCount + 1}`,
+			target: {
+				edge
+			},
+			d1: distance
 		})
 	}
 
@@ -1464,6 +1530,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private getSelectedEdgeReference(): EdgeReference | null {
+		if (!this.selectedExtrudeId || !this.selectedEdgeId) {
+			return null
+		}
+		return {
+			type: "extrudeEdge",
+			extrudeId: this.selectedExtrudeId,
+			edgeId: this.selectedEdgeId
+		}
+	}
+
 	private getSelectedFaceLabel(): string | null {
 		return this.selectedExtrudeId && this.selectedFaceId ? this.getPreviewFaceLabel(this.selectedExtrudeId, this.selectedFaceId) : null
 	}
@@ -1531,6 +1608,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return extrude?.type === "extrude" ? extrude : null
 		}
 		return this.getSelectedExtrude()
+	}
+
+	private getSelectedEdgeChamfer(): SolidChamfer | null {
+		const edge = this.getSelectedEdgeReference()
+		return edge ? this.getChamferForEdge(edge) : null
+	}
+
+	private getChamferForEdge(edge: EdgeReference): SolidChamfer | null {
+		const chamfer = this.features.find((feature) => feature.type === "chamfer" && edgeReferencesEqual(feature.target.edge, edge))
+		return chamfer?.type === "chamfer" ? chamfer : null
 	}
 
 	private canFinishSketch(): boolean {
@@ -2045,8 +2132,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				return
 			}
 			if (selectedEdgeLabel) {
+				const selectedChamfer = this.getSelectedEdgeChamfer()
 				this.statusText.textContent = `${selectedEdgeLabel} selected.`
-				this.summaryText.textContent = `On ${extrudeLabel}. Depth ${extrude.depth.toFixed(1)}.`
+				this.summaryText.textContent = selectedChamfer
+					? `On ${extrudeLabel}. Depth ${extrude.depth.toFixed(1)}. Chamfer ${formatSketchDimensionValue(selectedChamfer.d1)}.`
+					: `On ${extrudeLabel}. Depth ${extrude.depth.toFixed(1)}.`
 				return
 			}
 			if (selectedCornerLabel) {
@@ -2578,7 +2668,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			try {
 				const extrusion = extrudeSolidFeature(partState, extrude)
 				nextSolids.push(structuredClone(extrusion.solid) as Solid)
-				const visual = this.createExtrudedVisual(extrusion, extrude.id)
+				const chamfers = this.features.filter((feature): feature is SolidChamfer => feature.type === "chamfer" && feature.target.edge.extrudeId === extrude.id)
+				const visual = this.createExtrudedVisual(extrusion, extrude.id, chamfers)
 				this.previewSolids.push(visual)
 				this.previewSolidsGroup.add(visual.mesh)
 				for (const edge of visual.edges) {
@@ -2899,17 +2990,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return marker
 	}
 
-	private createExtrudedVisual(extrusion: ExtrudedSolid, extrudeId: string): PreviewSolidVisual {
-		const outerLoop = extrusion.profileLoops[0] ?? []
-		const shape = new THREE.Shape(outerLoop.map((point) => new THREE.Vector2(point.x, point.y)))
-		for (const hole of extrusion.profileLoops.slice(1)) {
-			shape.holes.push(new THREE.Path(hole.map((point) => new THREE.Vector2(point.x, point.y))))
-		}
-		const geometry = new THREE.ExtrudeGeometry(shape, {
-			depth: extrusion.depth,
-			bevelEnabled: false,
-			steps: 1
-		})
+	private createExtrudedVisual(extrusion: ExtrudedSolid, extrudeId: string, chamfers: SolidChamfer[] = []): PreviewSolidVisual {
+		const geometry = createExtrudedMeshGeometry(extrusion, chamfers)
 		const material = new THREE.MeshStandardMaterial({
 			color: 0x3b82f6,
 			roughness: 0.35,
@@ -3328,6 +3410,330 @@ function getPlaneQuaternion(plane: "XY" | "YZ" | "XZ"): THREE.Quaternion {
 	}
 }
 
+type PreviewTriangle = [THREE.Vector3, THREE.Vector3, THREE.Vector3]
+
+type ChamferClipPlane = {
+	normal: THREE.Vector3
+	constant: number
+}
+
+type ChamferEdgeDescriptor =
+	| {
+			kind: "bottom" | "top"
+			edgeId: string
+			point: Point2D
+			inwardNormal: THREE.Vector2
+	  }
+	| {
+			kind: "vertical"
+			edgeId: string
+			point: Point2D
+			previousInwardNormal: THREE.Vector2
+			nextInwardNormal: THREE.Vector2
+	  }
+
+function createExtrudedMeshGeometry(extrusion: ExtrudedSolid, chamfers: SolidChamfer[]): THREE.BufferGeometry {
+	const baseGeometry = createBaseExtrudedGeometry(extrusion)
+	const clipPlanes = createChamferClipPlanes(extrusion, chamfers)
+	if (clipPlanes.length === 0) {
+		return baseGeometry
+	}
+
+	const clippedGeometry = clipGeometryWithPlanes(baseGeometry, clipPlanes)
+	baseGeometry.dispose()
+	return clippedGeometry
+}
+
+function createBaseExtrudedGeometry(extrusion: ExtrudedSolid): THREE.BufferGeometry {
+	const outerLoop = extrusion.profileLoops[0] ?? []
+	const shape = new THREE.Shape(outerLoop.map((point) => new THREE.Vector2(point.x, point.y)))
+	for (const hole of extrusion.profileLoops.slice(1)) {
+		shape.holes.push(new THREE.Path(hole.map((point) => new THREE.Vector2(point.x, point.y))))
+	}
+	return new THREE.ExtrudeGeometry(shape, {
+		depth: extrusion.depth,
+		bevelEnabled: false,
+		steps: 1
+	})
+}
+
+function createChamferClipPlanes(extrusion: ExtrudedSolid, chamfers: SolidChamfer[]): ChamferClipPlane[] {
+	const descriptors = createChamferEdgeDescriptors(extrusion)
+	const planes: ChamferClipPlane[] = []
+	for (const chamfer of chamfers) {
+		const descriptor = descriptors.get(chamfer.target.edge.edgeId)
+		if (!descriptor || !Number.isFinite(chamfer.d1) || chamfer.d1 <= 0) {
+			continue
+		}
+		planes.push(createChamferClipPlane(descriptor, extrusion.depth, chamfer.d1))
+	}
+	return planes
+}
+
+function createChamferEdgeDescriptors(extrusion: ExtrudedSolid): Map<string, ChamferEdgeDescriptor> {
+	const descriptors = new Map<string, ChamferEdgeDescriptor>()
+	let edgeIndex = 0
+
+	for (const loop of extrusion.profileLoops) {
+		const area = signedPolygonArea(loop)
+		const outwardNormals = loop.map((point, pointIndex) => getOutwardSegmentNormal(point, loop[(pointIndex + 1) % loop.length] ?? point, area))
+
+		for (let pointIndex = 0; pointIndex < loop.length; pointIndex += 1) {
+			const point = loop[pointIndex]
+			const nextPoint = loop[(pointIndex + 1) % loop.length]
+			const outwardNormal = outwardNormals[pointIndex]
+			if (!point || !nextPoint || !outwardNormal) {
+				edgeIndex += 4
+				continue
+			}
+
+			const bottomEdge = extrusion.solid.edges[edgeIndex]
+			const topEdge = extrusion.solid.edges[edgeIndex + 1]
+			const sideStartEdge = extrusion.solid.edges[edgeIndex + 2]
+			const sideEndEdge = extrusion.solid.edges[edgeIndex + 3]
+			const inwardNormal = outwardNormal.clone().multiplyScalar(-1)
+
+			if (bottomEdge) {
+				descriptors.set(bottomEdge.id, {
+					kind: "bottom",
+					edgeId: bottomEdge.id,
+					point,
+					inwardNormal
+				})
+			}
+			if (topEdge) {
+				descriptors.set(topEdge.id, {
+					kind: "top",
+					edgeId: topEdge.id,
+					point,
+					inwardNormal
+				})
+			}
+			if (sideStartEdge) {
+				descriptors.set(sideStartEdge.id, createVerticalChamferEdgeDescriptor(sideStartEdge.id, loop, outwardNormals, pointIndex))
+			}
+			if (sideEndEdge) {
+				descriptors.set(sideEndEdge.id, createVerticalChamferEdgeDescriptor(sideEndEdge.id, loop, outwardNormals, (pointIndex + 1) % loop.length))
+			}
+
+			edgeIndex += 4
+		}
+	}
+
+	return descriptors
+}
+
+function createVerticalChamferEdgeDescriptor(edgeId: string, loop: Point2D[], outwardNormals: THREE.Vector2[], pointIndex: number): ChamferEdgeDescriptor {
+	const point = loop[pointIndex] ?? { x: 0, y: 0 }
+	const previousNormal = outwardNormals[(pointIndex - 1 + outwardNormals.length) % outwardNormals.length] ?? new THREE.Vector2(0, 0)
+	const nextNormal = outwardNormals[pointIndex] ?? new THREE.Vector2(0, 0)
+	return {
+		kind: "vertical",
+		edgeId,
+		point,
+		previousInwardNormal: previousNormal.clone().multiplyScalar(-1),
+		nextInwardNormal: nextNormal.clone().multiplyScalar(-1)
+	}
+}
+
+function createChamferClipPlane(descriptor: ChamferEdgeDescriptor, depth: number, distance: number): ChamferClipPlane {
+	if (descriptor.kind === "vertical") {
+		const normal = new THREE.Vector3(descriptor.previousInwardNormal.x + descriptor.nextInwardNormal.x, descriptor.previousInwardNormal.y + descriptor.nextInwardNormal.y, 0)
+		const pointOnEdge = new THREE.Vector3(descriptor.point.x, descriptor.point.y, 0)
+		return {
+			normal,
+			constant: -normal.dot(pointOnEdge) - distance
+		}
+	}
+
+	const z = descriptor.kind === "bottom" ? 0 : depth
+	const zDirection = descriptor.kind === "bottom" ? 1 : -1
+	const normal = new THREE.Vector3(descriptor.inwardNormal.x, descriptor.inwardNormal.y, zDirection)
+	const pointOnEdge = new THREE.Vector3(descriptor.point.x, descriptor.point.y, z)
+	return {
+		normal,
+		constant: -normal.dot(pointOnEdge) - distance
+	}
+}
+
+function clipGeometryWithPlanes(geometry: THREE.BufferGeometry, planes: ChamferClipPlane[]): THREE.BufferGeometry {
+	let triangles = extractGeometryTriangles(geometry)
+	for (const plane of planes) {
+		const clipped = clipTrianglesWithPlane(triangles, plane)
+		triangles = [...clipped.triangles, ...createCapTriangles(clipped.capPoints, plane)]
+	}
+	return createGeometryFromTriangles(triangles)
+}
+
+function extractGeometryTriangles(geometry: THREE.BufferGeometry): PreviewTriangle[] {
+	const positions = geometry.getAttribute("position")
+	const index = geometry.getIndex()
+	const triangles: PreviewTriangle[] = []
+	if (!positions) {
+		return triangles
+	}
+
+	const readVertex = (vertexIndex: number) => new THREE.Vector3().fromBufferAttribute(positions, vertexIndex)
+	if (index) {
+		for (let i = 0; i + 2 < index.count; i += 3) {
+			triangles.push([readVertex(index.getX(i)), readVertex(index.getX(i + 1)), readVertex(index.getX(i + 2))])
+		}
+		return triangles
+	}
+
+	for (let i = 0; i + 2 < positions.count; i += 3) {
+		triangles.push([readVertex(i), readVertex(i + 1), readVertex(i + 2)])
+	}
+	return triangles
+}
+
+function clipTrianglesWithPlane(triangles: PreviewTriangle[], plane: ChamferClipPlane): { triangles: PreviewTriangle[]; capPoints: THREE.Vector3[] } {
+	const clippedTriangles: PreviewTriangle[] = []
+	const capPoints: THREE.Vector3[] = []
+	for (const triangle of triangles) {
+		const clippedPolygon = clipPolygonWithPlane(triangle, plane, capPoints)
+		for (let index = 1; index + 1 < clippedPolygon.length; index += 1) {
+			clippedTriangles.push([
+				clippedPolygon[0]?.clone() ?? new THREE.Vector3(),
+				clippedPolygon[index]?.clone() ?? new THREE.Vector3(),
+				clippedPolygon[index + 1]?.clone() ?? new THREE.Vector3()
+			])
+		}
+	}
+	return {
+		triangles: clippedTriangles,
+		capPoints
+	}
+}
+
+function clipPolygonWithPlane(polygon: THREE.Vector3[], plane: ChamferClipPlane, capPoints: THREE.Vector3[]): THREE.Vector3[] {
+	const clipped: THREE.Vector3[] = []
+	const epsilon = 1e-7
+	for (let index = 0; index < polygon.length; index += 1) {
+		const current = polygon[index]
+		const previous = polygon[(index - 1 + polygon.length) % polygon.length]
+		if (!current || !previous) {
+			continue
+		}
+
+		const currentDistance = signedPlaneDistance(current, plane)
+		const previousDistance = signedPlaneDistance(previous, plane)
+		const currentInside = currentDistance >= -epsilon
+		const previousInside = previousDistance >= -epsilon
+
+		if (currentInside !== previousInside) {
+			const intersection = interpolatePlaneIntersection(previous, current, previousDistance, currentDistance)
+			clipped.push(intersection)
+			capPoints.push(intersection.clone())
+		}
+		if (currentInside) {
+			clipped.push(current.clone())
+		}
+	}
+	return clipped
+}
+
+function createCapTriangles(points: THREE.Vector3[], plane: ChamferClipPlane): PreviewTriangle[] {
+	const uniquePoints = uniqueVectorPoints(points)
+	if (uniquePoints.length < 3) {
+		return []
+	}
+
+	const centroid = uniquePoints.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / uniquePoints.length)
+	const planeNormal = plane.normal.clone().normalize()
+	const capNormal = planeNormal.clone().multiplyScalar(-1)
+	const basisU = getPerpendicularUnitVector(planeNormal)
+	const basisV = new THREE.Vector3().crossVectors(planeNormal, basisU).normalize()
+	const ordered = uniquePoints
+		.map((point) => ({
+			point,
+			angle: Math.atan2(point.clone().sub(centroid).dot(basisV), point.clone().sub(centroid).dot(basisU))
+		}))
+		.sort((a, b) => a.angle - b.angle)
+		.map((entry) => entry.point)
+
+	const triangles: PreviewTriangle[] = []
+	for (let index = 1; index + 1 < ordered.length; index += 1) {
+		const a = ordered[0]?.clone()
+		const b = ordered[index]?.clone()
+		const c = ordered[index + 1]?.clone()
+		if (!a || !b || !c || areTrianglePointsCollinear(a, b, c)) {
+			continue
+		}
+		const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a))
+		triangles.push(normal.dot(capNormal) >= 0 ? [a, b, c] : [a, c, b])
+	}
+	return triangles
+}
+
+function createGeometryFromTriangles(triangles: PreviewTriangle[]): THREE.BufferGeometry {
+	const coordinates: number[] = []
+	for (const triangle of triangles) {
+		for (const point of triangle) {
+			coordinates.push(point.x, point.y, point.z)
+		}
+	}
+	const geometry = new THREE.BufferGeometry()
+	geometry.setAttribute("position", new THREE.Float32BufferAttribute(coordinates, 3))
+	geometry.computeVertexNormals()
+	return geometry
+}
+
+function uniqueVectorPoints(points: THREE.Vector3[]): THREE.Vector3[] {
+	const seen = new Set<string>()
+	const unique: THREE.Vector3[] = []
+	for (const point of points) {
+		const key = `${point.x.toFixed(6)}:${point.y.toFixed(6)}:${point.z.toFixed(6)}`
+		if (seen.has(key)) {
+			continue
+		}
+		seen.add(key)
+		unique.push(point.clone())
+	}
+	return unique
+}
+
+function getOutwardSegmentNormal(start: Point2D, end: Point2D, polygonArea: number): THREE.Vector2 {
+	const direction = new THREE.Vector2(end.x - start.x, end.y - start.y)
+	if (direction.lengthSq() <= 1e-12) {
+		return new THREE.Vector2(0, 0)
+	}
+	direction.normalize()
+	return polygonArea >= 0 ? new THREE.Vector2(direction.y, -direction.x) : new THREE.Vector2(-direction.y, direction.x)
+}
+
+function signedPolygonArea(points: Point2D[]): number {
+	let area = 0
+	for (let index = 0; index < points.length; index += 1) {
+		const current = points[index]
+		const next = points[(index + 1) % points.length]
+		if (!current || !next) {
+			continue
+		}
+		area += current.x * next.y - next.x * current.y
+	}
+	return area / 2
+}
+
+function signedPlaneDistance(point: THREE.Vector3, plane: ChamferClipPlane): number {
+	return plane.normal.dot(point) + plane.constant
+}
+
+function interpolatePlaneIntersection(a: THREE.Vector3, b: THREE.Vector3, aDistance: number, bDistance: number): THREE.Vector3 {
+	const denominator = aDistance - bDistance
+	const ratio = Math.abs(denominator) <= 1e-12 ? 0 : aDistance / denominator
+	return a.clone().lerp(b, THREE.MathUtils.clamp(ratio, 0, 1))
+}
+
+function getPerpendicularUnitVector(normal: THREE.Vector3): THREE.Vector3 {
+	const reference = Math.abs(normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0)
+	return new THREE.Vector3().crossVectors(normal, reference).normalize()
+}
+
+function areTrianglePointsCollinear(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): boolean {
+	return new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).lengthSq() <= 1e-12
+}
+
 function createPreviewEdgeVisuals(extrusion: ExtrudedSolid, extrudeId: string): PreviewEdgeVisual[] {
 	const verticesById = new Map(extrusion.solid.vertices.map((vertex) => [vertex.id, vertex]))
 	const edges: PreviewEdgeVisual[] = []
@@ -3728,6 +4134,10 @@ function createNoopCanvasContext2D(): CanvasRenderingContext2D {
 		strokeStyle: "#000",
 		lineWidth: 1
 	} as unknown as CanvasRenderingContext2D
+}
+
+function edgeReferencesEqual(a: EdgeReference, b: EdgeReference): boolean {
+	return a.extrudeId === b.extrudeId && a.edgeId === b.edgeId
 }
 
 function createId(): string {

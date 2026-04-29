@@ -93,6 +93,14 @@ export type ExtrudeFaceReference = {
 
 export type FaceReference = ExtrudeFaceReference
 
+export type ExtrudeEdgeReference = {
+	type: "extrudeEdge"
+	extrudeId: string
+	edgeId: string
+}
+
+export type EdgeReference = ExtrudeEdgeReference
+
 export type ProfileReference = {
 	type: "profileRef"
 	sketchId: string
@@ -105,6 +113,19 @@ export type SolidExtrude = {
 	name?: string
 	target: ProfileReference
 	depth: number
+}
+
+export type ChamferEdgeTarget = {
+	edge: EdgeReference
+}
+
+export type SolidChamfer = {
+	type: "chamfer"
+	id: string
+	name?: string
+	target: ChamferEdgeTarget
+	d1: number
+	d2?: number
 }
 
 export type SketchTarget =
@@ -130,7 +151,7 @@ export type Sketch = {
 	profiles: Profile[]
 }
 
-export type PartFeature = Sketch | SolidExtrude
+export type PartFeature = Sketch | SolidExtrude | SolidChamfer
 
 export type PartDocument = {
 	features: PartFeature[]

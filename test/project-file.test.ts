@@ -318,6 +318,18 @@ describe("normalizeProjectFile", () => {
 									profileId: "sketch-1-profile-1"
 								},
 								depth: 18
+							},
+							{
+								type: "chamfer",
+								id: "chamfer-1",
+								target: {
+									edge: {
+										type: "extrudeEdge",
+										extrudeId: "extrude-1",
+										edgeId: "extrude-1-solid-edge-1"
+									}
+								},
+								d1: 1.25
 							}
 						],
 						solids: [
@@ -362,6 +374,18 @@ describe("normalizeProjectFile", () => {
 					type: "extrude",
 					id: "extrude-1",
 					depth: 18
+				},
+				{
+					type: "chamfer",
+					id: "chamfer-1",
+					target: {
+						edge: {
+							type: "extrudeEdge",
+							extrudeId: "extrude-1",
+							edgeId: "extrude-1-solid-edge-1"
+						}
+					},
+					d1: 1.25
 				}
 			],
 			solids: [

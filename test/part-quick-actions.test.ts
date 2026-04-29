@@ -158,7 +158,7 @@ describe("derivePartQuickActionsModel", () => {
 		})
 
 		expect(model.title).toBe("Edge: Edge 1")
-		expect(model.primaryActions).toEqual([])
+		expect(model.primaryActions).toEqual([{ id: "chamfer", label: "Chamfer" }])
 		expect(model.commandActions).toEqual([{ id: "delete-extrude", label: "Delete Extrude" }])
 		expect(model.showHeightInput).toBe(true)
 	})

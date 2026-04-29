@@ -1,6 +1,6 @@
-import { resolveSketchTargetFrame } from "./cad/extrude"
+import { extrudeSolidFeature, resolveSketchTargetFrame } from "./cad/extrude"
 import { materializeSketch } from "./cad/sketch"
-import type { FaceReference, PartDocument, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, SolidExtrude } from "./schema"
+import type { EdgeReference, FaceReference, PartDocument, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, SolidChamfer, SolidExtrude } from "./schema"
 
 type PartSketchEntity = Extract<SketchEntity, { type: "line" | "cornerRectangle" }>
 
@@ -47,6 +47,22 @@ export type PartAction =
 			depth: number
 	  }
 	| {
+			type: "createChamfer"
+			chamferId: string
+			name: string
+			target: {
+				edge: EdgeReference
+			}
+			d1: number
+			d2?: number
+	  }
+	| {
+			type: "setChamferDistances"
+			chamferId: string
+			d1: number
+			d2?: number
+	  }
+	| {
 			type: "setSketchDimension"
 			sketchId: string
 			dimension: SketchDimension
@@ -89,6 +105,10 @@ export function applyPartAction(state: PartDocument, action: PartAction): PartDo
 			return createExtrude(state, action)
 		case "setExtrudeDepth":
 			return setExtrudeDepth(state, action)
+		case "createChamfer":
+			return createChamfer(state, action)
+		case "setChamferDistances":
+			return setChamferDistances(state, action)
 		case "setSketchDimension":
 			return setSketchDimension(state, action)
 		case "deleteSketch":
@@ -201,6 +221,61 @@ function setExtrudeDepth(state: PartDocument, action: Extract<PartAction, { type
 		...extrude,
 		depth: action.depth
 	}
+	return withFeatures(state, nextFeatures)
+}
+
+function createChamfer(state: PartDocument, action: Extract<PartAction, { type: "createChamfer" }>): PartDocument {
+	const nextName = action.name.trim()
+	if (
+		!nextName ||
+		hasFeatureId(state.features, action.chamferId) ||
+		!isPositiveFiniteNumber(action.d1) ||
+		(action.d2 !== undefined && !isPositiveFiniteNumber(action.d2)) ||
+		!canResolveEdgeReference(state, action.target.edge) ||
+		findChamferForEdge(state.features, action.target.edge)
+	) {
+		return state
+	}
+
+	const nextChamfer: SolidChamfer = {
+		type: "chamfer",
+		id: action.chamferId,
+		name: nextName,
+		target: {
+			edge: cloneEdgeReference(action.target.edge)
+		},
+		d1: action.d1,
+		...(action.d2 === undefined ? {} : { d2: action.d2 })
+	}
+
+	return withFeatures(state, [...state.features, nextChamfer])
+}
+
+function setChamferDistances(state: PartDocument, action: Extract<PartAction, { type: "setChamferDistances" }>): PartDocument {
+	if (!isPositiveFiniteNumber(action.d1) || (action.d2 !== undefined && !isPositiveFiniteNumber(action.d2))) {
+		return state
+	}
+
+	const chamferIndex = state.features.findIndex((feature) => feature.type === "chamfer" && feature.id === action.chamferId)
+	if (chamferIndex < 0) {
+		return state
+	}
+
+	const chamfer = state.features[chamferIndex]
+	if (!chamfer || chamfer.type !== "chamfer" || (chamfer.d1 === action.d1 && chamfer.d2 === action.d2) || !canResolveEdgeReference(state, chamfer.target.edge)) {
+		return state
+	}
+
+	const nextFeatures = state.features.slice()
+	const nextChamfer: SolidChamfer = {
+		type: "chamfer",
+		id: chamfer.id,
+		...(chamfer.name === undefined ? {} : { name: chamfer.name }),
+		target: chamfer.target,
+		d1: action.d1,
+		...(action.d2 === undefined ? {} : { d2: action.d2 })
+	}
+	nextFeatures[chamferIndex] = nextChamfer
 	return withFeatures(state, nextFeatures)
 }
 
@@ -373,6 +448,11 @@ function collectDependentFeatureIds(features: PartFeature[], seedFeatureIds: Ite
 			if (feature.type === "sketch" && feature.target.type === "face" && removedIds.has(feature.target.face.extrudeId)) {
 				removedIds.add(feature.id)
 				changed = true
+				continue
+			}
+			if (feature.type === "chamfer" && removedIds.has(feature.target.edge.extrudeId)) {
+				removedIds.add(feature.id)
+				changed = true
 			}
 		}
 	}
@@ -388,8 +468,41 @@ function canResolveSketchTarget(state: Pick<PartDocument, "features">, target: S
 	}
 }
 
+function canResolveEdgeReference(state: Pick<PartDocument, "features">, reference: EdgeReference): boolean {
+	const extrude = state.features.find((feature) => feature.type === "extrude" && feature.id === reference.extrudeId)
+	if (!extrude || extrude.type !== "extrude") {
+		return false
+	}
+	try {
+		return extrudeSolidFeature(state, extrude).solid.edges.some((edge) => edge.id === reference.edgeId)
+	} catch (_error) {
+		return false
+	}
+}
+
 function hasFeatureId(features: PartFeature[], featureId: string): boolean {
 	return features.some((feature) => feature.id === featureId)
+}
+
+function findChamferForEdge(features: PartFeature[], reference: EdgeReference): SolidChamfer | null {
+	const chamfer = features.find((feature) => feature.type === "chamfer" && edgeReferencesEqual(feature.target.edge, reference))
+	return chamfer?.type === "chamfer" ? chamfer : null
+}
+
+function edgeReferencesEqual(a: EdgeReference, b: EdgeReference): boolean {
+	return a.extrudeId === b.extrudeId && a.edgeId === b.edgeId
+}
+
+function cloneEdgeReference(reference: EdgeReference): EdgeReference {
+	return {
+		type: "extrudeEdge",
+		extrudeId: reference.extrudeId,
+		edgeId: reference.edgeId
+	}
+}
+
+function isPositiveFiniteNumber(value: number): boolean {
+	return Number.isFinite(value) && value > 0
 }
 
 function withFeatures(state: PartDocument, features: PartFeature[]): PartDocument {

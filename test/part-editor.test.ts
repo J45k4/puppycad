@@ -1307,6 +1307,89 @@ describe("PartEditor", () => {
 		expect(selectedEdge?.highlightMaterial.color.getHex()).toBe(0xf59e0b)
 	})
 
+	it("adds a chamfer from the selected edge quick action", async () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const extrude = editor.listExtrudes()[0]
+		expect(extrude).toBeDefined()
+		if (!extrude) {
+			throw new Error("Expected extrude")
+		}
+
+		editor.selectReferencePlane("Front")
+		const previewPoint = getExtrudeEdgePreviewPoint(editor, previewCanvas, extrude.id)
+		clickPreview(domWindow, previewCanvas, previewPoint.x, previewPoint.y)
+
+		expect(editor.root.textContent).toContain("Chamfer")
+		clickButton(domWindow, editor.root, "Chamfer")
+		await submitTextPrompt(domWindow, "1.25", "Apply")
+
+		const chamfer = editor.getState().features.find((feature) => feature.type === "chamfer")
+		expect(chamfer).toBeDefined()
+		if (!chamfer || chamfer.type !== "chamfer") {
+			throw new Error("Expected chamfer")
+		}
+		expect(chamfer).toMatchObject({
+			type: "chamfer",
+			name: "Chamfer 1",
+			target: {
+				edge: {
+					type: "extrudeEdge",
+					extrudeId: extrude.id,
+					edgeId: previewPoint.edgeId
+				}
+			},
+			d1: 1.25
+		})
+		expect(editor.listChamfers()).toEqual([
+			{
+				id: chamfer.id,
+				name: "Chamfer 1",
+				d1: 1.25
+			}
+		])
+		const partEditor = editor as unknown as {
+			previewSolids: Array<{
+				extrudeId: string
+				mesh: THREE.Mesh
+			}>
+		}
+		const mesh = partEditor.previewSolids.find((entry) => entry.extrudeId === extrude.id)?.mesh
+		expect(mesh).toBeDefined()
+		if (!mesh) {
+			throw new Error("Expected chamfered mesh")
+		}
+		const positions = mesh.geometry.getAttribute("position")
+		const vertices = Array.from({ length: positions.count }, (_entry, index) => new THREE.Vector3().fromBufferAttribute(positions, index))
+		const minY = Math.min(...vertices.map((vertex) => vertex.y))
+		const minZ = Math.min(...vertices.map((vertex) => vertex.z))
+		expect(vertices.some((vertex) => Math.abs(vertex.y - (minY + 1.25)) <= 1e-4 && Math.abs(vertex.z - minZ) <= 1e-4)).toBe(true)
+		expect(vertices.some((vertex) => Math.abs(vertex.y - minY) <= 1e-4 && Math.abs(vertex.z - (minZ + 1.25)) <= 1e-4)).toBe(true)
+		expect(editor.root.textContent).toContain("Chamfer 1.25")
+
+		clickButton(domWindow, editor.root, "Chamfer")
+		await submitTextPrompt(domWindow, "2", "Apply")
+
+		const updatedChamfers = editor.getState().features.filter((feature) => feature.type === "chamfer")
+		expect(updatedChamfers).toHaveLength(1)
+		expect(updatedChamfers[0]).toMatchObject({
+			id: chamfer.id,
+			d1: 2
+		})
+	})
+
 	it("allows selecting an extrude corner directly from the preview", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()
