@@ -19,7 +19,7 @@ Runtime state should focus on editor ergonomics, not persisted JSON shape.
 
 ```ts
 export interface PCadState {
-	readonly nodes: ReadonlyMap<string, PCadNode>
+	readonly nodes: ReadonlyMap<string, PCadGraphNode>
 	readonly rootNodeIds: readonly string[]
 }
 ```
@@ -52,13 +52,13 @@ import type { Point2D, Vector3D } from "./types"
 export type SketchPlane = "XY" | "YZ" | "XZ"
 export type ReferencePlaneName = "Front" | "Top" | "Right"
 
-export interface PCadNodeBase {
+export interface PCadNode {
 	readonly id: string
 	readonly type: string
 	readonly name?: string
 }
 
-export interface ReferencePlaneNode extends PCadNodeBase {
+export interface ReferencePlaneNode extends PCadNode {
 	readonly type: "referencePlane"
 	readonly plane: SketchPlane
 }
@@ -99,53 +99,45 @@ export type SketchDimension =
 			readonly value: number
 	  }
 
-export interface SketchNode extends PCadNodeBase {
+export interface SketchNode extends PCadNode {
 	readonly type: "sketch"
 	readonly targetId: string
 	readonly entities: readonly SketchEntity[]
 	readonly dimensions: readonly SketchDimension[]
 }
 
-export interface ProfileSelector {
-	readonly type: "containsPoint"
-	readonly point: Point2D
-}
+export type ExtrudeOperation = "newBody" | "join" | "cut"
 
-export interface ProfileNode extends PCadNodeBase {
-	readonly type: "profile"
-	readonly sketchId: string
-	readonly selector: ProfileSelector
-}
-
-export interface ExtrudeNode extends PCadNodeBase {
+export interface ExtrudeNode extends PCadNode {
 	readonly type: "extrude"
+	readonly sketchId: string
 	readonly profileId: string
+	readonly operation: ExtrudeOperation
 	readonly depth: number
 }
 
-export interface FaceNode extends PCadNodeBase {
+export interface FaceNode extends PCadNode {
 	readonly type: "face"
 	readonly sourceId: string
 	readonly faceId: string
 }
 
-export interface EdgeNode extends PCadNodeBase {
+export interface EdgeNode extends PCadNode {
 	readonly type: "edge"
 	readonly sourceId: string
 	readonly edgeId: string
 }
 
-export interface ChamferNode extends PCadNodeBase {
+export interface ChamferNode extends PCadNode {
 	readonly type: "chamfer"
 	readonly edgeId: string
 	readonly d1: number
 	readonly d2?: number
 }
 
-export type PCadNode =
+export type PCadGraphNode =
 	| ReferencePlaneNode
 	| SketchNode
-	| ProfileNode
 	| ExtrudeNode
 	| FaceNode
 	| EdgeNode
@@ -187,13 +179,15 @@ The source graph should not store materialized sketch topology such as:
 
 Those should be computed from sketch entities and dimensions when needed.
 
-Profiles can exist as graph nodes, but they should select derived sketch regions by a stable selector:
+Operations that consume sketch profiles should reference derived sketch regions by stable profile id:
 
 ```ts
-export interface ProfileNode extends PCadNodeBase {
-	readonly type: "profile"
+export interface ExtrudeNode extends PCadNode {
+	readonly type: "extrude"
 	readonly sketchId: string
-	readonly selector: ProfileSelector
+	readonly profileId: string
+	readonly operation: ExtrudeOperation
+	readonly depth: number
 }
 ```
 
@@ -207,12 +201,12 @@ The primitive mutation model should be graph rewrites.
 export type PCadGraphRewrite =
 	| {
 			readonly type: "addNode"
-			readonly node: PCadNode
+			readonly node: PCadGraphNode
 			readonly root?: boolean
 	  }
 	| {
 			readonly type: "replaceNode"
-			readonly node: PCadNode
+			readonly node: PCadGraphNode
 	  }
 	| {
 			readonly type: "removeNodes"
@@ -271,16 +265,14 @@ export function applyGraphRewrites(state: PCadState, rewrites: readonly PCadGrap
 Dependencies can be derived from each node.
 
 ```ts
-export function getNodeDependencies(node: PCadNode): readonly string[] {
+export function getNodeDependencies(node: PCadGraphNode): readonly string[] {
 	switch (node.type) {
 		case "referencePlane":
 			return []
 		case "sketch":
 			return [node.targetId]
-		case "profile":
-			return [node.sketchId]
 		case "extrude":
-			return [node.profileId]
+			return [node.sketchId]
 		case "face":
 		case "edge":
 			return [node.sourceId]
@@ -406,33 +398,29 @@ export class CadEditor {
 		id: string
 		name?: string
 		sketchId: string
-		profileSelector: ProfileSelector
+		profileId: string
+		operation: ExtrudeOperation
 		depth: number
 	}): ExtrudeNode {
 		const sketch = this.getSketchOrThrow(args.sketchId)
 		if (!Number.isFinite(args.depth) || args.depth <= 0) {
 			throw new Error("Extrude depth must be greater than zero.")
 		}
-
-		const profile: ProfileNode = {
-			id: `${args.id}-profile`,
-			type: "profile",
-			sketchId: sketch.id,
-			selector: args.profileSelector
+		if (!["newBody", "join", "cut"].includes(args.operation)) {
+			throw new Error("Extrude operation must be newBody, join, or cut.")
 		}
 
 		const extrude: ExtrudeNode = {
 			id: args.id,
 			type: "extrude",
 			name: args.name,
-			profileId: profile.id,
+			sketchId: sketch.id,
+			profileId: args.profileId,
+			operation: args.operation,
 			depth: args.depth
 		}
 
-		this.commitMany([
-			{ type: "addNode", node: profile },
-			{ type: "addNode", node: extrude, root: true }
-		])
+		this.commit({ type: "addNode", node: extrude, root: true })
 
 		return extrude
 	}
