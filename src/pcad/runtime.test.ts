@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import type { Sketch, SolidExtrude } from "../schema"
-import { extrudeSolidFeature } from "../cad/extrude"
+import { extrudeSolidFeature, getExtrudedFaceDescriptors } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
 import {
 	CadEditor,
@@ -326,22 +326,133 @@ describe("CadEditor", () => {
 		expect(extrusion.solid.vertices[0]?.position).toEqual({ x: 0, y: 0, z: 0 })
 		expect(extrusion.solid.vertices[1]?.position).toEqual({ x: 0, y: 0, z: 12 })
 	})
+
+	it("creates a base rectangle and cuts a pocket from a second sketch", () => {
+		const baseSketch: SketchNode = {
+			id: "sketch-base-pocket",
+			type: "sketch",
+			name: "Base Sketch",
+			targetId: plane.id,
+			entities: [{ id: "rect-base", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 30, y: 20 } }],
+			dimensions: []
+		}
+		const editor = new CadEditor({
+			nodes: new Map([
+				[plane.id, plane],
+				[baseSketch.id, baseSketch]
+			]),
+			rootNodeIds: [plane.id]
+		})
+		const legacyBaseSketch = materializeSketch(toLegacySketch(baseSketch, plane))
+		const baseProfileId = legacyBaseSketch.profiles[0]?.id
+		expect(baseProfileId).toBeString()
+		const baseExtrudeNode = editor.extrudeSketchProfile({
+			id: "extrude-base-pocket",
+			sketchId: baseSketch.id,
+			profileId: baseProfileId ?? "",
+			operation: "newBody",
+			depth: 10
+		})
+		const legacyBaseExtrude = toLegacyExtrude(baseExtrudeNode)
+		const baseExtrusion = extrudeSolidFeature({ features: [legacyBaseSketch, legacyBaseExtrude] }, legacyBaseExtrude)
+		const topFaceId = getExtrudedFaceDescriptors(baseExtrusion).find((descriptor) => descriptor.label === "Top Face")?.faceId
+		expect(topFaceId).toBeString()
+
+		const topFace: FaceNode = {
+			id: "face-base-top",
+			type: "face",
+			sourceId: baseExtrudeNode.id,
+			faceId: topFaceId ?? ""
+		}
+		const pocketSketch: SketchNode = {
+			id: "sketch-pocket",
+			type: "sketch",
+			name: "Pocket Sketch",
+			targetId: topFace.id,
+			entities: [],
+			dimensions: []
+		}
+		const pocketEditor = new CadEditor({
+			nodes: new Map([
+				...editor.getState().nodes,
+				[topFace.id, topFace],
+				[pocketSketch.id, pocketSketch]
+			]),
+			rootNodeIds: editor.getState().rootNodeIds
+		})
+		const pocketSketchWithEntity = pocketEditor.addSketchEntity(pocketSketch.id, {
+			id: "rect-pocket",
+			type: "cornerRectangle",
+			p0: { x: 8, y: 6 },
+			p1: { x: 16, y: 14 }
+		})
+		const legacyPocketSketch = materializeSketch(toLegacySketch(pocketSketchWithEntity, topFace))
+		const pocketProfileId = legacyPocketSketch.profiles[0]?.id
+		expect(pocketProfileId).toBeString()
+		const pocketExtrudeNode = pocketEditor.extrudeSketchProfile({
+			id: "extrude-pocket-cut",
+			sketchId: pocketSketch.id,
+			profileId: pocketProfileId ?? "",
+			operation: "cut",
+			depth: 4
+		})
+		const legacyPocketExtrude = toLegacyExtrude(pocketExtrudeNode)
+		const pocketExtrusion = extrudeSolidFeature({ features: [legacyBaseSketch, legacyBaseExtrude, legacyPocketSketch, legacyPocketExtrude] }, legacyPocketExtrude)
+
+		expect(pocketExtrudeNode.operation).toBe("cut")
+		expect(pocketExtrusion.solid.vertices).toHaveLength(8)
+		expect(pocketExtrusion.solid.faces).toHaveLength(6)
+		expect(pocketExtrusion.profileLoops).toEqual([
+			[
+				{ x: 8, y: 6 },
+				{ x: 16, y: 6 },
+				{ x: 16, y: 14 },
+				{ x: 8, y: 14 }
+			]
+		])
+		expect(pocketExtrusion.solid.vertices[0]?.position).toEqual({ x: 8, y: 6, z: 10 })
+		expect(pocketExtrusion.solid.vertices[1]?.position).toEqual({ x: 8, y: 6, z: 14 })
+	})
 })
 
-function toLegacySketch(node: SketchNode, target: ReferencePlaneNode): Sketch {
+function toLegacySketch(node: SketchNode, target: ReferencePlaneNode | FaceNode): Sketch {
 	return {
 		type: "sketch",
 		id: node.id,
 		name: node.name,
 		dirty: false,
-		target: {
-			type: "plane",
-			plane: target.plane
-		},
+		target:
+			target.type === "referencePlane"
+				? {
+						type: "plane",
+						plane: target.plane
+					}
+				: {
+						type: "face",
+						face: {
+							type: "extrudeFace",
+							extrudeId: target.sourceId,
+							faceId: target.faceId
+						}
+					},
 		entities: node.entities.map((entity) => ({ ...entity })),
 		dimensions: node.dimensions.map((dimension) => ({ ...dimension })),
 		vertices: [],
 		loops: [],
 		profiles: []
+	}
+}
+
+function toLegacyExtrude(node: ExtrudeNode): SolidExtrude {
+	return {
+		type: "extrude",
+		id: node.id,
+		name: node.name,
+		target: {
+			type: "profileRef",
+			sketchId: node.sketchId,
+			profileId: node.profileId
+		},
+		depth: node.depth
 	}
 }
