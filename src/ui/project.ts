@@ -482,11 +482,14 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				addPlaneChild("plane-top", "Top")
 				addPlaneChild("plane-front", "Front")
 				addPlaneChild("plane-right", "Right")
-				for (const sketch of node.editor.listSketches()) {
-					addSketchChild(sketch.id, sketch.name)
-				}
-				for (const extrude of node.editor.listExtrudes()) {
-					addExtrudeChild(extrude.id, `${extrude.name} (${extrude.depth.toFixed(1)}u)`)
+				for (const feature of node.editor.listFeatureTreeEntries()) {
+					if (feature.type === "sketch") {
+						addSketchChild(feature.id, feature.name)
+						continue
+					}
+					if (feature.type === "extrude") {
+						addExtrudeChild(feature.id, `${feature.name} (${feature.depth.toFixed(1)}u)`)
+					}
 				}
 				return {
 					kind: "folder" as const,

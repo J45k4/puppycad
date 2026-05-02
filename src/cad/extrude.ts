@@ -153,7 +153,7 @@ export function getPlaneSketchFrame(plane: SketchPlane): SketchFrame3D {
 			return {
 				origin: { x: 0, y: 0, z: 0 },
 				xAxis: { x: 1, y: 0, z: 0 },
-				yAxis: { x: 0, y: 0, z: 1 },
+				yAxis: { x: 0, y: 0, z: -1 },
 				normal: { x: 0, y: 1, z: 0 }
 			}
 		default:

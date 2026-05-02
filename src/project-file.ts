@@ -12,7 +12,25 @@ import type {
 	SchemanticProjectItemData
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
-import type { EdgeReference, FaceReference, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, Solid, SolidChamfer, SolidEdge, SolidExtrude, SolidFace, SolidVertex } from "./schema"
+import { EXTRUDE_OPERATIONS } from "./schema"
+import type {
+	EdgeReference,
+	FaceReference,
+	PartFeature,
+	PartTreeState,
+	PCadGraphNode,
+	SerializedPCadState,
+	Sketch,
+	SketchDimension,
+	SketchEntity,
+	SketchPlane,
+	Solid,
+	SolidChamfer,
+	SolidEdge,
+	SolidExtrude,
+	SolidFace,
+	SolidVertex
+} from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
 export const PROJECT_FILE_VERSION = 3 as const
@@ -400,8 +418,8 @@ function normalizePartProjectItemData(input: unknown): PartProjectItemData {
 		return defaults
 	}
 
-	const value = input as { features?: unknown; solids?: unknown }
-	if (Array.isArray(value.features) || Array.isArray(value.solids)) {
+	const value = input as { features?: unknown; solids?: unknown; cad?: unknown; tree?: unknown }
+	if (Array.isArray(value.features) || Array.isArray(value.solids) || value.cad !== undefined) {
 		return normalizeSchemaPartProjectItemData(value)
 	}
 
@@ -426,17 +444,118 @@ type LegacyExtrudedModel = {
 	startOffset?: number
 }
 
-function normalizeSchemaPartProjectItemData(input: { features?: unknown; solids?: unknown; migrationWarnings?: unknown }): PartProjectItemData {
+function normalizeSchemaPartProjectItemData(input: { features?: unknown; solids?: unknown; migrationWarnings?: unknown; cad?: unknown; tree?: unknown }): PartProjectItemData {
 	const featuresInput = Array.isArray(input.features) ? input.features : []
 	const features = featuresInput.map((feature, index) => normalizePartFeature(feature, index)).filter((feature): feature is PartFeature => feature !== undefined)
 	const solids = normalizeSolids(input.solids)
 	const migrationWarnings = normalizeMigrationWarnings(input.migrationWarnings)
+	const cad = normalizeSerializedPCadState(input.cad)
+	const tree = normalizePartTreeState(input.tree)
 
 	return {
+		...(cad ? { cad } : {}),
+		...(tree ? { tree } : {}),
 		features,
 		...(solids.length > 0 ? { solids } : {}),
 		...(migrationWarnings.length > 0 ? { migrationWarnings } : {})
 	}
+}
+
+function normalizeSerializedPCadState(input: unknown): SerializedPCadState | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { nodes?: unknown; rootNodeIds?: unknown }
+	if (!Array.isArray(value.nodes)) {
+		return undefined
+	}
+	const nodes = value.nodes.map((node) => normalizePCadGraphNode(node)).filter((node): node is PCadGraphNode => node !== undefined)
+	const rootNodeIds = normalizeStringList(value.rootNodeIds)
+	return {
+		nodes,
+		rootNodeIds
+	}
+}
+
+function normalizePCadGraphNode(input: unknown): PCadGraphNode | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as Partial<PCadGraphNode>
+	const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : null
+	if (!id) {
+		return undefined
+	}
+	const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : undefined
+	if (value.type === "referencePlane") {
+		const plane = normalizeSketchPlane(value.plane)
+		return plane ? { type: "referencePlane", id, name, plane } : undefined
+	}
+	if (value.type === "sketch") {
+		const targetId = typeof value.targetId === "string" && value.targetId.trim() ? value.targetId.trim() : null
+		if (!targetId) {
+			return undefined
+		}
+		return {
+			type: "sketch",
+			id,
+			name,
+			targetId,
+			entities: normalizeSketchEntities(value.entities),
+			dimensions: normalizeSketchDimensions(value.dimensions, normalizeSketchEntities(value.entities))
+		}
+	}
+	if (value.type === "extrude") {
+		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
+		const profileId = typeof value.profileId === "string" && value.profileId.trim() ? value.profileId.trim() : null
+		if (!sketchId || !profileId) {
+			return undefined
+		}
+		const operation = typeof value.operation === "string" && EXTRUDE_OPERATIONS.includes(value.operation as (typeof EXTRUDE_OPERATIONS)[number]) ? value.operation : "newBody"
+		return {
+			type: "extrude",
+			id,
+			name,
+			sketchId,
+			profileId,
+			operation,
+			depth: extractFiniteNumber(value.depth, PART_PROJECT_DEFAULT_HEIGHT)
+		}
+	}
+	if (value.type === "face") {
+		const sourceId = typeof value.sourceId === "string" && value.sourceId.trim() ? value.sourceId.trim() : null
+		const faceId = typeof value.faceId === "string" && value.faceId.trim() ? value.faceId.trim() : null
+		return sourceId && faceId ? { type: "face", id, name, sourceId, faceId } : undefined
+	}
+	if (value.type === "edge") {
+		const sourceId = typeof value.sourceId === "string" && value.sourceId.trim() ? value.sourceId.trim() : null
+		const edgeId = typeof value.edgeId === "string" && value.edgeId.trim() ? value.edgeId.trim() : null
+		return sourceId && edgeId ? { type: "edge", id, name, sourceId, edgeId } : undefined
+	}
+	if (value.type === "chamfer") {
+		const edgeId = typeof value.edgeId === "string" && value.edgeId.trim() ? value.edgeId.trim() : null
+		const d1 = typeof value.d1 === "number" && Number.isFinite(value.d1) && value.d1 > 0 ? value.d1 : 1
+		const d2 = typeof value.d2 === "number" && Number.isFinite(value.d2) && value.d2 > 0 ? value.d2 : undefined
+		return edgeId ? { type: "chamfer", id, name, edgeId, d1, ...(d2 === undefined ? {} : { d2 }) } : undefined
+	}
+	return undefined
+}
+
+function normalizePartTreeState(input: unknown): PartTreeState | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { orderedNodeIds?: unknown; dirtySketchIds?: unknown }
+	const orderedNodeIds = normalizeStringList(value.orderedNodeIds)
+	const dirtySketchIds = normalizeStringList(value.dirtySketchIds)
+	return orderedNodeIds.length > 0 || dirtySketchIds.length > 0 ? { orderedNodeIds, ...(dirtySketchIds.length > 0 ? { dirtySketchIds } : {}) } : undefined
+}
+
+function normalizeStringList(input: unknown): string[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	return input.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
 }
 
 function normalizePartFeature(input: unknown, index: number): PartFeature | undefined {
