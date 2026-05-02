@@ -520,6 +520,78 @@ function toSketchPoint(localPoint: THREE.Vector3, frame: SketchFrame3D): { x: nu
 	}
 }
 
+function createRectangleExtrude(editor: PartEditor, depth = 30): { sketchId: string; extrudeId: string; profileId: string } {
+	const sketchId = "sketch-1"
+	const extrudeId = "extrude-1"
+	editor.dispatchPartAction({
+		type: "createSketch",
+		sketchId,
+		name: "Sketch 1",
+		target: { type: "plane", plane: "XY" }
+	})
+	editor.dispatchPartAction({
+		type: "addSketchEntity",
+		sketchId,
+		entity: {
+			id: "rect-1",
+			type: "cornerRectangle",
+			p0: { x: 0, y: 0 },
+			p1: { x: 10, y: 8 }
+		}
+	})
+	editor.dispatchPartAction({ type: "finishSketch", sketchId })
+	const sketch = editor.getState().features.find((feature) => feature.type === "sketch" && feature.id === sketchId)
+	expect(sketch).toBeDefined()
+	if (!sketch || sketch.type !== "sketch") {
+		throw new Error("Expected sketch")
+	}
+	const profileId = sketch.profiles[0]?.id
+	expect(profileId).toBeString()
+	if (!profileId) {
+		throw new Error("Expected profile")
+	}
+	editor.dispatchPartAction({
+		type: "createExtrude",
+		extrudeId,
+		name: "Extrude 1",
+		sketchId,
+		profileId,
+		depth
+	})
+	return { sketchId, extrudeId, profileId }
+}
+
+function createChamfer(editor: PartEditor, chamferId = "chamfer-1"): string {
+	const edgeId = "extrude-1-solid-edge-1"
+	editor.dispatchPartAction({
+		type: "createChamfer",
+		chamferId,
+		name: "Chamfer 1",
+		target: {
+			edge: {
+				type: "extrudeEdge",
+				extrudeId: "extrude-1",
+				edgeId
+			}
+		},
+		d1: 2
+	})
+	return chamferId
+}
+
+function getNodeInspector(root: HTMLElement): HTMLElement {
+	const inspector = root.querySelector(".pcad-node-inspector")
+	expect(inspector).toBeDefined()
+	if (!(inspector instanceof HTMLElement)) {
+		throw new Error("Expected node inspector")
+	}
+	return inspector
+}
+
+function selectPCadNode(editor: PartEditor, nodeId: string): void {
+	;(editor as unknown as { selectPCadNode: (nodeId: string | null) => void }).selectPCadNode(nodeId)
+}
+
 describe("PartEditor", () => {
 	beforeEach(() => {
 		domWindow = new HappyDOMWindow()
@@ -530,6 +602,155 @@ describe("PartEditor", () => {
 			callback(0)
 			return 1
 		}) as typeof globalThis.requestAnimationFrame
+	})
+
+	it("switches between graphic and node editor modes", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const nodeEditor = editor.root.querySelector(".pcad-node-editor")
+		expect(nodeEditor).toBeDefined()
+		expect((nodeEditor as HTMLElement).parentElement?.style.display).toBe("flex")
+
+		clickButton(domWindow, editor.root, "Graphic")
+		expect((nodeEditor as HTMLElement).parentElement?.style.display).toBe("none")
+	})
+
+	it("resizes the node and graphic views in node editor mode", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const nodeEditor = editor.root.querySelector(".pcad-node-editor")
+		expect(nodeEditor).toBeDefined()
+		const nodeEditorPanel = (nodeEditor as HTMLElement).parentElement
+		const resizeHandle = editor.root.querySelector(".part-node-preview-resize-handle") as HTMLElement | null
+		expect(nodeEditorPanel).toBeDefined()
+		expect(resizeHandle).not.toBeNull()
+		if (!nodeEditorPanel || !resizeHandle) {
+			throw new Error("Expected node editor panel and resize handle")
+		}
+		const body = resizeHandle.parentElement as HTMLElement
+		body.getBoundingClientRect = () => ({
+			left: 100,
+			top: 0,
+			width: 1000,
+			height: 600,
+			right: 1100,
+			bottom: 600,
+			x: 100,
+			y: 0,
+			toJSON: () => ({})
+		})
+
+		resizeHandle.dispatchEvent(new domWindow.MouseEvent("mousedown", { bubbles: true, clientX: 800 }) as unknown as Event)
+		document.dispatchEvent(new domWindow.MouseEvent("mousemove", { bubbles: true, clientX: 500 }) as unknown as Event)
+		document.dispatchEvent(new domWindow.MouseEvent("mouseup", { bubbles: true }) as unknown as Event)
+
+		expect(nodeEditorPanel.style.flex).toContain("40.00%")
+		expect(resizeHandle.getAttribute("aria-valuenow")).toBe("40")
+	})
+
+	it("shows preview quick actions for selected features in node editor mode", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { extrudeId } = createRectangleExtrude(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		editor.selectExtrude(extrudeId)
+
+		const titles = Array.from(editor.root.querySelectorAll("h3")).map((entry) => entry.textContent?.trim())
+		expect(titles).toContain("Extrude: Extrude 1")
+		const deleteExtrudeButton = Array.from(editor.root.querySelectorAll("button")).find((entry) => entry.textContent?.trim() === "Delete Extrude")
+		expect(deleteExtrudeButton).toBeDefined()
+	})
+
+	it("edits extrude depth from the node inspector", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { extrudeId } = createRectangleExtrude(editor, 18)
+
+		editor.selectExtrude(extrudeId)
+		clickButton(domWindow, editor.root, "Nodes")
+		const inspector = getNodeInspector(editor.root)
+		const depthInput = inspector.querySelector('input[type="number"]') as HTMLInputElement | null
+		expect(depthInput).not.toBeNull()
+		if (!depthInput) {
+			throw new Error("Expected depth input")
+		}
+		depthInput.value = "42"
+		depthInput.dispatchEvent(new domWindow.Event("change", { bubbles: true }) as unknown as Event)
+
+		const extrude = editor.getState().features.find((feature) => feature.type === "extrude" && feature.id === extrudeId)
+		expect(extrude?.type === "extrude" ? extrude.depth : null).toBe(42)
+		expect(editor.getState().solids?.[0]?.vertices.some((vertex) => Math.abs(vertex.position.z - 42) < 1e-6)).toBe(true)
+	})
+
+	it("edits chamfer distances from the node inspector", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		createRectangleExtrude(editor)
+		const chamferId = createChamfer(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		selectPCadNode(editor, chamferId)
+		const inspector = getNodeInspector(editor.root)
+		const inputs = Array.from(inspector.querySelectorAll('input[type="number"]')) as HTMLInputElement[]
+		expect(inputs).toHaveLength(2)
+		const d1Input = inputs[0]
+		const d2Input = inputs[1]
+		if (!d1Input || !d2Input) {
+			throw new Error("Expected chamfer inputs")
+		}
+		d1Input.value = "3"
+		d2Input.value = "1.5"
+		d2Input.dispatchEvent(new domWindow.Event("change", { bubbles: true }) as unknown as Event)
+
+		const chamfer = editor.getState().features.find((feature) => feature.type === "chamfer" && feature.id === chamferId)
+		expect(chamfer?.type === "chamfer" ? chamfer.d1 : null).toBe(3)
+		expect(chamfer?.type === "chamfer" ? chamfer.d2 : null).toBe(1.5)
+	})
+
+	it("deletes an extrude and its dependent PCad nodes from the node inspector", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { extrudeId } = createRectangleExtrude(editor)
+		createChamfer(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		selectPCadNode(editor, extrudeId)
+		clickButton(domWindow, getNodeInspector(editor.root), "Delete Node")
+
+		const state = editor.getState()
+		expect(state.features.some((feature) => feature.type === "sketch")).toBe(true)
+		expect(state.features.some((feature) => feature.type === "extrude")).toBe(false)
+		expect(state.features.some((feature) => feature.type === "chamfer")).toBe(false)
+		expect(state.cad?.nodes.some((node) => node.type === "edge" || node.type === "chamfer")).toBe(false)
+	})
+
+	it("deletes only the chamfer node when deleting a chamfer from the node inspector", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		createRectangleExtrude(editor)
+		const chamferId = createChamfer(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		selectPCadNode(editor, chamferId)
+		clickButton(domWindow, getNodeInspector(editor.root), "Delete Node")
+
+		const state = editor.getState()
+		expect(state.features.some((feature) => feature.type === "chamfer")).toBe(false)
+		expect(state.features.some((feature) => feature.type === "extrude")).toBe(true)
+		expect(state.cad?.nodes.some((node) => node.type === "edge")).toBe(true)
+		expect(state.cad?.nodes.some((node) => node.id === chamferId)).toBe(false)
 	})
 
 	it("supports a line-based sketch, finish, extrude, and reload flow", () => {

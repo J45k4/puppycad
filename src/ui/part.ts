@@ -12,6 +12,7 @@ import {
 	type PartRuntimeState
 } from "../pcad/part-state"
 import { CadEditor, collectDependentNodeIds } from "../pcad/runtime"
+import { PCadNodeEditor } from "./pcad-node-editor"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
 import {
@@ -20,6 +21,7 @@ import {
 	type EdgeReference,
 	type FaceReference,
 	type PartTreeState,
+	type PCadGraphNode,
 	type PartFeature,
 	type Sketch,
 	type SketchDimension,
@@ -33,6 +35,7 @@ import { UiComponent, showTextPromptModal } from "./ui"
 import * as THREE from "three"
 
 type PartStudioTool = "view" | "sketch"
+type PartStudioMode = "graphic" | "nodes"
 type SketchTool = "line" | "rectangle"
 type RectangleSide = "top" | "right" | "bottom" | "left"
 
@@ -187,8 +190,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly statusText: HTMLParagraphElement
 	private readonly summaryText: HTMLParagraphElement
 	private readonly warningText: HTMLParagraphElement
+	private readonly graphicModeButton: HTMLButtonElement
+	private readonly nodeModeButton: HTMLButtonElement
+	private readonly bodyContainer: HTMLDivElement
 	private readonly previewContainer: HTMLDivElement
 	private readonly sketchPanel: HTMLDivElement
+	private readonly nodeEditorPanel: HTMLDivElement
+	private readonly nodePreviewResizeHandle: HTMLDivElement
+	private readonly nodeEditor: PCadNodeEditor
 	private readonly quickActionsRail: HTMLDivElement
 	private readonly quickActionsTitle: HTMLHeadingElement
 	private readonly quickActionsDescription: HTMLParagraphElement
@@ -240,11 +249,25 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private reverseRotatePreview = false
 	private lastRotationPointer: { x: number; y: number } | null = null
 	private resizeObserver: ResizeObserver | null = null
+	private nodePreviewSplitRatio = 0.7
+	private nodePreviewResizeBodyCursor = ""
+	private nodePreviewResizeBodyUserSelect = ""
 	private hoveredReferencePlane: ReferencePlaneName | null = null
 	private hoveredExtrudeId: string | null = null
 	private hoveredFaceId: string | null = null
 	private hoveredEdgeId: string | null = null
 	private hoveredCornerId: string | null = null
+	private studioMode: PartStudioMode = "graphic"
+	private selectedPCadNodeId: string | null = null
+	private readonly handleNodePreviewResizeMove = (event: MouseEvent): void => {
+		this.updateNodePreviewSplitFromClientX(event.clientX)
+	}
+	private readonly handleNodePreviewResizeEnd = (): void => {
+		document.removeEventListener("mousemove", this.handleNodePreviewResizeMove)
+		document.removeEventListener("mouseup", this.handleNodePreviewResizeEnd)
+		document.body.style.cursor = this.nodePreviewResizeBodyCursor
+		document.body.style.userSelect = this.nodePreviewResizeBodyUserSelect
+	}
 
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
@@ -263,8 +286,34 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		header.style.padding = "12px 16px"
 		header.style.borderBottom = "1px solid #d0d7de"
 		header.style.backgroundColor = "#fff"
-		header.innerHTML = '<h2 style="margin:0;font-size:18px;">Part Studio</h2>'
 		this.root.appendChild(header)
+
+		const headerRow = document.createElement("div")
+		headerRow.style.display = "flex"
+		headerRow.style.alignItems = "center"
+		headerRow.style.justifyContent = "flex-start"
+		headerRow.style.gap = "12px"
+		headerRow.style.flexWrap = "wrap"
+		header.appendChild(headerRow)
+
+		const title = document.createElement("h2")
+		title.textContent = "Part Studio"
+		title.style.margin = "0"
+		title.style.fontSize = "18px"
+		headerRow.appendChild(title)
+
+		const modeSwitch = document.createElement("div")
+		modeSwitch.style.display = "flex"
+		modeSwitch.style.gap = "4px"
+		modeSwitch.style.padding = "3px"
+		modeSwitch.style.border = "1px solid #cbd5e1"
+		modeSwitch.style.borderRadius = "8px"
+		modeSwitch.style.background = "#f8fafc"
+		headerRow.appendChild(modeSwitch)
+
+		this.graphicModeButton = this.createModeButton("Graphic", "graphic")
+		this.nodeModeButton = this.createModeButton("Nodes", "nodes")
+		modeSwitch.append(this.graphicModeButton, this.nodeModeButton)
 
 		this.warningText = document.createElement("p")
 		this.warningText.style.margin = "8px 0 0"
@@ -284,6 +333,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		body.style.boxSizing = "border-box"
 		body.style.overflow = "hidden"
 		this.root.appendChild(body)
+		this.bodyContainer = body
 
 		this.sketchPanel = document.createElement("div")
 		this.sketchPanel.style.flex = "0 0 360px"
@@ -322,6 +372,51 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.sketchHoverPoint = null
 			this.drawSketch()
 		})
+
+		this.nodeEditorPanel = document.createElement("div")
+		this.nodeEditorPanel.style.flex = "1 1 620px"
+		this.nodeEditorPanel.style.minWidth = "0"
+		this.nodeEditorPanel.style.minHeight = "320px"
+		this.nodeEditorPanel.style.display = "none"
+		this.nodeEditorPanel.style.alignItems = "stretch"
+		this.nodeEditorPanel.style.overflow = "hidden"
+		body.appendChild(this.nodeEditorPanel)
+
+		this.nodeEditor = new PCadNodeEditor({
+			state: this.cadEditor.getState(),
+			selectedNodeId: this.getSelectedPCadNodeId(),
+			onSelectNode: (nodeId) => this.selectPCadNode(nodeId),
+			onRenameNode: (nodeId, name) => this.renamePCadNode(nodeId, name),
+			onSetExtrudeDepth: (nodeId, depth) => this.setPCadExtrudeDepth(nodeId, depth),
+			onSetChamferDistances: (nodeId, d1, d2) => this.setPCadChamferDistances(nodeId, d1, d2),
+			onDeleteNode: (nodeId) => this.deletePCadNode(nodeId)
+		})
+		this.nodeEditorPanel.appendChild(this.nodeEditor.root)
+
+		this.nodePreviewResizeHandle = document.createElement("div")
+		this.nodePreviewResizeHandle.className = "part-node-preview-resize-handle"
+		this.nodePreviewResizeHandle.setAttribute("role", "separator")
+		this.nodePreviewResizeHandle.setAttribute("aria-orientation", "vertical")
+		this.nodePreviewResizeHandle.setAttribute("aria-label", "Resize node and graphic views")
+		this.nodePreviewResizeHandle.style.display = "none"
+		this.nodePreviewResizeHandle.style.flex = "0 0 10px"
+		this.nodePreviewResizeHandle.style.alignSelf = "stretch"
+		this.nodePreviewResizeHandle.style.cursor = "col-resize"
+		this.nodePreviewResizeHandle.style.borderRadius = "999px"
+		this.nodePreviewResizeHandle.style.position = "relative"
+		this.nodePreviewResizeHandle.style.touchAction = "none"
+		this.nodePreviewResizeHandle.style.background = "transparent"
+		const resizeHandleBar = document.createElement("div")
+		resizeHandleBar.style.position = "absolute"
+		resizeHandleBar.style.left = "4px"
+		resizeHandleBar.style.top = "8px"
+		resizeHandleBar.style.bottom = "8px"
+		resizeHandleBar.style.width = "2px"
+		resizeHandleBar.style.borderRadius = "999px"
+		resizeHandleBar.style.background = "#cbd5e1"
+		this.nodePreviewResizeHandle.appendChild(resizeHandleBar)
+		this.nodePreviewResizeHandle.addEventListener("mousedown", this.handleNodePreviewResizeStart)
+		body.appendChild(this.nodePreviewResizeHandle)
 
 		this.previewContainer = document.createElement("div")
 		this.previewContainer.style.flex = "1 1 640px"
@@ -518,6 +613,78 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private createModeButton(label: string, mode: PartStudioMode): HTMLButtonElement {
+		const button = document.createElement("button")
+		button.type = "button"
+		button.textContent = label
+		button.style.border = "0"
+		button.style.borderRadius = "6px"
+		button.style.padding = "6px 10px"
+		button.style.fontSize = "13px"
+		button.style.fontWeight = "700"
+		button.style.cursor = "pointer"
+		button.addEventListener("click", () => this.setStudioMode(mode))
+		return button
+	}
+
+	private setStudioMode(mode: PartStudioMode): void {
+		if (this.studioMode === mode) {
+			return
+		}
+		this.studioMode = mode
+		if (mode === "nodes") {
+			this.selectedPCadNodeId = this.getSelectedPCadNodeId()
+		}
+		this.updateModeButtons()
+		this.updateControls()
+		queueFrame(() => this.updatePreviewSize())
+	}
+
+	private updateModeButtons(): void {
+		const updateButton = (button: HTMLButtonElement, active: boolean) => {
+			button.style.backgroundColor = active ? "#2563eb" : "transparent"
+			button.style.color = active ? "#ffffff" : "#334155"
+			button.style.boxShadow = active ? "0 1px 3px rgba(15,23,42,0.18)" : "none"
+		}
+		updateButton(this.graphicModeButton, this.studioMode === "graphic")
+		updateButton(this.nodeModeButton, this.studioMode === "nodes")
+	}
+
+	private readonly handleNodePreviewResizeStart = (event: MouseEvent): void => {
+		if (this.studioMode !== "nodes") {
+			return
+		}
+		event.preventDefault()
+		this.nodePreviewResizeBodyCursor = document.body.style.cursor
+		this.nodePreviewResizeBodyUserSelect = document.body.style.userSelect
+		document.body.style.cursor = "col-resize"
+		document.body.style.userSelect = "none"
+		document.addEventListener("mousemove", this.handleNodePreviewResizeMove)
+		document.addEventListener("mouseup", this.handleNodePreviewResizeEnd)
+		this.updateNodePreviewSplitFromClientX(event.clientX)
+	}
+
+	private updateNodePreviewSplitFromClientX(clientX: number): void {
+		const rect = this.bodyContainer.getBoundingClientRect()
+		if (rect.width <= 0) {
+			return
+		}
+		const relativeX = clientX - rect.left
+		this.nodePreviewSplitRatio = Math.min(0.84, Math.max(0.36, relativeX / rect.width))
+		this.applyNodePreviewSplit()
+		queueFrame(() => this.updatePreviewSize())
+	}
+
+	private applyNodePreviewSplit(): void {
+		const nodeBasis = `${(this.nodePreviewSplitRatio * 100).toFixed(2)}%`
+		const previewBasis = `${((1 - this.nodePreviewSplitRatio) * 100).toFixed(2)}%`
+		this.nodeEditorPanel.style.flex = `0 1 calc(${nodeBasis} - 13px)`
+		this.previewContainer.style.flex = `1 1 calc(${previewBasis} - 13px)`
+		this.nodePreviewResizeHandle.setAttribute("aria-valuemin", "36")
+		this.nodePreviewResizeHandle.setAttribute("aria-valuemax", "84")
+		this.nodePreviewResizeHandle.setAttribute("aria-valuenow", String(Math.round(this.nodePreviewSplitRatio * 100)))
+	}
+
 	public dispatchPartAction(action: PartAction): void {
 		const deletedExtrude = action.type === "deleteExtrude" ? this.resolveExtrude(action.extrudeId) : null
 		const previousCadState = this.cadEditor.getState()
@@ -531,6 +698,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.syncDerivedPartState()
 		this.syncSelectionAfterPartAction(action, deletedExtrude)
+		this.selectedPCadNodeId = this.getSelectedPCadNodeId()
 		this.syncPreviewGeometry()
 		this.drawSketch()
 		this.updateStatus()
@@ -851,6 +1019,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedEdgeId = null
 		this.selectedCornerId = null
 		this.selectedSketchEdge = null
+		this.selectedPCadNodeId = getReferencePlaneNodeId(planeName)
 		this.activeTool = "view"
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
@@ -875,6 +1044,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedEdgeId = null
 		this.selectedCornerId = null
 		this.selectedSketchEdge = null
+		this.selectedPCadNodeId = sketch.id
 		this.selectedReferencePlane = sketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane] : null
 		this.activeTool = "sketch"
 		this.activeSketchTool = this.getDefaultSketchTool(sketch)
@@ -1003,6 +1173,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedCornerId = null
 		this.selectedSketchId = null
 		this.selectedSketchEdge = null
+		this.selectedPCadNodeId = faceId ? this.findFaceNodeId(extrude.id, faceId) : extrude.id
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
@@ -1028,6 +1199,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedCornerId = null
 		this.selectedSketchId = null
 		this.selectedSketchEdge = null
+		this.selectedPCadNodeId = this.findEdgeNodeId(extrude.id, edgeId)
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
@@ -1056,6 +1228,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedCornerId = cornerId
 		this.selectedSketchId = null
 		this.selectedSketchEdge = null
+		this.selectedPCadNodeId = extrude.id
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
@@ -1080,6 +1253,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedFaceId = null
 		this.selectedEdgeId = null
 		this.selectedCornerId = null
+		this.selectedPCadNodeId = null
 		this.selectedSketchEdge = null
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
@@ -1094,6 +1268,193 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.updateStatus()
 		this.updateControls()
 		this.drawPreview()
+	}
+
+	private selectPCadNode(nodeId: string | null): void {
+		this.selectedPCadNodeId = nodeId
+		if (!nodeId) {
+			this.clearViewSelection()
+			return
+		}
+		const node = this.cadEditor.getState().nodes.get(nodeId)
+		if (!node) {
+			this.selectedPCadNodeId = null
+			this.updateControls()
+			return
+		}
+		switch (node.type) {
+			case "referencePlane":
+				this.selectReferencePlane(SKETCH_PLANE_TO_REFERENCE_PLANE[node.plane])
+				break
+			case "sketch":
+				this.selectSketch(node.id)
+				break
+			case "extrude":
+				this.selectExtrude(node.id)
+				break
+			case "face":
+				this.selectExtrudeFace(node.sourceId, node.faceId)
+				break
+			case "edge":
+				this.selectExtrudeEdge(node.sourceId, node.edgeId)
+				break
+			case "chamfer": {
+				const edge = this.cadEditor.getState().nodes.get(node.edgeId)
+				if (edge?.type === "edge") {
+					this.selectExtrudeEdge(edge.sourceId, edge.edgeId)
+				}
+				break
+			}
+		}
+		this.selectedPCadNodeId = node.id
+		this.refreshNodeEditor()
+	}
+
+	private renamePCadNode(nodeId: string, name: string): void {
+		const node = this.cadEditor.getState().nodes.get(nodeId)
+		const trimmedName = name.trim()
+		if (!node || !trimmedName || !this.canRenamePCadNode(node) || node.name === trimmedName) {
+			return
+		}
+		try {
+			this.cadEditor.renameNode(nodeId, trimmedName)
+			this.syncAfterPCadNodeMutation(nodeId)
+		} catch (_error) {
+			return
+		}
+	}
+
+	private setPCadExtrudeDepth(nodeId: string, depth: number): void {
+		const node = this.cadEditor.getState().nodes.get(nodeId)
+		if (!node || node.type !== "extrude" || !Number.isFinite(depth) || depth <= 0 || node.depth === depth) {
+			return
+		}
+		try {
+			this.cadEditor.setExtrudeDepth(nodeId, depth)
+			this.selectedExtrudeId = nodeId
+			this.syncAfterPCadNodeMutation(nodeId)
+		} catch (_error) {
+			return
+		}
+	}
+
+	private setPCadChamferDistances(nodeId: string, d1: number, d2?: number): void {
+		const node = this.cadEditor.getState().nodes.get(nodeId)
+		if (!node || node.type !== "chamfer" || !Number.isFinite(d1) || d1 <= 0 || (d2 !== undefined && (!Number.isFinite(d2) || d2 <= 0)) || (node.d1 === d1 && node.d2 === d2)) {
+			return
+		}
+		try {
+			this.cadEditor.setChamferDistance(nodeId, d1, d2)
+			this.syncAfterPCadNodeMutation(nodeId)
+		} catch (_error) {
+			return
+		}
+	}
+
+	private deletePCadNode(nodeId: string): void {
+		const node = this.cadEditor.getState().nodes.get(nodeId)
+		if (!node || !this.canDeletePCadNode(node)) {
+			return
+		}
+		const deletedIds = collectDependentNodeIds(this.cadEditor.getState(), [nodeId])
+		try {
+			this.cadEditor.deleteNodeCascade(nodeId)
+		} catch (_error) {
+			return
+		}
+		this.partTreeState = {
+			orderedNodeIds: this.partTreeState.orderedNodeIds.filter((id) => !deletedIds.has(id)),
+			dirtySketchIds: this.partTreeState.dirtySketchIds.filter((id) => !deletedIds.has(id))
+		}
+		this.syncAfterPCadNodeMutation(null)
+	}
+
+	private syncAfterPCadNodeMutation(selectedNodeId: string | null): void {
+		this.syncDerivedPartState()
+		this.normalizeSelectionAfterCadGraphChange()
+		this.selectedPCadNodeId = selectedNodeId && this.cadEditor.getState().nodes.has(selectedNodeId) ? selectedNodeId : this.getSelectedPCadNodeId()
+		this.syncPreviewGeometry()
+		this.drawSketch()
+		this.updateStatus()
+		this.updateControls()
+		this.emitStateChange()
+	}
+
+	private normalizeSelectionAfterCadGraphChange(): void {
+		if (this.selectedSketchId && !this.resolveSketch(this.selectedSketchId)) {
+			this.selectedSketchId = null
+			this.selectedSketchEdge = null
+			this.activeTool = "view"
+		}
+		if (this.selectedExtrudeId && !this.resolveExtrude(this.selectedExtrudeId)) {
+			this.selectedExtrudeId = null
+			this.selectedFaceId = null
+			this.selectedEdgeId = null
+			this.selectedCornerId = null
+		}
+		if (this.selectedFaceId && !this.selectedExtrudeId) {
+			this.selectedFaceId = null
+		}
+		if (this.selectedEdgeId && !this.selectedExtrudeId) {
+			this.selectedEdgeId = null
+		}
+		if (this.selectedCornerId && !this.selectedExtrudeId) {
+			this.selectedCornerId = null
+		}
+		if (this.selectedSketchEdge && !this.getSelectedSketchEdgeEntity()) {
+			this.selectedSketchEdge = null
+		}
+	}
+
+	private canRenamePCadNode(node: PCadGraphNode): boolean {
+		return node.type === "sketch" || node.type === "extrude" || node.type === "chamfer"
+	}
+
+	private canDeletePCadNode(node: PCadGraphNode): boolean {
+		return node.type === "sketch" || node.type === "extrude" || node.type === "chamfer"
+	}
+
+	private refreshNodeEditor(): void {
+		this.nodeEditor.update(this.cadEditor.getState(), this.getSelectedPCadNodeId())
+	}
+
+	private getSelectedPCadNodeId(): string | null {
+		const state = this.cadEditor.getState()
+		const explicitNode = this.selectedPCadNodeId ? state.nodes.get(this.selectedPCadNodeId) : null
+		if (explicitNode?.type === "chamfer") {
+			return explicitNode.id
+		}
+		if (this.selectedExtrudeId && this.selectedEdgeId) {
+			return this.findEdgeNodeId(this.selectedExtrudeId, this.selectedEdgeId) ?? this.selectedExtrudeId
+		}
+		if (this.selectedExtrudeId && this.selectedFaceId) {
+			return this.findFaceNodeId(this.selectedExtrudeId, this.selectedFaceId) ?? this.selectedExtrudeId
+		}
+		if (this.selectedExtrudeId && state.nodes.has(this.selectedExtrudeId)) {
+			return this.selectedExtrudeId
+		}
+		if (this.selectedSketchId && state.nodes.has(this.selectedSketchId)) {
+			return this.selectedSketchId
+		}
+		return this.selectedReferencePlane ? getReferencePlaneNodeId(this.selectedReferencePlane) : null
+	}
+
+	private findFaceNodeId(extrudeId: string, faceId: string): string | null {
+		for (const node of this.cadEditor.getState().nodes.values()) {
+			if (node.type === "face" && node.sourceId === extrudeId && node.faceId === faceId) {
+				return node.id
+			}
+		}
+		return null
+	}
+
+	private findEdgeNodeId(extrudeId: string, edgeId: string): string | null {
+		for (const node of this.cadEditor.getState().nodes.values()) {
+			if (node.type === "edge" && node.sourceId === extrudeId && node.edgeId === edgeId) {
+				return node.id
+			}
+		}
+		return null
 	}
 
 	public getSketchName(sketchId?: string): string {
@@ -1166,6 +1527,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedReferencePlane = selectedSketch ? this.getReferencePlaneForSketchTarget(selectedSketch.target) : "Front"
 		this.activeTool = selectedSketch?.dirty ? "sketch" : "view"
 		this.activeSketchTool = this.getDefaultSketchTool(selectedSketch)
+		this.selectedPCadNodeId = this.getSelectedPCadNodeId()
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
@@ -1173,6 +1535,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.focusReferencePlaneForSketch(this.selectedReferencePlane)
 		}
 		this.warningText.textContent = this.migrationWarnings.join(" ")
+		this.updateModeButtons()
 		this.refreshReferencePlaneStyles()
 		this.syncPreviewGeometry()
 		this.drawSketch()
@@ -2427,7 +2790,83 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private updateQuickActionsRail(): void {
+		const selectedExtrude = this.activeTool === "view" ? this.getSelectedExtrude() : null
+		const selectedFaceLabel = this.getSelectedFaceLabel()
+		const selectedEdgeLabel = this.getSelectedEdgeLabel()
+		const selectedCornerLabel = this.getSelectedCornerLabel()
+		const sketch = this.getSelectedSketch()
+		const selectedPlaneVisible = !!this.selectedReferencePlane && this.referencePlaneVisibility[this.selectedReferencePlane]
+		const selectedTargetVisible = sketch?.target.type === "face" || !!selectedFaceLabel ? true : selectedPlaneVisible
+		const model = derivePartQuickActionsModel({
+			activeTool: this.activeTool,
+			selectedExtrudeLabel: selectedExtrude?.name?.trim() || (selectedExtrude ? "Extrude" : null),
+			selectedFaceLabel: selectedFaceLabel,
+			selectedEdgeLabel: selectedEdgeLabel,
+			selectedCornerLabel: selectedCornerLabel,
+			selectedPlaneLabel: this.activeTool === "sketch" ? (sketch ? this.getSketchTargetLabel(sketch.target) : this.selectedReferencePlane) : this.selectedReferencePlane,
+			selectedPlaneVisible: selectedTargetVisible,
+			activeSketchTool: this.activeSketchTool,
+			canDimension: this.canDimension(),
+			canUndo: !!this.getEditableSketch() && (!!this.pendingLineStart || !!this.pendingRectangleStart || (sketch?.entities.length ?? 0) > 0),
+			canReset: !!this.getEditableSketch() && (!!this.pendingLineStart || !!this.pendingRectangleStart || (sketch?.entities.length ?? 0) > 0),
+			canFinishSketch: this.canFinishSketch(),
+			canExtrude: this.canExtrude()
+		})
+
+		this.quickActionsRail.style.display = model.visible ? "flex" : "none"
+		this.quickActionsTitle.textContent = model.title
+		this.quickActionsDescription.textContent = model.description
+		this.quickActionsPrimaryActions.replaceChildren(
+			...model.primaryActions.map((action) => this.createQuickActionButton(action.id, action.label, { active: action.active, disabled: action.disabled }))
+		)
+		this.quickActionsSketchToolsSection.style.display = model.sketchToolActions.length > 0 ? "flex" : "none"
+		this.quickActionsSketchToolsActions.replaceChildren(
+			...model.sketchToolActions.map((action) => this.createQuickActionButton(action.id, action.label, { active: action.active, disabled: action.disabled }))
+		)
+		this.quickActionsCommandSection.style.display = model.commandActions.length > 0 ? "flex" : "none"
+		this.quickActionsCommandActions.replaceChildren(
+			...model.commandActions.map((action) => this.createQuickActionButton(action.id, action.label, { active: action.active, disabled: action.disabled }))
+		)
+		this.quickActionsHeightSection.style.display = model.showHeightInput ? "flex" : "none"
+		this.quickActionsStatusSection.style.display = model.showStatus ? "flex" : "none"
+		this.heightInput.disabled = !selectedExtrude && !this.canExtrude()
+	}
+
 	private updateControls(): void {
+		if (this.studioMode === "nodes") {
+			this.bodyContainer.style.flexDirection = "row"
+			this.bodyContainer.style.flexWrap = "nowrap"
+			this.nodeEditorPanel.style.display = "flex"
+			this.nodeEditorPanel.style.minHeight = "0"
+			this.nodePreviewResizeHandle.style.display = "block"
+			this.applyNodePreviewSplit()
+			this.previewContainer.style.width = "auto"
+			this.previewContainer.style.height = "100%"
+			this.previewContainer.style.minWidth = "0"
+			this.previewContainer.style.minHeight = "0"
+			this.sketchPanel.style.display = "none"
+			this.updateQuickActionsRail()
+			this.refreshNodeEditor()
+			this.refreshCornerStyles()
+			this.refreshEdgeStyles()
+			this.refreshFaceStyles()
+			this.refreshSolidStyles()
+			this.refreshReferencePlaneStyles()
+			this.updatePreviewCursor()
+			queueFrame(() => this.drawPreview())
+			return
+		}
+
+		this.nodeEditorPanel.style.display = "none"
+		this.nodePreviewResizeHandle.style.display = "none"
+		this.bodyContainer.style.flexDirection = "row"
+		this.bodyContainer.style.flexWrap = "wrap"
+		this.previewContainer.style.flex = "1 1 640px"
+		this.previewContainer.style.width = "auto"
+		this.previewContainer.style.height = "100%"
+		this.previewContainer.style.minWidth = "0"
+		this.previewContainer.style.minHeight = "0"
 		const selectedExtrude = this.activeTool === "view" ? this.getSelectedExtrude() : null
 		const selectedFaceLabel = this.getSelectedFaceLabel()
 		const selectedEdgeLabel = this.getSelectedEdgeLabel()

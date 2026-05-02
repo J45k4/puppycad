@@ -36,6 +36,8 @@ type NewComponent<TData> = Omit<CanvasComponent<TData>, "id"> & Partial<Pick<Can
 export interface EditorCanvasOptions<TData = unknown> {
 	initialComponents?: CanvasComponent<TData>[]
 	initialConnections?: Connection[]
+	allowConnectionCreation?: boolean
+	allowDeletion?: boolean
 	createConnection?: (from: ConnectionEndpoint, to: ConnectionEndpoint) => Connection
 	createComponent?: (type: string, position: { x: number; y: number }, helpers: { createId: () => number }) => NewComponent<TData> | null | undefined
 	renderComponent?: (ctx: CanvasRenderingContext2D, component: CanvasComponent<TData>, state: { selected: boolean }) => void
@@ -112,9 +114,14 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 	private panStartX = 0
 	private panStartY = 0
 	private movedDuringDrag = false
+	private readonly resizeObserver?: ResizeObserver
+	private pendingResizeFrame: number | null = null
 
 	private readonly handleKeydown = (event: KeyboardEvent): void => {
 		if (event.key !== "Delete" && event.key !== "Backspace") {
+			return
+		}
+		if (this.options.allowDeletion === false) {
 			return
 		}
 
@@ -175,10 +182,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.canvasElement.tabIndex = 0
 
 		const context = this.canvasElement.getContext("2d")
-		if (!context) {
-			throw new Error("Unable to acquire 2D drawing context")
-		}
-		this.ctx = context
+		this.ctx = context ?? createNoopCanvasContext2D()
 
 		const canvasRow = new HList()
 		canvasRow.root.style.flex = "1 1 auto"
@@ -197,6 +201,18 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 
 		this.drawScene()
 		this.setupEventHandlers()
+		if (typeof ResizeObserver !== "undefined") {
+			this.resizeObserver = new ResizeObserver(() => {
+				if (this.pendingResizeFrame !== null) {
+					return
+				}
+				this.pendingResizeFrame = requestAnimationFrame(() => {
+					this.pendingResizeFrame = null
+					this.drawScene()
+				})
+			})
+			this.resizeObserver.observe(this.canvasElement)
+		}
 		this.canvasElement.addEventListener("keydown", this.handleKeydown)
 	}
 
@@ -415,7 +431,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 			this.movedDuringDrag = false
 			const clicked = this.components.find((component) => this.isPointInsideComponent(component, x, y))
 			const hoveredEdge = this.findHoveredEdge(x, y)
-			const shouldStartConnection = hoveredEdge !== null && (!clicked || this.isNearComponentEdge(clicked, x, y))
+			const shouldStartConnection = this.options.allowConnectionCreation !== false && hoveredEdge !== null && (!clicked || this.isNearComponentEdge(clicked, x, y))
 
 			if (shouldStartConnection && hoveredEdge) {
 				const hadConnectionSelection = this.selectedConnectionIndex !== null
@@ -622,10 +638,15 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		})
 
 		this.canvasElement.addEventListener("dragover", (event) => {
-			event.preventDefault()
+			if (this.options.createComponent) {
+				event.preventDefault()
+			}
 		})
 
 		this.canvasElement.addEventListener("drop", (event) => {
+			if (!this.options.createComponent) {
+				return
+			}
 			event.preventDefault()
 			const type = event.dataTransfer?.getData("component")
 			if (!type) {
@@ -652,6 +673,7 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 	}
 
 	private drawScene(): void {
+		this.resizeCanvasToDisplaySize()
 		this.ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height)
 		this.ctx.save()
 		this.ctx.setTransform(this.scale, 0, 0, this.scale, this.originX, this.originY)
@@ -664,6 +686,17 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 		this.drawAnchors()
 
 		this.ctx.restore()
+	}
+
+	private resizeCanvasToDisplaySize(): void {
+		const rect = this.canvasElement.getBoundingClientRect()
+		const width = Math.max(1, Math.round(rect.width))
+		const height = Math.max(1, Math.round(rect.height))
+		if (rect.width <= 0 || rect.height <= 0 || (this.canvasElement.width === width && this.canvasElement.height === height)) {
+			return
+		}
+		this.canvasElement.width = width
+		this.canvasElement.height = height
 	}
 
 	private drawGrid(): void {
@@ -1096,4 +1129,42 @@ export class EditorCanvas<TData = unknown> extends UiComponent<HTMLDivElement> {
 	private emitConnectionsChange(): void {
 		this.options.onConnectionsChange?.(this.getConnections())
 	}
+}
+
+function createNoopCanvasContext2D(): CanvasRenderingContext2D {
+	const noop = () => {}
+	return {
+		canvas: document.createElement("canvas"),
+		globalAlpha: 1,
+		globalCompositeOperation: "source-over",
+		drawImage: noop,
+		fill: noop,
+		fillRect: noop,
+		clearRect: noop,
+		stroke: noop,
+		strokeRect: noop,
+		beginPath: noop,
+		moveTo: noop,
+		lineTo: noop,
+		bezierCurveTo: noop,
+		closePath: noop,
+		arc: noop,
+		scale: noop,
+		setTransform: noop,
+		resetTransform: noop,
+		setLineDash: noop,
+		save: noop,
+		restore: noop,
+		translate: noop,
+		rotate: noop,
+		fillText: noop,
+		measureText: () => ({ width: 0 }) as TextMetrics,
+		fillStyle: "#000",
+		strokeStyle: "#000",
+		lineWidth: 1,
+		lineCap: "butt",
+		font: "10px sans-serif",
+		textAlign: "start",
+		textBaseline: "alphabetic"
+	} as unknown as CanvasRenderingContext2D
 }
