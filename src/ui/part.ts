@@ -12,7 +12,7 @@ import {
 	type PartRuntimeState
 } from "../pcad/part-state"
 import { CadEditor, collectDependentNodeIds } from "../pcad/runtime"
-import { PCadNodeEditor } from "./pcad-node-editor"
+import { PCadNodeEditor, type PCadGeneratedSelection, type PCadGeneratedState } from "./pcad-node-editor"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
 import {
@@ -384,8 +384,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.nodeEditor = new PCadNodeEditor({
 			state: this.cadEditor.getState(),
+			generatedState: this.getPCadGeneratedState(),
 			selectedNodeId: this.getSelectedPCadNodeId(),
 			onSelectNode: (nodeId) => this.selectPCadNode(nodeId),
+			onSelectGenerated: (selection) => this.selectPCadGeneratedNode(selection),
 			onRenameNode: (nodeId, name) => this.renamePCadNode(nodeId, name),
 			onSetExtrudeDepth: (nodeId, depth) => this.setPCadExtrudeDepth(nodeId, depth),
 			onSetChamferDistances: (nodeId, d1, d2) => this.setPCadChamferDistances(nodeId, d1, d2),
@@ -1310,6 +1312,53 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.refreshNodeEditor()
 	}
 
+	private selectPCadGeneratedNode(selection: PCadGeneratedSelection): void {
+		switch (selection.type) {
+			case "sketch":
+				this.selectSketch(selection.sketchId)
+				break
+			case "sketchEntity":
+				this.selectSketch(selection.sketchId)
+				this.selectSketchEdge(this.getSketchGraphEdgeSelection(selection.sketchId, selection.entityId))
+				break
+			case "sketchDimension":
+				this.selectSketch(selection.sketchId)
+				this.selectSketchEdge(this.getSketchGraphEdgeSelection(selection.sketchId, selection.entityId, selection.dimensionType))
+				break
+			case "solidFace":
+				this.selectExtrudeFace(selection.extrudeId, selection.faceId)
+				break
+			case "solidEdge":
+				this.selectExtrudeEdge(selection.extrudeId, selection.edgeId)
+				break
+			case "solidVertex":
+				this.selectExtrudeCorner(selection.extrudeId, selection.vertexId)
+				break
+		}
+		this.selectedPCadNodeId = selection.graphId
+		this.refreshNodeEditor()
+	}
+
+	private getSketchGraphEdgeSelection(sketchId: string, entityId: string, dimensionType?: SketchDimension["type"]): SketchEdgeSelection | null {
+		const sketch = this.features.find((feature): feature is Sketch => feature.type === "sketch" && feature.id === sketchId)
+		const entity = sketch?.entities.find((candidate) => candidate.id === entityId)
+		if (!entity) {
+			return null
+		}
+		if (entity.type === "line") {
+			return {
+				type: "line",
+				entityId
+			}
+		}
+		const side: RectangleSide = dimensionType === "rectangleHeight" ? "right" : "bottom"
+		return {
+			type: "rectangleSide",
+			entityId,
+			side
+		}
+	}
+
 	private renamePCadNode(nodeId: string, name: string): void {
 		const node = this.cadEditor.getState().nodes.get(nodeId)
 		const trimmedName = name.trim()
@@ -1415,11 +1464,21 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private refreshNodeEditor(): void {
-		this.nodeEditor.update(this.cadEditor.getState(), this.getSelectedPCadNodeId())
+		this.nodeEditor.update(this.cadEditor.getState(), this.getSelectedPCadNodeId(), this.getPCadGeneratedState())
+	}
+
+	private getPCadGeneratedState(): PCadGeneratedState {
+		return {
+			features: this.features,
+			solids: this.solids
+		}
 	}
 
 	private getSelectedPCadNodeId(): string | null {
 		const state = this.cadEditor.getState()
+		if (this.selectedPCadNodeId && !state.nodes.has(this.selectedPCadNodeId) && this.selectedPCadNodeId.startsWith("generated:")) {
+			return this.selectedPCadNodeId
+		}
 		const explicitNode = this.selectedPCadNodeId ? state.nodes.get(this.selectedPCadNodeId) : null
 		if (explicitNode?.type === "chamfer") {
 			return explicitNode.id

@@ -669,6 +669,112 @@ describe("PartEditor", () => {
 		expect(deleteExtrudeButton).toBeDefined()
 	})
 
+	it("passes generated sketch and solid state to the node editor graph", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		createRectangleExtrude(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const nodeEditor = (
+			editor as unknown as {
+				nodeEditor: {
+					getCanvasForTesting: () => {
+						getComponents: () => Array<{ data?: { nodeType?: string; detail?: string } }>
+					}
+				}
+			}
+		).nodeEditor
+		const components = nodeEditor.getCanvasForTesting().getComponents()
+
+		expect(components.some((component) => component.data?.nodeType === "generatedSketch" && component.data.detail?.includes("profiles"))).toBe(true)
+		expect(components.some((component) => component.data?.nodeType === "generatedSolid" && component.data.detail?.includes("faces"))).toBe(true)
+	})
+
+	it("highlights generated solid faces, edges, and vertices selected from the node graph", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { extrudeId } = createRectangleExtrude(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const partEditor = editor as unknown as {
+			nodeEditor: {
+				getCanvasForTesting: () => {
+					getComponents: () => Array<{ id: number; data?: { nodeType?: string } }>
+					setSelection: (ids: number[]) => void
+				}
+			}
+			previewSolids: Array<{
+				extrudeId: string
+				faces: Array<{ material: THREE.MeshBasicMaterial }>
+				edges: Array<{ highlight: THREE.Mesh }>
+				corners: Array<{ marker: THREE.Mesh }>
+			}>
+			selectedFaceId: string | null
+			selectedEdgeId: string | null
+			selectedCornerId: string | null
+		}
+		const canvas = partEditor.nodeEditor.getCanvasForTesting()
+		const components = canvas.getComponents()
+		const generatedFace = components.find((component) => component.data?.nodeType === "generatedSolidFace")
+		const generatedEdge = components.find((component) => component.data?.nodeType === "generatedSolidEdge")
+		const generatedVertex = components.find((component) => component.data?.nodeType === "generatedSolidVertex")
+		expect(generatedFace).toBeDefined()
+		expect(generatedEdge).toBeDefined()
+		expect(generatedVertex).toBeDefined()
+		if (!generatedFace || !generatedEdge || !generatedVertex) {
+			throw new Error("Expected generated solid topology nodes")
+		}
+
+		canvas.setSelection([generatedFace.id])
+		let solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+		expect(partEditor.selectedFaceId).not.toBeNull()
+		expect(solid?.faces.some((face) => face.material.opacity > 0)).toBe(true)
+
+		canvas.setSelection([generatedEdge.id])
+		solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+		expect(partEditor.selectedEdgeId).not.toBeNull()
+		expect(solid?.edges.some((edge) => edge.highlight.visible)).toBe(true)
+
+		canvas.setSelection([generatedVertex.id])
+		solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+		expect(partEditor.selectedCornerId).not.toBeNull()
+		expect(solid?.corners.some((corner) => corner.marker.visible)).toBe(true)
+	})
+
+	it("selects sketch data nodes in the graphic sketch state from the node graph", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { sketchId } = createRectangleExtrude(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const partEditor = editor as unknown as {
+			nodeEditor: {
+				getCanvasForTesting: () => {
+					getComponents: () => Array<{ id: number; data?: { nodeType?: string } }>
+					setSelection: (ids: number[]) => void
+				}
+			}
+			activeTool: string
+			selectedSketchId: string | null
+			selectedSketchEdge: { entityId: string } | null
+		}
+		const canvas = partEditor.nodeEditor.getCanvasForTesting()
+		const sketchEntity = canvas.getComponents().find((component) => component.data?.nodeType === "sketchEntity")
+		expect(sketchEntity).toBeDefined()
+		if (!sketchEntity) {
+			throw new Error("Expected sketch entity node")
+		}
+
+		canvas.setSelection([sketchEntity.id])
+
+		expect(partEditor.activeTool).toBe("sketch")
+		expect(partEditor.selectedSketchId).toBe(sketchId)
+		expect(partEditor.selectedSketchEdge?.entityId).toBe("rect-1")
+	})
+
 	it("edits extrude depth from the node inspector", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()
