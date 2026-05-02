@@ -1,140 +1,30 @@
-import type { Point2D, Vector3D } from "../types"
+import { EXTRUDE_OPERATIONS } from "../schema"
+import type { ChamferNode, EdgeNode, FaceNode, ExtrudeNode, ExtrudeOperation, PCadGraphNode, PCadGraphRewrite, PCadState, SketchDimension, SketchEntity, SketchNode } from "../schema"
 
-export interface PCadState {
-	readonly nodes: ReadonlyMap<string, PCadGraphNode>
-	readonly rootNodeIds: readonly string[]
-}
-
-export type SketchPlane = "XY" | "YZ" | "XZ"
-export type ReferencePlaneName = "Front" | "Top" | "Right"
-
-export interface PCadNode {
-	readonly id: string
-	readonly type: string
-	readonly name?: string
-}
-
-export interface ReferencePlaneNode extends PCadNode {
-	readonly type: "referencePlane"
-	readonly plane: SketchPlane
-}
-
-export interface Line {
-	readonly id: string
-	readonly type: "line"
-	readonly p0: Point2D
-	readonly p1: Point2D
-}
-
-export interface CornerRectangle {
-	readonly id: string
-	readonly type: "cornerRectangle"
-	readonly p0: Point2D
-	readonly p1: Point2D
-}
-
-export type SketchEntity = Line | CornerRectangle
-
-export type SketchDimension =
-	| {
-			readonly id: string
-			readonly type: "lineLength"
-			readonly entityId: string
-			readonly value: number
-	  }
-	| {
-			readonly id: string
-			readonly type: "rectangleWidth"
-			readonly entityId: string
-			readonly value: number
-	  }
-	| {
-			readonly id: string
-			readonly type: "rectangleHeight"
-			readonly entityId: string
-			readonly value: number
-	  }
-
-export interface SketchNode extends PCadNode {
-	readonly type: "sketch"
-	readonly targetId: string
-	readonly entities: readonly SketchEntity[]
-	readonly dimensions: readonly SketchDimension[]
-}
-
-export const EXTRUDE_OPERATIONS = ["newBody", "join", "cut"] as const
-export type ExtrudeOperation = (typeof EXTRUDE_OPERATIONS)[number]
-
-export interface ExtrudeNode extends PCadNode {
-	readonly type: "extrude"
-	readonly sketchId: string
-	readonly profileId: string
-	readonly operation: ExtrudeOperation
-	readonly depth: number
-}
-
-export interface FaceNode extends PCadNode {
-	readonly type: "face"
-	readonly sourceId: string
-	readonly faceId: string
-}
-
-export interface EdgeNode extends PCadNode {
-	readonly type: "edge"
-	readonly sourceId: string
-	readonly edgeId: string
-}
-
-export interface ChamferNode extends PCadNode {
-	readonly type: "chamfer"
-	readonly edgeId: string
-	readonly d1: number
-	readonly d2?: number
-}
-
-export type PCadGraphNode = ReferencePlaneNode | SketchNode | ExtrudeNode | FaceNode | EdgeNode | ChamferNode
-
-export interface SolidVertex {
-	readonly id: string
-	readonly position: Vector3D
-}
-
-export interface SolidEdge {
-	readonly id: string
-	readonly vertexIds: readonly string[]
-}
-
-export interface SolidFace {
-	readonly id: string
-	readonly edgeIds: readonly string[]
-}
-
-export interface Solid {
-	readonly id: string
-	readonly sourceId: string
-	readonly vertices: readonly SolidVertex[]
-	readonly edges: readonly SolidEdge[]
-	readonly faces: readonly SolidFace[]
-}
-
-export type PCadGraphRewrite =
-	| {
-			readonly type: "addNode"
-			readonly node: PCadGraphNode
-			readonly root?: boolean
-	  }
-	| {
-			readonly type: "replaceNode"
-			readonly node: PCadGraphNode
-	  }
-	| {
-			readonly type: "removeNodes"
-			readonly nodeIds: readonly string[]
-	  }
-	| {
-			readonly type: "setRootNodes"
-			readonly rootNodeIds: readonly string[]
-	  }
+export { EXTRUDE_OPERATIONS } from "../schema"
+export type {
+	ChamferNode,
+	CornerRectangle,
+	EdgeNode,
+	ExtrudeNode,
+	ExtrudeOperation,
+	FaceNode,
+	Line,
+	PCadGraphNode,
+	PCadGraphRewrite,
+	PCadNode,
+	PCadSolid as Solid,
+	PCadState,
+	ReferencePlaneName,
+	ReferencePlaneNode,
+	SketchDimension,
+	SketchEntity,
+	SketchNode,
+	SketchPlane,
+	SolidEdge,
+	SolidFace,
+	SolidVertex
+} from "../schema"
 
 export function createEmptyPCadState(): PCadState {
 	return {
@@ -276,11 +166,81 @@ export class CadEditor {
 		this.future = rest
 	}
 
+	public addSketch(args: { id: string; name?: string; targetId: string }): SketchNode {
+		this.assertUnusedId(args.id)
+		requireNodeType(this.present, args.targetId, ["referencePlane", "face"], `Sketch "${args.id}" target`)
+		const sketch: SketchNode = {
+			id: args.id,
+			type: "sketch",
+			name: args.name,
+			targetId: args.targetId,
+			entities: [],
+			dimensions: []
+		}
+		this.commit({ type: "addNode", node: sketch })
+		return sketch
+	}
+
+	public addFace(node: FaceNode): FaceNode {
+		const existing = this.present.nodes.get(node.id)
+		if (existing) {
+			if (existing.type !== "face") {
+				throw new Error(`Node "${node.id}" already exists.`)
+			}
+			return existing
+		}
+		requireNodeType(this.present, node.sourceId, ["extrude", "chamfer"], `Face "${node.id}" source`)
+		this.commit({ type: "addNode", node })
+		return node
+	}
+
+	public addEdge(node: EdgeNode): EdgeNode {
+		const existing = this.present.nodes.get(node.id)
+		if (existing) {
+			if (existing.type !== "edge") {
+				throw new Error(`Node "${node.id}" already exists.`)
+			}
+			return existing
+		}
+		requireNodeType(this.present, node.sourceId, ["extrude", "chamfer"], `Edge "${node.id}" source`)
+		this.commit({ type: "addNode", node })
+		return node
+	}
+
+	public renameNode(nodeId: string, name: string): PCadGraphNode {
+		const node = this.getNodeOrThrow(nodeId)
+		const trimmedName = name.trim()
+		if (!trimmedName) {
+			throw new Error("Node name must be provided.")
+		}
+		const nextNode = {
+			...node,
+			name: trimmedName
+		} as PCadGraphNode
+		this.commit({ type: "replaceNode", node: nextNode })
+		return nextNode
+	}
+
 	public addSketchEntity(sketchId: string, entity: SketchEntity): SketchNode {
 		const sketch = this.getSketchOrThrow(sketchId)
 		const nextSketch: SketchNode = {
 			...sketch,
 			entities: [...sketch.entities, entity]
+		}
+		this.commit({ type: "replaceNode", node: nextSketch })
+		return nextSketch
+	}
+
+	public removeLastSketchEntity(sketchId: string): SketchNode {
+		const sketch = this.getSketchOrThrow(sketchId)
+		if (sketch.entities.length === 0) {
+			return sketch
+		}
+		const removedEntity = sketch.entities.at(-1)
+		const nextSketch: SketchNode = {
+			...sketch,
+			entities: sketch.entities.slice(0, -1),
+			dimensions: removedEntity ? sketch.dimensions.filter((dimension) => dimension.entityId !== removedEntity.id) : sketch.dimensions
 		}
 		this.commit({ type: "replaceNode", node: nextSketch })
 		return nextSketch
@@ -307,8 +267,16 @@ export class CadEditor {
 		}
 
 		const dimensions = sketch.dimensions.filter((item) => !(item.entityId === dimension.entityId && item.type === dimension.type))
+		const entityIndex = sketch.entities.findIndex((entity) => entity.id === dimension.entityId)
+		const entity = sketch.entities[entityIndex]
+		if (!entity || !canApplyDimensionToEntity(entity, dimension)) {
+			throw new Error(`Sketch dimension "${dimension.type}" cannot be applied to entity "${dimension.entityId}".`)
+		}
+		const entities = sketch.entities.slice()
+		entities[entityIndex] = applyDimensionToEntity(entity, dimension)
 		const nextSketch: SketchNode = {
 			...sketch,
+			entities,
 			dimensions: [...dimensions, dimension]
 		}
 		this.commit({ type: "replaceNode", node: nextSketch })
@@ -473,6 +441,62 @@ export class CadEditor {
 			throw new Error(`Node "${id}" already exists.`)
 		}
 	}
+}
+
+function canApplyDimensionToEntity(entity: SketchEntity, dimension: SketchDimension): boolean {
+	if (entity.type === "line") {
+		return dimension.type === "lineLength"
+	}
+	return dimension.type === "rectangleWidth" || dimension.type === "rectangleHeight"
+}
+
+function applyDimensionToEntity(entity: SketchEntity, dimension: SketchDimension): SketchEntity {
+	if (entity.type === "line" && dimension.type === "lineLength") {
+		const dx = entity.p1.x - entity.p0.x
+		const dy = entity.p1.y - entity.p0.y
+		const length = Math.hypot(dx, dy)
+		if (length <= 1e-9) {
+			return {
+				...entity,
+				p1: {
+					x: entity.p0.x + dimension.value,
+					y: entity.p0.y
+				}
+			}
+		}
+		const scale = dimension.value / length
+		return {
+			...entity,
+			p1: {
+				x: entity.p0.x + dx * scale,
+				y: entity.p0.y + dy * scale
+			}
+		}
+	}
+
+	if (entity.type === "cornerRectangle" && dimension.type === "rectangleWidth") {
+		const sign = entity.p1.x === entity.p0.x ? 1 : Math.sign(entity.p1.x - entity.p0.x)
+		return {
+			...entity,
+			p1: {
+				x: entity.p0.x + sign * dimension.value,
+				y: entity.p1.y
+			}
+		}
+	}
+
+	if (entity.type === "cornerRectangle" && dimension.type === "rectangleHeight") {
+		const sign = entity.p1.y === entity.p0.y ? 1 : Math.sign(entity.p1.y - entity.p0.y)
+		return {
+			...entity,
+			p1: {
+				x: entity.p1.x,
+				y: entity.p0.y + sign * dimension.value
+			}
+		}
+	}
+
+	return entity
 }
 
 function validateNode(state: PCadState, node: PCadGraphNode): void {

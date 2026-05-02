@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import type { PartDocument, Sketch, SketchPlane, SolidExtrude } from "../schema"
-import { extrudeSolidFeature, getExtrudedFaceDescriptors } from "./extrude"
+import { extrudeSolidFeature, getExtrudedFaceDescriptors, getPlaneSketchFrame } from "./extrude"
 import { materializeSketch } from "./sketch"
 
 function createSketch(id: string, plane: SketchPlane, entities: Sketch["entities"]): Sketch {
@@ -22,6 +22,16 @@ function createSketch(id: string, plane: SketchPlane, entities: Sketch["entities
 }
 
 describe("extrudeSolidFeature", () => {
+	it("keeps reference plane frames right-handed", () => {
+		for (const plane of ["XY", "XZ", "YZ"] as const) {
+			const frame = getPlaneSketchFrame(plane)
+			const normal = crossVector(frame.xAxis, frame.yAxis)
+			expect(normal.x).toBeCloseTo(frame.normal.x, 6)
+			expect(normal.y).toBeCloseTo(frame.normal.y, 6)
+			expect(normal.z).toBeCloseTo(frame.normal.z, 6)
+		}
+	})
+
 	it("extrudes a single-profile plane sketch", () => {
 		const sketch = createSketch("sketch-1", "XY", [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 20, y: 10 } }])
 		const part: PartDocument = {
@@ -86,6 +96,33 @@ describe("extrudeSolidFeature", () => {
 		expect(extrusion.frame.yAxis).toEqual({ x: 0, y: 0, z: 1 })
 		expect(extrusion.solid.vertices[0]?.position).toEqual({ x: 7, y: 1, z: 2 })
 		expect(extrusion.solid.vertices[1]?.position).toEqual({ x: 10, y: 1, z: 2 })
+	})
+
+	it("extrudes Top reference plane sketches along positive Y", () => {
+		const sketch = createSketch("sketch-top", "XZ", [{ id: "rect-top", type: "cornerRectangle", p0: { x: 1, y: 2 }, p1: { x: 5, y: 6 } }])
+		const part: PartDocument = {
+			features: [
+				sketch,
+				{
+					type: "extrude",
+					id: "extrude-top",
+					target: {
+						type: "profileRef",
+						sketchId: sketch.id,
+						profileId: sketch.profiles[0]?.id ?? ""
+					},
+					depth: 9
+				}
+			]
+		}
+
+		const extrusion = extrudeSolidFeature(part, part.features[1] as Extract<PartDocument["features"][number], { type: "extrude" }>)
+
+		expect(extrusion.frame.xAxis).toEqual({ x: 1, y: 0, z: 0 })
+		expect(extrusion.frame.yAxis).toEqual({ x: 0, y: 0, z: -1 })
+		expect(extrusion.frame.normal).toEqual({ x: 0, y: 1, z: 0 })
+		expect(extrusion.solid.vertices[0]?.position).toEqual({ x: 1, y: 0, z: -2 })
+		expect(extrusion.solid.vertices[1]?.position).toEqual({ x: 1, y: 9, z: -2 })
 	})
 
 	it("extrudes a sketch that targets an extrude face", () => {
@@ -170,3 +207,11 @@ describe("extrudeSolidFeature", () => {
 		)
 	})
 })
+
+function crossVector(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+	return {
+		x: a.y * b.z - a.z * b.y,
+		y: a.z * b.x - a.x * b.z,
+		z: a.x * b.y - a.y * b.x
+	}
+}

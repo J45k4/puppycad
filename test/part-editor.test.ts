@@ -1672,6 +1672,7 @@ describe("PartEditor", () => {
 		expect(state.features[3]).toMatchObject({
 			type: "extrude"
 		})
+		expect(editor.listFeatureTreeEntries().map((entry) => entry.type)).toEqual(["sketch", "extrude", "sketch", "extrude"])
 	})
 
 	it("keeps side-face sketch input on the selected face after orbiting", () => {

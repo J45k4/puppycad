@@ -1,7 +1,17 @@
 import type { PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../contract"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors, resolveSketchTargetFrame, type ExtrudedFaceDescriptor, type ExtrudedSolid, type SketchFrame3D } from "../cad/extrude"
-import { materializeSketch } from "../cad/sketch"
-import { applyPartAction, type PartAction } from "../part-actions"
+import type { PartAction } from "../part-actions"
+import {
+	createDefaultPartRuntimeState,
+	createEdgeNodeFromReference,
+	createFaceNodeFromReference,
+	createPartRuntimeState,
+	getReferencePlaneNodeId,
+	materializePartFeatures,
+	serializePCadState,
+	type PartRuntimeState
+} from "../pcad/part-state"
+import { CadEditor, collectDependentNodeIds } from "../pcad/runtime"
 import { PART_PROJECT_DEFAULT_HEIGHT, PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION } from "../project-file"
 import { derivePartQuickActionsModel, type PartQuickActionId, type ReferencePlaneName } from "../part-quick-actions"
 import {
@@ -9,6 +19,7 @@ import {
 	SKETCH_PLANE_TO_REFERENCE_PLANE,
 	type EdgeReference,
 	type FaceReference,
+	type PartTreeState,
 	type PartFeature,
 	type Sketch,
 	type SketchDimension,
@@ -116,6 +127,27 @@ type ChamferListEntry = {
 	d2?: number
 }
 
+type FeatureTreeListEntry =
+	| {
+			type: "sketch"
+			id: string
+			name: string
+			dirty: boolean
+	  }
+	| {
+			type: "extrude"
+			id: string
+			name: string
+			depth: number
+	  }
+	| {
+			type: "chamfer"
+			id: string
+			name: string
+			d1: number
+			d2?: number
+	  }
+
 const SKETCH_CANVAS_SIZE = 360
 const REFERENCE_PLANE_SIZE = 18
 const PREVIEW_FIELD_OF_VIEW = 60
@@ -183,6 +215,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		Right: true
 	}
 	private sketchVisible = true
+	private cadEditor = new CadEditor(createDefaultPartRuntimeState().cad)
+	private partTreeState: Required<PartTreeState> = {
+		orderedNodeIds: [],
+		dirtySketchIds: []
+	}
 	private features: PartFeature[] = []
 	private solids: Solid[] = []
 	private previewBaseDistance = PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
@@ -459,6 +496,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	public getState(): PartEditorState {
 		return {
+			cad: serializePCadState(this.cadEditor.getState()),
+			tree: {
+				orderedNodeIds: [...this.partTreeState.orderedNodeIds],
+				dirtySketchIds: [...this.partTreeState.dirtySketchIds]
+			},
 			features: structuredClone(this.features) as PartFeature[],
 			...(this.solids.length > 0 ? { solids: structuredClone(this.solids) as Solid[] } : {}),
 			...(this.migrationWarnings.length > 0 ? { migrationWarnings: [...this.migrationWarnings] } : {})
@@ -478,24 +520,200 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	public dispatchPartAction(action: PartAction): void {
 		const deletedExtrude = action.type === "deleteExtrude" ? this.resolveExtrude(action.extrudeId) : null
-		const nextState = applyPartAction(
-			{
-				features: this.features,
-				...(this.migrationWarnings.length > 0 ? { migrationWarnings: [...this.migrationWarnings] } : {})
-			},
-			action
-		)
-		if (nextState.features === this.features) {
+		const previousCadState = this.cadEditor.getState()
+		const previousTreeState = this.partTreeState
+		if (!this.applyCadEditorAction(action)) {
+			return
+		}
+		if (this.cadEditor.getState() === previousCadState && this.partTreeState === previousTreeState) {
 			return
 		}
 
-		this.features = nextState.features
+		this.syncDerivedPartState()
 		this.syncSelectionAfterPartAction(action, deletedExtrude)
 		this.syncPreviewGeometry()
 		this.drawSketch()
 		this.updateStatus()
 		this.updateControls()
 		this.emitStateChange()
+	}
+
+	private applyCadEditorAction(action: PartAction): boolean {
+		try {
+			switch (action.type) {
+				case "createSketch":
+					return this.applyCreateSketchAction(action)
+				case "renameSketch":
+					if (!action.name.trim() || !this.resolveSketch(action.sketchId)) {
+						return false
+					}
+					this.cadEditor.renameNode(action.sketchId, action.name)
+					return true
+				case "addSketchEntity":
+					if (!this.isDirtySketch(action.sketchId)) {
+						return false
+					}
+					this.cadEditor.addSketchEntity(action.sketchId, action.entity)
+					return true
+				case "undoSketchEntity":
+					if (!this.isDirtySketch(action.sketchId) || !this.resolveSketch(action.sketchId)?.entities.length) {
+						return false
+					}
+					this.cadEditor.removeLastSketchEntity(action.sketchId)
+					return true
+				case "resetSketch":
+					if (!this.isDirtySketch(action.sketchId) || !this.resolveSketch(action.sketchId)?.entities.length) {
+						return false
+					}
+					this.cadEditor.clearSketch(action.sketchId)
+					return true
+				case "finishSketch": {
+					const sketch = this.resolveSketch(action.sketchId)
+					if (!sketch || !this.isDirtySketch(sketch.id) || sketch.profiles.length !== 1) {
+						return false
+					}
+					this.setDirtySketch(sketch.id, false)
+					return true
+				}
+				case "createExtrude":
+					return this.applyCreateExtrudeAction(action)
+				case "setExtrudeDepth": {
+					const extrude = this.resolveExtrude(action.extrudeId)
+					if (!extrude || !Number.isFinite(action.depth) || action.depth <= 0 || extrude.depth === action.depth) {
+						return false
+					}
+					this.cadEditor.setExtrudeDepth(action.extrudeId, action.depth)
+					return true
+				}
+				case "createChamfer":
+					return this.applyCreateChamferAction(action)
+				case "setChamferDistances":
+					return this.applySetChamferDistancesAction(action)
+				case "setSketchDimension":
+					if (!Number.isFinite(action.dimension.value) || action.dimension.value <= 0 || !this.resolveSketch(action.sketchId)) {
+						return false
+					}
+					this.cadEditor.setSketchDimension(action.sketchId, action.dimension)
+					return true
+				case "deleteSketch":
+					return this.applyDeleteNodeAction(action.sketchId, "sketch")
+				case "deleteExtrude":
+					return this.applyDeleteNodeAction(action.extrudeId, "extrude")
+			}
+		} catch (_error) {
+			return false
+		}
+	}
+
+	private applyCreateSketchAction(action: Extract<PartAction, { type: "createSketch" }>): boolean {
+		const nextName = action.name.trim()
+		if (!nextName || this.cadEditor.getState().nodes.has(action.sketchId) || this.features.some((feature) => feature.type === "sketch" && feature.dirty)) {
+			return false
+		}
+
+		const targetId =
+			action.target.type === "plane"
+				? getReferencePlaneNodeId(SKETCH_PLANE_TO_REFERENCE_PLANE[action.target.plane])
+				: (() => {
+						const faceNode = createFaceNodeFromReference(action.target.face)
+						this.cadEditor.addFace(faceNode)
+						return faceNode.id
+					})()
+
+		this.cadEditor.addSketch({
+			id: action.sketchId,
+			name: nextName,
+			targetId
+		})
+		this.partTreeState = {
+			...this.partTreeState,
+			orderedNodeIds: [...this.partTreeState.orderedNodeIds, action.sketchId],
+			dirtySketchIds: [...this.partTreeState.dirtySketchIds, action.sketchId]
+		}
+		return true
+	}
+
+	private applyCreateExtrudeAction(action: Extract<PartAction, { type: "createExtrude" }>): boolean {
+		const nextName = action.name.trim()
+		const sketch = this.resolveSketch(action.sketchId)
+		if (!nextName || this.cadEditor.getState().nodes.has(action.extrudeId) || !sketch || sketch.dirty || sketch.profiles.length !== 1 || sketch.profiles[0]?.id !== action.profileId) {
+			return false
+		}
+		if (!Number.isFinite(action.depth) || action.depth <= 0) {
+			return false
+		}
+		this.cadEditor.extrudeSketchProfile({
+			id: action.extrudeId,
+			name: nextName,
+			sketchId: sketch.id,
+			profileId: action.profileId,
+			operation: "newBody",
+			depth: action.depth
+		})
+		this.partTreeState = {
+			...this.partTreeState,
+			orderedNodeIds: [...this.partTreeState.orderedNodeIds, action.extrudeId]
+		}
+		return true
+	}
+
+	private applyCreateChamferAction(action: Extract<PartAction, { type: "createChamfer" }>): boolean {
+		const nextName = action.name.trim()
+		if (
+			!nextName ||
+			this.cadEditor.getState().nodes.has(action.chamferId) ||
+			!Number.isFinite(action.d1) ||
+			action.d1 <= 0 ||
+			(action.d2 !== undefined && (!Number.isFinite(action.d2) || action.d2 <= 0))
+		) {
+			return false
+		}
+		if (this.getChamferForEdge(action.target.edge)) {
+			return false
+		}
+		const edgeNode = createEdgeNodeFromReference(action.target.edge)
+		this.cadEditor.addEdge(edgeNode)
+		this.cadEditor.chamferEdge({
+			id: action.chamferId,
+			name: nextName,
+			edgeId: edgeNode.id,
+			d1: action.d1,
+			...(action.d2 === undefined ? {} : { d2: action.d2 })
+		})
+		this.partTreeState = {
+			...this.partTreeState,
+			orderedNodeIds: [...this.partTreeState.orderedNodeIds, action.chamferId]
+		}
+		return true
+	}
+
+	private applySetChamferDistancesAction(action: Extract<PartAction, { type: "setChamferDistances" }>): boolean {
+		const chamfer = this.features.find((feature): feature is SolidChamfer => feature.type === "chamfer" && feature.id === action.chamferId)
+		if (
+			!chamfer ||
+			!Number.isFinite(action.d1) ||
+			action.d1 <= 0 ||
+			(action.d2 !== undefined && (!Number.isFinite(action.d2) || action.d2 <= 0)) ||
+			(chamfer.d1 === action.d1 && chamfer.d2 === action.d2)
+		) {
+			return false
+		}
+		this.cadEditor.setChamferDistance(action.chamferId, action.d1, action.d2)
+		return true
+	}
+
+	private applyDeleteNodeAction(nodeId: string, type: "sketch" | "extrude"): boolean {
+		const node = this.cadEditor.getState().nodes.get(nodeId)
+		if (!node || node.type !== type) {
+			return false
+		}
+		const deletedIds = collectDependentNodeIds(this.cadEditor.getState(), [nodeId])
+		this.cadEditor.deleteNodeCascade(nodeId)
+		this.partTreeState = {
+			orderedNodeIds: this.partTreeState.orderedNodeIds.filter((id) => !deletedIds.has(id)),
+			dirtySketchIds: this.partTreeState.dirtySketchIds.filter((id) => !deletedIds.has(id))
+		}
+		return true
 	}
 
 	private syncSelectionAfterPartAction(action: PartAction, deletedExtrude: SolidExtrude | null): void {
@@ -731,6 +949,40 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			}))
 	}
 
+	public listFeatureTreeEntries(): FeatureTreeListEntry[] {
+		return this.partTreeState.orderedNodeIds
+			.map((nodeId): FeatureTreeListEntry | null => {
+				const feature = this.features.find((candidate) => candidate.id === nodeId)
+				if (!feature) {
+					return null
+				}
+				if (feature.type === "sketch") {
+					return {
+						type: "sketch",
+						id: feature.id,
+						name: feature.name?.trim() || "Sketch",
+						dirty: feature.dirty
+					}
+				}
+				if (feature.type === "extrude") {
+					return {
+						type: "extrude",
+						id: feature.id,
+						name: feature.name?.trim() || "Extrude",
+						depth: feature.depth
+					}
+				}
+				return {
+					type: "chamfer",
+					id: feature.id,
+					name: feature.name?.trim() || "Chamfer",
+					d1: feature.d1,
+					...(feature.d2 === undefined ? {} : { d2: feature.d2 })
+				}
+			})
+			.filter((entry): entry is FeatureTreeListEntry => entry !== null)
+	}
+
 	public selectExtrude(extrudeId: string): void {
 		const extrude = this.features.find((feature) => feature.type === "extrude" && feature.id === extrudeId)
 		if (!extrude || extrude.type !== "extrude") {
@@ -900,12 +1152,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private restoreState(state?: PartEditorState): void {
 		this.solids = []
-		this.features = (state?.features ?? []).map((feature) => {
-			if (feature.type === "sketch") {
-				return materializeSketch(feature)
-			}
-			return { ...feature }
-		})
+		const runtimeState: PartRuntimeState = createPartRuntimeState(state)
+		this.cadEditor = new CadEditor(runtimeState.cad)
+		this.partTreeState = runtimeState.tree
+		this.syncDerivedPartState()
 		this.selectedSketchId = this.features.find((feature) => feature.type === "sketch" && feature.dirty)?.id ?? this.getLastSketchId()
 		this.selectedExtrudeId = null
 		this.selectedFaceId = null
@@ -1509,6 +1759,22 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		const sketch = this.features.find((feature) => feature.type === "sketch" && feature.id === this.selectedSketchId)
 		return sketch?.type === "sketch" ? sketch : null
+	}
+
+	private syncDerivedPartState(): void {
+		this.features = materializePartFeatures(this.cadEditor.getState(), this.partTreeState)
+	}
+
+	private isDirtySketch(sketchId: string): boolean {
+		return this.partTreeState.dirtySketchIds.includes(sketchId)
+	}
+
+	private setDirtySketch(sketchId: string, dirty: boolean): void {
+		const dirtySketchIds = dirty ? [...new Set([...this.partTreeState.dirtySketchIds, sketchId])] : this.partTreeState.dirtySketchIds.filter((id) => id !== sketchId)
+		this.partTreeState = {
+			...this.partTreeState,
+			dirtySketchIds
+		}
 	}
 
 	private getSelectedExtrude(): SolidExtrude | null {
@@ -3402,7 +3668,7 @@ function createNoopPreviewRenderer(): PreviewRendererLike {
 function getPlaneQuaternion(plane: "XY" | "YZ" | "XZ"): THREE.Quaternion {
 	switch (plane) {
 		case "XZ":
-			return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, -1, 0)))
+			return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0)))
 		case "YZ":
 			return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)))
 		default:

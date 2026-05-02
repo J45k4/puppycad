@@ -1,5 +1,20 @@
 import type { Point2D, Vector3D } from "./types"
 
+export interface PCadState {
+	readonly nodes: ReadonlyMap<string, PCadGraphNode>
+	readonly rootNodeIds: readonly string[]
+}
+
+export type SerializedPCadState = {
+	readonly nodes: readonly PCadGraphNode[]
+	readonly rootNodeIds: readonly string[]
+}
+
+export type PartTreeState = {
+	readonly orderedNodeIds: readonly string[]
+	readonly dirtySketchIds?: readonly string[]
+}
+
 export type SketchPlane = "XY" | "YZ" | "XZ"
 export type ReferencePlaneName = "Front" | "Top" | "Right"
 
@@ -13,6 +28,17 @@ export const SKETCH_PLANE_TO_REFERENCE_PLANE: Record<SketchPlane, ReferencePlane
 	XY: "Front",
 	XZ: "Top",
 	YZ: "Right"
+}
+
+export interface PCadNode {
+	readonly id: string
+	readonly type: string
+	readonly name?: string
+}
+
+export interface ReferencePlaneNode extends PCadNode {
+	readonly type: "referencePlane"
+	readonly plane: SketchPlane
 }
 
 export type Line = {
@@ -51,6 +77,64 @@ export type SketchDimension =
 			value: number
 	  }
 
+export interface SketchNode extends PCadNode {
+	readonly type: "sketch"
+	readonly targetId: string
+	readonly entities: readonly SketchEntity[]
+	readonly dimensions: readonly SketchDimension[]
+}
+
+export const EXTRUDE_OPERATIONS = ["newBody", "join", "cut"] as const
+export type ExtrudeOperation = (typeof EXTRUDE_OPERATIONS)[number]
+
+export interface ExtrudeNode extends PCadNode {
+	readonly type: "extrude"
+	readonly sketchId: string
+	readonly profileId: string
+	readonly operation: ExtrudeOperation
+	readonly depth: number
+}
+
+export interface FaceNode extends PCadNode {
+	readonly type: "face"
+	readonly sourceId: string
+	readonly faceId: string
+}
+
+export interface EdgeNode extends PCadNode {
+	readonly type: "edge"
+	readonly sourceId: string
+	readonly edgeId: string
+}
+
+export interface ChamferNode extends PCadNode {
+	readonly type: "chamfer"
+	readonly edgeId: string
+	readonly d1: number
+	readonly d2?: number
+}
+
+export type PCadGraphNode = ReferencePlaneNode | SketchNode | ExtrudeNode | FaceNode | EdgeNode | ChamferNode
+
+export type PCadGraphRewrite =
+	| {
+			readonly type: "addNode"
+			readonly node: PCadGraphNode
+			readonly root?: boolean
+	  }
+	| {
+			readonly type: "replaceNode"
+			readonly node: PCadGraphNode
+	  }
+	| {
+			readonly type: "removeNodes"
+			readonly nodeIds: readonly string[]
+	  }
+	| {
+			readonly type: "setRootNodes"
+			readonly rootNodeIds: readonly string[]
+	  }
+
 export type Loop = {
 	id: string
 	vertexIndices: number[]
@@ -83,6 +167,14 @@ export type Solid = {
 	vertices: SolidVertex[]
 	edges: SolidEdge[]
 	faces: SolidFace[]
+}
+
+export type PCadSolid = {
+	readonly id: string
+	readonly sourceId: string
+	readonly vertices: readonly SolidVertex[]
+	readonly edges: readonly SolidEdge[]
+	readonly faces: readonly SolidFace[]
 }
 
 export type ExtrudeFaceReference = {
@@ -154,6 +246,8 @@ export type Sketch = {
 export type PartFeature = Sketch | SolidExtrude | SolidChamfer
 
 export type PartDocument = {
+	cad?: SerializedPCadState
+	tree?: PartTreeState
 	features: PartFeature[]
 	solids?: Solid[]
 	migrationWarnings?: string[]

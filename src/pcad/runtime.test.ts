@@ -1,23 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import type { Sketch, SolidExtrude } from "../schema"
+import type { EdgeNode, ExtrudeNode, ExtrudeOperation, FaceNode, PCadGraphNode, PCadState, ReferencePlaneNode, Sketch, SketchNode, SolidExtrude } from "../schema"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
-import {
-	CadEditor,
-	type EdgeNode,
-	type ExtrudeNode,
-	type ExtrudeOperation,
-	type FaceNode,
-	type ReferencePlaneNode,
-	type SketchNode,
-	applyGraphRewrite,
-	applyGraphRewrites,
-	collectDependentNodeIds,
-	createEmptyPCadState,
-	getNodeDependencies,
-	validatePCadState,
-	type PCadState
-} from "./runtime"
+import { CadEditor, applyGraphRewrite, applyGraphRewrites, collectDependentNodeIds, createEmptyPCadState, getNodeDependencies, validatePCadState } from "./runtime"
 
 const plane: ReferencePlaneNode = {
 	id: "plane-front",
@@ -61,7 +46,7 @@ const face: FaceNode = {
 
 function createValidState(): PCadState {
 	return {
-		nodes: new Map([
+		nodes: new Map<string, PCadGraphNode>([
 			[plane.id, plane],
 			[sketch.id, sketch]
 		]),
@@ -78,7 +63,7 @@ function createDependencyState(): PCadState {
 	}
 
 	return {
-		nodes: new Map([
+		nodes: new Map<string, PCadGraphNode>([
 			[plane.id, plane],
 			[sketch.id, sketch],
 			[extrude.id, extrude],
@@ -207,9 +192,7 @@ describe("CadEditor", () => {
 		})
 
 		expect(updatedSketch.dimensions).toEqual([{ id: "dim-1", type: "rectangleWidth", entityId: "rect-1", value: 10 }])
-		expect(() => editor.setSketchDimension(sketch.id, { id: "dim-2", type: "rectangleHeight", entityId: "missing", value: 5 })).toThrow(
-			'Sketch entity "missing" does not exist.'
-		)
+		expect(() => editor.setSketchDimension(sketch.id, { id: "dim-2", type: "rectangleHeight", entityId: "missing", value: 5 })).toThrow('Sketch entity "missing" does not exist.')
 	})
 
 	it("rejects invalid ids, depths, and extrude operations", () => {
@@ -248,14 +231,14 @@ describe("CadEditor", () => {
 	it("validates graph references and numeric operation fields", () => {
 		expect(() =>
 			validatePCadState({
-				nodes: new Map([[sketch.id, sketch]]),
+				nodes: new Map<string, PCadGraphNode>([[sketch.id, sketch]]),
 				rootNodeIds: [sketch.id]
 			})
 		).toThrow('Sketch "sketch-1" target "plane-front" does not exist.')
 
 		expect(() =>
 			validatePCadState({
-				nodes: new Map([
+				nodes: new Map<string, PCadGraphNode>([
 					[plane.id, plane],
 					[sketch.id, sketch],
 					[extrude.id, { ...extrude, depth: Number.NaN }]
@@ -275,7 +258,7 @@ describe("CadEditor", () => {
 			dimensions: []
 		}
 		const editor = new CadEditor({
-			nodes: new Map([
+			nodes: new Map<string, PCadGraphNode>([
 				[plane.id, plane],
 				[editableSketch.id, editableSketch]
 			]),
@@ -337,7 +320,7 @@ describe("CadEditor", () => {
 			dimensions: []
 		}
 		const editor = new CadEditor({
-			nodes: new Map([
+			nodes: new Map<string, PCadGraphNode>([
 				[plane.id, plane],
 				[baseSketch.id, baseSketch]
 			]),
@@ -373,11 +356,7 @@ describe("CadEditor", () => {
 			dimensions: []
 		}
 		const pocketEditor = new CadEditor({
-			nodes: new Map([
-				...editor.getState().nodes,
-				[topFace.id, topFace],
-				[pocketSketch.id, pocketSketch]
-			]),
+			nodes: new Map<string, PCadGraphNode>([...editor.getState().nodes, [topFace.id, topFace], [pocketSketch.id, pocketSketch]]),
 			rootNodeIds: editor.getState().rootNodeIds
 		})
 		const pocketSketchWithEntity = pocketEditor.addSketchEntity(pocketSketch.id, {
