@@ -865,11 +865,19 @@ function renderPCadNodeComponent(ctx: CanvasRenderingContext2D, component: Canva
 	const data = component.data
 	const palette = getNodePalette(data?.nodeType)
 	ctx.save()
+	if (selected) {
+		const outlineWidth = 4
+		ctx.fillStyle = "#2563eb"
+		ctx.fillRect(component.x - outlineWidth, component.y - outlineWidth, component.width + outlineWidth * 2, component.height + outlineWidth * 2)
+	}
+
 	ctx.fillStyle = "#ffffff"
-	ctx.strokeStyle = selected ? "#2563eb" : palette.border
-	ctx.lineWidth = selected ? 3 : 1.5
 	ctx.fillRect(component.x, component.y, component.width, component.height)
-	ctx.strokeRect(component.x, component.y, component.width, component.height)
+	if (!selected) {
+		ctx.strokeStyle = palette.border
+		ctx.lineWidth = 1.5
+		ctx.strokeRect(component.x, component.y, component.width, component.height)
+	}
 
 	ctx.fillStyle = palette.fill
 	ctx.fillRect(component.x, component.y, component.width, 24)

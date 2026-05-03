@@ -743,6 +743,83 @@ describe("PartEditor", () => {
 		expect(solid?.corners.some((corner) => corner.marker.visible)).toBe(true)
 	})
 
+	it("selects the generated face node when a graphic face is selected in node mode", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { extrudeId } = createRectangleExtrude(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const partEditor = editor as unknown as {
+			selectExtrudeFace: (extrudeId: string, faceId?: string) => void
+			previewSolids: Array<{
+				extrudeId: string
+				faces: Array<{ faceId: string; label: string }>
+			}>
+			nodeEditor: {
+				getCanvasForTesting: () => {
+					getComponents: () => Array<{ id: number; data?: { nodeType?: string } }>
+					getSelection: () => number[]
+				}
+			}
+		}
+		const faceId = partEditor.previewSolids.find((solid) => solid.extrudeId === extrudeId)?.faces.find((face) => face.label === "Bottom Face")?.faceId
+		expect(faceId).toBeString()
+		if (!faceId) {
+			throw new Error("Expected bottom face id")
+		}
+
+		partEditor.selectExtrudeFace(extrudeId, faceId)
+
+		const canvas = partEditor.nodeEditor.getCanvasForTesting()
+		const selectedId = canvas.getSelection()[0]
+		const selectedComponent = canvas.getComponents().find((component) => component.id === selectedId)
+		expect(selectedComponent?.data?.nodeType).toBe("generatedSolidFace")
+	})
+
+	it("selects generated edge and vertex nodes when graphic topology is selected in node mode", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const { extrudeId } = createRectangleExtrude(editor)
+
+		clickButton(domWindow, editor.root, "Nodes")
+		const partEditor = editor as unknown as {
+			selectExtrudeEdge: (extrudeId: string, edgeId: string) => void
+			selectExtrudeCorner: (extrudeId: string, cornerId: string) => void
+			previewSolids: Array<{
+				extrudeId: string
+				edges: Array<{ edgeId: string }>
+				corners: Array<{ cornerId: string }>
+			}>
+			nodeEditor: {
+				getCanvasForTesting: () => {
+					getComponents: () => Array<{ id: number; data?: { nodeType?: string } }>
+					getSelection: () => number[]
+				}
+			}
+		}
+		const solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
+		const edgeId = solid?.edges[0]?.edgeId
+		const cornerId = solid?.corners[0]?.cornerId
+		expect(edgeId).toBeString()
+		expect(cornerId).toBeString()
+		if (!edgeId || !cornerId) {
+			throw new Error("Expected generated edge and corner ids")
+		}
+
+		const canvas = partEditor.nodeEditor.getCanvasForTesting()
+		partEditor.selectExtrudeEdge(extrudeId, edgeId)
+		let selectedId = canvas.getSelection()[0]
+		let selectedComponent = canvas.getComponents().find((component) => component.id === selectedId)
+		expect(selectedComponent?.data?.nodeType).toBe("generatedSolidEdge")
+
+		partEditor.selectExtrudeCorner(extrudeId, cornerId)
+		selectedId = canvas.getSelection()[0]
+		selectedComponent = canvas.getComponents().find((component) => component.id === selectedId)
+		expect(selectedComponent?.data?.nodeType).toBe("generatedSolidVertex")
+	})
+
 	it("selects sketch data nodes in the graphic sketch state from the node graph", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()

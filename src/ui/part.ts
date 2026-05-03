@@ -1175,7 +1175,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedCornerId = null
 		this.selectedSketchId = null
 		this.selectedSketchEdge = null
-		this.selectedPCadNodeId = faceId ? this.findFaceNodeId(extrude.id, faceId) : extrude.id
+		this.selectedPCadNodeId = faceId ? (this.findFaceNodeId(extrude.id, faceId) ?? this.findGeneratedSolidFaceGraphId(extrude.id, faceId)) : extrude.id
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
@@ -1201,7 +1201,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedCornerId = null
 		this.selectedSketchId = null
 		this.selectedSketchEdge = null
-		this.selectedPCadNodeId = this.findEdgeNodeId(extrude.id, edgeId)
+		this.selectedPCadNodeId = this.findEdgeNodeId(extrude.id, edgeId) ?? this.findGeneratedSolidEdgeGraphId(extrude.id, edgeId)
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
@@ -1230,7 +1230,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.selectedCornerId = cornerId
 		this.selectedSketchId = null
 		this.selectedSketchEdge = null
-		this.selectedPCadNodeId = extrude.id
+		this.selectedPCadNodeId = this.findGeneratedSolidVertexGraphId(extrude.id, cornerId) ?? extrude.id
 		this.selectedReferencePlane = targetSketch?.type === "sketch" ? this.getReferencePlaneForSketchTarget(targetSketch.target) : this.selectedReferencePlane
 		this.activeTool = "view"
 		this.pendingLineStart = null
@@ -1484,10 +1484,21 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return explicitNode.id
 		}
 		if (this.selectedExtrudeId && this.selectedEdgeId) {
-			return this.findEdgeNodeId(this.selectedExtrudeId, this.selectedEdgeId) ?? this.selectedExtrudeId
+			return (
+				this.findEdgeNodeId(this.selectedExtrudeId, this.selectedEdgeId) ??
+				this.findGeneratedSolidEdgeGraphId(this.selectedExtrudeId, this.selectedEdgeId) ??
+				this.selectedExtrudeId
+			)
 		}
 		if (this.selectedExtrudeId && this.selectedFaceId) {
-			return this.findFaceNodeId(this.selectedExtrudeId, this.selectedFaceId) ?? this.selectedExtrudeId
+			return (
+				this.findFaceNodeId(this.selectedExtrudeId, this.selectedFaceId) ??
+				this.findGeneratedSolidFaceGraphId(this.selectedExtrudeId, this.selectedFaceId) ??
+				this.selectedExtrudeId
+			)
+		}
+		if (this.selectedExtrudeId && this.selectedCornerId) {
+			return this.findGeneratedSolidVertexGraphId(this.selectedExtrudeId, this.selectedCornerId) ?? this.selectedExtrudeId
 		}
 		if (this.selectedExtrudeId && state.nodes.has(this.selectedExtrudeId)) {
 			return this.selectedExtrudeId
@@ -1514,6 +1525,21 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			}
 		}
 		return null
+	}
+
+	private findGeneratedSolidFaceGraphId(extrudeId: string, faceId: string): string | null {
+		const solid = this.solids.find((candidate) => candidate.featureId === extrudeId && candidate.faces.some((face) => face.id === faceId))
+		return solid ? `generated:${solid.id}:solid-face:${faceId}` : null
+	}
+
+	private findGeneratedSolidEdgeGraphId(extrudeId: string, edgeId: string): string | null {
+		const solid = this.solids.find((candidate) => candidate.featureId === extrudeId && candidate.edges.some((edge) => edge.id === edgeId))
+		return solid ? `generated:${solid.id}:solid-edge:${edgeId}` : null
+	}
+
+	private findGeneratedSolidVertexGraphId(extrudeId: string, vertexId: string): string | null {
+		const solid = this.solids.find((candidate) => candidate.featureId === extrudeId && candidate.vertices.some((vertex) => vertex.id === vertexId))
+		return solid ? `generated:${solid.id}:solid-vertex:${vertexId}` : null
 	}
 
 	public getSketchName(sketchId?: string): string {
