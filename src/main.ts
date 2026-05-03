@@ -1,6 +1,6 @@
 import index from "./ui/index.html"
 import { postMcp } from "./mcp"
-import { postProject } from "./server/save-project"
+import { getProject, getProjectEvents, postProject, postProjectCommands, putProject } from "./server/save-project"
 
 console.log("Starting server on http://localhost:5337")
 
@@ -33,9 +33,16 @@ Bun.serve({
 		"/api/projects": {
 			POST: postProject
 		},
+		"/api/projects/:projectId": {
+			GET: (request) => getProject(request, request.params.projectId),
+			PUT: (request) => putProject(request, request.params.projectId)
+		},
+		"/api/projects/:projectId/commands": {
+			POST: (request) => postProjectCommands(request, request.params.projectId)
+		},
+		"/api/projects/:projectId/events": {
+			GET: (request) => getProjectEvents(request, request.params.projectId)
+		},
 		"/*": index
-	},
-	fetch() {
-		return new Response("Not Found", { status: 404 })
 	}
 })

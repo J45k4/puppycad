@@ -187,6 +187,24 @@ export function createProject(name?: string): ProjectMetadata {
 	return project
 }
 
+export function ensureProject(id: string, name?: string): ProjectMetadata {
+	const projects = loadProjects()
+	const existing = projects.find((project) => project.id === id)
+	if (existing) {
+		return existing
+	}
+	const now = Date.now()
+	const project: ProjectMetadata = {
+		id,
+		name: normalizeProjectName(name, projects),
+		createdAt: now,
+		updatedAt: now
+	}
+	projects.push(project)
+	saveProjects(projects)
+	return project
+}
+
 export function renameProject(id: string, name: string): ProjectMetadata | null {
 	const projects = loadProjects()
 	const index = projects.findIndex((project) => project.id === id)

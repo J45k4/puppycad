@@ -618,6 +618,78 @@ describe("PartEditor", () => {
 		expect((nodeEditor as HTMLElement).parentElement?.style.display).toBe("none")
 	})
 
+	it("keeps reference plane and sketch visibility outside part state", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+
+		editor.setReferencePlaneVisible("Front", false)
+		editor.setReferencePlaneVisible("Top", false)
+		editor.setSketchVisible(false)
+
+		const state = editor.getState()
+		expect("view" in state).toBe(false)
+
+		const viewState = editor.getViewState()
+		expect(viewState).toMatchObject({
+			sketchVisible: false,
+			referencePlaneVisibility: {
+				Front: false,
+				Top: false,
+				Right: true
+			}
+		})
+
+		const reloaded = new PartEditor({
+			initialState: state,
+			initialViewState: viewState,
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		expect(reloaded.getViewState()).toMatchObject({
+			sketchVisible: false,
+			referencePlaneVisibility: {
+				Front: false,
+				Top: false,
+				Right: true
+			}
+		})
+	})
+
+	it("keeps preview zoom and pan when starting and finishing sketches", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const partEditor = editor as unknown as {
+			previewBaseDistance: number
+			previewPan: THREE.Vector3
+			previewOrbitPivot: THREE.Vector3
+		}
+		partEditor.previewBaseDistance = 72
+		partEditor.previewPan.set(3, -2, 1)
+		partEditor.previewOrbitPivot.set(1, 2, 3)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+
+		expect(partEditor.previewBaseDistance).toBe(72)
+		expect(partEditor.previewPan.toArray()).toEqual([3, -2, 1])
+		expect(partEditor.previewOrbitPivot.toArray()).toEqual([1, 2, 3])
+
+		const sketch = editor.getState().features.find((feature) => feature.type === "sketch")
+		expect(sketch).toBeDefined()
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		editor.dispatchPartAction({
+			type: "finishSketch",
+			sketchId: sketch.id
+		})
+
+		expect(partEditor.previewBaseDistance).toBe(72)
+		expect(partEditor.previewPan.toArray()).toEqual([3, -2, 1])
+		expect(partEditor.previewOrbitPivot.toArray()).toEqual([1, 2, 3])
+	})
+
 	it("resizes the node and graphic views in node editor mode", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()
@@ -2176,6 +2248,95 @@ describe("PartEditor", () => {
 		expect(rectangle.p0.y).toBeCloseTo(expectedStart.y, 6)
 		expect(rectangle.p1.x).toBeCloseTo(expectedEnd.x, 6)
 		expect(rectangle.p1.y).toBeCloseTo(expectedEnd.y, 6)
+	})
+
+	it("starts a sketch on the selected face instead of reopening a dirty sketch on another face", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		createRectangleExtrude(editor, 10)
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const partEditor = editor as unknown as {
+			drawPreview: () => void
+			previewSolids: Array<{
+				extrudeId: string
+				faces: Array<{
+					faceId: string
+					label: string
+				}>
+			}>
+			selectExtrudeFace: (extrudeId: string, faceId?: string) => void
+		}
+		partEditor.drawPreview()
+		const previewSolid = partEditor.previewSolids.find((entry) => entry.extrudeId === baseExtrude.id)
+		expect(previewSolid).toBeDefined()
+		if (!previewSolid) {
+			throw new Error("Expected preview solid")
+		}
+		const sideFace2 = previewSolid.faces.find((face) => face.label === "Side Face 2")
+		const sideFace4 = previewSolid.faces.find((face) => face.label === "Side Face 4")
+		expect(sideFace2).toBeDefined()
+		expect(sideFace4).toBeDefined()
+		if (!sideFace2 || !sideFace4) {
+			throw new Error("Expected side faces")
+		}
+
+		editor.dispatchPartAction({
+			type: "createSketch",
+			sketchId: "face-sketch-1",
+			name: "Face Sketch",
+			target: {
+				type: "face",
+				face: {
+					type: "extrudeFace",
+					extrudeId: baseExtrude.id,
+					faceId: sideFace4.faceId
+				}
+			}
+		})
+		editor.dispatchPartAction({
+			type: "addSketchEntity",
+			sketchId: "face-sketch-1",
+			entity: {
+				id: "face-rect-1",
+				type: "cornerRectangle",
+				p0: { x: 0, y: 0 },
+				p1: { x: 1, y: 1 }
+			}
+		})
+
+		partEditor.selectExtrudeFace(baseExtrude.id, sideFace2.faceId)
+		expect(editor.root.textContent).toContain("Side Face 2 selected.")
+		clickButton(domWindow, editor.root, "Sketch")
+
+		expect(editor.root.textContent).toContain("Sketch: Side Face 2")
+		const sketches = editor.getState().features.filter((feature) => feature.type === "sketch")
+		const previousSketch = sketches.find((sketch) => sketch.id === "face-sketch-1")
+		const selectedSketch = sketches.find((sketch) => sketch.dirty)
+		expect(previousSketch).toMatchObject({
+			dirty: false,
+			target: {
+				type: "face",
+				face: {
+					faceId: sideFace4.faceId
+				}
+			}
+		})
+		expect(selectedSketch).toMatchObject({
+			dirty: true,
+			target: {
+				type: "face",
+				face: {
+					faceId: sideFace2.faceId
+				}
+			}
+		})
 	})
 
 	it("allows extruding a finished face sketch after reselecting it", () => {

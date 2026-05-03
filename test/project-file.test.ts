@@ -3,6 +3,59 @@ import type { PartProjectItemData, ProjectNode, SchemanticProjectItemData } from
 import { PART_PROJECT_DEFAULT_HEIGHT, normalizeProjectFile } from "../src/project-file"
 
 describe("normalizeProjectFile", () => {
+	it("normalizes v3 files to v4 with deterministic ids and revision zero", () => {
+		const file = normalizeProjectFile({
+			version: 3,
+			items: [
+				{ type: "part", name: "Part" },
+				{
+					kind: "folder",
+					name: "Folder",
+					items: [{ type: "diagram", name: "Diagram" }]
+				}
+			],
+			selectedPath: [1, 0]
+		})
+
+		expect(file).not.toBeNull()
+		if (!file) {
+			throw new Error("normalizeProjectFile returned null")
+		}
+		expect(file.version).toBe(4)
+		expect(file.revision).toBe(0)
+		expect(file.items[0]?.id).toBe("project-node-0")
+		expect(file.items[1]?.id).toBe("project-node-1")
+		const folder = file.items[1]
+		if (!folder || !("kind" in folder)) {
+			throw new Error("Expected folder")
+		}
+		expect(folder.items[0]?.id).toBe("project-node-1-0")
+		expect(file.selectedPath).toEqual([1, 0])
+	})
+
+	it("preserves and repairs v4 persisted ids and revision", () => {
+		const file = normalizeProjectFile({
+			version: 4,
+			revision: 12,
+			items: [
+				{ id: "part-id", type: "part", name: "Part" },
+				{ id: "part-id", type: "diagram", name: "Diagram" },
+				{ id: "", type: "pcb", name: "PCB" }
+			],
+			selectedPath: [0]
+		})
+
+		expect(file).not.toBeNull()
+		if (!file) {
+			throw new Error("normalizeProjectFile returned null")
+		}
+		expect(file.revision).toBe(12)
+		expect(file.items.map((item) => item.id)).toEqual(["part-id", "part-id-2", "project-node-2"])
+		const roundTrip = normalizeProjectFile(file)
+		expect(roundTrip?.items.map((item) => item.id)).toEqual(["part-id", "part-id-2", "project-node-2"])
+		expect(roundTrip?.revision).toBe(12)
+	})
+
 	it("normalizes schemantic project items", () => {
 		const input = {
 			version: 2,
@@ -191,25 +244,26 @@ describe("normalizeProjectFile", () => {
 		if (!pcbEntry || !("type" in pcbEntry) || pcbEntry.type !== "pcb") {
 			throw new Error("Expected first item to be a PCB project entry")
 		}
-		expect(pcbEntry).toEqual({ type: "pcb", name: "Pcb 1" })
+		expect(pcbEntry).toEqual(expect.objectContaining({ id: "project-node-0", type: "pcb", name: "Pcb 1" }))
 
 		const assemblyEntry = file.items[1]
 		if (!assemblyEntry || !("type" in assemblyEntry) || assemblyEntry.type !== "assembly") {
 			throw new Error("Expected second item to be an assembly project entry")
 		}
-		expect(assemblyEntry).toEqual({ type: "assembly", name: "Assembly 1" })
+		expect(assemblyEntry).toEqual(expect.objectContaining({ id: "project-node-1", type: "assembly", name: "Assembly 1" }))
 
 		const diagramEntry = file.items[2]
 		if (!diagramEntry || !("type" in diagramEntry) || diagramEntry.type !== "diagram") {
 			throw new Error("Expected third item to be a diagram project entry")
 		}
-		expect(diagramEntry).toEqual({ type: "diagram", name: "Custom Diagram" })
+		expect(diagramEntry).toEqual(expect.objectContaining({ id: "project-node-2", type: "diagram", name: "Custom Diagram" }))
 
 		const folderEntry = file.items[3]
 		if (!folderEntry || !("kind" in folderEntry) || folderEntry.kind !== "folder") {
 			throw new Error("Expected fourth item to be a folder entry")
 		}
 		expect(folderEntry.name).toBe("Folder 1")
+		expect(folderEntry.id).toBe("project-node-3")
 		expect(folderEntry.visible).toBeUndefined()
 		expect(folderEntry.items).toHaveLength(2)
 
@@ -217,7 +271,7 @@ describe("normalizeProjectFile", () => {
 		if (!nestedDiagram || !("type" in nestedDiagram) || nestedDiagram.type !== "diagram") {
 			throw new Error("Expected first nested item to be a diagram entry")
 		}
-		expect(nestedDiagram).toEqual({ type: "diagram", name: "Diagram 1" })
+		expect(nestedDiagram).toEqual(expect.objectContaining({ id: "project-node-3-0", type: "diagram", name: "Diagram 1" }))
 
 		const nestedPart = folderEntry.items[1]
 		if (!nestedPart || !("type" in nestedPart) || nestedPart.type !== "part") {
@@ -281,6 +335,39 @@ describe("normalizeProjectFile", () => {
 		}
 		expect(partEntry.visible).toBe(false)
 		expect(partEntry.data).toEqual({ features: [] })
+	})
+
+	it("drops schema-based part view state because editor UI state is local-only", () => {
+		const file = normalizeProjectFile({
+			version: 4,
+			revision: 0,
+			items: [
+				{
+					id: "part-1",
+					type: "part",
+					name: "Part",
+					data: {
+						features: [],
+						view: {
+							sketchVisible: false,
+							referencePlaneVisibility: {
+								Front: false,
+								Top: true,
+								Right: false
+							}
+						}
+					}
+				}
+			],
+			selectedPath: [0]
+		})
+
+		expect(file?.items[0]).toMatchObject({
+			type: "part",
+			data: {
+				features: []
+			}
+		})
 	})
 
 	it("preserves schema-based part features", () => {

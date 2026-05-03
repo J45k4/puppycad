@@ -33,7 +33,7 @@ import type {
 } from "./schema"
 import type { Point2D, Quaternion, Vector3D } from "./types"
 
-export const PROJECT_FILE_VERSION = 3 as const
+export const PROJECT_FILE_VERSION = 4 as const
 
 export const PROJECT_FILE_TYPES = ["schemantic", "pcb", "part", "assembly", "diagram"] as const
 
@@ -50,9 +50,11 @@ export const PROJECT_FILE_MIME_TYPE = "application/json"
 export function createProjectFile(args: {
 	items: ProjectNode[]
 	selectedPath: number[] | null
+	revision?: number
 }): Project {
 	return {
 		version: PROJECT_FILE_VERSION,
+		revision: normalizeRevision(args.revision),
 		items: args.items.map(cloneProjectFileEntry),
 		selectedPath: cloneSelectedPath(args.selectedPath)
 	}
@@ -70,16 +72,17 @@ export function normalizeProjectFile(input: unknown): Project | null {
 	const value = input as Partial<{
 		version: unknown
 		items: unknown
+		revision: unknown
 		selectedIndex: unknown
 		selectedPath: unknown
 	}>
 
 	const rawVersion = typeof value.version === "number" ? value.version : 1
-	if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== PROJECT_FILE_VERSION) {
+	if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== 3 && rawVersion !== PROJECT_FILE_VERSION) {
 		return null
 	}
 
-	const items = normalizeProjectFileEntries(value.items)
+	const items = normalizeProjectFileEntries(value.items, new Set<string>())
 
 	let selectedPath: number[] | null = null
 	if (rawVersion === 1) {
@@ -96,26 +99,35 @@ export function normalizeProjectFile(input: unknown): Project | null {
 
 	return {
 		version: PROJECT_FILE_VERSION,
+		revision: rawVersion === PROJECT_FILE_VERSION ? normalizeRevision(value.revision) : 0,
 		items,
 		selectedPath
 	}
 }
 
-function normalizeProjectFileEntries(input: unknown): ProjectNode[] {
+function normalizeRevision(value: unknown): number {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0
+}
+
+function normalizeProjectFileEntries(input: unknown, usedIds: Set<string>, path: number[] = []): ProjectNode[] {
 	const itemsInput = Array.isArray(input) ? input : []
 	const usedNames = new Set<string>()
 	const items: ProjectNode[] = []
 
-	for (const rawItem of itemsInput) {
+	for (let index = 0; index < itemsInput.length; index += 1) {
+		const rawItem = itemsInput[index]
 		if (!rawItem || typeof rawItem !== "object") {
 			continue
 		}
+		const itemPath = [...path, index]
+		const id = normalizeProjectNodeId(rawItem, usedIds, itemPath)
 
 		if (isFolderEntry(rawItem)) {
 			const folderName = normalizeEntryName(rawItem, usedNames, generateDefaultFolderName)
 			const visible = normalizeVisibleFlag(rawItem)
-			const children = normalizeProjectFileEntries((rawItem as { items?: unknown }).items)
+			const children = normalizeProjectFileEntries((rawItem as { items?: unknown }).items, usedIds, itemPath)
 			items.push({
+				id,
 				kind: "folder",
 				name: folderName,
 				items: children,
@@ -135,6 +147,7 @@ function normalizeProjectFileEntries(input: unknown): ProjectNode[] {
 			const data = normalizeSchemanticProjectItemData((rawItem as { data?: unknown }).data)
 			const visible = normalizeVisibleFlag(rawItem)
 			items.push({
+				id,
 				type,
 				name,
 				data: data.components.length === 0 && data.connections.length === 0 ? undefined : data,
@@ -147,6 +160,7 @@ function normalizeProjectFileEntries(input: unknown): ProjectNode[] {
 			const data = normalizePartProjectItemData((rawItem as { data?: unknown }).data)
 			const visible = normalizeVisibleFlag(rawItem)
 			items.push({
+				id,
 				type,
 				name,
 				data,
@@ -157,6 +171,7 @@ function normalizeProjectFileEntries(input: unknown): ProjectNode[] {
 
 		const visible = normalizeVisibleFlag(rawItem)
 		items.push({
+			id,
 			type,
 			name,
 			...(visible === undefined ? {} : { visible })
@@ -164,6 +179,23 @@ function normalizeProjectFileEntries(input: unknown): ProjectNode[] {
 	}
 
 	return items
+}
+
+function normalizeProjectNodeId(rawItem: unknown, usedIds: Set<string>, path: number[]): string {
+	const rawId = (rawItem as { id?: unknown }).id
+	const preferred = typeof rawId === "string" && rawId.trim() ? rawId.trim() : `project-node-${path.join("-")}`
+	return makeUniqueProjectNodeId(preferred, usedIds)
+}
+
+function makeUniqueProjectNodeId(preferred: string, usedIds: Set<string>): string {
+	let candidate = preferred
+	let suffix = 2
+	while (usedIds.has(candidate)) {
+		candidate = `${preferred}-${suffix}`
+		suffix += 1
+	}
+	usedIds.add(candidate)
+	return candidate
 }
 
 function normalizeEntryName(rawItem: unknown, usedNames: Set<string>, generateDefault: (names: Set<string>) => string): string {
@@ -231,6 +263,7 @@ function isFolderProjectEntry(entry: ProjectNode): entry is ProjectFolder {
 function cloneProjectFileEntry(entry: ProjectNode): ProjectNode {
 	if (isFolderProjectEntry(entry)) {
 		return {
+			id: entry.id,
 			kind: "folder",
 			name: entry.name,
 			items: entry.items.map(cloneProjectFileEntry),
@@ -240,6 +273,7 @@ function cloneProjectFileEntry(entry: ProjectNode): ProjectNode {
 
 	if (entry.type === "schemantic") {
 		return {
+			id: entry.id,
 			type: entry.type,
 			name: entry.name,
 			data: cloneSchemanticProjectItemData(entry.data),
@@ -249,6 +283,7 @@ function cloneProjectFileEntry(entry: ProjectNode): ProjectNode {
 
 	if (entry.type === "part") {
 		return {
+			id: entry.id,
 			type: entry.type,
 			name: entry.name,
 			data: clonePartProjectItemData(entry.data),
@@ -257,6 +292,7 @@ function cloneProjectFileEntry(entry: ProjectNode): ProjectNode {
 	}
 
 	return {
+		id: entry.id,
 		type: entry.type,
 		name: entry.name,
 		...(entry.visible === undefined ? {} : { visible: entry.visible })

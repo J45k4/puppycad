@@ -5,12 +5,14 @@ import type { PartEditorState, PartEditorViewState } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
 import type { Project, ProjectDocumentType, ProjectFolder as PersistedProjectFolder, ProjectNode as PersistedProjectNode } from "../contract"
-import { PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "../project-file"
+import type { SyncedProjectCommand } from "../project-commands"
+import { PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION, PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "../project-file"
 import { DockLayout, type DockOrientation, type DockLayoutState } from "./dock-layout"
 import { ItemList, Modal, UiComponent, TreeList, showTextPromptModal, type TreeNode } from "./ui"
 import { ProjectList, type ProjectListEntry } from "./project-list"
 
 type BaseProjectItem = {
+	id: string
 	type: ProjectDocumentType
 	name: string
 	editor: UiComponent<HTMLDivElement>
@@ -39,6 +41,7 @@ type OtherProjectItem = BaseProjectItem & {
 export type ProjectItem = SchemanticProjectItem | PartProjectItem | OtherProjectItem
 
 type ProjectFolder = {
+	id: string
 	kind: "folder"
 	name: string
 	visible: boolean
@@ -89,11 +92,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private isRestoring = false
 	private persistenceEnabled = typeof indexedDB !== "undefined"
 	private nodePaths: Map<ProjectNode, number[]> = new Map()
-	private nodeIdMap: Map<ProjectNode, string> = new Map()
 	private idNodeMap: Map<string, ProjectNode> = new Map()
 	private readonly syntheticSelectionTargets = new Map<string, ProjectItem>()
 	private readonly syntheticEntries = new Map<string, SyntheticProjectEntry>()
-	private nextNodeId = 0
+	private readonly clientId = this.createClientId()
+	private serverBacked = false
+	private serverRevision = 0
+	private eventSource: EventSource | null = null
+	private commandQueue = Promise.resolve()
+	private saveSnapshotQueue = Promise.resolve()
 	private itemsListContainer: TreeList<ProjectNode>
 	private nodeElements: Map<ProjectNode, { header: HTMLDivElement; container?: HTMLDivElement; exitDropZone?: HTMLDivElement }> = new Map()
 	private dragState: { node: ProjectNode; path: number[] } | null = null
@@ -104,6 +111,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	public static readonly STORE_NAME = "projectState"
 	public static readonly STORE_KEY_PREFIX = "project:"
 	public static readonly LEGACY_STORE_KEY = "items"
+	public static readonly PART_VIEW_STATE_STORAGE_KEY_PREFIX = "puppycad.partViewState:"
 	private static readonly PERSIST_DEBOUNCE_MS = 200
 
 	private log(...args: unknown[]): void {
@@ -128,6 +136,20 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	private getStoreKey(): string {
 		return `${ProjectTreeView.STORE_KEY_PREFIX}${this.projectId}`
+	}
+
+	private createClientId(): string {
+		if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+			return `client-${crypto.randomUUID()}`
+		}
+		return `client-${Date.now()}-${Math.random().toString(36).slice(2)}`
+	}
+
+	private createProjectNodeId(): string {
+		if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+			return `project-node-${crypto.randomUUID()}`
+		}
+		return `project-node-${Date.now()}-${Math.random().toString(36).slice(2)}`
 	}
 
 	public constructor(args: {
@@ -280,9 +302,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				this.moveNodeToRoot()
 			}
 		})
-		if (this.persistenceEnabled) {
-			void this.loadFromIndexedDB()
-		}
+		void this.loadInitialProject()
 	}
 
 	private createRootDropZone(): HTMLDivElement {
@@ -509,13 +529,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private getNodeId(node: ProjectNode): string {
-		let id = this.nodeIdMap.get(node)
-		if (!id) {
-			id = `project-node-${this.nextNodeId++}`
-			this.nodeIdMap.set(node, id)
-		}
-		this.idNodeMap.set(id, node)
-		return id
+		this.idNodeMap.set(node.id, node)
+		return node.id
 	}
 
 	private handleSelectionById(id: string) {
@@ -569,6 +584,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			node.visible = visible
 			this.renderItems()
 			this.schedulePersist()
+			this.enqueueCommand({ type: "setNodeVisibility", nodeId: node.id, visible })
 			return
 		}
 		const syntheticEntry = this.syntheticEntries.get(id)
@@ -634,6 +650,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.renderItems()
 		this.handleNodeSelection(movedNode)
 		this.schedulePersist()
+		this.enqueueCommand({ type: "moveNode", nodeId: movedNode.id, parentId: destinationId })
 	}
 
 	private isNodeDescendant(ancestor: ProjectNode, candidate: ProjectNode): boolean {
@@ -1196,6 +1213,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.renderItems()
 		this.handleNodeSelection(movedNode)
 		this.schedulePersist()
+		this.enqueueCommand({ type: "moveNode", nodeId: movedNode.id, parentId: null })
 	}
 
 	private moveNodeToParent(): void {
@@ -1233,6 +1251,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.renderItems()
 		this.handleNodeSelection(movedNode)
 		this.schedulePersist()
+		this.enqueueCommand({ type: "moveNode", nodeId: movedNode.id, parentId: this.getParentIdForContainer(container) })
 	}
 
 	private getContainerByPath(path: number[]): ProjectNode[] | null {
@@ -1256,18 +1275,24 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	private addItem(type: ProjectDocumentType) {
 		const container = this.getContainerForNewNode()
+		const parentId = this.getParentIdForContainer(container)
 		const item = this.createProjectItem(type, undefined, container)
 		container.push(item)
 		this.renderItems()
 		this.handleNodeSelection(item)
+		this.schedulePersist()
+		this.enqueueCommand({ type: "createItem", id: item.id, documentType: type, parentId, name: item.name })
 	}
 
 	private addFolder() {
 		const container = this.getContainerForNewNode()
+		const parentId = this.getParentIdForContainer(container)
 		const folder = this.createFolder(undefined, container)
 		container.push(folder)
 		this.renderItems()
 		this.handleNodeSelection(folder)
+		this.schedulePersist()
+		this.enqueueCommand({ type: "createFolder", id: folder.id, parentId, name: folder.name })
 	}
 
 	private renameSelectedItem() {
@@ -1316,6 +1341,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.selectedPath = path.slice()
 		this.renderItems()
 		this.schedulePersist()
+		this.enqueueCommand({ type: "renameNode", nodeId: node.id, name: trimmed })
 	}
 
 	private async deleteNode(node: ProjectNode) {
@@ -1337,6 +1363,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.projectList.selectById(null)
 		this.onItemsDeleted?.(removedItems)
 		this.schedulePersist()
+		this.enqueueCommand({ type: "deleteNode", nodeId: removed.id })
 	}
 
 	private collectProjectItems(node: ProjectNode): ProjectItem[] {
@@ -1427,7 +1454,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		existingNodes: ProjectNode[] = this.items,
 		schemanticState?: SchemanticEditorState,
 		partState?: PartEditorState,
-		visible = true
+		visible = true,
+		id = this.createProjectNodeId(),
+		partViewState?: PartEditorViewState
 	): ProjectItem {
 		const resolvedName = this.resolveItemName(type, name, existingNodes)
 		switch (type) {
@@ -1437,6 +1466,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					onStateChange: () => this.schedulePersist()
 				})
 				return {
+					id,
 					type,
 					name: resolvedName,
 					editor,
@@ -1445,16 +1475,23 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				}
 			}
 			case "pcb":
-				return { type, name: resolvedName, editor: new PCBEditor(), visible }
+				return { id, type, name: resolvedName, editor: new PCBEditor(), visible }
 			case "part": {
 				const editor = new PartEditor({
 					initialState: partState,
+					initialViewState: partViewState ?? this.loadPartViewState(id),
 					onStateChange: () => {
 						this.schedulePersist()
 						this.renderItems()
-					}
+					},
+					onViewStateChange: (state) => {
+						this.savePartViewState(id, state)
+						this.renderItems()
+					},
+					onCadCommand: (command) => this.enqueueCommand({ type: "cad", partId: id, command })
 				})
 				return {
+					id,
 					type,
 					name: resolvedName,
 					editor,
@@ -1464,10 +1501,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				}
 			}
 			case "assembly":
-				return { type, name: resolvedName, editor: new AssemblyEditor(), visible }
+				return { id, type, name: resolvedName, editor: new AssemblyEditor(), visible }
 			case "diagram": {
 				const editor = createDiagramEditor()
 				return {
+					id,
 					type,
 					name: resolvedName,
 					editor,
@@ -1479,8 +1517,40 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		throw new Error(`Unsupported project item type: ${type}`)
 	}
 
-	private createFolder(name?: string, existingNodes: ProjectNode[] = this.items, visible = true): ProjectFolder {
+	private getPartViewStateStorageKey(partId: string): string {
+		return `${ProjectTreeView.PART_VIEW_STATE_STORAGE_KEY_PREFIX}${this.projectId}:${partId}`
+	}
+
+	private loadPartViewState(partId: string): PartEditorViewState | undefined {
+		if (typeof localStorage === "undefined") {
+			return undefined
+		}
+		try {
+			const raw = localStorage.getItem(this.getPartViewStateStorageKey(partId))
+			if (!raw) {
+				return undefined
+			}
+			return normalizePartEditorViewState(JSON.parse(raw))
+		} catch (error) {
+			console.error("Failed to load part view state", error)
+			return undefined
+		}
+	}
+
+	private savePartViewState(partId: string, state: PartEditorViewState): void {
+		if (typeof localStorage === "undefined") {
+			return
+		}
+		try {
+			localStorage.setItem(this.getPartViewStateStorageKey(partId), JSON.stringify(state))
+		} catch (error) {
+			console.error("Failed to save part view state", error)
+		}
+	}
+
+	private createFolder(name?: string, existingNodes: ProjectNode[] = this.items, visible = true, id = this.createProjectNodeId()): ProjectFolder {
 		return {
+			id,
 			kind: "folder",
 			name: this.resolveFolderName(name, existingNodes),
 			visible,
@@ -1585,6 +1655,30 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		return this.items
 	}
 
+	private getParentIdForContainer(container: ProjectNode[]): string | null {
+		if (container === this.items) {
+			return null
+		}
+		const parent = this.findFolderForChildren(this.items, container)
+		return parent?.id ?? null
+	}
+
+	private findFolderForChildren(nodes: ProjectNode[], children: ProjectNode[]): ProjectFolder | null {
+		for (const node of nodes) {
+			if (!isFolder(node)) {
+				continue
+			}
+			if (node.children === children) {
+				return node
+			}
+			const nested = this.findFolderForChildren(node.children, children)
+			if (nested) {
+				return nested
+			}
+		}
+		return null
+	}
+
 	private pathsEqual(left: number[] | null, right: number[]): boolean {
 		if (!left) {
 			return false
@@ -1601,10 +1695,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private schedulePersist() {
-		if (this.isRestoring || !this.persistenceEnabled) {
+		if (this.isRestoring || (!this.persistenceEnabled && !this.serverBacked)) {
 			this.log("schedulePersist:skipped", {
 				isRestoring: this.isRestoring,
-				persistenceEnabled: this.persistenceEnabled
+				persistenceEnabled: this.persistenceEnabled,
+				serverBacked: this.serverBacked
 			})
 			return
 		}
@@ -1615,9 +1710,67 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.persistTimeout = window.setTimeout(() => {
 			this.log("schedulePersist:timeout-fired")
 			this.persistTimeout = null
-			void this.saveToIndexedDB()
+			void this.persistCurrentProject()
 		}, ProjectTreeView.PERSIST_DEBOUNCE_MS)
 		this.log("schedulePersist:scheduled", { delayMs: ProjectTreeView.PERSIST_DEBOUNCE_MS })
+	}
+
+	private async persistCurrentProject(): Promise<void> {
+		if (this.persistenceEnabled) {
+			await this.saveToIndexedDB()
+		}
+		if (this.serverBacked) {
+			this.saveSnapshotQueue = this.saveSnapshotQueue
+				.then(async () => {
+					await this.commandQueue
+					await this.saveProjectSnapshotToServer()
+				})
+				.catch((error) => {
+					console.error("Failed to persist project snapshot to server", error)
+				})
+			await this.saveSnapshotQueue
+		}
+	}
+
+	private enqueueCommand(command: SyncedProjectCommand): void {
+		if (this.isRestoring || !this.serverBacked) {
+			return
+		}
+		this.commandQueue = this.commandQueue
+			.then(() => this.postCommand(command))
+			.catch((error) => {
+				console.error("Failed to sync project command", error)
+			})
+	}
+
+	private async postCommand(command: SyncedProjectCommand): Promise<void> {
+		const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}/commands`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				clientId: this.clientId,
+				baseRevision: this.serverRevision,
+				commands: [command]
+			})
+		})
+		const result = (await response.json()) as { ok?: boolean; revision?: number; project?: unknown; message?: string }
+		if (response.status === 404) {
+			await this.saveProjectSnapshotToServer()
+			return
+		}
+		if (!response.ok || !result.ok) {
+			throw new Error(result.message ?? `Server responded with ${response.status}`)
+		}
+		if (typeof result.revision === "number") {
+			this.serverRevision = result.revision
+		}
+		const project = normalizeProjectFile(result.project)
+		if (project) {
+			this.restoreFromProjectFile(project)
+			void this.saveToIndexedDB()
+		}
 	}
 
 	private async saveToIndexedDB() {
@@ -1642,6 +1795,105 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		} catch (error) {
 			this.handlePersistenceError("Failed to save project items", error)
 		}
+	}
+
+	private async loadInitialProject(): Promise<void> {
+		const serverLoadResult = await this.loadFromServer()
+		if (serverLoadResult === "loaded") {
+			return
+		}
+		if (this.persistenceEnabled) {
+			await this.loadFromIndexedDB()
+		}
+		if (serverLoadResult === "missing") {
+			await this.saveProjectSnapshotToServer()
+			this.connectProjectEvents()
+		}
+	}
+
+	private async loadFromServer(): Promise<"loaded" | "missing" | "offline"> {
+		if (typeof fetch !== "function") {
+			return "offline"
+		}
+		try {
+			const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}`)
+			if (response.status === 404) {
+				const missingProject = await this.isServerProjectNotFoundResponse(response)
+				if (missingProject) {
+					this.log("loadFromServer:not-found")
+					this.serverBacked = true
+					this.serverRevision = 0
+					return "missing"
+				}
+				return "offline"
+			}
+			if (!response.ok) {
+				throw new Error(`Server responded with ${response.status}`)
+			}
+			const result = (await response.json()) as { ok?: boolean; project?: unknown; revision?: number }
+			const project = normalizeProjectFile(result.project)
+			if (!result.ok || !project) {
+				return "offline"
+			}
+			this.serverBacked = true
+			this.serverRevision = project.revision
+			this.restoreFromProjectFile(project)
+			this.connectProjectEvents()
+			if (this.persistenceEnabled) {
+				void this.saveToIndexedDB()
+			}
+			this.log("loadFromServer:complete", { revision: this.serverRevision })
+			return "loaded"
+		} catch (error) {
+			console.warn("Failed to load server project; falling back to IndexedDB", error)
+			return "offline"
+		}
+	}
+
+	private async isServerProjectNotFoundResponse(response: Response): Promise<boolean> {
+		try {
+			const result = (await response.json()) as { ok?: unknown; code?: unknown }
+			return result.ok === false && result.code === "not_found"
+		} catch {
+			return false
+		}
+	}
+
+	private connectProjectEvents(): void {
+		if (typeof EventSource === "undefined" || this.eventSource) {
+			return
+		}
+		const eventSource = new EventSource(`/api/projects/${encodeURIComponent(this.projectId)}/events?clientId=${encodeURIComponent(this.clientId)}`)
+		eventSource.addEventListener("connected", (event) => {
+			const data = parseEventData<{ revision?: unknown }>(event)
+			if (typeof data?.revision === "number") {
+				this.serverRevision = data.revision
+			}
+		})
+		eventSource.addEventListener("projectChanged", (event) => {
+			const data = parseEventData<{ originClientId?: unknown; revision?: unknown; project?: unknown }>(event)
+			if (!data) {
+				return
+			}
+			if (typeof data.revision === "number") {
+				this.serverRevision = data.revision
+			}
+			if (data.originClientId === this.clientId) {
+				return
+			}
+			const project = normalizeProjectFile(data.project)
+			if (!project) {
+				return
+			}
+			this.restoreFromProjectFile(project)
+			if (this.persistenceEnabled) {
+				void this.saveToIndexedDB()
+			}
+		})
+		eventSource.onerror = () => {
+			this.log("project-events:error")
+		}
+		this.eventSource = eventSource
 	}
 
 	private async loadFromIndexedDB() {
@@ -1697,7 +1949,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		const items = this.buildProjectFileEntries(this.items)
 		return createProjectFile({
 			items,
-			selectedPath: this.selectedPath ? this.selectedPath.slice() : null
+			selectedPath: this.selectedPath ? this.selectedPath.slice() : null,
+			revision: this.serverRevision
 		})
 	}
 
@@ -1705,6 +1958,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		return nodes.map((node) => {
 			if (isFolder(node)) {
 				return {
+					id: node.id,
 					kind: "folder",
 					name: node.name,
 					items: this.buildProjectFileEntries(node.children),
@@ -1713,6 +1967,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			}
 			if (node.type === "schemantic") {
 				return {
+					id: node.id,
 					type: node.type,
 					name: node.name,
 					data: node.getState(),
@@ -1721,20 +1976,23 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			}
 			if (node.type === "part") {
 				return {
+					id: node.id,
 					type: node.type,
 					name: node.name,
 					data: node.getState(),
 					visible: node.visible
 				}
 			}
-			return { type: node.type, name: node.name, visible: node.visible }
+			return { id: node.id, type: node.type, name: node.name, visible: node.visible }
 		})
 	}
 
 	private restoreFromProjectFile(projectFile: Project) {
 		this.isRestoring = true
 		try {
-			this.items = this.createNodesFromEntries(projectFile.items)
+			const partViewStates = this.capturePartViewStates()
+			this.items = this.createNodesFromEntries(projectFile.items, partViewStates)
+			this.serverRevision = projectFile.revision
 			this.selectedPath = projectFile.selectedPath ? projectFile.selectedPath.slice() : null
 			this.renderItems()
 			if (this.selectedPath) {
@@ -1753,18 +2011,36 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
-	private createNodesFromEntries(entries: PersistedProjectNode[]): ProjectNode[] {
+	private capturePartViewStates(): Map<string, PartEditorViewState> {
+		const states = new Map<string, PartEditorViewState>()
+		const visit = (nodes: ProjectNode[]) => {
+			for (const node of nodes) {
+				if (isFolder(node)) {
+					visit(node.children)
+					continue
+				}
+				if (node.type === "part") {
+					states.set(node.id, node.getViewState())
+				}
+			}
+		}
+		visit(this.items)
+		return states
+	}
+
+	private createNodesFromEntries(entries: PersistedProjectNode[], partViewStates: Map<string, PartEditorViewState> = new Map()): ProjectNode[] {
 		const nodes: ProjectNode[] = []
 		for (const entry of entries) {
 			if (this.isFolderEntry(entry)) {
-				const folder = this.createFolder(entry.name, nodes, entry.visible ?? true)
-				folder.children = this.createNodesFromEntries(entry.items)
+				const folder = this.createFolder(entry.name, nodes, entry.visible ?? true, entry.id)
+				folder.children = this.createNodesFromEntries(entry.items, partViewStates)
 				nodes.push(folder)
 				continue
 			}
 			const schemanticState = entry.type === "schemantic" ? entry.data : undefined
 			const partState = entry.type === "part" ? entry.data : undefined
-			nodes.push(this.createProjectItem(entry.type, entry.name, nodes, schemanticState, partState, entry.visible ?? true))
+			const partViewState = entry.type === "part" ? (partViewStates.get(entry.id) ?? this.loadPartViewState(entry.id)) : undefined
+			nodes.push(this.createProjectItem(entry.type, entry.name, nodes, schemanticState, partState, entry.visible ?? true, entry.id, partViewState))
 		}
 		return nodes
 	}
@@ -1795,35 +2071,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	private async saveProjectToServer() {
 		try {
-			const projectFile = this.buildProjectFile()
-			const response = await fetch("/api/projects", {
-				method: "POST",
-				headers: {
-					"Content-Type": PROJECT_FILE_MIME_TYPE
-				},
-				body: serializeProjectFile(projectFile)
-			})
-
-			if (!response.ok) {
-				let errorDetail = ""
-				try {
-					errorDetail = await response.text()
-				} catch {
-					// ignore response body parsing issues
-				}
-				const reason = errorDetail.trim() ? `: ${errorDetail}` : ""
-				throw new Error(`Server responded with ${response.status}${reason}`)
-			}
-
-			let message = "Project saved on server."
-			try {
-				const result = (await response.json()) as { fileName?: string } | null
-				if (result?.fileName) {
-					message = `Project saved on server as ${result.fileName}.`
-				}
-			} catch {
-				// ignore JSON parse issues, best-effort message only
-			}
+			await this.saveProjectSnapshotToServer()
+			const message = "Project saved on server."
+			this.connectProjectEvents()
 
 			console.log(message)
 			if (typeof window !== "undefined" && typeof window.alert === "function") {
@@ -1836,6 +2086,44 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				window.alert(`Failed to save project to server: ${description}`)
 			}
 		}
+	}
+
+	private async saveProjectSnapshotToServer(): Promise<void> {
+		const projectFile = this.buildProjectFile()
+		const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}`, {
+			method: "PUT",
+			headers: {
+				"Content-Type": PROJECT_FILE_MIME_TYPE,
+				"X-PuppyCAD-Client-Id": this.clientId
+			},
+			body: serializeProjectFile(projectFile)
+		})
+
+		if (!response.ok) {
+			let errorDetail = ""
+			try {
+				errorDetail = await response.text()
+			} catch {
+				// ignore response body parsing issues
+			}
+			const reason = errorDetail.trim() ? `: ${errorDetail}` : ""
+			throw new Error(`Server responded with ${response.status}${reason}`)
+		}
+
+		const result = (await response.json()) as { revision?: number; project?: unknown } | null
+		if (typeof result?.revision === "number") {
+			this.serverRevision = result.revision
+		}
+		const normalized = normalizeProjectFile(result?.project)
+		if (normalized) {
+			this.serverRevision = normalized.revision
+			this.restoreFromProjectFile(normalized)
+			if (this.persistenceEnabled) {
+				void this.saveToIndexedDB()
+			}
+		}
+		this.serverBacked = true
+		this.connectProjectEvents()
 	}
 
 	private handlePersistenceError(message: string, error: unknown) {
@@ -1899,6 +2187,79 @@ export async function deleteProjectState(projectId: string): Promise<void> {
 		})
 	} catch (error) {
 		console.error("Failed to delete project state", error)
+	}
+}
+
+function parseEventData<T>(event: Event): T | null {
+	const messageEvent = event as MessageEvent<string>
+	try {
+		return JSON.parse(messageEvent.data) as T
+	} catch {
+		return null
+	}
+}
+
+function normalizePartEditorViewState(input: unknown): PartEditorViewState | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as {
+		sketchVisible?: unknown
+		referencePlaneVisibility?: unknown
+		previewRotation?: unknown
+		previewPan?: unknown
+		previewOrbitPivot?: unknown
+		previewBaseDistance?: unknown
+	}
+	const referencePlaneVisibility = value.referencePlaneVisibility as Partial<Record<keyof PartEditorViewState["referencePlaneVisibility"], unknown>> | undefined
+	if (!referencePlaneVisibility || typeof referencePlaneVisibility !== "object") {
+		return undefined
+	}
+	if (
+		typeof value.sketchVisible !== "boolean" ||
+		typeof referencePlaneVisibility.Front !== "boolean" ||
+		typeof referencePlaneVisibility.Top !== "boolean" ||
+		typeof referencePlaneVisibility.Right !== "boolean"
+	) {
+		return undefined
+	}
+	return {
+		sketchVisible: value.sketchVisible,
+		referencePlaneVisibility: {
+			Front: referencePlaneVisibility.Front,
+			Top: referencePlaneVisibility.Top,
+			Right: referencePlaneVisibility.Right
+		},
+		previewRotation: normalizePartViewRotation(value.previewRotation),
+		previewPan: normalizePartViewVector(value.previewPan),
+		previewOrbitPivot: normalizePartViewVector(value.previewOrbitPivot),
+		previewBaseDistance: typeof value.previewBaseDistance === "number" && Number.isFinite(value.previewBaseDistance) ? value.previewBaseDistance : PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
+	}
+}
+
+function normalizePartViewRotation(input: unknown): PartEditorViewState["previewRotation"] {
+	if (!input || typeof input !== "object") {
+		return {
+			yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
+			pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
+		}
+	}
+	const value = input as { yaw?: unknown; pitch?: unknown }
+	return {
+		yaw: typeof value.yaw === "number" && Number.isFinite(value.yaw) ? value.yaw : PART_PROJECT_DEFAULT_ROTATION.yaw,
+		pitch: typeof value.pitch === "number" && Number.isFinite(value.pitch) ? value.pitch : PART_PROJECT_DEFAULT_ROTATION.pitch
+	}
+}
+
+function normalizePartViewVector(input: unknown): PartEditorViewState["previewPan"] {
+	if (!input || typeof input !== "object") {
+		return { x: 0, y: 0, z: 0 }
+	}
+	const value = input as { x?: unknown; y?: unknown; z?: unknown }
+	return {
+		x: typeof value.x === "number" && Number.isFinite(value.x) ? value.x : 0,
+		y: typeof value.y === "number" && Number.isFinite(value.y) ? value.y : 0,
+		z: typeof value.z === "number" && Number.isFinite(value.z) ? value.z : 0
 	}
 }
 

@@ -1,5 +1,5 @@
 import { ProjectView } from "./project"
-import { ProjectsView, touchProject, renameProject, type ProjectMetadata, getLastOpenedProjectId, listProjects, setLastOpenedProjectId, clearLastOpenedProjectId } from "./projects"
+import { ProjectsView, touchProject, renameProject, type ProjectMetadata, getLastOpenedProjectId, listProjects, setLastOpenedProjectId, clearLastOpenedProjectId, ensureProject } from "./projects"
 import { Container, type UiComponent } from "./ui"
 
 type ViewHistoryState =
@@ -113,15 +113,15 @@ window.onload = () => {
 		return listProjects().find((candidate) => candidate.id === id)
 	}
 
+	const getOrCreateProjectById = (id: string): ProjectMetadata => {
+		return getProjectById(id) ?? ensureProject(id)
+	}
+
 	window.addEventListener("popstate", (event) => {
 		const state = event.state as ViewHistoryState | null
 		if (state?.view === "project") {
-			const project = getProjectById(state.projectId)
-			if (project) {
-				openProject(project, { skipHistory: true, replace: true })
-				return
-			}
-			clearLastOpenedProjectId()
+			openProject(getOrCreateProjectById(state.projectId), { skipHistory: true, replace: true })
+			return
 		}
 		projectsView.refresh()
 		showProjects({ skipHistory: true, replace: true })
@@ -130,13 +130,7 @@ window.onload = () => {
 	projectsView.refresh()
 	const initialProjectId = parseProjectIdFromPath(window.location.pathname)
 	if (initialProjectId) {
-		const project = getProjectById(initialProjectId)
-		if (project) {
-			openProject(project, { replace: true })
-			return
-		}
-		clearLastOpenedProjectId()
-		showProjects({ replace: true })
+		openProject(getOrCreateProjectById(initialProjectId), { replace: true })
 		return
 	}
 	const lastOpenedId = getLastOpenedProjectId()

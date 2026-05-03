@@ -1,6 +1,7 @@
 import type { PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../contract"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors, resolveSketchTargetFrame, type ExtrudedFaceDescriptor, type ExtrudedSolid, type SketchFrame3D } from "../cad/extrude"
 import type { PartAction } from "../part-actions"
+import type { CadCommand } from "../project-commands"
 import {
 	createDefaultPartRuntimeState,
 	createEdgeNodeFromReference,
@@ -102,11 +103,18 @@ export type PartEditorState = PartProjectItemData
 export type PartEditorViewState = {
 	sketchVisible: boolean
 	referencePlaneVisibility: PartProjectReferencePlaneVisibility
+	previewRotation: PartProjectPreviewRotation
+	previewPan: Vector3D
+	previewOrbitPivot: Vector3D
+	previewBaseDistance: number
 }
 
 type PartEditorOptions = {
 	initialState?: PartEditorState
+	initialViewState?: PartEditorViewState
 	onStateChange?: () => void
+	onViewStateChange?: (state: PartEditorViewState) => void
+	onCadCommand?: (command: CadCommand) => void
 	createPreviewRenderer?: (canvas: HTMLCanvasElement) => PreviewRendererLike
 }
 
@@ -209,6 +217,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly quickActionsHeightSection: HTMLDivElement
 	private readonly quickActionsStatusSection: HTMLDivElement
 	private readonly onStateChange?: () => void
+	private readonly onViewStateChange?: (state: PartEditorViewState) => void
+	private readonly onCadCommand?: (command: CadCommand) => void
 	private readonly previewRotation: PartProjectPreviewRotation = {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
 		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
@@ -272,6 +282,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	public constructor(options?: PartEditorOptions) {
 		super(document.createElement("div"))
 		this.onStateChange = options?.onStateChange
+		this.onViewStateChange = options?.onViewStateChange
+		this.onCadCommand = options?.onCadCommand
 		this.migrationWarnings = [...(options?.initialState?.migrationWarnings ?? [])]
 
 		this.root.style.width = "100%"
@@ -578,6 +590,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		document.addEventListener("keydown", this.handleDocumentKeyDown, true)
 
 		this.restoreState(options?.initialState)
+		if (options?.initialViewState) {
+			this.applyViewState(options.initialViewState)
+		}
 
 		if (typeof ResizeObserver === "function") {
 			this.resizeObserver = new ResizeObserver(() => {
@@ -611,8 +626,44 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				Front: this.referencePlaneVisibility.Front,
 				Top: this.referencePlaneVisibility.Top,
 				Right: this.referencePlaneVisibility.Right
-			}
+			},
+			previewRotation: {
+				yaw: this.previewRotation.yaw,
+				pitch: this.previewRotation.pitch
+			},
+			previewPan: {
+				x: this.previewPan.x,
+				y: this.previewPan.y,
+				z: this.previewPan.z
+			},
+			previewOrbitPivot: {
+				x: this.previewOrbitPivot.x,
+				y: this.previewOrbitPivot.y,
+				z: this.previewOrbitPivot.z
+			},
+			previewBaseDistance: this.previewBaseDistance
 		}
+	}
+
+	public applyViewState(state: PartEditorViewState): void {
+		this.sketchVisible = state.sketchVisible
+		this.referencePlaneVisibility = {
+			Front: state.referencePlaneVisibility.Front,
+			Top: state.referencePlaneVisibility.Top,
+			Right: state.referencePlaneVisibility.Right
+		}
+		if (this.selectedReferencePlane && !this.referencePlaneVisibility[this.selectedReferencePlane]) {
+			this.selectedReferencePlane = this.getFirstVisibleReferencePlane()
+		}
+		this.previewRotation.yaw = state.previewRotation.yaw
+		this.previewRotation.pitch = state.previewRotation.pitch
+		this.previewPan.set(state.previewPan.x, state.previewPan.y, state.previewPan.z)
+		this.previewOrbitPivot.set(state.previewOrbitPivot.x, state.previewOrbitPivot.y, state.previewOrbitPivot.z)
+		this.previewBaseDistance = THREE.MathUtils.clamp(state.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		this.refreshReferencePlaneStyles()
+		this.syncPreviewGeometry()
+		this.updateControls()
+		this.drawPreview()
 	}
 
 	private createModeButton(label: string, mode: PartStudioMode): HTMLButtonElement {
@@ -706,6 +757,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.updateStatus()
 		this.updateControls()
 		this.emitStateChange()
+		this.onCadCommand?.(action)
 	}
 
 	private applyCadEditorAction(action: PartAction): boolean {
@@ -955,33 +1007,65 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return "line"
 	}
 
-	public enterSketchMode(): void {
-		const existingDirtySketch = this.features.find((feature) => feature.type === "sketch" && feature.dirty)
-		if (existingDirtySketch && existingDirtySketch.type === "sketch") {
-			this.selectedSketchId = existingDirtySketch.id
-			this.selectedExtrudeId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.extrudeId : null
-			this.selectedFaceId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.faceId : null
-			this.selectedEdgeId = null
-			this.selectedCornerId = null
-			this.selectedReferencePlane = existingDirtySketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[existingDirtySketch.target.plane] : null
-			this.activeTool = "sketch"
-			this.activeSketchTool = this.getDefaultSketchTool(existingDirtySketch)
-			this.selectedSketchEdge = null
-			this.pendingLineStart = null
-			this.pendingRectangleStart = null
-			this.sketchHoverPoint = null
-			if (this.selectedReferencePlane) {
-				this.focusReferencePlaneForSketch(this.selectedReferencePlane)
-			}
-			this.drawSketch()
-			this.updateStatus()
-			this.updateControls()
-			return
+	private static sketchTargetsEqual(left: Sketch["target"], right: Sketch["target"]): boolean {
+		if (left.type !== right.type) {
+			return false
 		}
+		if (left.type === "plane" && right.type === "plane") {
+			return left.plane === right.plane
+		}
+		if (left.type === "face" && right.type === "face") {
+			return left.face.extrudeId === right.face.extrudeId && left.face.faceId === right.face.faceId
+		}
+		return false
+	}
 
+	public enterSketchMode(): void {
 		const selectedFace = this.getSelectedFaceReference()
 		const selectedPlane = selectedFace ? null : (this.selectedReferencePlane ?? this.getFirstVisibleReferencePlane())
-		if (!selectedFace && !selectedPlane) {
+		const requestedTarget: Sketch["target"] | null = selectedFace
+			? {
+					type: "face",
+					face: selectedFace
+				}
+			: selectedPlane
+				? {
+						type: "plane",
+						plane: REFERENCE_PLANE_TO_SKETCH_PLANE[selectedPlane]
+					}
+				: null
+		const existingDirtySketch = this.features.find((feature) => feature.type === "sketch" && feature.dirty)
+		if (existingDirtySketch && existingDirtySketch.type === "sketch") {
+			if (requestedTarget && !PartEditor.sketchTargetsEqual(existingDirtySketch.target, requestedTarget)) {
+				if (!this.closeDirtySketchBeforeStartingAnother(existingDirtySketch)) {
+					this.updateStatus()
+					this.updateControls()
+					return
+				}
+			} else {
+				this.selectedSketchId = existingDirtySketch.id
+				this.selectedExtrudeId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.extrudeId : null
+				this.selectedFaceId = existingDirtySketch.target.type === "face" ? existingDirtySketch.target.face.faceId : null
+				this.selectedEdgeId = null
+				this.selectedCornerId = null
+				this.selectedReferencePlane = existingDirtySketch.target.type === "plane" ? SKETCH_PLANE_TO_REFERENCE_PLANE[existingDirtySketch.target.plane] : null
+				this.activeTool = "sketch"
+				this.activeSketchTool = this.getDefaultSketchTool(existingDirtySketch)
+				this.selectedSketchEdge = null
+				this.pendingLineStart = null
+				this.pendingRectangleStart = null
+				this.sketchHoverPoint = null
+				if (this.selectedReferencePlane) {
+					this.focusReferencePlaneForSketch(this.selectedReferencePlane)
+				}
+				this.drawSketch()
+				this.updateStatus()
+				this.updateControls()
+				return
+			}
+		}
+
+		if (!requestedTarget) {
 			return
 		}
 
@@ -995,16 +1079,26 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			type: "createSketch",
 			sketchId: `sketch-${this.features.filter((feature) => feature.type === "sketch").length + 1}-${createId()}`,
 			name: this.getNextSketchName(),
-			target: selectedFace
-				? {
-						type: "face",
-						face: selectedFace
-					}
-				: {
-						type: "plane",
-						plane: REFERENCE_PLANE_TO_SKETCH_PLANE[selectedPlane as ReferencePlaneName]
-					}
+			target: requestedTarget
 		})
+	}
+
+	private closeDirtySketchBeforeStartingAnother(sketch: Sketch): boolean {
+		if (sketch.profiles.length === 1) {
+			this.dispatchPartAction({
+				type: "finishSketch",
+				sketchId: sketch.id
+			})
+			return !this.features.some((feature) => feature.type === "sketch" && feature.dirty)
+		}
+		if (sketch.entities.length === 0) {
+			this.dispatchPartAction({
+				type: "deleteSketch",
+				sketchId: sketch.id
+			})
+			return !this.features.some((feature) => feature.type === "sketch" && feature.dirty)
+		}
+		return false
 	}
 
 	public selectReferencePlane(planeName: ReferencePlaneName): void {
@@ -1075,7 +1169,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.refreshReferencePlaneStyles()
 		this.updateControls()
 		this.drawPreview()
-		this.emitStateChange()
+		this.emitViewStateChange()
 	}
 
 	public setSketchVisible(visible: boolean): void {
@@ -1086,7 +1180,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.syncPreviewGeometry()
 		this.updateControls()
 		this.drawPreview()
-		this.emitStateChange()
+		this.emitViewStateChange()
 	}
 
 	public listSketches(): SketchListEntry[] {
@@ -1368,6 +1462,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		try {
 			this.cadEditor.renameNode(nodeId, trimmedName)
 			this.syncAfterPCadNodeMutation(nodeId)
+			this.onCadCommand?.({ type: "renameNode", nodeId, name: trimmedName })
 		} catch (_error) {
 			return
 		}
@@ -1382,6 +1477,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.cadEditor.setExtrudeDepth(nodeId, depth)
 			this.selectedExtrudeId = nodeId
 			this.syncAfterPCadNodeMutation(nodeId)
+			this.onCadCommand?.({ type: "setExtrudeDepth", extrudeId: nodeId, depth })
 		} catch (_error) {
 			return
 		}
@@ -1395,6 +1491,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		try {
 			this.cadEditor.setChamferDistance(nodeId, d1, d2)
 			this.syncAfterPCadNodeMutation(nodeId)
+			this.onCadCommand?.({ type: "setChamferDistances", chamferId: nodeId, d1, ...(d2 === undefined ? {} : { d2 }) })
 		} catch (_error) {
 			return
 		}
@@ -1416,6 +1513,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			dirtySketchIds: this.partTreeState.dirtySketchIds.filter((id) => !deletedIds.has(id))
 		}
 		this.syncAfterPCadNodeMutation(null)
+		this.onCadCommand?.({ type: "deleteNodeCascade", nodeId })
 	}
 
 	private syncAfterPCadNodeMutation(selectedNodeId: string | null): void {
@@ -1616,8 +1714,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pendingLineStart = null
 		this.pendingRectangleStart = null
 		this.sketchHoverPoint = null
+		this.sketchVisible = true
+		this.referencePlaneVisibility = {
+			Front: true,
+			Top: true,
+			Right: true
+		}
 		if (this.activeTool === "sketch" && this.selectedReferencePlane) {
-			this.focusReferencePlaneForSketch(this.selectedReferencePlane)
+			this.focusReferencePlaneForSketch(this.selectedReferencePlane, { resetView: true })
 		}
 		this.warningText.textContent = this.migrationWarnings.join(" ")
 		this.updateModeButtons()
@@ -2079,6 +2183,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewPan.y -= dy * panScale.y
 		}
 		this.drawPreview()
+		this.emitViewStateChange()
 	}
 
 	private handlePreviewPointerUp = (event: PointerEvent): void => {
@@ -2114,6 +2219,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const zoomFactor = Math.exp(event.deltaY * PREVIEW_ZOOM_SENSITIVITY)
 		this.previewBaseDistance = THREE.MathUtils.clamp(this.previewBaseDistance * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
 		this.drawPreview()
+		this.emitViewStateChange()
 	}
 
 	private handleDocumentKeyDown = (event: KeyboardEvent): void => {
@@ -3399,7 +3505,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return true
 	}
 
-	private focusReferencePlaneForSketch(planeName: ReferencePlaneName | null): void {
+	private focusReferencePlaneForSketch(planeName: ReferencePlaneName | null, options?: { resetView?: boolean }): void {
 		if (!planeName) {
 			return
 		}
@@ -3417,9 +3523,17 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.previewRotation.pitch = 0
 				break
 		}
+		const shouldResetView = options?.resetView === true || (options?.resetView !== false && this.isPreviewViewAtDefaultFraming())
+		if (!shouldResetView) {
+			return
+		}
 		this.previewPan.set(0, 0, 0)
 		this.previewOrbitPivot.set(0, 0, 0)
 		this.previewBaseDistance = Math.min(this.previewBaseDistance, 28)
+	}
+
+	private isPreviewViewAtDefaultFraming(): boolean {
+		return this.previewPan.lengthSq() <= 1e-12 && this.previewOrbitPivot.lengthSq() <= 1e-12 && Math.abs(this.previewBaseDistance - PART_PROJECT_DEFAULT_PREVIEW_DISTANCE) <= 1e-9
 	}
 
 	private syncPreviewGeometry(): void {
@@ -4162,6 +4276,10 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private emitStateChange(): void {
 		this.onStateChange?.()
+	}
+
+	private emitViewStateChange(): void {
+		this.onViewStateChange?.(this.getViewState())
 	}
 }
 

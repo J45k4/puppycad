@@ -515,6 +515,7 @@ export type PartProjectReferencePlaneVisibility = {
 export type PartProjectItemData = PartDocument
 
 export type ProjectSchemanticDocument = {
+	id: string
 	type: "schemantic"
 	name: string
 	data?: SchemanticProjectItemData
@@ -522,6 +523,7 @@ export type ProjectSchemanticDocument = {
 }
 
 export type ProjectPartDocument = {
+	id: string
 	type: "part"
 	name: string
 	data?: PartProjectItemData
@@ -529,6 +531,7 @@ export type ProjectPartDocument = {
 }
 
 export type ProjectAssemblyDocument = {
+	id: string
 	type: "assembly"
 	name: string
 	data?: Assembly
@@ -536,6 +539,7 @@ export type ProjectAssemblyDocument = {
 }
 
 export type ProjectOtherDocument = {
+	id: string
 	type: Exclude<ProjectDocumentType, "schemantic" | "part" | "assembly">
 	name: string
 	visible?: boolean
@@ -544,6 +548,7 @@ export type ProjectOtherDocument = {
 export type ProjectDocument = ProjectSchemanticDocument | ProjectPartDocument | ProjectAssemblyDocument | ProjectOtherDocument
 
 export type ProjectFolder = {
+	id: string
 	kind: "folder"
 	name: string
 	items: ProjectNode[]
@@ -552,10 +557,11 @@ export type ProjectFolder = {
 
 export type ProjectNode = ProjectDocument | ProjectFolder
 
-export type ProjectVersion = 3
+export type ProjectVersion = 4
 
 export type Project = {
 	version: ProjectVersion
+	revision: number
 	items: ProjectNode[]
 	selectedPath: number[] | null
 }
