@@ -29,14 +29,14 @@ const extrude: Extract<PCadGraphNode, { type: "extrude" }> = {
 	depth: 12
 }
 
-const edge: PCadGraphNode = {
+const edge: Extract<PCadGraphNode, { type: "edge" }> = {
 	id: "edge-extrude-1-edge-1",
 	type: "edge",
 	sourceId: extrude.id,
 	edgeId: "extrude-1-solid-edge-1"
 }
 
-const face: PCadGraphNode = {
+const face: Extract<PCadGraphNode, { type: "face" }> = {
 	id: "face-extrude-1-face-1",
 	type: "face",
 	sourceId: extrude.id,
@@ -62,6 +62,17 @@ function createState(): PCadState {
 			[chamfer.id, chamfer]
 		]),
 		rootNodeIds: [plane.id, extrude.id, chamfer.id]
+	}
+}
+
+function createStateWithoutAuthoredTopologyRefs(): PCadState {
+	return {
+		nodes: new Map<string, PCadGraphNode>([
+			[plane.id, plane],
+			[sketch.id, sketch],
+			[extrude.id, extrude]
+		]),
+		rootNodeIds: [plane.id, extrude.id]
 	}
 }
 
@@ -105,8 +116,8 @@ function createGeneratedState(): { features: PartFeature[]; solids: Solid[] } {
 					{ id: "v1", position: { x: 0, y: 0, z: 0 } },
 					{ id: "v2", position: { x: 1, y: 0, z: 0 } }
 				],
-				edges: [{ id: "e1", vertexIds: ["v1", "v2"] }],
-				faces: [{ id: "f1", edgeIds: ["e1"] }]
+				edges: [{ id: edge.edgeId, vertexIds: ["v1", "v2"] }],
+				faces: [{ id: face.faceId, edgeIds: [edge.edgeId] }]
 			}
 		]
 	}
@@ -161,6 +172,37 @@ describe("PCadNodeEditor", () => {
 			from: { componentId: edgeComponentId, edge: "right", ratio: 0.5 },
 			to: { componentId: chamferComponentId, edge: "left", ratio: 0.5 }
 		})
+	})
+
+	it("hides unreferenced generated solid geometry until its parent is selected or show all is enabled", () => {
+		const editor = new PCadNodeEditor({ state: createStateWithoutAuthoredTopologyRefs(), generatedState: createGeneratedState() })
+		let components = editor.getCanvasForTesting().getComponents()
+		expect(components.some((component) => component.data?.nodeType === "generatedSolid")).toBe(false)
+		expect(components.some((component) => component.data?.nodeType === "generatedSolidFace")).toBe(false)
+
+		const showAll = editor.root.querySelector<HTMLInputElement>('input[type="checkbox"]')
+		expect(showAll).not.toBeNull()
+		if (!showAll) {
+			throw new Error("Expected show all generated toggle")
+		}
+		showAll.checked = true
+		showAll.dispatchEvent(new window.Event("change", { bubbles: true }))
+		components = editor.getCanvasForTesting().getComponents()
+
+		expect(components.some((component) => component.data?.nodeType === "generatedSolid")).toBe(true)
+		expect(components.some((component) => component.data?.nodeType === "generatedSolidFace")).toBe(true)
+	})
+
+	it("shows generated geometry when its parent node is selected", () => {
+		const editor = new PCadNodeEditor({
+			state: createStateWithoutAuthoredTopologyRefs(),
+			generatedState: createGeneratedState(),
+			selectedNodeId: extrude.id
+		})
+		const components = editor.getCanvasForTesting().getComponents()
+
+		expect(components.some((component) => component.data?.nodeType === "generatedSolid")).toBe(true)
+		expect(components.some((component) => component.data?.nodeType === "generatedSolidFace")).toBe(true)
 	})
 
 	it("displays generated sketch topology and solid state as read-only graph nodes", () => {
@@ -250,7 +292,7 @@ describe("PCadNodeEditor", () => {
 
 		canvas.setSelection([generatedEdge.id])
 
-		expect(generatedSelections).toEqual(["solidEdge:generated:extrude-1-solid:solid-edge:e1"])
+		expect(generatedSelections).toEqual(["solidEdge:generated:extrude-1-solid:solid-edge:extrude-1-solid-edge-1"])
 	})
 
 	it("maps sketch data node selection to generated selection callbacks", () => {

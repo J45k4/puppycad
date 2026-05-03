@@ -98,6 +98,7 @@ type PCadNodeEditorOptions = {
 	state: PCadState
 	generatedState?: PCadGeneratedState
 	selectedNodeId?: string | null
+	showAllGenerated?: boolean
 	onSelectNode?: (nodeId: string | null) => void
 	onSelectGenerated?: (selection: PCadGeneratedSelection) => void
 	onRenameNode?: (nodeId: string, name: string) => void
@@ -116,7 +117,8 @@ const NODE_START_Y = 44
 export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 	private readonly editor: EditorCanvas<PCadNodeComponentData>
 	private readonly inspector: HTMLDivElement
-	private readonly options: Omit<PCadNodeEditorOptions, "state" | "generatedState" | "selectedNodeId">
+	private readonly showAllGeneratedInput: HTMLInputElement
+	private readonly options: Omit<PCadNodeEditorOptions, "state" | "generatedState" | "selectedNodeId" | "showAllGenerated">
 	private readonly nodePositions = new Map<string, { x: number; y: number }>()
 	private graphIdByComponentId = new Map<number, string>()
 	private componentIdByGraphId = new Map<string, number>()
@@ -124,6 +126,7 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 	private state: PCadState
 	private generatedState?: PCadGeneratedState
 	private selectedGraphId: string | null
+	private showAllGenerated: boolean
 	private suppressSelectionChange = false
 
 	public constructor(options: PCadNodeEditorOptions) {
@@ -139,6 +142,7 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 		this.state = options.state
 		this.generatedState = options.generatedState
 		this.selectedGraphId = options.selectedNodeId ?? null
+		this.showAllGenerated = options.showAllGenerated ?? false
 
 		this.root.className = "pcad-node-editor"
 		this.root.style.display = "flex"
@@ -154,7 +158,34 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 		graphPane.style.minWidth = "0"
 		graphPane.style.minHeight = "0"
 		graphPane.style.display = "flex"
+		graphPane.style.flexDirection = "column"
+		graphPane.style.gap = "8px"
 		this.root.appendChild(graphPane)
+
+		const graphToolbar = document.createElement("div")
+		graphToolbar.style.display = "flex"
+		graphToolbar.style.justifyContent = "flex-end"
+		graphToolbar.style.alignItems = "center"
+		graphToolbar.style.flex = "0 0 auto"
+		graphToolbar.style.minWidth = "0"
+		graphPane.appendChild(graphToolbar)
+
+		const showAllGeneratedLabel = document.createElement("label")
+		showAllGeneratedLabel.style.display = "inline-flex"
+		showAllGeneratedLabel.style.alignItems = "center"
+		showAllGeneratedLabel.style.gap = "6px"
+		showAllGeneratedLabel.style.fontSize = "12px"
+		showAllGeneratedLabel.style.fontWeight = "700"
+		showAllGeneratedLabel.style.color = "#334155"
+		this.showAllGeneratedInput = document.createElement("input")
+		this.showAllGeneratedInput.type = "checkbox"
+		this.showAllGeneratedInput.checked = this.showAllGenerated
+		this.showAllGeneratedInput.addEventListener("change", () => {
+			this.showAllGenerated = this.showAllGeneratedInput.checked
+			this.applyGraph(this.buildCurrentGraph())
+		})
+		showAllGeneratedLabel.append(this.showAllGeneratedInput, document.createTextNode("Show all generated"))
+		graphToolbar.appendChild(showAllGeneratedLabel)
 
 		this.inspector = document.createElement("div")
 		this.inspector.className = "pcad-node-inspector"
@@ -169,7 +200,7 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 		this.inspector.style.overflowY = "auto"
 		this.root.appendChild(this.inspector)
 
-		const graph = buildGraph(this.state, this.nodePositions, this.generatedState)
+		const graph = this.buildCurrentGraph()
 		this.editor = new EditorCanvas<PCadNodeComponentData>({
 			initialComponents: graph.components,
 			initialConnections: graph.connections,
@@ -195,11 +226,18 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 		this.state = state
 		this.generatedState = generatedState
 		this.selectedGraphId = selectedNodeId ?? null
-		this.applyGraph(buildGraph(this.state, this.nodePositions, this.generatedState))
+		this.applyGraph(this.buildCurrentGraph())
 	}
 
 	public getCanvasForTesting(): EditorCanvas<PCadNodeComponentData> {
 		return this.editor
+	}
+
+	private buildCurrentGraph(): { components: CanvasComponent<PCadNodeComponentData>[]; connections: Connection[]; generatedNodes: GeneratedGraphNode[] } {
+		return buildGraph(this.state, this.nodePositions, this.generatedState, {
+			selectedGraphId: this.selectedGraphId,
+			showAllGenerated: this.showAllGenerated
+		})
 	}
 
 	private applyGraph(graph: { components: CanvasComponent<PCadNodeComponentData>[]; connections: Connection[]; generatedNodes: GeneratedGraphNode[] }): void {
@@ -348,10 +386,11 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 function buildGraph(
 	state: PCadState,
 	positions: ReadonlyMap<string, { x: number; y: number }>,
-	generatedState?: PCadGeneratedState
+	generatedState?: PCadGeneratedState,
+	options: { selectedGraphId?: string | null; showAllGenerated?: boolean } = {}
 ): { components: CanvasComponent<PCadNodeComponentData>[]; connections: Connection[]; generatedNodes: GeneratedGraphNode[] } {
 	const pcadNodes = getSortedNodes(state)
-	const generatedNodes = buildGeneratedNodes(state, generatedState)
+	const generatedNodes = filterGeneratedNodes(buildGeneratedNodes(state, generatedState), state, options)
 	const graphNodes = [
 		...pcadNodes.map(
 			(node): RenderGraphNode => ({
@@ -472,6 +511,89 @@ function computeDepths(nodes: readonly RenderGraphNode[]): Map<string, number> {
 		visit(node.id)
 	}
 	return depthById
+}
+
+function filterGeneratedNodes(nodes: readonly GeneratedGraphNode[], state: PCadState, options: { selectedGraphId?: string | null; showAllGenerated?: boolean }): GeneratedGraphNode[] {
+	if (options.showAllGenerated) {
+		return [...nodes]
+	}
+
+	const nodeById = new Map(nodes.map((node) => [node.id, node]))
+	const visibleIds = new Set<string>()
+	const addVisibleWithDependencies = (nodeId: string): void => {
+		if (visibleIds.has(nodeId)) {
+			return
+		}
+		const node = nodeById.get(nodeId)
+		if (!node) {
+			return
+		}
+		visibleIds.add(nodeId)
+		for (const dependencyId of node.dependencies) {
+			addVisibleWithDependencies(dependencyId)
+		}
+	}
+
+	const selectedGraphId = options.selectedGraphId ?? null
+	const selectedNode = selectedGraphId ? state.nodes.get(selectedGraphId) : undefined
+	const selectedSourceId = selectedNode && (selectedNode.type === "sketch" || selectedNode.type === "extrude") ? selectedNode.id : undefined
+	if (selectedGraphId && nodeById.has(selectedGraphId)) {
+		addVisibleWithDependencies(selectedGraphId)
+	}
+	if (selectedSourceId) {
+		for (const node of nodes) {
+			if (isGeneratedGeometryNode(node) && node.sourceId === selectedSourceId) {
+				addVisibleWithDependencies(node.id)
+			}
+		}
+	}
+
+	for (const node of state.nodes.values()) {
+		if (node.type === "extrude") {
+			addVisibleWithDependencies(getGeneratedSketchProfileNodeId(node.sketchId, node.profileId))
+			continue
+		}
+		if (node.type === "face") {
+			for (const generatedNode of nodes) {
+				if (
+					generatedNode.type === "generatedSolidFace" &&
+					generatedNode.selection?.type === "solidFace" &&
+					generatedNode.selection.extrudeId === node.sourceId &&
+					generatedNode.selection.faceId === node.faceId
+				) {
+					addVisibleWithDependencies(generatedNode.id)
+				}
+			}
+			continue
+		}
+		if (node.type === "edge") {
+			for (const generatedNode of nodes) {
+				if (
+					generatedNode.type === "generatedSolidEdge" &&
+					generatedNode.selection?.type === "solidEdge" &&
+					generatedNode.selection.extrudeId === node.sourceId &&
+					generatedNode.selection.edgeId === node.edgeId
+				) {
+					addVisibleWithDependencies(generatedNode.id)
+				}
+			}
+		}
+	}
+
+	return nodes.filter((node) => !isGeneratedGeometryNode(node) || visibleIds.has(node.id))
+}
+
+function isGeneratedGeometryNode(node: GeneratedGraphNode): boolean {
+	return (
+		node.type === "generatedSketch" ||
+		node.type === "generatedSketchVertex" ||
+		node.type === "generatedSketchLoop" ||
+		node.type === "generatedSketchProfile" ||
+		node.type === "generatedSolid" ||
+		node.type === "generatedSolidVertex" ||
+		node.type === "generatedSolidEdge" ||
+		node.type === "generatedSolidFace"
+	)
 }
 
 function buildGeneratedNodes(state: PCadState, generatedState?: PCadGeneratedState): GeneratedGraphNode[] {

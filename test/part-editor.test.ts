@@ -716,10 +716,10 @@ describe("PartEditor", () => {
 			selectedCornerId: string | null
 		}
 		const canvas = partEditor.nodeEditor.getCanvasForTesting()
-		const components = canvas.getComponents()
-		const generatedFace = components.find((component) => component.data?.nodeType === "generatedSolidFace")
-		const generatedEdge = components.find((component) => component.data?.nodeType === "generatedSolidEdge")
-		const generatedVertex = components.find((component) => component.data?.nodeType === "generatedSolidVertex")
+		const getGeneratedNode = (nodeType: string) => canvas.getComponents().find((component) => component.data?.nodeType === nodeType)
+		const generatedFace = getGeneratedNode("generatedSolidFace")
+		const generatedEdge = getGeneratedNode("generatedSolidEdge")
+		const generatedVertex = getGeneratedNode("generatedSolidVertex")
 		expect(generatedFace).toBeDefined()
 		expect(generatedEdge).toBeDefined()
 		expect(generatedVertex).toBeDefined()
@@ -732,12 +732,22 @@ describe("PartEditor", () => {
 		expect(partEditor.selectedFaceId).not.toBeNull()
 		expect(solid?.faces.some((face) => face.material.opacity > 0)).toBe(true)
 
-		canvas.setSelection([generatedEdge.id])
+		const visibleGeneratedEdge = getGeneratedNode("generatedSolidEdge")
+		expect(visibleGeneratedEdge).toBeDefined()
+		if (!visibleGeneratedEdge) {
+			throw new Error("Expected generated edge to remain visible")
+		}
+		canvas.setSelection([visibleGeneratedEdge.id])
 		solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
 		expect(partEditor.selectedEdgeId).not.toBeNull()
 		expect(solid?.edges.some((edge) => edge.highlight.visible)).toBe(true)
 
-		canvas.setSelection([generatedVertex.id])
+		const visibleGeneratedVertex = getGeneratedNode("generatedSolidVertex")
+		expect(visibleGeneratedVertex).toBeDefined()
+		if (!visibleGeneratedVertex) {
+			throw new Error("Expected generated vertex to remain visible")
+		}
+		canvas.setSelection([visibleGeneratedVertex.id])
 		solid = partEditor.previewSolids.find((entry) => entry.extrudeId === extrudeId)
 		expect(partEditor.selectedCornerId).not.toBeNull()
 		expect(solid?.corners.some((corner) => corner.marker.visible)).toBe(true)
