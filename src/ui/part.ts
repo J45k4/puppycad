@@ -114,7 +114,7 @@ type PartEditorOptions = {
 	initialViewState?: PartEditorViewState
 	onStateChange?: () => void
 	onViewStateChange?: (state: PartEditorViewState) => void
-	onCadCommand?: (command: CadCommand) => void
+	onCadCommand?: (command: CadCommand, previousState: PartEditorState) => void
 	createPreviewRenderer?: (canvas: HTMLCanvasElement) => PreviewRendererLike
 }
 
@@ -218,7 +218,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly quickActionsStatusSection: HTMLDivElement
 	private readonly onStateChange?: () => void
 	private readonly onViewStateChange?: (state: PartEditorViewState) => void
-	private readonly onCadCommand?: (command: CadCommand) => void
+	private readonly onCadCommand?: (command: CadCommand, previousState: PartEditorState) => void
 	private readonly previewRotation: PartProjectPreviewRotation = {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
 		pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
@@ -740,6 +740,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	public dispatchPartAction(action: PartAction): void {
 		const deletedExtrude = action.type === "deleteExtrude" ? this.resolveExtrude(action.extrudeId) : null
+		const previousState = this.getState()
 		const previousCadState = this.cadEditor.getState()
 		const previousTreeState = this.partTreeState
 		if (!this.applyCadEditorAction(action)) {
@@ -757,7 +758,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.updateStatus()
 		this.updateControls()
 		this.emitStateChange()
-		this.onCadCommand?.(action)
+		this.onCadCommand?.(action, previousState)
 	}
 
 	private applyCadEditorAction(action: PartAction): boolean {
@@ -1459,10 +1460,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!node || !trimmedName || !this.canRenamePCadNode(node) || node.name === trimmedName) {
 			return
 		}
+		const previousState = this.getState()
 		try {
 			this.cadEditor.renameNode(nodeId, trimmedName)
 			this.syncAfterPCadNodeMutation(nodeId)
-			this.onCadCommand?.({ type: "renameNode", nodeId, name: trimmedName })
+			this.onCadCommand?.({ type: "renameNode", nodeId, name: trimmedName }, previousState)
 		} catch (_error) {
 			return
 		}
@@ -1473,11 +1475,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!node || node.type !== "extrude" || !Number.isFinite(depth) || depth <= 0 || node.depth === depth) {
 			return
 		}
+		const previousState = this.getState()
 		try {
 			this.cadEditor.setExtrudeDepth(nodeId, depth)
 			this.selectedExtrudeId = nodeId
 			this.syncAfterPCadNodeMutation(nodeId)
-			this.onCadCommand?.({ type: "setExtrudeDepth", extrudeId: nodeId, depth })
+			this.onCadCommand?.({ type: "setExtrudeDepth", extrudeId: nodeId, depth }, previousState)
 		} catch (_error) {
 			return
 		}
@@ -1488,10 +1491,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!node || node.type !== "chamfer" || !Number.isFinite(d1) || d1 <= 0 || (d2 !== undefined && (!Number.isFinite(d2) || d2 <= 0)) || (node.d1 === d1 && node.d2 === d2)) {
 			return
 		}
+		const previousState = this.getState()
 		try {
 			this.cadEditor.setChamferDistance(nodeId, d1, d2)
 			this.syncAfterPCadNodeMutation(nodeId)
-			this.onCadCommand?.({ type: "setChamferDistances", chamferId: nodeId, d1, ...(d2 === undefined ? {} : { d2 }) })
+			this.onCadCommand?.({ type: "setChamferDistances", chamferId: nodeId, d1, ...(d2 === undefined ? {} : { d2 }) }, previousState)
 		} catch (_error) {
 			return
 		}
@@ -1502,6 +1506,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!node || !this.canDeletePCadNode(node)) {
 			return
 		}
+		const previousState = this.getState()
 		const deletedIds = collectDependentNodeIds(this.cadEditor.getState(), [nodeId])
 		try {
 			this.cadEditor.deleteNodeCascade(nodeId)
@@ -1513,7 +1518,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			dirtySketchIds: this.partTreeState.dirtySketchIds.filter((id) => !deletedIds.has(id))
 		}
 		this.syncAfterPCadNodeMutation(null)
-		this.onCadCommand?.({ type: "deleteNodeCascade", nodeId })
+		this.onCadCommand?.({ type: "deleteNodeCascade", nodeId }, previousState)
 	}
 
 	private syncAfterPCadNodeMutation(selectedNodeId: string | null): void {

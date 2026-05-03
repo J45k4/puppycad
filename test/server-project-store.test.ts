@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { unlink } from "node:fs/promises"
 import type { Project } from "../src/contract"
-import { getProject, getProjectEvents, getProjectFileUrl, persistProject, postProjectCommands, putProject } from "../src/server/save-project"
+import { getProject, getProjectEvents, getProjectFileUrl, persistProject, postProjectCommands, postProjectRedo, postProjectUndo, putProject } from "../src/server/save-project"
 
 const createdProjectIds: string[] = []
 
@@ -145,6 +145,51 @@ describe("server project store", () => {
 		expect(changed).toContain("Broadcast Part")
 		await reader.cancel()
 	})
+
+	it("undoes and redoes accepted project command batches", async () => {
+		const projectId = createProjectId()
+		await persistProject(projectId, createProject())
+
+		await postProjectCommands(createCommandRequest(projectId, "client-a", [{ type: "renameNode", nodeId: "part-1", name: "Undoable Part" }]), projectId)
+
+		const undoResponse = await postProjectUndo(createHistoryRequest(projectId, "client-a"), projectId)
+		expect(undoResponse.status).toBe(200)
+		const undone = (await undoResponse.json()) as { ok: boolean; revision: number; project: Project; canUndo: boolean; canRedo: boolean }
+		expect(undone.ok).toBe(true)
+		expect(undone.project.items[0]?.name).toBe("Part")
+		expect(undone.revision).toBe(2)
+		expect(undone.canUndo).toBe(false)
+		expect(undone.canRedo).toBe(true)
+
+		const redoResponse = await postProjectRedo(createHistoryRequest(projectId, "client-a"), projectId)
+		expect(redoResponse.status).toBe(200)
+		const redone = (await redoResponse.json()) as { ok: boolean; revision: number; project: Project; canUndo: boolean; canRedo: boolean }
+		expect(redone.ok).toBe(true)
+		expect(redone.project.items[0]?.name).toBe("Undoable Part")
+		expect(redone.revision).toBe(3)
+		expect(redone.canUndo).toBe(true)
+		expect(redone.canRedo).toBe(false)
+	})
+
+	it("broadcasts undo and redo changes to SSE subscribers", async () => {
+		const projectId = createProjectId()
+		await persistProject(projectId, createProject())
+		await postProjectCommands(createCommandRequest(projectId, "client-a", [{ type: "renameNode", nodeId: "part-1", name: "Broadcast Undo Part" }]), projectId)
+
+		const events = await getProjectEvents(new Request(`http://localhost/api/projects/${projectId}/events?clientId=client-b`), projectId)
+		const reader = events.body?.getReader()
+		if (!reader) {
+			throw new Error("Expected SSE body")
+		}
+		await readSseChunk(reader)
+
+		await postProjectUndo(createHistoryRequest(projectId, "client-a"), projectId)
+		const changed = await readSseChunk(reader)
+		expect(changed).toContain("event: projectChanged")
+		expect(changed).toContain('"canRedo":true')
+		expect(changed).toContain('"name":"Part"')
+		await reader.cancel()
+	})
 })
 
 function createProjectId(): string {
@@ -169,6 +214,16 @@ function createCommandRequest(projectId: string, clientId: string, commands: unk
 			clientId,
 			baseRevision: 0,
 			commands
+		})
+	})
+}
+
+function createHistoryRequest(projectId: string, clientId: string): Request {
+	return new Request(`http://localhost/api/projects/${projectId}/history`, {
+		method: "POST",
+		body: JSON.stringify({
+			clientId,
+			baseRevision: 0
 		})
 	})
 }

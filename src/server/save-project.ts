@@ -18,11 +18,16 @@ type ProjectChangedEvent = {
 	originClientId: string
 	commands: SyncedProjectCommand[]
 	project: Project
+	canUndo?: boolean
+	canRedo?: boolean
 }
 
 const textEncoder = new TextEncoder()
 const subscribersByProjectId = new Map<string, Set<ProjectEventSubscriber>>()
 const projectQueues = new Map<string, Promise<void>>()
+const undoStacksByProjectId = new Map<string, Project[]>()
+const redoStacksByProjectId = new Map<string, Project[]>()
+const MAX_PROJECT_HISTORY = 100
 
 async function ensureDirectory() {
 	if (existsSync(SAVE_DIRECTORY_URL)) {
@@ -65,7 +70,7 @@ export async function getProject(request: Request, projectId: string): Promise<R
 		if (!project) {
 			return Response.json({ ok: false, code: "not_found", message: "Project not found." }, { status: 404 })
 		}
-		return Response.json({ ok: true, projectId, revision: project.revision, project })
+		return Response.json({ ok: true, projectId, revision: project.revision, project, ...getProjectHistoryState(projectId) })
 	} catch (error) {
 		console.error("Failed to load project", error)
 		return Response.json({ ok: false, code: "load_failed", message: "Unable to load project." }, { status: 500 })
@@ -89,6 +94,10 @@ export async function putProject(request: Request, projectId: string): Promise<R
 	try {
 		const currentProject = await loadProject(projectId)
 		if (currentProject) {
+			pushProjectHistory(undoStacksByProjectId, projectId, currentProject)
+			clearProjectRedoHistory(projectId)
+		}
+		if (currentProject) {
 			projectFile.revision = currentProject.revision + 1
 		}
 		const project = await persistProject(projectId, projectFile)
@@ -99,9 +108,10 @@ export async function putProject(request: Request, projectId: string): Promise<R
 			revision: project.revision,
 			originClientId,
 			commands: [],
-			project
+			project,
+			...getProjectHistoryState(projectId)
 		})
-		return Response.json({ ok: true, projectId, revision: project.revision, project })
+		return Response.json({ ok: true, projectId, revision: project.revision, project, ...getProjectHistoryState(projectId) })
 	} catch (error) {
 		console.error("Failed to persist project", error)
 		return Response.json({ ok: false, code: "persist_failed", message: "Unable to persist project." }, { status: 500 })
@@ -136,7 +146,9 @@ export async function postProjectCommands(request: Request, projectId: string): 
 			return Response.json({ ok: false, code: "not_found", message: "Project not found." }, { status: 404 })
 		}
 		try {
+			pushProjectHistory(undoStacksByProjectId, projectId, currentProject)
 			const nextProject = applySyncedProjectCommands(currentProject, commandRequest.commands)
+			clearProjectRedoHistory(projectId)
 			nextProject.revision = currentProject.revision + 1
 			const project = await persistProject(projectId, nextProject)
 			broadcastProjectChanged({
@@ -145,16 +157,69 @@ export async function postProjectCommands(request: Request, projectId: string): 
 				revision: project.revision,
 				originClientId: commandRequest.clientId,
 				commands: commandRequest.commands,
-				project
+				project,
+				...getProjectHistoryState(projectId)
 			})
-			return Response.json({ ok: true, projectId, revision: project.revision, project })
+			return Response.json({ ok: true, projectId, revision: project.revision, project, ...getProjectHistoryState(projectId) })
 		} catch (error) {
+			popProjectHistory(undoStacksByProjectId, projectId)
 			if (error instanceof ProjectCommandError) {
 				return Response.json({ ok: false, code: error.code, message: error.message, revision: currentProject.revision }, { status: 400 })
 			}
 			console.error("Failed to apply project commands", error)
 			return Response.json({ ok: false, code: "command_failed", message: "Unable to apply commands.", revision: currentProject.revision }, { status: 500 })
 		}
+	})
+}
+
+export async function postProjectUndo(request: Request, projectId: string): Promise<Response> {
+	return postProjectHistoryAction(request, projectId, "undo")
+}
+
+export async function postProjectRedo(request: Request, projectId: string): Promise<Response> {
+	return postProjectHistoryAction(request, projectId, "redo")
+}
+
+async function postProjectHistoryAction(request: Request, projectId: string, action: "undo" | "redo"): Promise<Response> {
+	let payload: unknown
+	try {
+		payload = await request.json()
+	} catch {
+		return Response.json({ ok: false, code: "invalid_json", message: "Invalid JSON body." }, { status: 400 })
+	}
+	const commandRequest = normalizeHistoryRequest(payload)
+	if (!commandRequest) {
+		return Response.json({ ok: false, code: "invalid_request", message: "History request must include clientId and baseRevision." }, { status: 400 })
+	}
+
+	return withProjectQueue(projectId, async () => {
+		const currentProject = await loadProject(projectId)
+		if (!currentProject) {
+			return Response.json({ ok: false, code: "not_found", message: "Project not found." }, { status: 404 })
+		}
+		const sourceStack = action === "undo" ? undoStacksByProjectId : redoStacksByProjectId
+		const destinationStack = action === "undo" ? redoStacksByProjectId : undoStacksByProjectId
+		const historyProject = popProjectHistory(sourceStack, projectId)
+		if (!historyProject) {
+			return Response.json(
+				{ ok: false, code: `nothing_to_${action}`, message: `Nothing to ${action}.`, revision: currentProject.revision, ...getProjectHistoryState(projectId) },
+				{ status: 409 }
+			)
+		}
+		pushProjectHistory(destinationStack, projectId, currentProject)
+		historyProject.revision = currentProject.revision + 1
+		const project = await persistProject(projectId, historyProject)
+		const historyState = getProjectHistoryState(projectId)
+		broadcastProjectChanged({
+			type: "projectChanged",
+			projectId,
+			revision: project.revision,
+			originClientId: commandRequest.clientId,
+			commands: [],
+			project,
+			...historyState
+		})
+		return Response.json({ ok: true, projectId, revision: project.revision, project, ...historyState })
 	})
 }
 
@@ -176,7 +241,7 @@ export async function getProjectEvents(request: Request, projectId: string): Pro
 				subscribersByProjectId.set(projectId, subscribers)
 			}
 			subscribers.add(subscriber)
-			controller.enqueue(encodeSseEvent("connected", { type: "connected", projectId, revision: project.revision, clientId }))
+			controller.enqueue(encodeSseEvent("connected", { type: "connected", projectId, revision: project.revision, clientId, ...getProjectHistoryState(projectId) }))
 		},
 		cancel() {
 			if (subscriber) {
@@ -264,6 +329,57 @@ function sanitizeProjectId(projectId: string): string {
 		throw new Error("Invalid project id")
 	}
 	return trimmed
+}
+
+function pushProjectHistory(stacks: Map<string, Project[]>, projectId: string, project: Project): void {
+	const stack = stacks.get(projectId) ?? []
+	stack.push(cloneProject(project))
+	if (stack.length > MAX_PROJECT_HISTORY) {
+		stack.shift()
+	}
+	stacks.set(projectId, stack)
+}
+
+function popProjectHistory(stacks: Map<string, Project[]>, projectId: string): Project | null {
+	const stack = stacks.get(projectId)
+	const project = stack?.pop() ?? null
+	if (stack && stack.length === 0) {
+		stacks.delete(projectId)
+	}
+	return project
+}
+
+function clearProjectRedoHistory(projectId: string): void {
+	redoStacksByProjectId.delete(projectId)
+}
+
+function getProjectHistoryState(projectId: string): { canUndo: boolean; canRedo: boolean } {
+	return {
+		canUndo: (undoStacksByProjectId.get(projectId)?.length ?? 0) > 0,
+		canRedo: (redoStacksByProjectId.get(projectId)?.length ?? 0) > 0
+	}
+}
+
+function cloneProject(project: Project): Project {
+	const normalized = normalizeProjectFile(JSON.parse(JSON.stringify(project)))
+	if (!normalized) {
+		throw new Error("Project cannot be normalized.")
+	}
+	return normalized
+}
+
+function normalizeHistoryRequest(input: unknown): { clientId: string; baseRevision: number } | null {
+	if (!input || typeof input !== "object") {
+		return null
+	}
+	const value = input as { clientId?: unknown; baseRevision?: unknown }
+	if (typeof value.clientId !== "string" || !value.clientId.trim() || typeof value.baseRevision !== "number" || !Number.isInteger(value.baseRevision)) {
+		return null
+	}
+	return {
+		clientId: value.clientId.trim(),
+		baseRevision: value.baseRevision
+	}
 }
 
 function isNotFoundError(error: unknown): boolean {

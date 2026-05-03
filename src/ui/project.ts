@@ -101,6 +101,12 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private eventSource: EventSource | null = null
 	private commandQueue = Promise.resolve()
 	private saveSnapshotQueue = Promise.resolve()
+	private undoStack: Project[] = []
+	private redoStack: Project[] = []
+	private serverCanUndo = false
+	private serverCanRedo = false
+	private readonly undoButton: HTMLButtonElement
+	private readonly redoButton: HTMLButtonElement
 	private itemsListContainer: TreeList<ProjectNode>
 	private nodeElements: Map<ProjectNode, { header: HTMLDivElement; container?: HTMLDivElement; exitDropZone?: HTMLDivElement }> = new Map()
 	private dragState: { node: ProjectNode; path: number[] } | null = null
@@ -185,6 +191,22 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		newButton.classList.add("button", "button--primary")
 		newButton.onclick = this.newButtonClicked.bind(this)
 		this.root.appendChild(newButton)
+
+		this.undoButton = document.createElement("button")
+		this.undoButton.textContent = "Undo"
+		this.undoButton.classList.add("button", "button--ghost")
+		this.undoButton.onclick = () => {
+			void this.undoProject()
+		}
+		this.root.appendChild(this.undoButton)
+
+		this.redoButton = document.createElement("button")
+		this.redoButton.textContent = "Redo"
+		this.redoButton.classList.add("button", "button--ghost")
+		this.redoButton.onclick = () => {
+			void this.redoProject()
+		}
+		this.root.appendChild(this.redoButton)
 
 		const saveButton = document.createElement("button")
 		saveButton.textContent = "Save"
@@ -302,6 +324,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				this.moveNodeToRoot()
 			}
 		})
+		document.addEventListener("keydown", this.handleProjectHistoryKeyDown, true)
+		this.updateHistoryControls()
 		void this.loadInitialProject()
 	}
 
@@ -581,6 +605,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private handleVisibilityToggle(id: string, visible: boolean): void {
 		const node = this.idNodeMap.get(id)
 		if (node) {
+			this.recordUndoSnapshot()
 			node.visible = visible
 			this.renderItems()
 			this.schedulePersist()
@@ -633,6 +658,13 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!sourcePath) {
 			return
 		}
+		if (destinationId) {
+			const destinationNode = this.idNodeMap.get(destinationId)
+			if (!destinationNode || !isFolder(destinationNode)) {
+				return
+			}
+		}
+		this.recordUndoSnapshot()
 		const movedNode = this.removeNodeAtPath(sourcePath)
 		if (!movedNode) {
 			return
@@ -832,6 +864,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			this.resetDragState()
 			return
 		}
+		this.recordUndoSnapshot()
 		const movedNode = this.removeNodeAtPath(dragState.path)
 		if (!movedNode) {
 			this.log("handleFolderDrop:remove-failed", {
@@ -1198,6 +1231,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			this.log("moveNodeToRoot:no-drag-state")
 			return
 		}
+		this.recordUndoSnapshot()
 		const movedNode = this.removeNodeAtPath(dragState.path)
 		if (!movedNode) {
 			this.log("moveNodeToRoot:remove-failed", { path: this.describePath(dragState.path) })
@@ -1229,15 +1263,16 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 		const parentPath = dragState.path.slice(0, -1)
 		const containerPath = parentPath.slice(0, -1)
-		const movedNode = this.removeNodeAtPath(dragState.path)
-		if (!movedNode) {
-			this.log("moveNodeToParent:remove-failed", { path: this.describePath(dragState.path) })
-			this.resetDragState()
-			return
-		}
 		const container = this.getContainerByPath(containerPath)
 		if (!container) {
 			this.log("moveNodeToParent:container-missing", { containerPath: this.describePath(containerPath) })
+			this.resetDragState()
+			return
+		}
+		this.recordUndoSnapshot()
+		const movedNode = this.removeNodeAtPath(dragState.path)
+		if (!movedNode) {
+			this.log("moveNodeToParent:remove-failed", { path: this.describePath(dragState.path) })
 			this.resetDragState()
 			return
 		}
@@ -1277,6 +1312,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		const container = this.getContainerForNewNode()
 		const parentId = this.getParentIdForContainer(container)
 		const item = this.createProjectItem(type, undefined, container)
+		this.recordUndoSnapshot()
 		container.push(item)
 		this.renderItems()
 		this.handleNodeSelection(item)
@@ -1288,6 +1324,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		const container = this.getContainerForNewNode()
 		const parentId = this.getParentIdForContainer(container)
 		const folder = this.createFolder(undefined, container)
+		this.recordUndoSnapshot()
 		container.push(folder)
 		this.renderItems()
 		this.handleNodeSelection(folder)
@@ -1337,6 +1374,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			}
 			return
 		}
+		this.recordUndoSnapshot()
 		node.name = trimmed
 		this.selectedPath = path.slice()
 		this.renderItems()
@@ -1353,6 +1391,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		if (!shouldDelete) {
 			return
 		}
+		this.recordUndoSnapshot()
 		const removed = this.removeNodeAtPath(path)
 		if (!removed) {
 			return
@@ -1488,7 +1527,10 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						this.savePartViewState(id, state)
 						this.renderItems()
 					},
-					onCadCommand: (command) => this.enqueueCommand({ type: "cad", partId: id, command })
+					onCadCommand: (command, previousState) => {
+						this.recordPartUndoSnapshot(id, previousState)
+						this.enqueueCommand({ type: "cad", partId: id, command })
+					}
 				})
 				return {
 					id,
@@ -1694,6 +1736,136 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		return true
 	}
 
+	private recordUndoSnapshot(snapshot: Project = this.buildProjectFile()): void {
+		if (this.isRestoring || this.serverBacked) {
+			return
+		}
+		this.undoStack.push(snapshot)
+		if (this.undoStack.length > 100) {
+			this.undoStack.shift()
+		}
+		this.redoStack = []
+		this.updateHistoryControls()
+	}
+
+	private recordPartUndoSnapshot(partId: string, previousState: PartEditorState): void {
+		if (this.isRestoring || this.serverBacked) {
+			return
+		}
+		this.recordUndoSnapshot(this.buildProjectFileWithPartState(partId, previousState))
+	}
+
+	private async undoProject(): Promise<void> {
+		if (this.serverBacked) {
+			await this.postProjectHistoryAction("undo")
+			return
+		}
+		const previousProject = this.undoStack.pop()
+		if (!previousProject) {
+			this.updateHistoryControls()
+			return
+		}
+		this.redoStack.push(this.buildProjectFile())
+		this.restoreFromProjectFile(previousProject)
+		this.schedulePersist()
+		this.updateHistoryControls()
+	}
+
+	private async redoProject(): Promise<void> {
+		if (this.serverBacked) {
+			await this.postProjectHistoryAction("redo")
+			return
+		}
+		const nextProject = this.redoStack.pop()
+		if (!nextProject) {
+			this.updateHistoryControls()
+			return
+		}
+		this.undoStack.push(this.buildProjectFile())
+		this.restoreFromProjectFile(nextProject)
+		this.schedulePersist()
+		this.updateHistoryControls()
+	}
+
+	private async postProjectHistoryAction(action: "undo" | "redo"): Promise<void> {
+		if (!this.serverBacked) {
+			return
+		}
+		await this.commandQueue
+		await this.saveSnapshotQueue
+		const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}/${action}`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				clientId: this.clientId,
+				baseRevision: this.serverRevision
+			})
+		})
+		const result = (await response.json()) as { ok?: boolean; revision?: number; project?: unknown; canUndo?: boolean; canRedo?: boolean; message?: string }
+		this.updateServerHistoryState(result)
+		if (!response.ok || !result.ok) {
+			if (response.status !== 409) {
+				console.warn(`Project ${action} failed`, result.message ?? response.status)
+			}
+			this.updateHistoryControls()
+			return
+		}
+		if (typeof result.revision === "number") {
+			this.serverRevision = result.revision
+		}
+		const project = normalizeProjectFile(result.project)
+		if (project) {
+			this.restoreFromProjectFile(project)
+			void this.saveToIndexedDB()
+		}
+		this.updateHistoryControls()
+	}
+
+	private updateServerHistoryState(value: { canUndo?: unknown; canRedo?: unknown } | null | undefined): void {
+		if (typeof value?.canUndo === "boolean") {
+			this.serverCanUndo = value.canUndo
+		}
+		if (typeof value?.canRedo === "boolean") {
+			this.serverCanRedo = value.canRedo
+		}
+		this.updateHistoryControls()
+	}
+
+	private updateHistoryControls(): void {
+		const canUndo = this.serverBacked ? this.serverCanUndo : this.undoStack.length > 0
+		const canRedo = this.serverBacked ? this.serverCanRedo : this.redoStack.length > 0
+		this.undoButton.disabled = !canUndo
+		this.redoButton.disabled = !canRedo
+		this.undoButton.style.opacity = canUndo ? "1" : "0.55"
+		this.redoButton.style.opacity = canRedo ? "1" : "0.55"
+	}
+
+	private readonly handleProjectHistoryKeyDown = (event: KeyboardEvent): void => {
+		if (!(event.metaKey || event.ctrlKey) || event.altKey || ProjectTreeView.isEditableKeyboardTarget(event.target)) {
+			return
+		}
+		const key = event.key.toLowerCase()
+		if (key === "z" && !event.shiftKey) {
+			event.preventDefault()
+			void this.undoProject()
+			return
+		}
+		if ((key === "z" && event.shiftKey) || key === "y") {
+			event.preventDefault()
+			void this.redoProject()
+		}
+	}
+
+	private static isEditableKeyboardTarget(target: EventTarget | null): boolean {
+		if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) {
+			return false
+		}
+		const tagName = target.tagName.toLowerCase()
+		return target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select"
+	}
+
 	private schedulePersist() {
 		if (this.isRestoring || (!this.persistenceEnabled && !this.serverBacked)) {
 			this.log("schedulePersist:skipped", {
@@ -1755,7 +1927,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				commands: [command]
 			})
 		})
-		const result = (await response.json()) as { ok?: boolean; revision?: number; project?: unknown; message?: string }
+		const result = (await response.json()) as { ok?: boolean; revision?: number; project?: unknown; canUndo?: boolean; canRedo?: boolean; message?: string }
+		this.updateServerHistoryState(result)
 		if (response.status === 404) {
 			await this.saveProjectSnapshotToServer()
 			return
@@ -1830,13 +2003,14 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			if (!response.ok) {
 				throw new Error(`Server responded with ${response.status}`)
 			}
-			const result = (await response.json()) as { ok?: boolean; project?: unknown; revision?: number }
+			const result = (await response.json()) as { ok?: boolean; project?: unknown; revision?: number; canUndo?: boolean; canRedo?: boolean }
 			const project = normalizeProjectFile(result.project)
 			if (!result.ok || !project) {
 				return "offline"
 			}
 			this.serverBacked = true
 			this.serverRevision = project.revision
+			this.updateServerHistoryState(result)
 			this.restoreFromProjectFile(project)
 			this.connectProjectEvents()
 			if (this.persistenceEnabled) {
@@ -1865,19 +2039,21 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 		const eventSource = new EventSource(`/api/projects/${encodeURIComponent(this.projectId)}/events?clientId=${encodeURIComponent(this.clientId)}`)
 		eventSource.addEventListener("connected", (event) => {
-			const data = parseEventData<{ revision?: unknown }>(event)
+			const data = parseEventData<{ revision?: unknown; canUndo?: unknown; canRedo?: unknown }>(event)
 			if (typeof data?.revision === "number") {
 				this.serverRevision = data.revision
 			}
+			this.updateServerHistoryState(data)
 		})
 		eventSource.addEventListener("projectChanged", (event) => {
-			const data = parseEventData<{ originClientId?: unknown; revision?: unknown; project?: unknown }>(event)
+			const data = parseEventData<{ originClientId?: unknown; revision?: unknown; project?: unknown; canUndo?: unknown; canRedo?: unknown }>(event)
 			if (!data) {
 				return
 			}
 			if (typeof data.revision === "number") {
 				this.serverRevision = data.revision
 			}
+			this.updateServerHistoryState(data)
 			if (data.originClientId === this.clientId) {
 				return
 			}
@@ -1952,6 +2128,30 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			selectedPath: this.selectedPath ? this.selectedPath.slice() : null,
 			revision: this.serverRevision
 		})
+	}
+
+	private buildProjectFileWithPartState(partId: string, previousState: PartEditorState): Project {
+		const projectFile = this.buildProjectFile()
+		const replacePartState = (nodes: PersistedProjectNode[]): PersistedProjectNode[] =>
+			nodes.map((node) => {
+				if (this.isFolderEntry(node)) {
+					return {
+						...node,
+						items: replacePartState(node.items)
+					}
+				}
+				if (node.id === partId && node.type === "part") {
+					return {
+						...node,
+						data: previousState
+					}
+				}
+				return node
+			})
+		return {
+			...projectFile,
+			items: replacePartState(projectFile.items)
+		}
 	}
 
 	private buildProjectFileEntries(nodes: ProjectNode[]): PersistedProjectNode[] {
@@ -2110,7 +2310,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			throw new Error(`Server responded with ${response.status}${reason}`)
 		}
 
-		const result = (await response.json()) as { revision?: number; project?: unknown } | null
+		const result = (await response.json()) as { revision?: number; project?: unknown; canUndo?: boolean; canRedo?: boolean } | null
+		this.updateServerHistoryState(result)
 		if (typeof result?.revision === "number") {
 			this.serverRevision = result.revision
 		}
