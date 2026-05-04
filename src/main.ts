@@ -1,6 +1,6 @@
 import index from "./ui/index.html"
 import { postMcp } from "./mcp"
-import { getProject, getProjectEvents, postProject, postProjectCommands, postProjectRedo, postProjectUndo, putProject } from "./server/save-project"
+import { getHealth, getProject, getProjectEvents, getProjects, postProject, postProjectCommands, postProjectRedo, postProjectUndo, putProject } from "./server/save-project"
 
 console.log("Starting server on http://localhost:5337")
 
@@ -30,7 +30,11 @@ Bun.serve({
 		"/mcp": {
 			POST: postMcp
 		},
+		"/health": {
+			GET: getHealth
+		},
 		"/api/projects": {
+			GET: getProjects,
 			POST: postProject
 		},
 		"/api/projects/:projectId": {
