@@ -20,6 +20,12 @@ export type PCadProjectSyncResult = {
 	originClientId?: string
 }
 
+export type PuppyCadProjectSummary = {
+	projectId: string
+	revision: number
+	documents: number
+}
+
 export class PCadProjectSyncError extends Error {
 	public readonly status: number
 
@@ -48,6 +54,24 @@ export class PuppyCadClient {
 		this.fetch = args?.fetch ?? fetch
 		this.apiBasePath = args?.apiBasePath?.replace(/\/$/, "") ?? ""
 		this.createEventSource = args?.createEventSource
+	}
+
+	public getHealth(): Promise<Response> {
+		return this.fetch(this.apiUrl("/health"))
+	}
+
+	public listProjects(): Promise<Response> {
+		return this.fetch(this.apiUrl("/api/projects"))
+	}
+
+	public createProject(project: Project): Promise<Response> {
+		return this.fetch(this.apiUrl("/api/projects"), {
+			method: "POST",
+			headers: {
+				"Content-Type": PROJECT_FILE_MIME_TYPE
+			},
+			body: serializeProjectFile(project)
+		})
 	}
 
 	public loadProject(projectId: string): Promise<Response> {
@@ -90,8 +114,12 @@ export class PuppyCadClient {
 		return factory(`${this.projectUrl(projectId, "/events")}?clientId=${encodeURIComponent(clientId)}`)
 	}
 
+	private apiUrl(path: string): string {
+		return `${this.apiBasePath}${path.startsWith("/") ? path : `/${path}`}`
+	}
+
 	private projectUrl(projectId: string, suffix = ""): string {
-		return `${this.apiBasePath}/api/projects/${encodeURIComponent(projectId)}${suffix}`
+		return this.apiUrl(`/api/projects/${encodeURIComponent(projectId)}${suffix}`)
 	}
 }
 

@@ -4,7 +4,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import type { Project, ProjectDocument, ProjectDocumentType, ProjectNode } from "./contract"
-import { PCadPart } from "./pcad/project"
+import { PCadPart, PuppyCadClient } from "./pcad/project"
 import { createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
 import type { PartFeature } from "./schema"
 
@@ -88,12 +88,6 @@ type CliGraphEdge = {
 	to: string
 	partId: string
 	type: "dependency"
-}
-
-type ServerJsonResponse<T> = {
-	payload: T
-	response: Response
-	url: string
 }
 
 const DEFAULT_VERSION = "0.1.0"
@@ -347,9 +341,9 @@ async function runConfigCommand(args: readonly string[], context: CliContext): P
 
 async function runDoctor(context: CliContext): Promise<number> {
 	const serverUrl = await resolveServerUrl(context)
-	const url = buildServerUrl(serverUrl, "/health")
 	try {
-		const response = await context.fetch(url)
+		const client = await createPuppyCadClient(context)
+		const response = await client.getHealth()
 		const health = await readJsonPayload(response)
 		if (context.globals.json) {
 			writeStdout(context, JSON.stringify({ ok: response.ok, serverUrl, status: response.status, health }, null, 2))
@@ -376,7 +370,7 @@ async function runProjectCommand(args: readonly string[], context: CliContext): 
 		return 0
 	}
 	if (action === "list") {
-		const { payload } = await requestServerJson<{ projects?: unknown }>(context, "/api/projects")
+		const payload = await parseServerJson<{ projects?: unknown }>(context, (await createPuppyCadClient(context)).listProjects())
 		const projects = Array.isArray(payload.projects) ? payload.projects : []
 		if (context.globals.json) {
 			writeStdout(context, JSON.stringify({ projects }, null, 2))
@@ -403,11 +397,7 @@ async function runProjectCommand(args: readonly string[], context: CliContext): 
 			throw new Error("Usage: puppycad project create <name> [--json]")
 		}
 		const project = createInitialProject({ filePath: DEFAULT_PROJECT_FILE, partName: name, force: false, empty: false })
-		const { payload } = await requestServerJson<{ projectId?: unknown; project?: unknown; revision?: unknown }>(context, "/api/projects", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(project)
-		})
+		const payload = await parseServerJson<{ projectId?: unknown; project?: unknown; revision?: unknown }>(context, (await createPuppyCadClient(context)).createProject(project))
 		const result = {
 			projectId: typeof payload.projectId === "string" ? payload.projectId : "",
 			project: normalizeProjectFile(payload.project),
@@ -681,7 +671,7 @@ function isProjectFolder(node: ProjectNode): node is Exclude<ProjectNode, Projec
 
 async function loadServerProject(context: CliContext, target: string | undefined): Promise<{ projectId: string; project: Project }> {
 	const projectId = await resolveProjectId(context, target)
-	const { payload } = await requestServerJson<{ projectId?: unknown; project?: unknown }>(context, `/api/projects/${encodeURIComponent(projectId)}`)
+	const payload = await parseServerJson<{ projectId?: unknown; project?: unknown }>(context, (await createPuppyCadClient(context)).loadProject(projectId))
 	const project = normalizeProjectFile(payload.project)
 	if (!project) {
 		throw new Error(`Server returned an invalid project for ${projectId}.`)
@@ -692,12 +682,18 @@ async function loadServerProject(context: CliContext, target: string | undefined
 	}
 }
 
-async function requestServerJson<T>(context: CliContext, path: string, init?: RequestInit): Promise<ServerJsonResponse<T>> {
+async function createPuppyCadClient(context: CliContext): Promise<PuppyCadClient> {
+	return new PuppyCadClient({
+		fetch: context.fetch,
+		apiBasePath: await resolveServerUrl(context)
+	})
+}
+
+async function parseServerJson<T>(context: CliContext, responsePromise: Promise<Response>): Promise<T> {
 	const serverUrl = await resolveServerUrl(context)
-	const url = buildServerUrl(serverUrl, path)
 	let response: Response
 	try {
-		response = await context.fetch(url, init)
+		response = await responsePromise
 	} catch (error) {
 		throw new Error(`Unable to reach Puppycad server at ${serverUrl}: ${formatFileError(error)}`)
 	}
@@ -706,7 +702,7 @@ async function requestServerJson<T>(context: CliContext, path: string, init?: Re
 		const message = typeof payload?.message === "string" ? payload.message : `Server responded with ${response.status}`
 		throw new Error(message)
 	}
-	return { payload, response, url }
+	return payload
 }
 
 async function readJsonPayload(response: Response): Promise<unknown> {
@@ -764,10 +760,6 @@ function normalizeProjectId(value: string): string {
 		throw new Error("Project id cannot be empty.")
 	}
 	return trimmed
-}
-
-function buildServerUrl(serverUrl: string, path: string): string {
-	return `${serverUrl.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`
 }
 
 async function readCliConfig(context: CliContext): Promise<CliConfig> {
