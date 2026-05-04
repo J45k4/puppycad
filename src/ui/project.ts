@@ -5,6 +5,7 @@ import type { PartEditorState, PartEditorViewState } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
 import type { Project, ProjectDocumentType, ProjectFolder as PersistedProjectFolder, ProjectNode as PersistedProjectNode } from "../contract"
+import { PCadProject, PCadProjectSyncError, PuppyCadClient, type PCadProjectSyncResult } from "../pcad/project"
 import type { SyncedProjectCommand } from "../project-commands"
 import { PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION, PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "../project-file"
 import { DockLayout, type DockOrientation, type DockLayoutState } from "./dock-layout"
@@ -96,9 +97,10 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private readonly syntheticSelectionTargets = new Map<string, ProjectItem>()
 	private readonly syntheticEntries = new Map<string, SyntheticProjectEntry>()
 	private readonly clientId = this.createClientId()
+	private readonly client: PuppyCadClient
+	private readonly pcadProject: PCadProject
 	private serverBacked = false
 	private serverRevision = 0
-	private eventSource: EventSource | null = null
 	private commandQueue = Promise.resolve()
 	private saveSnapshotQueue = Promise.resolve()
 	private undoStack: Project[] = []
@@ -167,6 +169,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.onItemSelected = args.onClick
 		this.onItemsDeleted = args.onItemsDeleted
 		this.projectId = args.projectId ?? "default"
+		this.client = new PuppyCadClient()
+		this.pcadProject = new PCadProject({ projectId: this.projectId, clientId: this.clientId, client: this.client })
 		this.root.classList.add("project-tree-panel")
 		this.modal = new Modal({
 			title: "New Item",
@@ -1793,32 +1797,16 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 		await this.commandQueue
 		await this.saveSnapshotQueue
-		const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}/${action}`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json"
-			},
-			body: JSON.stringify({
-				clientId: this.clientId,
-				baseRevision: this.serverRevision
-			})
-		})
-		const result = (await response.json()) as { ok?: boolean; revision?: number; project?: unknown; canUndo?: boolean; canRedo?: boolean; message?: string }
-		this.updateServerHistoryState(result)
-		if (!response.ok || !result.ok) {
-			if (response.status !== 409) {
-				console.warn(`Project ${action} failed`, result.message ?? response.status)
+		this.pcadProject.setRevision(this.serverRevision)
+		try {
+			const result = await this.pcadProject.postHistoryAction(action)
+			this.applyProjectSyncResult(result)
+		} catch (error) {
+			if (!(error instanceof PCadProjectSyncError) || error.status !== 409) {
+				console.warn(`Project ${action} failed`, error instanceof Error ? error.message : error)
 			}
 			this.updateHistoryControls()
 			return
-		}
-		if (typeof result.revision === "number") {
-			this.serverRevision = result.revision
-		}
-		const project = normalizeProjectFile(result.project)
-		if (project) {
-			this.restoreFromProjectFile(project)
-			void this.saveToIndexedDB()
 		}
 		this.updateHistoryControls()
 	}
@@ -1831,6 +1819,15 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			this.serverCanRedo = value.canRedo
 		}
 		this.updateHistoryControls()
+	}
+
+	private applyProjectSyncResult(result: PCadProjectSyncResult): void {
+		this.updateServerHistoryState(result)
+		this.serverRevision = result.revision
+		this.restoreFromProjectFile(result.project)
+		if (this.persistenceEnabled) {
+			void this.saveToIndexedDB()
+		}
 	}
 
 	private updateHistoryControls(): void {
@@ -1916,33 +1913,16 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private async postCommand(command: SyncedProjectCommand): Promise<void> {
-		const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}/commands`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json"
-			},
-			body: JSON.stringify({
-				clientId: this.clientId,
-				baseRevision: this.serverRevision,
-				commands: [command]
-			})
-		})
-		const result = (await response.json()) as { ok?: boolean; revision?: number; project?: unknown; canUndo?: boolean; canRedo?: boolean; message?: string }
-		this.updateServerHistoryState(result)
-		if (response.status === 404) {
-			await this.saveProjectSnapshotToServer()
-			return
-		}
-		if (!response.ok || !result.ok) {
-			throw new Error(result.message ?? `Server responded with ${response.status}`)
-		}
-		if (typeof result.revision === "number") {
-			this.serverRevision = result.revision
-		}
-		const project = normalizeProjectFile(result.project)
-		if (project) {
-			this.restoreFromProjectFile(project)
-			void this.saveToIndexedDB()
+		this.pcadProject.setRevision(this.serverRevision)
+		try {
+			const result = await this.pcadProject.postCommand(command)
+			this.applyProjectSyncResult(result)
+		} catch (error) {
+			if (error instanceof PCadProjectSyncError && error.status === 404) {
+				await this.saveProjectSnapshotToServer()
+				return
+			}
+			throw error
 		}
 	}
 
@@ -1989,87 +1969,49 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return "offline"
 		}
 		try {
-			const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}`)
-			if (response.status === 404) {
-				const missingProject = await this.isServerProjectNotFoundResponse(response)
-				if (missingProject) {
-					this.log("loadFromServer:not-found")
-					this.serverBacked = true
-					this.serverRevision = 0
-					return "missing"
-				}
-				return "offline"
-			}
-			if (!response.ok) {
-				throw new Error(`Server responded with ${response.status}`)
-			}
-			const result = (await response.json()) as { ok?: boolean; project?: unknown; revision?: number; canUndo?: boolean; canRedo?: boolean }
-			const project = normalizeProjectFile(result.project)
-			if (!result.ok || !project) {
-				return "offline"
-			}
+			const result = await this.pcadProject.load()
 			this.serverBacked = true
-			this.serverRevision = project.revision
-			this.updateServerHistoryState(result)
-			this.restoreFromProjectFile(project)
+			this.applyProjectSyncResult(result)
 			this.connectProjectEvents()
-			if (this.persistenceEnabled) {
-				void this.saveToIndexedDB()
-			}
 			this.log("loadFromServer:complete", { revision: this.serverRevision })
 			return "loaded"
 		} catch (error) {
+			if (error instanceof PCadProjectSyncError && error.status === 404) {
+				this.log("loadFromServer:not-found")
+				this.serverBacked = true
+				this.serverRevision = 0
+				this.pcadProject.setRevision(0)
+				return "missing"
+			}
 			console.warn("Failed to load server project; falling back to IndexedDB", error)
 			return "offline"
 		}
 	}
 
-	private async isServerProjectNotFoundResponse(response: Response): Promise<boolean> {
-		try {
-			const result = (await response.json()) as { ok?: unknown; code?: unknown }
-			return result.ok === false && result.code === "not_found"
-		} catch {
-			return false
-		}
-	}
-
 	private connectProjectEvents(): void {
-		if (typeof EventSource === "undefined" || this.eventSource) {
+		if (typeof EventSource === "undefined") {
 			return
 		}
-		const eventSource = new EventSource(`/api/projects/${encodeURIComponent(this.projectId)}/events?clientId=${encodeURIComponent(this.clientId)}`)
-		eventSource.addEventListener("connected", (event) => {
-			const data = parseEventData<{ revision?: unknown; canUndo?: unknown; canRedo?: unknown }>(event)
-			if (typeof data?.revision === "number") {
-				this.serverRevision = data.revision
-			}
-			this.updateServerHistoryState(data)
+		this.pcadProject.connectEvents({
+			onConnected: (state) => {
+				if (typeof state.revision === "number") {
+					this.serverRevision = state.revision
+				}
+				this.updateServerHistoryState(state)
+			},
+			onProjectChanged: (result) => {
+				this.updateServerHistoryState(result)
+				this.serverRevision = result.revision
+				if (result.originClientId === this.clientId) {
+					return
+				}
+				this.restoreFromProjectFile(result.project)
+				if (this.persistenceEnabled) {
+					void this.saveToIndexedDB()
+				}
+			},
+			onError: () => this.log("project-events:error")
 		})
-		eventSource.addEventListener("projectChanged", (event) => {
-			const data = parseEventData<{ originClientId?: unknown; revision?: unknown; project?: unknown; canUndo?: unknown; canRedo?: unknown }>(event)
-			if (!data) {
-				return
-			}
-			if (typeof data.revision === "number") {
-				this.serverRevision = data.revision
-			}
-			this.updateServerHistoryState(data)
-			if (data.originClientId === this.clientId) {
-				return
-			}
-			const project = normalizeProjectFile(data.project)
-			if (!project) {
-				return
-			}
-			this.restoreFromProjectFile(project)
-			if (this.persistenceEnabled) {
-				void this.saveToIndexedDB()
-			}
-		})
-		eventSource.onerror = () => {
-			this.log("project-events:error")
-		}
-		this.eventSource = eventSource
 	}
 
 	private async loadFromIndexedDB() {
@@ -2290,39 +2232,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 
 	private async saveProjectSnapshotToServer(): Promise<void> {
 		const projectFile = this.buildProjectFile()
-		const response = await fetch(`/api/projects/${encodeURIComponent(this.projectId)}`, {
-			method: "PUT",
-			headers: {
-				"Content-Type": PROJECT_FILE_MIME_TYPE,
-				"X-PuppyCAD-Client-Id": this.clientId
-			},
-			body: serializeProjectFile(projectFile)
-		})
-
-		if (!response.ok) {
-			let errorDetail = ""
-			try {
-				errorDetail = await response.text()
-			} catch {
-				// ignore response body parsing issues
-			}
-			const reason = errorDetail.trim() ? `: ${errorDetail}` : ""
-			throw new Error(`Server responded with ${response.status}${reason}`)
-		}
-
-		const result = (await response.json()) as { revision?: number; project?: unknown; canUndo?: boolean; canRedo?: boolean } | null
-		this.updateServerHistoryState(result)
-		if (typeof result?.revision === "number") {
-			this.serverRevision = result.revision
-		}
-		const normalized = normalizeProjectFile(result?.project)
-		if (normalized) {
-			this.serverRevision = normalized.revision
-			this.restoreFromProjectFile(normalized)
-			if (this.persistenceEnabled) {
-				void this.saveToIndexedDB()
-			}
-		}
+		this.pcadProject.setRevision(this.serverRevision)
+		const result = await this.pcadProject.putSnapshot(projectFile)
+		this.applyProjectSyncResult(result)
 		this.serverBacked = true
 		this.connectProjectEvents()
 	}
@@ -2388,15 +2300,6 @@ export async function deleteProjectState(projectId: string): Promise<void> {
 		})
 	} catch (error) {
 		console.error("Failed to delete project state", error)
-	}
-}
-
-function parseEventData<T>(event: Event): T | null {
-	const messageEvent = event as MessageEvent<string>
-	try {
-		return JSON.parse(messageEvent.data) as T
-	} catch {
-		return null
 	}
 }
 

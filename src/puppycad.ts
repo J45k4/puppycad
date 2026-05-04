@@ -3,6 +3,9 @@
 
 import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./contract"
 
+export { PCadPart, PCadProject, PCadProjectSyncError, PuppyCadClient } from "./pcad/project"
+export type { PCadProjectSyncResult } from "./pcad/project"
+
 export type {
 	BaseFeature,
 	BoardShape,
