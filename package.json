@@ -1,6 +1,10 @@
 {
 	"name": "puppycad",
+	"version": "0.1.0",
 	"private": true,
+	"bin": {
+		"puppycad": "./src/cli.ts"
+	},
 	"scripts": {
 		"lint": "bunx biome lint .",
 		"lint-fix": "bunx biome lint . --fix",

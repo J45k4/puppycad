@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile } from "node:fs/promises"
+import { mkdir, readFile, readdir } from "node:fs/promises"
 import type { Project } from "../contract"
 import { applySyncedProjectCommands, ProjectCommandError, type SyncedProjectCommand } from "../project-commands"
 import { normalizeProjectFile, serializeProjectFile } from "../project-file"
@@ -50,6 +50,41 @@ export async function loadProject(projectId: string): Promise<Project | null> {
 			return null
 		}
 		throw error
+	}
+}
+
+export async function getHealth(_request: Request): Promise<Response> {
+	return Response.json({ ok: true, service: "puppycad", version: "0.1.0" })
+}
+
+export async function getProjects(_request: Request): Promise<Response> {
+	try {
+		await ensureDirectory()
+		const entries = await readdir(SAVE_DIRECTORY_URL, { withFileTypes: true })
+		const projects = (
+			await Promise.all(
+				entries
+					.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+					.map(async (entry) => {
+						const projectId = entry.name.slice(0, -".json".length)
+						const project = await loadProject(projectId)
+						if (!project) {
+							return null
+						}
+						return {
+							projectId,
+							revision: project.revision,
+							documents: countProjectDocuments(project.items)
+						}
+					})
+			)
+		)
+			.filter((project) => project !== null)
+			.sort((left, right) => left.projectId.localeCompare(right.projectId))
+		return Response.json({ ok: true, projects })
+	} catch (error) {
+		console.error("Failed to list projects", error)
+		return Response.json({ ok: false, code: "list_failed", message: "Unable to list projects." }, { status: 500 })
 	}
 }
 
@@ -125,7 +160,7 @@ export async function postProject(request: Request): Promise<Response> {
 		return response
 	}
 	const payload = (await response.json()) as { project?: Project }
-	return Response.json({ status: "ok", projectId, fileName: `${projectId}.json`, project: payload.project }, { status: 201 })
+	return Response.json({ ok: true, status: "ok", projectId, fileName: `${projectId}.json`, project: payload.project }, { status: 201 })
 }
 
 export async function postProjectCommands(request: Request, projectId: string): Promise<Response> {
@@ -366,6 +401,18 @@ function cloneProject(project: Project): Project {
 		throw new Error("Project cannot be normalized.")
 	}
 	return normalized
+}
+
+function countProjectDocuments(items: Project["items"]): number {
+	let count = 0
+	for (const item of items) {
+		if ("kind" in item && item.kind === "folder") {
+			count += countProjectDocuments(item.items)
+			continue
+		}
+		count += 1
+	}
+	return count
 }
 
 function normalizeHistoryRequest(input: unknown): { clientId: string; baseRevision: number } | null {
