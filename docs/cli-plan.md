@@ -322,7 +322,7 @@ Build server-backed read/evaluate/output before mutation:
 5. `puppycad graph --json|--mermaid` — dependency graph output. Implemented from feature references in the server project snapshot.
 6. `puppycad eval --json|--explain` — evaluator status/debugging. Implemented as MVP project snapshot validation/materialization.
 7. `puppycad query geometry --json` — generated bodies/faces/edges. Implemented from the server project snapshot, with `query bodies`, `query faces`, `query edges`, `query bbox`, and `--body <body-id>` filters.
-8. `puppycad render --out preview.png` — server-backed preview.
+8. `puppycad render --out preview.png` — server-backed preview. Implemented as a client-side MVP using generated geometry from the server snapshot and optional headless-gl (`gl`) through a Node worker; on Linux it may need `xvfb-run` plus Mesa/X11 libraries.
 9. `puppycad export --format glb` — first export path.
 10. `puppycad patch --dry-run/--apply` — structured mutation.
 

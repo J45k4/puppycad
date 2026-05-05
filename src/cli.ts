@@ -7,6 +7,7 @@ import { extrudeSolidFeature } from "./cad/extrude"
 import type { Project, ProjectDocument, ProjectDocumentType, ProjectNode } from "./contract"
 import { PCadPart, PuppyCadClient } from "./pcad/project"
 import { createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
+import { renderProjectPreviewPng } from "./render"
 import type { PartDocument, PartFeature, Solid, SolidEdge, SolidFace, SolidVertex } from "./schema"
 import type { Vector3D } from "./types"
 
@@ -17,6 +18,7 @@ type CliOutput = {
 
 type CliEnv = Record<string, string | undefined>
 type CliFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+type CliRenderPng = (bodies: readonly CliGeometryBody[], options: RenderOptions) => Promise<Uint8Array>
 
 type CliOptions = {
 	version?: string
@@ -26,6 +28,7 @@ type CliOptions = {
 	env?: CliEnv
 	configPath?: string
 	configDir?: string
+	renderPng?: CliRenderPng
 }
 
 type CliContext = {
@@ -37,6 +40,7 @@ type CliContext = {
 	globals: GlobalCliOptions
 	configPath?: string
 	configDir?: string
+	renderPng: CliRenderPng
 }
 
 type GlobalCliOptions = {
@@ -118,6 +122,13 @@ type QueryArgs = {
 	bodyId?: string
 }
 
+type RenderOptions = {
+	target?: string
+	outPath: string
+	width?: number
+	height?: number
+}
+
 const DEFAULT_VERSION = "0.1.0"
 const DEFAULT_PROJECT_FILE = "puppycad.pcad"
 const DEFAULT_SERVER_URL = "http://localhost:5337"
@@ -135,6 +146,7 @@ export async function runPuppycadCli(args: readonly string[], options: CliOption
 		output,
 		fetch: options.fetch ?? fetch,
 		env: options.env ?? process.env,
+		renderPng: options.renderPng ?? renderProjectPreviewPng,
 		globals: parsed.globals,
 		...(options.configPath ? { configPath: options.configPath } : {}),
 		...(options.configDir ? { configDir: options.configDir } : {})
@@ -167,6 +179,9 @@ export async function runPuppycadCli(args: readonly string[], options: CliOption
 		}
 		if (command === "eval") {
 			return await runEvalCommand(rest, context)
+		}
+		if (command === "render") {
+			return await runRenderCommand(rest, context)
 		}
 		if (command === "inspect") {
 			return await runInspectCommand(rest, context)
@@ -589,6 +604,28 @@ async function runEvalCommand(args: readonly string[], context: CliContext): Pro
 		return 0
 	}
 	writeStdout(context, `ok project=${projectId} features=${features.length}`)
+	return 0
+}
+
+async function runRenderCommand(args: readonly string[], context: CliContext): Promise<number> {
+	const options = parseRenderArgs(args)
+	const { projectId, project } = await loadServerProject(context, options.target)
+	const geometry = collectProjectGeometry(project)
+	if (geometry.errors.length > 0) {
+		throw new Error(`Cannot render project with geometry errors: ${geometry.errors.map((error) => `${error.partId}/${error.featureId}: ${error.message}`).join("; ")}`)
+	}
+	if (geometry.bodies.length === 0) {
+		throw new Error("Project has no generated solid geometry to render.")
+	}
+	const png = await context.renderPng(geometry.bodies, options)
+	const outPath = resolve(context.cwd, options.outPath)
+	await mkdir(dirname(outPath), { recursive: true })
+	await writeFile(outPath, png)
+	if (context.globals.json) {
+		writeStdout(context, JSON.stringify({ projectId, out: outPath, width: options.width ?? 1024, height: options.height ?? 768, bodies: geometry.bodies.length }, null, 2))
+		return 0
+	}
+	writeStdout(context, `Rendered ${projectId} to ${outPath}`)
 	return 0
 }
 
@@ -1055,6 +1092,73 @@ function parseQueryArgs(args: readonly string[], commandName: string): QueryArgs
 	}
 }
 
+function parseRenderArgs(args: readonly string[]): RenderOptions {
+	let target: string | undefined
+	let outPath: string | undefined
+	let width: number | undefined
+	let height: number | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) {
+			continue
+		}
+		if (arg === "--help" || arg === "-h") {
+			throw new CliHelpError(formatRenderHelp())
+		}
+		if (arg === "--out" || arg === "-o") {
+			outPath = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--out=")) {
+			outPath = arg.slice("--out=".length)
+			continue
+		}
+		if (arg === "--width") {
+			width = parsePositiveInteger(readOptionValue(args, index, arg), arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--width=")) {
+			width = parsePositiveInteger(arg.slice("--width=".length), "--width")
+			continue
+		}
+		if (arg === "--height") {
+			height = parsePositiveInteger(readOptionValue(args, index, arg), arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--height=")) {
+			height = parsePositiveInteger(arg.slice("--height=".length), "--height")
+			continue
+		}
+		if (arg.startsWith("-")) {
+			throw new Error(`Unknown render option: ${arg}`)
+		}
+		if (target) {
+			throw new Error(`Unexpected render argument: ${arg}`)
+		}
+		target = arg
+	}
+	if (!outPath) {
+		throw new Error("Usage: puppycad render [project-id] --out <preview.png>")
+	}
+	return {
+		outPath,
+		...(target ? { target } : {}),
+		...(width ? { width } : {}),
+		...(height ? { height } : {})
+	}
+}
+
+function parsePositiveInteger(value: string, option: string): number {
+	const parsed = Number(value)
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(`${option} requires a positive integer.`)
+	}
+	return parsed
+}
+
 async function shouldInspectLocalFile(target: string, cwd: string): Promise<boolean> {
 	if (target.endsWith(".pcad") || target.endsWith(".json") || target.includes("/") || target.includes("\\")) {
 		return true
@@ -1124,6 +1228,7 @@ function formatHelp(): string {
 		"  query bodies|faces|edges|bbox   Inspect generated geometry",
 		"  graph [project-id]              Print the feature graph",
 		"  eval [project-id]               Validate/evaluate the project snapshot",
+		"  render [project-id] --out <png> Render a PNG preview",
 		"  init [file]                     Create a local PuppyCAD project file",
 		"  validate [file]                 Validate and summarize a local project file",
 		"",
@@ -1157,6 +1262,17 @@ function formatQueryHelp(): string {
 		"  faces [project-id] [--body <body-id>] --json",
 		"  edges [project-id] [--body <body-id>] --json",
 		"  bbox [project-id] [--body <body-id>] --json"
+	].join("\n")
+}
+
+function formatRenderHelp(): string {
+	return [
+		"Usage: puppycad render [project-id] --out <preview.png> [options]",
+		"",
+		"Options:",
+		"  -o, --out <file>   Write PNG preview to file",
+		"  --width <px>       Image width, default 1024",
+		"  --height <px>      Image height, default 768"
 	].join("\n")
 }
 

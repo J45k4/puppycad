@@ -212,6 +212,33 @@ describe("puppycad CLI", () => {
 		expect(facesCode).toBe(0)
 		expect(JSON.parse(facesOutput.stdout.join("\n"))).toMatchObject({ faces: expect.arrayContaining([expect.objectContaining({ bodyId: "extrude-1-solid" })]) })
 	})
+
+	it("renders a server project preview to a PNG path", async () => {
+		const cwd = await createTempDir()
+		const projectId = `cli-render-test-${crypto.randomUUID()}`
+		createdProjectIds.push(projectId)
+		await persistProject(projectId, createProject(new PCadPart(createPartDocument()).getDocument()))
+
+		const fetch = createServerFetch()
+		const output = createOutput()
+		const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+		const code = await runPuppycadCli(["--server-url", "http://server.test", "render", projectId, "--out", "preview.png", "--width", "320", "--height", "240"], {
+			cwd,
+			output: output.output,
+			fetch,
+			renderPng: async (bodies, options) => {
+				expect(bodies).toHaveLength(1)
+				expect(options.width).toBe(320)
+				expect(options.height).toBe(240)
+				return pngBytes
+			}
+		})
+
+		expect(code).toBe(0)
+		expect(output.stderr).toEqual([])
+		expect(output.stdout.join("\n")).toContain("Rendered")
+		expect(new Uint8Array(await readFile(join(cwd, "preview.png")))).toEqual(pngBytes)
+	})
 })
 
 function createServerFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
