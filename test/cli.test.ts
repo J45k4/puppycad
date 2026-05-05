@@ -180,6 +180,38 @@ describe("puppycad CLI", () => {
 		expect(evalCode).toBe(0)
 		expect(JSON.parse(evalOutput.stdout.join("\n"))).toMatchObject({ status: "ok", projectId, features: 2 })
 	})
+
+	it("queries generated geometry from server project snapshots", async () => {
+		const projectId = `cli-geometry-test-${crypto.randomUUID()}`
+		createdProjectIds.push(projectId)
+		await persistProject(projectId, createProject(new PCadPart(createPartDocument()).getDocument()))
+
+		const fetch = createServerFetch()
+		const geometryOutput = createOutput()
+		const geometryCode = await runPuppycadCli(["--server-url", "http://server.test", "query", "geometry", projectId, "--json"], { output: geometryOutput.output, fetch })
+		expect(geometryCode).toBe(0)
+		const geometry = JSON.parse(geometryOutput.stdout.join("\n")) as {
+			projectId: string
+			bodies: { id: string; sourceId: string; vertices: unknown[]; edges: unknown[]; faces: unknown[]; bbox: { size: { x: number; y: number; z: number } } }[]
+			errors: unknown[]
+		}
+		expect(geometry.projectId).toBe(projectId)
+		expect(geometry.errors).toEqual([])
+		expect(geometry.bodies).toHaveLength(1)
+		expect(geometry.bodies[0]).toMatchObject({ id: "extrude-1-solid", sourceId: "extrude-1" })
+		expect(geometry.bodies[0]?.vertices).toHaveLength(8)
+		expect(geometry.bodies[0]?.edges).toHaveLength(16)
+		expect(geometry.bodies[0]?.faces).toHaveLength(6)
+		expect(geometry.bodies[0]?.bbox.size).toEqual({ x: 10, y: 10, z: 10 })
+
+		const facesOutput = createOutput()
+		const facesCode = await runPuppycadCli(["--server-url", "http://server.test", "query", "faces", projectId, "--body", "extrude-1-solid", "--json"], {
+			output: facesOutput.output,
+			fetch
+		})
+		expect(facesCode).toBe(0)
+		expect(JSON.parse(facesOutput.stdout.join("\n"))).toMatchObject({ faces: expect.arrayContaining([expect.objectContaining({ bodyId: "extrude-1-solid" })]) })
+	})
 })
 
 function createServerFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {

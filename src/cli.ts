@@ -3,10 +3,12 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { dirname, join, resolve } from "node:path"
+import { extrudeSolidFeature } from "./cad/extrude"
 import type { Project, ProjectDocument, ProjectDocumentType, ProjectNode } from "./contract"
 import { PCadPart, PuppyCadClient } from "./pcad/project"
 import { createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
-import type { PartFeature } from "./schema"
+import type { PartDocument, PartFeature, Solid, SolidEdge, SolidFace, SolidVertex } from "./schema"
+import type { Vector3D } from "./types"
 
 type CliOutput = {
 	stdout: (message: string) => void
@@ -88,6 +90,32 @@ type CliGraphEdge = {
 	to: string
 	partId: string
 	type: "dependency"
+}
+
+type CliGeometryBody = {
+	id: string
+	partId: string
+	sourceId: string
+	vertices: readonly SolidVertex[]
+	edges: readonly SolidEdge[]
+	faces: readonly SolidFace[]
+	bbox: CliBoundingBox | null
+}
+
+type CliBoundingBox = {
+	min: Vector3D
+	max: Vector3D
+	size: Vector3D
+}
+
+type CliGeometry = {
+	bodies: CliGeometryBody[]
+	errors: { partId: string; featureId: string; message: string }[]
+}
+
+type QueryArgs = {
+	target?: string
+	bodyId?: string
 }
 
 const DEFAULT_VERSION = "0.1.0"
@@ -435,11 +463,15 @@ async function runQueryCommand(args: readonly string[], context: CliContext): Pr
 		context.output.stdout(formatQueryHelp())
 		return 0
 	}
-	if (query !== "features") {
+	if (!["features", "geometry", "bodies", "faces", "edges", "bbox"].includes(query)) {
 		throw new Error(`Unknown query: ${query}`)
 	}
-	const { target } = parseProjectTargetArgs(rest, "query features")
+	const { target, bodyId } = parseQueryArgs(rest, `query ${query}`)
 	const { projectId, project } = await loadServerProject(context, target)
+	if (query !== "features") {
+		const geometry = collectProjectGeometry(project)
+		return writeGeometryQuery(query, projectId, geometry, bodyId, context)
+	}
 	const features = collectProjectFeatures(project)
 	if (context.globals.json) {
 		writeStdout(context, JSON.stringify({ projectId, features }, null, 2))
@@ -447,6 +479,68 @@ async function runQueryCommand(args: readonly string[], context: CliContext): Pr
 	}
 	writeStdout(context, features.length > 0 ? features.map((feature) => `${feature.id} ${feature.type} part=${feature.partId}`).join("\n") : "No features.")
 	return 0
+}
+
+function writeGeometryQuery(query: string, projectId: string, geometry: CliGeometry, bodyId: string | undefined, context: CliContext): number {
+	const bodies = bodyId ? geometry.bodies.filter((body) => body.id === bodyId) : geometry.bodies
+	if (bodyId && bodies.length === 0) {
+		throw new Error(`Body not found: ${bodyId}`)
+	}
+	if (query === "geometry") {
+		if (context.globals.json) {
+			writeStdout(context, JSON.stringify({ projectId, bodies, errors: geometry.errors }, null, 2))
+			return geometry.errors.length > 0 ? 1 : 0
+		}
+		writeStdout(context, bodies.length > 0 ? bodies.map(formatBodySummary).join("\n") : "No generated geometry.")
+		return geometry.errors.length > 0 ? 1 : 0
+	}
+	if (query === "bodies") {
+		const summaries = bodies.map((body) => ({
+			id: body.id,
+			partId: body.partId,
+			sourceId: body.sourceId,
+			vertices: body.vertices.length,
+			edges: body.edges.length,
+			faces: body.faces.length,
+			bbox: body.bbox
+		}))
+		if (context.globals.json) {
+			writeStdout(context, JSON.stringify({ projectId, bodies: summaries, errors: geometry.errors }, null, 2))
+			return geometry.errors.length > 0 ? 1 : 0
+		}
+		writeStdout(
+			context,
+			summaries.length > 0
+				? summaries.map((body) => `${body.id} part=${body.partId} source=${body.sourceId} vertices=${body.vertices} edges=${body.edges} faces=${body.faces}`).join("\n")
+				: "No bodies."
+		)
+		return geometry.errors.length > 0 ? 1 : 0
+	}
+	if (query === "faces") {
+		const faces = bodies.flatMap((body) => body.faces.map((face) => ({ ...face, bodyId: body.id, partId: body.partId, sourceId: body.sourceId })))
+		if (context.globals.json) {
+			writeStdout(context, JSON.stringify({ projectId, faces, errors: geometry.errors }, null, 2))
+			return geometry.errors.length > 0 ? 1 : 0
+		}
+		writeStdout(context, faces.length > 0 ? faces.map((face) => `${face.id} body=${face.bodyId} edges=${face.edgeIds.length}`).join("\n") : "No faces.")
+		return geometry.errors.length > 0 ? 1 : 0
+	}
+	if (query === "edges") {
+		const edges = bodies.flatMap((body) => body.edges.map((edge) => ({ ...edge, bodyId: body.id, partId: body.partId, sourceId: body.sourceId })))
+		if (context.globals.json) {
+			writeStdout(context, JSON.stringify({ projectId, edges, errors: geometry.errors }, null, 2))
+			return geometry.errors.length > 0 ? 1 : 0
+		}
+		writeStdout(context, edges.length > 0 ? edges.map((edge) => `${edge.id} body=${edge.bodyId} vertices=${edge.vertexIds.join(",")}`).join("\n") : "No edges.")
+		return geometry.errors.length > 0 ? 1 : 0
+	}
+	const bboxes = bodies.map((body) => ({ bodyId: body.id, partId: body.partId, sourceId: body.sourceId, bbox: body.bbox }))
+	if (context.globals.json) {
+		writeStdout(context, JSON.stringify({ projectId, bboxes, errors: geometry.errors }, null, 2))
+		return geometry.errors.length > 0 ? 1 : 0
+	}
+	writeStdout(context, bboxes.length > 0 ? bboxes.map((body) => `${body.bodyId} ${formatBoundingBox(body.bbox)}`).join("\n") : "No bounding boxes.")
+	return geometry.errors.length > 0 ? 1 : 0
 }
 
 async function runGraphCommand(args: readonly string[], context: CliContext): Promise<number> {
@@ -632,6 +726,85 @@ function collectProjectGraph(project: Project): { nodes: CliGraphNode[]; edges: 
 		}
 	})
 	return { nodes, edges }
+}
+
+function collectProjectGeometry(project: Project): CliGeometry {
+	const bodies: CliGeometryBody[] = []
+	const errors: CliGeometry["errors"] = []
+	visitProjectNodes(project.items, (node) => {
+		if (isProjectFolder(node) || node.type !== "part") {
+			return
+		}
+		const part = new PCadPart(node.data).getDocument() as PartDocument
+		for (const feature of part.features) {
+			if (feature.type !== "extrude") {
+				continue
+			}
+			try {
+				const generated = extrudeSolidFeature(part, feature)
+				bodies.push(toCliGeometryBody(node.id, generated.solid))
+			} catch (error) {
+				errors.push({ partId: node.id, featureId: feature.id, message: formatFileError(error) })
+			}
+		}
+	})
+	return { bodies, errors }
+}
+
+function toCliGeometryBody(partId: string, solid: Solid): CliGeometryBody {
+	return {
+		id: solid.id,
+		partId,
+		sourceId: solid.featureId,
+		vertices: solid.vertices,
+		edges: solid.edges,
+		faces: solid.faces,
+		bbox: computeBoundingBox(solid.vertices)
+	}
+}
+
+function computeBoundingBox(vertices: readonly SolidVertex[]): CliBoundingBox | null {
+	if (vertices.length === 0) {
+		return null
+	}
+	const first = vertices[0]
+	if (!first) {
+		return null
+	}
+	const min = { ...first.position }
+	const max = { ...first.position }
+	for (const vertex of vertices.slice(1)) {
+		min.x = Math.min(min.x, vertex.position.x)
+		min.y = Math.min(min.y, vertex.position.y)
+		min.z = Math.min(min.z, vertex.position.z)
+		max.x = Math.max(max.x, vertex.position.x)
+		max.y = Math.max(max.y, vertex.position.y)
+		max.z = Math.max(max.z, vertex.position.z)
+	}
+	return {
+		min,
+		max,
+		size: {
+			x: max.x - min.x,
+			y: max.y - min.y,
+			z: max.z - min.z
+		}
+	}
+}
+
+function formatBodySummary(body: CliGeometryBody): string {
+	return `${body.id} part=${body.partId} source=${body.sourceId} vertices=${body.vertices.length} edges=${body.edges.length} faces=${body.faces.length} bbox=${formatBoundingBox(body.bbox)}`
+}
+
+function formatBoundingBox(bbox: CliBoundingBox | null): string {
+	if (!bbox) {
+		return "none"
+	}
+	return `min=(${formatNumber(bbox.min.x)},${formatNumber(bbox.min.y)},${formatNumber(bbox.min.z)}) max=(${formatNumber(bbox.max.x)},${formatNumber(bbox.max.y)},${formatNumber(bbox.max.z)}) size=(${formatNumber(bbox.size.x)},${formatNumber(bbox.size.y)},${formatNumber(bbox.size.z)})`
+}
+
+function formatNumber(value: number): string {
+	return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")
 }
 
 function collectFeatureDependencies(feature: PartFeature): string[] {
@@ -848,6 +1021,40 @@ function parseProjectTargetArgs(args: readonly string[], commandName: string, al
 	return { target, mermaid, explain }
 }
 
+function parseQueryArgs(args: readonly string[], commandName: string): QueryArgs {
+	let target: string | undefined
+	let bodyId: string | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) {
+			continue
+		}
+		if (arg === "--help" || arg === "-h") {
+			throw new CliHelpError(formatQueryHelp())
+		}
+		if (arg === "--body") {
+			bodyId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--body=")) {
+			bodyId = arg.slice("--body=".length)
+			continue
+		}
+		if (arg.startsWith("-")) {
+			throw new Error(`Unknown ${commandName} option: ${arg}`)
+		}
+		if (target) {
+			throw new Error(`Unexpected ${commandName} argument: ${arg}`)
+		}
+		target = arg
+	}
+	return {
+		...(target ? { target } : {}),
+		...(bodyId ? { bodyId } : {})
+	}
+}
+
 async function shouldInspectLocalFile(target: string, cwd: string): Promise<boolean> {
 	if (target.endsWith(".pcad") || target.endsWith(".json") || target.includes("/") || target.includes("\\")) {
 		return true
@@ -913,6 +1120,8 @@ function formatHelp(): string {
 		"  project inspect [project-id]    Inspect a server project",
 		"  inspect [project-id|file]       Inspect a server project or local project file",
 		"  query features [project-id]     List part features",
+		"  query geometry [project-id]     List generated bodies/faces/edges",
+		"  query bodies|faces|edges|bbox   Inspect generated geometry",
 		"  graph [project-id]              Print the feature graph",
 		"  eval [project-id]               Validate/evaluate the project snapshot",
 		"  init [file]                     Create a local PuppyCAD project file",
@@ -938,7 +1147,17 @@ function formatProjectHelp(): string {
 }
 
 function formatQueryHelp(): string {
-	return ["Usage: puppycad query <query>", "", "Queries:", "  features [project-id] --json"].join("\n")
+	return [
+		"Usage: puppycad query <query> [project-id] [options]",
+		"",
+		"Queries:",
+		"  features [project-id] --json",
+		"  geometry [project-id] [--body <body-id>] --json",
+		"  bodies [project-id] --json",
+		"  faces [project-id] [--body <body-id>] --json",
+		"  edges [project-id] [--body <body-id>] --json",
+		"  bbox [project-id] [--body <body-id>] --json"
+	].join("\n")
 }
 
 function formatProjectTargetHelp(commandName: string): string {
