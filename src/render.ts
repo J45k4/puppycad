@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer"
 import { spawn } from "node:child_process"
 import zlib from "node:zlib"
+import { ShapeUtils, Vector2 } from "three"
 import type { SolidEdge, SolidFace, SolidVertex } from "./schema"
 import type { Vector3D } from "./types"
 
@@ -29,6 +30,11 @@ type WebGLRenderingContextLike = WebGLRenderingContext & {
 
 type Vec3 = [number, number, number]
 type Mat4 = readonly number[]
+type ProjectedLoop = {
+	points3d: Vec3[]
+	points2d: Vector2[]
+	area: number
+}
 
 const DEFAULT_WIDTH = 1024
 const DEFAULT_HEIGHT = 768
@@ -87,28 +93,106 @@ function buildPreviewMesh(bodies: readonly RenderGeometryBody[]): { positions: n
 			expandBounds(bounds, toVec3(vertex.position))
 		}
 		for (const face of body.faces) {
-			const polygon = orderFaceVertices(face, edgesById, verticesById)
-			if (polygon.length < 3) {
-				continue
-			}
-			const normal = computeFaceNormal(polygon)
-			const origin = polygon[0]
-			if (!origin) {
-				continue
-			}
-			for (let index = 1; index < polygon.length - 1; index += 1) {
-				const current = polygon[index]
-				const next = polygon[index + 1]
-				if (!current || !next) {
-					continue
-				}
-				pushVertex(positions, normals, origin, normal)
-				pushVertex(positions, normals, current, normal)
-				pushVertex(positions, normals, next, normal)
-			}
+			triangulateFace(face, edgesById, verticesById, positions, normals)
 		}
 	}
 	return { positions, normals, bounds, modelMatrix: identity4() }
+}
+
+function triangulateFace(face: SolidFace, edgesById: ReadonlyMap<string, SolidEdge>, verticesById: ReadonlyMap<string, Vector3D>, positions: number[], normals: number[]): void {
+	const loops = orderFaceLoops(face, edgesById, verticesById).filter((loop) => loop.length >= 3)
+	const firstLoop = loops[0]
+	if (!firstLoop) {
+		return
+	}
+	const normal = computeFaceNormal(firstLoop)
+	if (loops.length === 1) {
+		pushFanTriangles(firstLoop, normal, positions, normals)
+		return
+	}
+	const projectedLoops = loops.map((loop) => projectLoop(loop, normal)).sort((a, b) => Math.abs(b.area) - Math.abs(a.area))
+	const outer = projectedLoops[0]
+	if (!outer) {
+		return
+	}
+	const holes = projectedLoops.slice(1)
+	const allPoints3d = [...outer.points3d, ...holes.flatMap((loop) => loop.points3d)]
+	const triangles = ShapeUtils.triangulateShape(
+		outer.points2d,
+		holes.map((loop) => loop.points2d)
+	)
+	for (const triangle of triangles) {
+		const [aIndex, bIndex, cIndex] = triangle
+		if (aIndex === undefined || bIndex === undefined || cIndex === undefined) {
+			continue
+		}
+		const a = allPoints3d[aIndex]
+		const b = allPoints3d[bIndex]
+		const c = allPoints3d[cIndex]
+		if (!a || !b || !c) {
+			continue
+		}
+		pushVertex(positions, normals, a, normal)
+		pushVertex(positions, normals, b, normal)
+		pushVertex(positions, normals, c, normal)
+	}
+}
+
+function pushFanTriangles(polygon: readonly Vec3[], normal: Vec3, positions: number[], normals: number[]): void {
+	const origin = polygon[0]
+	if (!origin) {
+		return
+	}
+	for (let index = 1; index < polygon.length - 1; index += 1) {
+		const current = polygon[index]
+		const next = polygon[index + 1]
+		if (!current || !next) {
+			continue
+		}
+		pushVertex(positions, normals, origin, normal)
+		pushVertex(positions, normals, current, normal)
+		pushVertex(positions, normals, next, normal)
+	}
+}
+
+function projectLoop(loop: readonly Vec3[], normal: Vec3): ProjectedLoop {
+	const axis = dominantAxis(normal)
+	const points2d = loop.map((point) => {
+		switch (axis) {
+			case 0:
+				return new Vector2(point[1], point[2])
+			case 1:
+				return new Vector2(point[0], point[2])
+			default:
+				return new Vector2(point[0], point[1])
+		}
+	})
+	return {
+		points3d: [...loop],
+		points2d,
+		area: signedArea2d(points2d)
+	}
+}
+
+function dominantAxis(normal: Vec3): 0 | 1 | 2 {
+	const abs = normal.map(Math.abs)
+	if ((abs[0] ?? 0) >= (abs[1] ?? 0) && (abs[0] ?? 0) >= (abs[2] ?? 0)) {
+		return 0
+	}
+	return (abs[1] ?? 0) >= (abs[2] ?? 0) ? 1 : 2
+}
+
+function signedArea2d(points: readonly Vector2[]): number {
+	let area = 0
+	for (let index = 0; index < points.length; index += 1) {
+		const current = points[index]
+		const next = points[(index + 1) % points.length]
+		if (!current || !next) {
+			continue
+		}
+		area += current.x * next.y - next.x * current.y
+	}
+	return area / 2
 }
 
 async function renderMeshWithNodeWorker(
@@ -266,39 +350,42 @@ function dot3(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
 function normalize3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l] }
 `
 
-function orderFaceVertices(face: SolidFace, edgesById: ReadonlyMap<string, SolidEdge>, verticesById: ReadonlyMap<string, Vector3D>): Vec3[] {
-	const edges = face.edgeIds.map((edgeId) => edgesById.get(edgeId)).filter((edge): edge is SolidEdge => !!edge && edge.vertexIds.length >= 2)
-	const first = edges[0]
-	if (!first) {
-		return []
-	}
-	const start = first.vertexIds[0]
-	const second = first.vertexIds[1]
-	if (!start || !second) {
-		return []
-	}
-	const orderedIds = [start, second]
-	const unused = edges.slice(1)
-	let current = second
-	while (unused.length > 0 && current !== start) {
-		const nextIndex = unused.findIndex((edge) => edge.vertexIds.includes(current))
-		if (nextIndex < 0) {
-			break
+function orderFaceLoops(face: SolidFace, edgesById: ReadonlyMap<string, SolidEdge>, verticesById: ReadonlyMap<string, Vector3D>): Vec3[][] {
+	const unused = face.edgeIds.map((edgeId) => edgesById.get(edgeId)).filter((edge): edge is SolidEdge => !!edge && edge.vertexIds.length >= 2)
+	const loops: Vec3[][] = []
+	while (unused.length > 0) {
+		const first = unused.shift()
+		const start = first?.vertexIds[0]
+		const second = first?.vertexIds[1]
+		if (!start || !second) {
+			continue
 		}
-		const [edge] = unused.splice(nextIndex, 1)
-		const next = edge?.vertexIds.find((vertexId) => vertexId !== current)
-		if (!next) {
-			break
+		const orderedIds = [start, second]
+		let current = second
+		while (unused.length > 0 && current !== start) {
+			const nextIndex = unused.findIndex((edge) => edge.vertexIds.includes(current))
+			if (nextIndex < 0) {
+				break
+			}
+			const [edge] = unused.splice(nextIndex, 1)
+			const next = edge?.vertexIds.find((vertexId) => vertexId !== current)
+			if (!next) {
+				break
+			}
+			if (next !== start) {
+				orderedIds.push(next)
+			}
+			current = next
 		}
-		if (next !== start) {
-			orderedIds.push(next)
+		const loop = orderedIds
+			.map((vertexId) => verticesById.get(vertexId))
+			.filter((position): position is Vector3D => !!position)
+			.map(toVec3)
+		if (loop.length >= 3) {
+			loops.push(loop)
 		}
-		current = next
 	}
-	return orderedIds
-		.map((vertexId) => verticesById.get(vertexId))
-		.filter((position): position is Vector3D => !!position)
-		.map(toVec3)
+	return loops
 }
 
 function pushVertex(positions: number[], normals: number[], position: Vec3, normal: Vec3): void {
