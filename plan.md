@@ -79,6 +79,22 @@ export interface CornerRectangle {
 
 export type SketchEntity = Line | CornerRectangle
 
+export interface SketchLineNode extends PCadNode {
+	readonly type: "sketchLine"
+	readonly sketchId: string
+	readonly p0: Point2D
+	readonly p1: Point2D
+}
+
+export interface SketchCornerRectangleNode extends PCadNode {
+	readonly type: "sketchCornerRectangle"
+	readonly sketchId: string
+	readonly p0: Point2D
+	readonly p1: Point2D
+}
+
+export type SketchEntityNode = SketchLineNode | SketchCornerRectangleNode
+
 export type SketchDimension =
 	| {
 			readonly id: string
@@ -102,7 +118,6 @@ export type SketchDimension =
 export interface SketchNode extends PCadNode {
 	readonly type: "sketch"
 	readonly targetId: string
-	readonly entities: readonly SketchEntity[]
 	readonly dimensions: readonly SketchDimension[]
 }
 
@@ -138,6 +153,7 @@ export interface ChamferNode extends PCadNode {
 export type PCadGraphNode =
 	| ReferencePlaneNode
 	| SketchNode
+	| SketchEntityNode
 	| ExtrudeNode
 	| FaceNode
 	| EdgeNode
@@ -177,7 +193,7 @@ The source graph should not store materialized sketch topology such as:
 - loops
 - profiles
 
-Those should be computed from sketch entities and dimensions when needed.
+Those should be computed from sketch entity graph nodes and dimensions when needed.
 
 Operations that consume sketch profiles should reference derived sketch regions by stable profile id:
 
@@ -271,6 +287,9 @@ export function getNodeDependencies(node: PCadGraphNode): readonly string[] {
 			return []
 		case "sketch":
 			return [node.targetId]
+		case "sketchLine":
+		case "sketchCornerRectangle":
+			return [node.sketchId]
 		case "extrude":
 			return [node.sketchId]
 		case "face":
@@ -362,24 +381,24 @@ export class CadEditor {
 		this.future = rest
 	}
 
-	public addSketchEntity(sketchId: string, entity: SketchEntity): SketchNode {
-		const sketch = this.getSketchOrThrow(sketchId)
-		const nextSketch: SketchNode = {
-			...sketch,
-			entities: [...sketch.entities, entity]
-		}
-		this.commit({ type: "replaceNode", node: nextSketch })
-		return nextSketch
+	public addSketchEntity(sketchId: string, entity: SketchEntity): SketchEntityNode {
+		this.getSketchOrThrow(sketchId)
+		const node = sketchEntityToNode(sketchId, entity)
+		this.commit({ type: "addNode", node })
+		return node
 	}
 
 	public clearSketch(sketchId: string): SketchNode {
 		const sketch = this.getSketchOrThrow(sketchId)
+		const entityNodeIds = getSketchEntityNodes(this.present, sketch.id).map((node) => node.id)
 		const nextSketch: SketchNode = {
 			...sketch,
-			entities: [],
 			dimensions: []
 		}
-		this.commit({ type: "replaceNode", node: nextSketch })
+		this.commitMany([
+			{ type: "removeNodes", nodeIds: entityNodeIds },
+			{ type: "replaceNode", node: nextSketch }
+		])
 		return nextSketch
 	}
 
@@ -548,4 +567,3 @@ The migration should be staged:
 4. Keep UI behavior unchanged while swapping implementation internals.
 5. Remove persisted derived sketch topology once consumers use materialization helpers.
 6. Later, decide whether persisted files should use an array of nodes or another JSON shape.
-

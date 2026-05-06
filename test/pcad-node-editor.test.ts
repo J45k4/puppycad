@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Window } from "happy-dom"
 import type { PartFeature, PCadGraphNode, PCadState, Solid } from "../src/schema"
+import { sketchEntityNodeToEntity, sketchEntityToNode } from "../src/pcad/sketch-entities"
 import { PCadNodeEditor } from "../src/ui/pcad-node-editor"
 
 const plane: PCadGraphNode = {
@@ -15,9 +16,10 @@ const sketch: Extract<PCadGraphNode, { type: "sketch" }> = {
 	type: "sketch",
 	name: "Sketch 1",
 	targetId: plane.id,
-	entities: [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 8 } }],
 	dimensions: []
 }
+
+const rectangle = sketchEntityToNode(sketch.id, { id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 8 } })
 
 const extrude: Extract<PCadGraphNode, { type: "extrude" }> = {
 	id: "extrude-1",
@@ -56,6 +58,7 @@ function createState(): PCadState {
 		nodes: new Map<string, PCadGraphNode>([
 			[plane.id, plane],
 			[sketch.id, sketch],
+			[rectangle.id, rectangle],
 			[extrude.id, extrude],
 			[edge.id, edge],
 			[face.id, face],
@@ -70,6 +73,7 @@ function createStateWithoutAuthoredTopologyRefs(): PCadState {
 		nodes: new Map<string, PCadGraphNode>([
 			[plane.id, plane],
 			[sketch.id, sketch],
+			[rectangle.id, rectangle],
 			[extrude.id, extrude]
 		]),
 		rootNodeIds: [plane.id, extrude.id]
@@ -85,7 +89,7 @@ function createGeneratedState(): { features: PartFeature[]; solids: Solid[] } {
 				name: sketch.name,
 				dirty: false,
 				target: { type: "plane", plane: "XY" },
-				entities: [...sketch.entities],
+				entities: [sketchEntityNodeToEntity(rectangle)],
 				dimensions: [],
 				vertices: [
 					{ x: 0, y: 0 },
@@ -142,14 +146,13 @@ describe("PCadNodeEditor", () => {
 				.map((component) => component.data?.nodeId)
 				.filter(Boolean)
 				.sort()
-		).toEqual([plane.id, sketch.id, extrude.id, edge.id, face.id, chamfer.id].sort())
+		).toEqual([plane.id, sketch.id, rectangle.id, extrude.id, edge.id, face.id, chamfer.id].sort())
 		expect(connections).toHaveLength(6)
 
 		const idByNode = new Map(components.map((component) => [component.data?.nodeId, component.id]))
-		const idByGraph = new Map(components.map((component) => [component.data?.graphId, component.id]))
 		const planeComponentId = idByNode.get(plane.id)
 		const sketchComponentId = idByNode.get(sketch.id)
-		const entityComponentId = idByGraph.get("data:sketch-1:entity:rect-1")
+		const entityComponentId = idByNode.get(rectangle.id)
 		const edgeComponentId = idByNode.get(edge.id)
 		const chamferComponentId = idByNode.get(chamfer.id)
 		expect(planeComponentId).toBeNumber()
@@ -295,14 +298,14 @@ describe("PCadNodeEditor", () => {
 		expect(generatedSelections).toEqual(["solidEdge:generated:extrude-1-solid:solid-edge:extrude-1-solid-edge-1"])
 	})
 
-	it("maps sketch data node selection to generated selection callbacks", () => {
-		const generatedSelections: string[] = []
+	it("maps sketch entity node selection to PCad node callbacks", () => {
+		const selected: Array<string | null> = []
 		const editor = new PCadNodeEditor({
 			state: createState(),
-			onSelectGenerated: (selection) => generatedSelections.push(`${selection.type}:${selection.graphId}`)
+			onSelectNode: (nodeId) => selected.push(nodeId)
 		})
 		const canvas = editor.getCanvasForTesting()
-		const sketchEntity = canvas.getComponents().find((component) => component.data?.nodeType === "sketchEntity")
+		const sketchEntity = canvas.getComponents().find((component) => component.data?.nodeId === rectangle.id)
 		expect(sketchEntity).toBeDefined()
 		if (!sketchEntity) {
 			throw new Error("Expected sketch entity component")
@@ -310,7 +313,7 @@ describe("PCadNodeEditor", () => {
 
 		canvas.setSelection([sketchEntity.id])
 
-		expect(generatedSelections).toEqual(["sketchEntity:data:sketch-1:entity:rect-1"])
+		expect(selected).toEqual([rectangle.id])
 	})
 
 	it("maps canvas selection back to PCad node ids", () => {

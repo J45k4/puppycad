@@ -773,7 +773,7 @@ describe("PartEditor", () => {
 		const partEditor = editor as unknown as {
 			nodeEditor: {
 				getCanvasForTesting: () => {
-					getComponents: () => Array<{ id: number; data?: { nodeType?: string } }>
+					getComponents: () => Array<{ id: number; data?: { nodeId?: string; nodeType?: string } }>
 					setSelection: (ids: number[]) => void
 				}
 			}
@@ -912,7 +912,7 @@ describe("PartEditor", () => {
 		const partEditor = editor as unknown as {
 			nodeEditor: {
 				getCanvasForTesting: () => {
-					getComponents: () => Array<{ id: number; data?: { nodeType?: string } }>
+					getComponents: () => Array<{ id: number; data?: { nodeId?: string; nodeType?: string } }>
 					setSelection: (ids: number[]) => void
 				}
 			}
@@ -921,7 +921,7 @@ describe("PartEditor", () => {
 			selectedSketchEdge: { entityId: string } | null
 		}
 		const canvas = partEditor.nodeEditor.getCanvasForTesting()
-		const sketchEntity = canvas.getComponents().find((component) => component.data?.nodeType === "sketchEntity")
+		const sketchEntity = canvas.getComponents().find((component) => component.data?.nodeId === "rect-1" && component.data.nodeType === "sketchCornerRectangle")
 		expect(sketchEntity).toBeDefined()
 		if (!sketchEntity) {
 			throw new Error("Expected sketch entity node")

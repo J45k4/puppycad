@@ -12,6 +12,7 @@ import type {
 	SchemanticProjectItemData
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
+import { sketchEntityToNode } from "./pcad/sketch-entities"
 import { EXTRUDE_OPERATIONS } from "./schema"
 import type {
 	EdgeReference,
@@ -23,6 +24,7 @@ import type {
 	Sketch,
 	SketchDimension,
 	SketchEntity,
+	SketchEntityNode,
 	SketchPlane,
 	Solid,
 	SolidChamfer,
@@ -505,10 +507,29 @@ function normalizeSerializedPCadState(input: unknown): SerializedPCadState | und
 	if (!Array.isArray(value.nodes)) {
 		return undefined
 	}
-	const nodes = value.nodes.map((node) => normalizePCadGraphNode(node)).filter((node): node is PCadGraphNode => node !== undefined)
+	const nodes: PCadGraphNode[] = []
+	const usedNodeIds = new Set<string>()
+	for (const inputNode of value.nodes) {
+		const node = normalizePCadGraphNode(inputNode)
+		if (!node || usedNodeIds.has(node.id)) {
+			continue
+		}
+		nodes.push(node)
+		usedNodeIds.add(node.id)
+		if (node.type === "sketch") {
+			for (const entity of normalizeSketchEntities((inputNode as { entities?: unknown }).entities)) {
+				const entityNode = sketchEntityToNode(node.id, entity)
+				if (usedNodeIds.has(entityNode.id)) {
+					continue
+				}
+				nodes.push(entityNode)
+				usedNodeIds.add(entityNode.id)
+			}
+		}
+	}
 	const rootNodeIds = normalizeStringList(value.rootNodeIds)
 	return {
-		nodes,
+		nodes: normalizeSerializedPCadGraphNodes(nodes),
 		rootNodeIds
 	}
 }
@@ -537,9 +558,20 @@ function normalizePCadGraphNode(input: unknown): PCadGraphNode | undefined {
 			id,
 			name,
 			targetId,
-			entities: normalizeSketchEntities(value.entities),
-			dimensions: normalizeSketchDimensions(value.dimensions, normalizeSketchEntities(value.entities))
+			dimensions: normalizeSerializedSketchDimensions((value as { dimensions?: unknown }).dimensions)
 		}
+	}
+	if (value.type === "sketchLine") {
+		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
+		const p0 = normalizePoint2D(value.p0)
+		const p1 = normalizePoint2D(value.p1)
+		return sketchId && p0 && p1 ? { type: "sketchLine", id, name, sketchId, p0, p1 } : undefined
+	}
+	if (value.type === "sketchCornerRectangle") {
+		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
+		const p0 = normalizePoint2D(value.p0)
+		const p1 = normalizePoint2D(value.p1)
+		return sketchId && p0 && p1 ? { type: "sketchCornerRectangle", id, name, sketchId, p0, p1 } : undefined
 	}
 	if (value.type === "extrude") {
 		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
@@ -592,6 +624,56 @@ function normalizeStringList(input: unknown): string[] {
 		return []
 	}
 	return input.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+}
+
+function normalizeSerializedPCadGraphNodes(nodes: PCadGraphNode[]): PCadGraphNode[] {
+	const nodeById = new Map(nodes.map((node) => [node.id, node]))
+	return nodes.map((node) => {
+		if (node.type !== "sketch") {
+			return node
+		}
+		const dimensions = node.dimensions.filter((dimension) => {
+			const entity = nodeById.get(dimension.entityId)
+			return isSketchDimensionEntityNode(entity) && entity.sketchId === node.id && canApplySerializedSketchDimension(entity, dimension)
+		})
+		return dimensions.length === node.dimensions.length ? node : { ...node, dimensions }
+	})
+}
+
+function normalizeSerializedSketchDimensions(input: unknown): SketchDimension[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+
+	const dimensions: SketchDimension[] = []
+	for (let index = 0; index < input.length; index += 1) {
+		const dimension = input[index]
+		if (!dimension || typeof dimension !== "object") {
+			continue
+		}
+		const id = typeof dimension.id === "string" && dimension.id.trim() ? dimension.id.trim() : `dimension-${index + 1}`
+		const entityId = typeof dimension.entityId === "string" && dimension.entityId.trim() ? dimension.entityId.trim() : null
+		const value = extractFiniteNumber((dimension as { value?: unknown }).value, Number.NaN)
+		if (!entityId || !Number.isFinite(value) || value <= 0) {
+			continue
+		}
+		const type = (dimension as { type?: unknown }).type
+		if (type === "lineLength" || type === "rectangleWidth" || type === "rectangleHeight") {
+			dimensions.push({ id, type, entityId, value })
+		}
+	}
+	return dimensions
+}
+
+function isSketchDimensionEntityNode(node: PCadGraphNode | undefined): node is SketchEntityNode {
+	return node?.type === "sketchLine" || node?.type === "sketchCornerRectangle"
+}
+
+function canApplySerializedSketchDimension(entity: SketchEntityNode, dimension: SketchDimension): boolean {
+	if (entity.type === "sketchLine") {
+		return dimension.type === "lineLength"
+	}
+	return dimension.type === "rectangleWidth" || dimension.type === "rectangleHeight"
 }
 
 function normalizePartFeature(input: unknown, index: number): PartFeature | undefined {

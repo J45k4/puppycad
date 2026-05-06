@@ -1,4 +1,5 @@
 import { materializeSketch } from "../cad/sketch"
+import { getSketchEntities, sketchEntityToNode } from "./sketch-entities"
 import {
 	REFERENCE_PLANE_TO_SKETCH_PLANE,
 	SKETCH_PLANE_TO_REFERENCE_PLANE,
@@ -80,15 +81,30 @@ export function createPartRuntimeStateFromFeatures(features: readonly PartFeatur
 			if (!targetId) {
 				continue
 			}
+			const entityIdMap = new Map<string, string>()
+			const entityNodes: PCadGraphNode[] = []
+			const reservedEntityNodeIds = new Set<string>()
+			for (const entity of feature.entities) {
+				const entityNodeId = getAvailableSketchEntityNodeId(feature.id, entity.id, nodes, reservedEntityNodeIds)
+				const entityNode = sketchEntityToNode(feature.id, entityNodeId === entity.id ? entity : { ...entity, id: entityNodeId })
+				entityNodes.push(entityNode)
+				reservedEntityNodeIds.add(entityNode.id)
+				entityIdMap.set(entity.id, entityNode.id)
+			}
 			const sketchNode: SketchNode = {
 				id: feature.id,
 				type: "sketch",
 				name: feature.name,
 				targetId,
-				entities: feature.entities.map((entity) => ({ ...entity })),
-				dimensions: feature.dimensions.map((dimension) => ({ ...dimension }))
+				dimensions: feature.dimensions.map((dimension) => ({
+					...dimension,
+					entityId: entityIdMap.get(dimension.entityId) ?? dimension.entityId
+				}))
 			}
 			nodes.set(sketchNode.id, sketchNode)
+			for (const entityNode of entityNodes) {
+				nodes.set(entityNode.id, entityNode)
+			}
 			orderedNodeIds.push(sketchNode.id)
 			if (feature.dirty) {
 				dirtySketchIds.push(sketchNode.id)
@@ -301,7 +317,7 @@ function materializeSketchNode(state: PCadState, node: SketchNode, dirty: boolea
 		name: node.name,
 		dirty,
 		target: sketchTarget,
-		entities: node.entities.map((entity) => ({ ...entity })),
+		entities: getSketchEntities(state, node.id),
 		dimensions: node.dimensions.map((dimension) => ({ ...dimension })),
 		vertices: [],
 		loops: [],
@@ -324,6 +340,21 @@ function ensureEdgeReferenceNode(reference: EdgeReference, nodes: Map<string, PC
 		nodes.set(edgeNode.id, edgeNode)
 	}
 	return edgeNode.id
+}
+
+function getAvailableSketchEntityNodeId(sketchId: string, entityId: string, nodes: Map<string, PCadGraphNode>, reservedIds: ReadonlySet<string>): string {
+	if (!nodes.has(entityId) && !reservedIds.has(entityId)) {
+		return entityId
+	}
+	const baseId = `${sketchId}-${entityId}`
+	if (!nodes.has(baseId) && !reservedIds.has(baseId)) {
+		return baseId
+	}
+	let index = 2
+	while (nodes.has(`${baseId}-${index}`) || reservedIds.has(`${baseId}-${index}`)) {
+		index += 1
+	}
+	return `${baseId}-${index}`
 }
 
 function getFaceNodeId(reference: FaceReference): string {

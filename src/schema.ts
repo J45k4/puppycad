@@ -57,6 +57,22 @@ export type CornerRectangle = {
 
 export type SketchEntity = Line | CornerRectangle
 
+export type SketchLineNode = PCadNode & {
+	readonly type: "sketchLine"
+	readonly sketchId: string
+	readonly p0: Point2D
+	readonly p1: Point2D
+}
+
+export type SketchCornerRectangleNode = PCadNode & {
+	readonly type: "sketchCornerRectangle"
+	readonly sketchId: string
+	readonly p0: Point2D
+	readonly p1: Point2D
+}
+
+export type SketchEntityNode = SketchLineNode | SketchCornerRectangleNode
+
 export type SketchDimension =
 	| {
 			id: string
@@ -80,7 +96,6 @@ export type SketchDimension =
 export interface SketchNode extends PCadNode {
 	readonly type: "sketch"
 	readonly targetId: string
-	readonly entities: readonly SketchEntity[]
 	readonly dimensions: readonly SketchDimension[]
 }
 
@@ -114,7 +129,7 @@ export interface ChamferNode extends PCadNode {
 	readonly d2?: number
 }
 
-export type PCadGraphNode = ReferencePlaneNode | SketchNode | ExtrudeNode | FaceNode | EdgeNode | ChamferNode
+export type PCadGraphNode = ReferencePlaneNode | SketchNode | SketchEntityNode | ExtrudeNode | FaceNode | EdgeNode | ChamferNode
 
 export type PCadGraphRewrite =
 	| {

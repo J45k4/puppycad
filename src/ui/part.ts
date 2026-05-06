@@ -1386,6 +1386,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			case "sketch":
 				this.selectSketch(node.id)
 				break
+			case "sketchLine":
+			case "sketchCornerRectangle":
+				this.selectSketch(node.sketchId)
+				this.selectSketchEdge(this.getSketchGraphEdgeSelection(node.sketchId, node.id))
+				break
 			case "extrude":
 				this.selectExtrude(node.id)
 				break
@@ -1583,7 +1588,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			return this.selectedPCadNodeId
 		}
 		const explicitNode = this.selectedPCadNodeId ? state.nodes.get(this.selectedPCadNodeId) : null
-		if (explicitNode?.type === "chamfer") {
+		if (explicitNode?.type === "chamfer" || explicitNode?.type === "sketchLine" || explicitNode?.type === "sketchCornerRectangle") {
 			return explicitNode.id
 		}
 		if (this.selectedExtrudeId && this.selectedEdgeId) {
@@ -1605,6 +1610,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		if (this.selectedExtrudeId && state.nodes.has(this.selectedExtrudeId)) {
 			return this.selectedExtrudeId
+		}
+		if (this.selectedSketchId && this.selectedSketchEdge && state.nodes.has(this.selectedSketchEdge.entityId)) {
+			return this.selectedSketchEdge.entityId
 		}
 		if (this.selectedSketchId && state.nodes.has(this.selectedSketchId)) {
 			return this.selectedSketchId

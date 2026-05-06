@@ -1,4 +1,5 @@
 import type { ChamferNode, ExtrudeNode, PartFeature, PCadGraphNode, PCadState, SketchDimension, SketchEntity, Solid, SolidEdge, SolidFace, SolidVertex } from "../schema"
+import { getSketchEntityNodes, sketchEntityNodeToEntity } from "../pcad/sketch-entities"
 import { getNodeDependencies } from "../pcad/runtime"
 import type { Point2D, Vector3D } from "../types"
 import { EditorCanvas, type CanvasComponent, type Connection } from "./canvas"
@@ -321,8 +322,13 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 		} else if (node.type === "chamfer") {
 			this.renderChamferInspector(node)
 		} else if (node.type === "sketch") {
-			this.inspector.appendChild(createReadonlyRow("Entities", String(node.entities.length)))
+			this.inspector.appendChild(createReadonlyRow("Entities", String(getSketchEntityNodes(this.state, node.id).length)))
 			this.inspector.appendChild(createReadonlyRow("Dimensions", String(node.dimensions.length)))
+		} else if (node.type === "sketchLine" || node.type === "sketchCornerRectangle") {
+			this.inspector.appendChild(createReadonlyRow("Sketch", node.sketchId))
+			for (const row of sketchEntityRows(sketchEntityNodeToEntity(node))) {
+				this.inspector.appendChild(createReadonlyRow(row.label, row.value))
+			}
 		} else if (node.type === "referencePlane") {
 			this.inspector.appendChild(createReadonlyRow("Plane", node.plane))
 		} else if (node.type === "face") {
@@ -777,32 +783,13 @@ function buildSketchDataNodes(state: PCadState): GeneratedGraphNode[] {
 		if (node.type !== "sketch") {
 			continue
 		}
-		for (const entity of node.entities) {
-			const graphId = getSketchEntityNodeId(node.id, entity.id)
-			nodes.push({
-				id: graphId,
-				type: "sketchEntity",
-				sourceId: node.id,
-				dependencies: [node.id],
-				label: getSketchEntityLabel(entity),
-				detail: getSketchEntityDetail(entity),
-				rows: sketchEntityRows(entity),
-				selection: {
-					type: "sketchEntity",
-					graphId,
-					sketchId: node.id,
-					entityId: entity.id
-				}
-			})
-		}
 		for (const dimension of node.dimensions) {
-			const entityNodeId = getSketchEntityNodeId(node.id, dimension.entityId)
 			const graphId = getSketchDimensionNodeId(node.id, dimension.id)
 			nodes.push({
 				id: graphId,
 				type: "sketchDimension",
 				sourceId: node.id,
-				dependencies: nodes.some((candidate) => candidate.id === entityNodeId) ? [entityNodeId] : [node.id],
+				dependencies: state.nodes.has(dimension.entityId) ? [dimension.entityId] : [node.id],
 				label: getSketchDimensionLabel(dimension),
 				detail: formatNumber(dimension.value),
 				rows: sketchDimensionRows(dimension),
@@ -817,10 +804,6 @@ function buildSketchDataNodes(state: PCadState): GeneratedGraphNode[] {
 		}
 	}
 	return nodes
-}
-
-function getSketchEntityNodeId(sketchId: string, entityId: string): string {
-	return `data:${sketchId}:entity:${entityId}`
 }
 
 function getSketchDimensionNodeId(sketchId: string, dimensionId: string): string {
@@ -943,14 +926,17 @@ function getTypeOrder(type: PCadGraphNode["type"]): number {
 			return 0
 		case "sketch":
 			return 1
-		case "extrude":
+		case "sketchLine":
+		case "sketchCornerRectangle":
 			return 2
-		case "face":
+		case "extrude":
 			return 3
-		case "edge":
+		case "face":
 			return 4
-		case "chamfer":
+		case "edge":
 			return 5
+		case "chamfer":
+			return 6
 	}
 }
 
@@ -963,7 +949,10 @@ function getNodeDetail(node: PCadGraphNode): string {
 		case "referencePlane":
 			return node.plane
 		case "sketch":
-			return `${node.entities.length} entities`
+			return `${node.dimensions.length} dimensions`
+		case "sketchLine":
+		case "sketchCornerRectangle":
+			return getSketchEntityDetail(sketchEntityNodeToEntity(node))
 		case "extrude":
 			return `Depth ${formatNumber(node.depth)}`
 		case "face":
@@ -1034,6 +1023,10 @@ function getNodeTypeCaption(data?: PCadNodeComponentData): string {
 		return "NODE"
 	}
 	switch (data.nodeType) {
+		case "sketchLine":
+			return "SKETCH LINE"
+		case "sketchCornerRectangle":
+			return "SKETCH RECTANGLE"
 		case "sketchEntity":
 			return "SKETCH ENTITY"
 		case "sketchDimension":
@@ -1069,6 +1062,9 @@ function getNodePalette(type?: PCadGraphNode["type"] | GeneratedNodeType): { fil
 			return { fill: "#e0f2fe", border: "#38bdf8", text: "#075985" }
 		case "sketch":
 			return { fill: "#dcfce7", border: "#22c55e", text: "#166534" }
+		case "sketchLine":
+		case "sketchCornerRectangle":
+			return { fill: "#ecfccb", border: "#84cc16", text: "#3f6212" }
 		case "extrude":
 			return { fill: "#dbeafe", border: "#3b82f6", text: "#1d4ed8" }
 		case "face":

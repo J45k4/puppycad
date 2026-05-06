@@ -461,7 +461,7 @@ describe("normalizeProjectFile", () => {
 			cad: {
 				nodes: [
 					{ id: "plane-front", type: "referencePlane", name: "Front", plane: "XY" },
-					{ id: "sketch-1", type: "sketch", name: "Sketch 1", targetId: "plane-front", entities: [], dimensions: [] },
+					{ id: "sketch-1", type: "sketch", name: "Sketch 1", targetId: "plane-front", dimensions: [] },
 					{ id: "extrude-1", type: "extrude", sketchId: "sketch-1", profileId: "sketch-1-profile-1", operation: "newBody", depth: 18 }
 				],
 				rootNodeIds: ["plane-front", "extrude-1"]

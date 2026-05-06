@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import type { EdgeNode, ExtrudeNode, ExtrudeOperation, FaceNode, PCadGraphNode, PCadState, ReferencePlaneNode, Sketch, SketchNode, SolidExtrude } from "../schema"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
+import { getSketchEntities, sketchEntityToNode } from "./sketch-entities"
 import { CadEditor, applyGraphRewrite, applyGraphRewrites, collectDependentNodeIds, createEmptyPCadState, getNodeDependencies, validatePCadState } from "./runtime"
 
 const plane: ReferencePlaneNode = {
@@ -16,9 +17,10 @@ const sketch: SketchNode = {
 	type: "sketch",
 	name: "Sketch 1",
 	targetId: plane.id,
-	entities: [{ id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 5 } }],
 	dimensions: []
 }
+
+const sketchRectangle = sketchEntityToNode(sketch.id, { id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 5 } })
 
 const extrude: ExtrudeNode = {
 	id: "extrude-1",
@@ -48,7 +50,8 @@ function createValidState(): PCadState {
 	return {
 		nodes: new Map<string, PCadGraphNode>([
 			[plane.id, plane],
-			[sketch.id, sketch]
+			[sketch.id, sketch],
+			[sketchRectangle.id, sketchRectangle]
 		]),
 		rootNodeIds: [plane.id]
 	}
@@ -66,6 +69,7 @@ function createDependencyState(): PCadState {
 		nodes: new Map<string, PCadGraphNode>([
 			[plane.id, plane],
 			[sketch.id, sketch],
+			[sketchRectangle.id, sketchRectangle],
 			[extrude.id, extrude],
 			[edge.id, edge],
 			[face.id, face],
@@ -124,6 +128,7 @@ describe("PCad dependencies", () => {
 	it("extracts node dependencies", () => {
 		expect(getNodeDependencies(plane)).toEqual([])
 		expect(getNodeDependencies(sketch)).toEqual([plane.id])
+		expect(getNodeDependencies(sketchRectangle)).toEqual([sketch.id])
 		expect(getNodeDependencies(extrude)).toEqual([sketch.id])
 		expect(getNodeDependencies(face)).toEqual([extrude.id])
 		expect(getNodeDependencies(edge)).toEqual([extrude.id])
@@ -133,7 +138,7 @@ describe("PCad dependencies", () => {
 	it("collects transitive dependent nodes for cascade deletion", () => {
 		const deletedIds = collectDependentNodeIds(createDependencyState(), [sketch.id])
 
-		expect([...deletedIds].sort()).toEqual([sketch.id, extrude.id, edge.id, face.id, "chamfer-1"].sort())
+		expect([...deletedIds].sort()).toEqual([sketch.id, sketchRectangle.id, extrude.id, edge.id, face.id, "chamfer-1"].sort())
 	})
 })
 
@@ -254,7 +259,6 @@ describe("CadEditor", () => {
 			type: "sketch",
 			name: "Geometry Sketch",
 			targetId: plane.id,
-			entities: [],
 			dimensions: []
 		}
 		const editor = new CadEditor({
@@ -265,13 +269,13 @@ describe("CadEditor", () => {
 			rootNodeIds: [plane.id]
 		})
 
-		const sketchedRectangle = editor.addSketchEntity(editableSketch.id, {
+		editor.addSketchEntity(editableSketch.id, {
 			id: "rect-geometry",
 			type: "cornerRectangle",
 			p0: { x: 0, y: 0 },
 			p1: { x: 20, y: 10 }
 		})
-		const legacySketch = materializeSketch(toLegacySketch(sketchedRectangle, plane))
+		const legacySketch = materializeSketch(toLegacySketch(editor.getState(), editableSketch, plane))
 		const profileId = legacySketch.profiles[0]?.id
 		expect(profileId).toBeString()
 
@@ -316,17 +320,18 @@ describe("CadEditor", () => {
 			type: "sketch",
 			name: "Base Sketch",
 			targetId: plane.id,
-			entities: [{ id: "rect-base", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 30, y: 20 } }],
 			dimensions: []
 		}
+		const baseRectangle = sketchEntityToNode(baseSketch.id, { id: "rect-base", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 30, y: 20 } })
 		const editor = new CadEditor({
 			nodes: new Map<string, PCadGraphNode>([
 				[plane.id, plane],
-				[baseSketch.id, baseSketch]
+				[baseSketch.id, baseSketch],
+				[baseRectangle.id, baseRectangle]
 			]),
 			rootNodeIds: [plane.id]
 		})
-		const legacyBaseSketch = materializeSketch(toLegacySketch(baseSketch, plane))
+		const legacyBaseSketch = materializeSketch(toLegacySketch(editor.getState(), baseSketch, plane))
 		const baseProfileId = legacyBaseSketch.profiles[0]?.id
 		expect(baseProfileId).toBeString()
 		const baseExtrudeNode = editor.extrudeSketchProfile({
@@ -352,20 +357,19 @@ describe("CadEditor", () => {
 			type: "sketch",
 			name: "Pocket Sketch",
 			targetId: topFace.id,
-			entities: [],
 			dimensions: []
 		}
 		const pocketEditor = new CadEditor({
 			nodes: new Map<string, PCadGraphNode>([...editor.getState().nodes, [topFace.id, topFace], [pocketSketch.id, pocketSketch]]),
 			rootNodeIds: editor.getState().rootNodeIds
 		})
-		const pocketSketchWithEntity = pocketEditor.addSketchEntity(pocketSketch.id, {
+		pocketEditor.addSketchEntity(pocketSketch.id, {
 			id: "rect-pocket",
 			type: "cornerRectangle",
 			p0: { x: 8, y: 6 },
 			p1: { x: 16, y: 14 }
 		})
-		const legacyPocketSketch = materializeSketch(toLegacySketch(pocketSketchWithEntity, topFace))
+		const legacyPocketSketch = materializeSketch(toLegacySketch(pocketEditor.getState(), pocketSketch, topFace))
 		const pocketProfileId = legacyPocketSketch.profiles[0]?.id
 		expect(pocketProfileId).toBeString()
 		const pocketExtrudeNode = pocketEditor.extrudeSketchProfile({
@@ -394,7 +398,7 @@ describe("CadEditor", () => {
 	})
 })
 
-function toLegacySketch(node: SketchNode, target: ReferencePlaneNode | FaceNode): Sketch {
+function toLegacySketch(state: PCadState, node: SketchNode, target: ReferencePlaneNode | FaceNode): Sketch {
 	return {
 		type: "sketch",
 		id: node.id,
@@ -414,7 +418,7 @@ function toLegacySketch(node: SketchNode, target: ReferencePlaneNode | FaceNode)
 							faceId: target.faceId
 						}
 					},
-		entities: node.entities.map((entity) => ({ ...entity })),
+		entities: getSketchEntities(state, node.id),
 		dimensions: node.dimensions.map((dimension) => ({ ...dimension })),
 		vertices: [],
 		loops: [],
