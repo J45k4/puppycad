@@ -1,4 +1,5 @@
 import { materializeSketch } from "../cad/sketch"
+import { getSketchDimensions, sketchDimensionToConstraintNode } from "./sketch-constraints"
 import { getSketchEntities, sketchEntityToNode } from "./sketch-entities"
 import {
 	REFERENCE_PLANE_TO_SKETCH_PLANE,
@@ -91,19 +92,26 @@ export function createPartRuntimeStateFromFeatures(features: readonly PartFeatur
 				reservedEntityNodeIds.add(entityNode.id)
 				entityIdMap.set(entity.id, entityNode.id)
 			}
+			const dimensions = feature.dimensions.map((dimension) => ({
+				...dimension,
+				entityId: entityIdMap.get(dimension.entityId) ?? dimension.entityId
+			}))
 			const sketchNode: SketchNode = {
 				id: feature.id,
 				type: "sketch",
 				name: feature.name,
 				targetId,
-				dimensions: feature.dimensions.map((dimension) => ({
-					...dimension,
-					entityId: entityIdMap.get(dimension.entityId) ?? dimension.entityId
-				}))
+				dimensions
 			}
 			nodes.set(sketchNode.id, sketchNode)
 			for (const entityNode of entityNodes) {
 				nodes.set(entityNode.id, entityNode)
+			}
+			for (const dimension of dimensions) {
+				const constraintNode = sketchDimensionToConstraintNode(sketchNode.id, dimension)
+				if (!nodes.has(constraintNode.id)) {
+					nodes.set(constraintNode.id, constraintNode)
+				}
 			}
 			orderedNodeIds.push(sketchNode.id)
 			if (feature.dirty) {
@@ -254,6 +262,17 @@ function deserializePCadState(serialized: SerializedPCadState): PCadState {
 	for (const node of serialized.nodes) {
 		nodes.set(node.id, clonePCadNode(node))
 	}
+	for (const node of nodes.values()) {
+		if (node.type !== "sketch") {
+			continue
+		}
+		for (const dimension of node.dimensions) {
+			const constraintNode = sketchDimensionToConstraintNode(node.id, dimension)
+			if (!nodes.has(constraintNode.id)) {
+				nodes.set(constraintNode.id, constraintNode)
+			}
+		}
+	}
 	const rootNodeIds = serialized.rootNodeIds.filter((id) => nodes.has(id))
 	const referencePlaneIds = PART_REFERENCE_PLANES.map((plane) => plane.id)
 	return {
@@ -318,7 +337,7 @@ function materializeSketchNode(state: PCadState, node: SketchNode, dirty: boolea
 		dirty,
 		target: sketchTarget,
 		entities: getSketchEntities(state, node.id),
-		dimensions: node.dimensions.map((dimension) => ({ ...dimension })),
+		dimensions: getSketchDimensions(state, node.id, node.dimensions),
 		vertices: [],
 		loops: [],
 		profiles: []

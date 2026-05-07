@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import type { EdgeNode, ExtrudeNode, ExtrudeOperation, FaceNode, PCadGraphNode, PCadState, ReferencePlaneNode, Sketch, SketchNode, SolidExtrude } from "../schema"
+import type { EdgeNode, ExtrudeNode, ExtrudeOperation, FaceNode, PCadGraphNode, PCadState, ReferencePlaneNode, Sketch, SketchConstraintNode, SketchNode, SolidExtrude } from "../schema"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors } from "../cad/extrude"
 import { materializeSketch } from "../cad/sketch"
 import { getSketchEntities, sketchEntityToNode } from "./sketch-entities"
@@ -21,6 +21,18 @@ const sketch: SketchNode = {
 }
 
 const sketchRectangle = sketchEntityToNode(sketch.id, { id: "rect-1", type: "cornerRectangle", p0: { x: 0, y: 0 }, p1: { x: 10, y: 5 } })
+const sketchLine = sketchEntityToNode(sketch.id, { id: "line-1", type: "line", p0: { x: 0, y: 0 }, p1: { x: 3, y: 4 } })
+
+const sketchConstraint: SketchConstraintNode = {
+	id: "constraint-width",
+	type: "sketchConstraint",
+	sketchId: sketch.id,
+	constraint: {
+		type: "rectangleWidth",
+		entityId: sketchRectangle.id,
+		value: 10
+	}
+}
 
 const extrude: ExtrudeNode = {
 	id: "extrude-1",
@@ -70,6 +82,7 @@ function createDependencyState(): PCadState {
 			[plane.id, plane],
 			[sketch.id, sketch],
 			[sketchRectangle.id, sketchRectangle],
+			[sketchConstraint.id, sketchConstraint],
 			[extrude.id, extrude],
 			[edge.id, edge],
 			[face.id, face],
@@ -129,6 +142,7 @@ describe("PCad dependencies", () => {
 		expect(getNodeDependencies(plane)).toEqual([])
 		expect(getNodeDependencies(sketch)).toEqual([plane.id])
 		expect(getNodeDependencies(sketchRectangle)).toEqual([sketch.id])
+		expect(getNodeDependencies(sketchConstraint)).toEqual([sketch.id, sketchRectangle.id])
 		expect(getNodeDependencies(extrude)).toEqual([sketch.id])
 		expect(getNodeDependencies(face)).toEqual([extrude.id])
 		expect(getNodeDependencies(edge)).toEqual([extrude.id])
@@ -138,7 +152,13 @@ describe("PCad dependencies", () => {
 	it("collects transitive dependent nodes for cascade deletion", () => {
 		const deletedIds = collectDependentNodeIds(createDependencyState(), [sketch.id])
 
-		expect([...deletedIds].sort()).toEqual([sketch.id, sketchRectangle.id, extrude.id, edge.id, face.id, "chamfer-1"].sort())
+		expect([...deletedIds].sort()).toEqual([sketch.id, sketchRectangle.id, sketchConstraint.id, extrude.id, edge.id, face.id, "chamfer-1"].sort())
+	})
+
+	it("collects constraint nodes when deleting a constrained entity", () => {
+		const deletedIds = collectDependentNodeIds(createDependencyState(), [sketchRectangle.id])
+
+		expect([...deletedIds].sort()).toEqual([sketchRectangle.id, sketchConstraint.id].sort())
 	})
 })
 
@@ -197,7 +217,49 @@ describe("CadEditor", () => {
 		})
 
 		expect(updatedSketch.dimensions).toEqual([{ id: "dim-1", type: "rectangleWidth", entityId: "rect-1", value: 10 }])
+		expect(editor.getState().nodes.get("dim-1")).toEqual({
+			id: "dim-1",
+			type: "sketchConstraint",
+			sketchId: sketch.id,
+			constraint: { type: "rectangleWidth", entityId: "rect-1", value: 10 }
+		})
 		expect(() => editor.setSketchDimension(sketch.id, { id: "dim-2", type: "rectangleHeight", entityId: "missing", value: 5 })).toThrow('Sketch entity "missing" does not exist.')
+	})
+
+	it("sets line length through a constraint node while preserving current coordinate behavior", () => {
+		const editor = new CadEditor({
+			nodes: new Map<string, PCadGraphNode>([
+				[plane.id, plane],
+				[sketch.id, sketch],
+				[sketchLine.id, sketchLine]
+			]),
+			rootNodeIds: [plane.id]
+		})
+
+		editor.setSketchDimension(sketch.id, { id: "dim-line", type: "lineLength", entityId: sketchLine.id, value: 10 })
+		const line = editor.getState().nodes.get(sketchLine.id)
+
+		expect(line).toMatchObject({ type: "sketchLine", p0: { x: 0, y: 0 }, p1: { x: 6, y: 8 } })
+		expect(editor.getState().nodes.get("dim-line")).toEqual({
+			id: "dim-line",
+			type: "sketchConstraint",
+			sketchId: sketch.id,
+			constraint: { type: "lineLength", entityId: sketchLine.id, value: 10 }
+		})
+	})
+
+	it("validates sketch constraint nodes", () => {
+		expect(() =>
+			validatePCadState({
+				nodes: new Map<string, PCadGraphNode>([
+					[plane.id, plane],
+					[sketch.id, sketch],
+					[sketchRectangle.id, sketchRectangle],
+					["bad-constraint", { ...sketchConstraint, id: "bad-constraint", constraint: { type: "lineLength", entityId: sketchRectangle.id, value: 10 } }]
+				]),
+				rootNodeIds: [plane.id]
+			})
+		).toThrow('Sketch constraint "bad-constraint" cannot be applied to entity "rect-1".')
 	})
 
 	it("rejects invalid ids, depths, and extrude operations", () => {

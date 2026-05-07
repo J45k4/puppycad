@@ -6,9 +6,10 @@ import { dirname, join, resolve } from "node:path"
 import { extrudeSolidFeature } from "./cad/extrude"
 import type { Project, ProjectDocument, ProjectDocumentType, ProjectNode } from "./contract"
 import { PCadPart, PuppyCadClient } from "./pcad/project"
+import { applySyncedProjectCommands, type CadCommand, type SyncedProjectCommand } from "./project-commands"
 import { createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
-import { renderProjectPreviewPng } from "./render"
-import type { PartDocument, PartFeature, Solid, SolidEdge, SolidFace, SolidVertex } from "./schema"
+import { renderProjectPreviewPng, type RenderLabel } from "./render"
+import type { PartDocument, PartFeature, SketchDimension, SketchEntity, SketchPlane, Solid, SolidEdge, SolidFace, SolidVertex } from "./schema"
 import type { Vector3D } from "./types"
 
 type CliOutput = {
@@ -18,7 +19,7 @@ type CliOutput = {
 
 type CliEnv = Record<string, string | undefined>
 type CliFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-type CliRenderPng = (bodies: readonly CliGeometryBody[], options: RenderOptions) => Promise<Uint8Array>
+type CliRenderPng = (bodies: readonly CliGeometryBody[], options: RenderOptions & { labels?: readonly RenderLabel[] }) => Promise<Uint8Array>
 
 type CliOptions = {
 	version?: string
@@ -127,6 +128,52 @@ type RenderOptions = {
 	outPath: string
 	width?: number
 	height?: number
+	showDimensions?: boolean
+}
+
+type DimensionSetOptions = {
+	target?: string
+	partId: string
+	sketchId: string
+	entityId: string
+	type: SketchDimension["type"]
+	value: number
+	dimensionId?: string
+}
+
+type SketchCreateOptions = {
+	target?: string
+	partId: string
+	sketchId: string
+	name: string
+	plane: SketchPlane
+}
+
+type SketchRectangleOptions = {
+	target?: string
+	partId: string
+	sketchId: string
+	entityId: string
+	x0: number
+	y0: number
+	x1: number
+	y1: number
+}
+
+type SketchFinishOptions = {
+	target?: string
+	partId: string
+	sketchId: string
+}
+
+type ExtrudeCreateOptions = {
+	target?: string
+	partId: string
+	extrudeId: string
+	name: string
+	sketchId: string
+	profileId?: string
+	depth: number
 }
 
 const DEFAULT_VERSION = "0.1.0"
@@ -170,6 +217,9 @@ export async function runPuppycadCli(args: readonly string[], options: CliOption
 		}
 		if (command === "project") {
 			return await runProjectCommand(rest, context)
+		}
+		if (command === "cad") {
+			return await runCadCommand(rest, context)
 		}
 		if (command === "query") {
 			return await runQueryCommand(rest, context)
@@ -472,6 +522,82 @@ async function runInspectCommand(args: readonly string[], context: CliContext): 
 	return await runServerInspect(options.target, { ...context, globals: { ...context.globals, json } })
 }
 
+async function runCadCommand(args: readonly string[], context: CliContext): Promise<number> {
+	const [area, action, ...rest] = args
+	if (!area || area === "--help" || area === "-h") {
+		context.output.stdout(formatCadHelp())
+		return 0
+	}
+	if (area === "sketch" && action === "create") {
+		const options = parseSketchCreateArgs(rest)
+		return executeCadCommand(
+			context,
+			options.target,
+			options.partId,
+			{ type: "createSketch", sketchId: options.sketchId, name: options.name, target: { type: "plane", plane: options.plane } },
+			`Created sketch ${options.sketchId}`
+		)
+	}
+	if (area === "sketch" && action === "rectangle") {
+		const options = parseSketchRectangleArgs(rest)
+		return executeCadCommand(
+			context,
+			options.target,
+			options.partId,
+			{
+				type: "addSketchEntity",
+				sketchId: options.sketchId,
+				entity: {
+					id: options.entityId,
+					type: "cornerRectangle",
+					p0: { x: options.x0, y: options.y0 },
+					p1: { x: options.x1, y: options.y1 }
+				}
+			},
+			`Added rectangle ${options.entityId}`
+		)
+	}
+	if (area === "sketch" && action === "finish") {
+		const options = parseSketchFinishArgs(rest)
+		return executeCadCommand(context, options.target, options.partId, { type: "finishSketch", sketchId: options.sketchId }, `Finished sketch ${options.sketchId}`)
+	}
+	if (area === "dimension" && action === "set") {
+		const options = parseDimensionSetArgs(rest)
+		const dimension: SketchDimension = {
+			id: options.dimensionId ?? getDefaultDimensionId(options.sketchId, options.type, options.entityId),
+			type: options.type,
+			entityId: options.entityId,
+			value: options.value
+		}
+		return executeCadCommand(
+			context,
+			options.target,
+			options.partId,
+			{ type: "setSketchDimension", sketchId: options.sketchId, dimension },
+			`Set ${dimension.type} dimension ${dimension.id} on ${dimension.entityId} to ${dimension.value}`,
+			{ sketchId: options.sketchId, dimension }
+		)
+	}
+	if (area === "extrude" && action === "create") {
+		const options = parseExtrudeCreateArgs(rest)
+		return executeCadCommand(
+			context,
+			options.target,
+			options.partId,
+			{
+				type: "createExtrude",
+				extrudeId: options.extrudeId,
+				name: options.name,
+				sketchId: options.sketchId,
+				profileId: options.profileId ?? `${options.sketchId}-profile-1`,
+				depth: options.depth
+			},
+			`Created extrude ${options.extrudeId}`
+		)
+	}
+	throw new Error(`Unknown cad command: ${[area, action].filter(Boolean).join(" ")}`)
+}
+
 async function runQueryCommand(args: readonly string[], context: CliContext): Promise<number> {
 	const [query, ...rest] = args
 	if (!query || query === "--help" || query === "-h") {
@@ -609,7 +735,7 @@ async function runEvalCommand(args: readonly string[], context: CliContext): Pro
 
 async function runRenderCommand(args: readonly string[], context: CliContext): Promise<number> {
 	const options = parseRenderArgs(args)
-	const { projectId, project } = await loadServerProject(context, options.target)
+	const { projectId, project } = await loadProjectForRead(context, options.target)
 	const geometry = collectProjectGeometry(project)
 	if (geometry.errors.length > 0) {
 		throw new Error(`Cannot render project with geometry errors: ${geometry.errors.map((error) => `${error.partId}/${error.featureId}: ${error.message}`).join("; ")}`)
@@ -617,12 +743,16 @@ async function runRenderCommand(args: readonly string[], context: CliContext): P
 	if (geometry.bodies.length === 0) {
 		throw new Error("Project has no generated solid geometry to render.")
 	}
-	const png = await context.renderPng(geometry.bodies, options)
+	const labels = options.showDimensions ? collectProjectDimensionLabels(project) : []
+	const png = await context.renderPng(geometry.bodies, { ...options, labels })
 	const outPath = resolve(context.cwd, options.outPath)
 	await mkdir(dirname(outPath), { recursive: true })
 	await writeFile(outPath, png)
 	if (context.globals.json) {
-		writeStdout(context, JSON.stringify({ projectId, out: outPath, width: options.width ?? 1024, height: options.height ?? 768, bodies: geometry.bodies.length }, null, 2))
+		writeStdout(
+			context,
+			JSON.stringify({ projectId, out: outPath, width: options.width ?? 1024, height: options.height ?? 768, bodies: geometry.bodies.length, labels: labels.length }, null, 2)
+		)
 		return 0
 	}
 	writeStdout(context, `Rendered ${projectId} to ${outPath}`)
@@ -788,6 +918,64 @@ function collectProjectGeometry(project: Project): CliGeometry {
 	return { bodies, errors }
 }
 
+function collectProjectDimensionLabels(project: Project): RenderLabel[] {
+	const labels: RenderLabel[] = []
+	visitProjectNodes(project.items, (node) => {
+		if (isProjectFolder(node) || node.type !== "part") {
+			return
+		}
+		const part = new PCadPart(node.data).getDocument() as PartDocument
+		for (const feature of part.features) {
+			if (feature.type !== "sketch" || feature.target.type !== "plane") {
+				continue
+			}
+			const entitiesById = new Map(feature.entities.map((entity) => [entity.id, entity] as const))
+			for (const dimension of feature.dimensions) {
+				const entity = entitiesById.get(dimension.entityId)
+				if (!entity) {
+					continue
+				}
+				const position = getDimensionLabelPosition(feature.target.plane, entity, dimension)
+				if (position) {
+					labels.push({ text: `${formatNumber(dimension.value)}mm`, position })
+				}
+			}
+		}
+	})
+	return labels
+}
+
+function getDimensionLabelPosition(plane: SketchPlane, entity: SketchEntity, dimension: SketchDimension): RenderLabel["position"] | null {
+	if (entity.type === "line" && dimension.type === "lineLength") {
+		return sketchPointToWorld(plane, { x: (entity.p0.x + entity.p1.x) / 2, y: (entity.p0.y + entity.p1.y) / 2 })
+	}
+	if (entity.type !== "cornerRectangle") {
+		return null
+	}
+	const minX = Math.min(entity.p0.x, entity.p1.x)
+	const maxX = Math.max(entity.p0.x, entity.p1.x)
+	const minY = Math.min(entity.p0.y, entity.p1.y)
+	const maxY = Math.max(entity.p0.y, entity.p1.y)
+	const offset = Math.max(maxX - minX, maxY - minY, 1) * 0.18
+	if (dimension.type === "rectangleWidth") {
+		return sketchPointToWorld(plane, { x: (minX + maxX) / 2, y: minY - offset })
+	}
+	if (dimension.type === "rectangleHeight") {
+		return sketchPointToWorld(plane, { x: minX - offset, y: (minY + maxY) / 2 })
+	}
+	return null
+}
+
+function sketchPointToWorld(plane: SketchPlane, point: { x: number; y: number }): RenderLabel["position"] {
+	if (plane === "XZ") {
+		return { x: point.x, y: 0, z: point.y }
+	}
+	if (plane === "YZ") {
+		return { x: 0, y: point.x, z: point.y }
+	}
+	return { x: point.x, y: point.y, z: 0 }
+}
+
 function toCliGeometryBody(partId: string, solid: Solid): CliGeometryBody {
 	return {
 		id: solid.id,
@@ -875,8 +1063,74 @@ function visitProjectNodes(nodes: readonly ProjectNode[], visitor: (node: Projec
 	}
 }
 
+function findProjectPart(project: Project, partId: string): Extract<ProjectDocument, { type: "part" }> | null {
+	let part: Extract<ProjectDocument, { type: "part" }> | null = null
+	visitProjectNodes(project.items, (node) => {
+		if (!isProjectFolder(node) && node.type === "part" && node.id === partId) {
+			part = node
+		}
+	})
+	return part
+}
+
 function isProjectFolder(node: ProjectNode): node is Exclude<ProjectNode, ProjectDocument> {
 	return "kind" in node && node.kind === "folder"
+}
+
+async function loadProjectForRead(context: CliContext, target: string | undefined): Promise<{ projectId: string; project: Project }> {
+	if (target && (await shouldInspectLocalFile(target, context.cwd))) {
+		const filePath = resolve(context.cwd, target)
+		const raw = await readFile(filePath, "utf8").catch((error: unknown) => {
+			throw new Error(`Unable to read project file: ${formatFileError(error)}`)
+		})
+		const project = normalizeProjectFile(JSON.parse(raw))
+		if (!project) {
+			throw new Error(`Invalid PuppyCAD project file: ${filePath}`)
+		}
+		return { projectId: filePath, project }
+	}
+	return loadServerProject(context, target)
+}
+
+async function executeCadCommand(context: CliContext, target: string | undefined, partId: string, command: CadCommand, message: string, jsonFields: Record<string, unknown> = {}): Promise<number> {
+	const syncedCommand: SyncedProjectCommand = { type: "cad", partId, command }
+	if (target && (await shouldInspectLocalFile(target, context.cwd))) {
+		const filePath = resolve(context.cwd, target)
+		const raw = await readFile(filePath, "utf8").catch((error: unknown) => {
+			throw new Error(`Unable to read project file: ${formatFileError(error)}`)
+		})
+		const project = normalizeProjectFile(JSON.parse(raw))
+		if (!project) {
+			throw new Error(`Invalid PuppyCAD project file: ${filePath}`)
+		}
+		const nextProject = applySyncedProjectCommands(project, [syncedCommand])
+		nextProject.revision = project.revision + 1
+		await writeFile(filePath, `${serializeProjectFile(nextProject)}\n`, "utf8")
+		if (context.globals.json) {
+			writeStdout(context, JSON.stringify({ file: filePath, revision: nextProject.revision, partId, ...jsonFields, command }, null, 2))
+			return 0
+		}
+		writeStdout(context, `${message} (file=${filePath} revision=${nextProject.revision})`)
+		return 0
+	}
+
+	const { projectId, project } = await loadServerProject(context, target)
+	const client = await createPuppyCadClient(context)
+	const payload = await parseServerJson<{ projectId?: unknown; revision?: unknown; project?: unknown }>(
+		context,
+		client.postProjectCommands(projectId, {
+			clientId: "puppycad-cli",
+			baseRevision: project.revision,
+			commands: [syncedCommand]
+		})
+	)
+	const revision = typeof payload.revision === "number" ? payload.revision : project.revision + 1
+	if (context.globals.json) {
+		writeStdout(context, JSON.stringify({ projectId, revision, partId, ...jsonFields, command }, null, 2))
+		return 0
+	}
+	writeStdout(context, `${message} (project=${projectId} revision=${revision})`)
+	return 0
 }
 
 async function loadServerProject(context: CliContext, target: string | undefined): Promise<{ projectId: string; project: Project }> {
@@ -1092,11 +1346,369 @@ function parseQueryArgs(args: readonly string[], commandName: string): QueryArgs
 	}
 }
 
+function parseSketchCreateArgs(args: readonly string[]): SketchCreateOptions {
+	let target: string | undefined
+	let partId: string | undefined
+	let sketchId: string | undefined
+	let name = "Sketch"
+	let plane: SketchPlane | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) continue
+		if (arg === "--help" || arg === "-h") throw new CliHelpError(formatCadHelp())
+		if (arg === "--part") {
+			partId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--part=")) {
+			partId = arg.slice("--part=".length)
+			continue
+		}
+		if (arg === "--sketch") {
+			sketchId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--sketch=")) {
+			sketchId = arg.slice("--sketch=".length)
+			continue
+		}
+		if (arg === "--name") {
+			name = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--name=")) {
+			name = arg.slice("--name=".length)
+			continue
+		}
+		if (arg === "--plane") {
+			plane = parseSketchPlane(readOptionValue(args, index, arg))
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--plane=")) {
+			plane = parseSketchPlane(arg.slice("--plane=".length))
+			continue
+		}
+		if (arg.startsWith("-")) throw new Error(`Unknown cad sketch create option: ${arg}`)
+		if (target) throw new Error(`Unexpected cad sketch create argument: ${arg}`)
+		target = arg
+	}
+	if (!partId || !sketchId || !plane) {
+		throw new Error("Usage: puppycad cad sketch create [project-id|file] --part <part-id> --sketch <sketch-id> --plane <XY|YZ|XZ> [--name <name>]")
+	}
+	return { partId, sketchId, name, plane, ...(target ? { target } : {}) }
+}
+
+function parseSketchRectangleArgs(args: readonly string[]): SketchRectangleOptions {
+	let target: string | undefined
+	let partId: string | undefined
+	let sketchId: string | undefined
+	let entityId: string | undefined
+	let x0: number | undefined
+	let y0: number | undefined
+	let x1: number | undefined
+	let y1: number | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) continue
+		if (arg === "--help" || arg === "-h") throw new CliHelpError(formatCadHelp())
+		if (arg === "--part") {
+			partId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--part=")) {
+			partId = arg.slice("--part=".length)
+			continue
+		}
+		if (arg === "--sketch") {
+			sketchId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--sketch=")) {
+			sketchId = arg.slice("--sketch=".length)
+			continue
+		}
+		if (arg === "--entity") {
+			entityId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--entity=")) {
+			entityId = arg.slice("--entity=".length)
+			continue
+		}
+		if (arg === "--x0" || arg === "--y0" || arg === "--x1" || arg === "--y1") {
+			const value = parseFiniteNumber(readOptionValue(args, index, arg), arg)
+			if (arg === "--x0") x0 = value
+			if (arg === "--y0") y0 = value
+			if (arg === "--x1") x1 = value
+			if (arg === "--y1") y1 = value
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--x0=")) {
+			x0 = parseFiniteNumber(arg.slice("--x0=".length), "--x0")
+			continue
+		}
+		if (arg.startsWith("--y0=")) {
+			y0 = parseFiniteNumber(arg.slice("--y0=".length), "--y0")
+			continue
+		}
+		if (arg.startsWith("--x1=")) {
+			x1 = parseFiniteNumber(arg.slice("--x1=".length), "--x1")
+			continue
+		}
+		if (arg.startsWith("--y1=")) {
+			y1 = parseFiniteNumber(arg.slice("--y1=".length), "--y1")
+			continue
+		}
+		if (arg.startsWith("-")) throw new Error(`Unknown cad sketch rectangle option: ${arg}`)
+		if (target) throw new Error(`Unexpected cad sketch rectangle argument: ${arg}`)
+		target = arg
+	}
+	if (!partId || !sketchId || !entityId || x0 === undefined || y0 === undefined || x1 === undefined || y1 === undefined) {
+		throw new Error("Usage: puppycad cad sketch rectangle [project-id|file] --part <part-id> --sketch <sketch-id> --entity <entity-id> --x0 <n> --y0 <n> --x1 <n> --y1 <n>")
+	}
+	return { partId, sketchId, entityId, x0, y0, x1, y1, ...(target ? { target } : {}) }
+}
+
+function parseSketchFinishArgs(args: readonly string[]): SketchFinishOptions {
+	let target: string | undefined
+	let partId: string | undefined
+	let sketchId: string | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) continue
+		if (arg === "--help" || arg === "-h") throw new CliHelpError(formatCadHelp())
+		if (arg === "--part") {
+			partId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--part=")) {
+			partId = arg.slice("--part=".length)
+			continue
+		}
+		if (arg === "--sketch") {
+			sketchId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--sketch=")) {
+			sketchId = arg.slice("--sketch=".length)
+			continue
+		}
+		if (arg.startsWith("-")) throw new Error(`Unknown cad sketch finish option: ${arg}`)
+		if (target) throw new Error(`Unexpected cad sketch finish argument: ${arg}`)
+		target = arg
+	}
+	if (!partId || !sketchId) {
+		throw new Error("Usage: puppycad cad sketch finish [project-id|file] --part <part-id> --sketch <sketch-id>")
+	}
+	return { partId, sketchId, ...(target ? { target } : {}) }
+}
+
+function parseExtrudeCreateArgs(args: readonly string[]): ExtrudeCreateOptions {
+	let target: string | undefined
+	let partId: string | undefined
+	let extrudeId: string | undefined
+	let name = "Extrude"
+	let sketchId: string | undefined
+	let profileId: string | undefined
+	let depth: number | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) continue
+		if (arg === "--help" || arg === "-h") throw new CliHelpError(formatCadHelp())
+		if (arg === "--part") {
+			partId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--part=")) {
+			partId = arg.slice("--part=".length)
+			continue
+		}
+		if (arg === "--extrude") {
+			extrudeId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--extrude=")) {
+			extrudeId = arg.slice("--extrude=".length)
+			continue
+		}
+		if (arg === "--name") {
+			name = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--name=")) {
+			name = arg.slice("--name=".length)
+			continue
+		}
+		if (arg === "--sketch") {
+			sketchId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--sketch=")) {
+			sketchId = arg.slice("--sketch=".length)
+			continue
+		}
+		if (arg === "--profile") {
+			profileId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--profile=")) {
+			profileId = arg.slice("--profile=".length)
+			continue
+		}
+		if (arg === "--depth") {
+			depth = parsePositiveNumber(readOptionValue(args, index, arg), arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--depth=")) {
+			depth = parsePositiveNumber(arg.slice("--depth=".length), "--depth")
+			continue
+		}
+		if (arg.startsWith("-")) throw new Error(`Unknown cad extrude create option: ${arg}`)
+		if (target) throw new Error(`Unexpected cad extrude create argument: ${arg}`)
+		target = arg
+	}
+	if (!partId || !extrudeId || !sketchId || depth === undefined) {
+		throw new Error(
+			"Usage: puppycad cad extrude create [project-id|file] --part <part-id> --extrude <extrude-id> --sketch <sketch-id> --depth <number> [--profile <profile-id>] [--name <name>]"
+		)
+	}
+	return { partId, extrudeId, name, sketchId, depth, ...(profileId ? { profileId } : {}), ...(target ? { target } : {}) }
+}
+
+function parseDimensionSetArgs(args: readonly string[]): DimensionSetOptions {
+	let target: string | undefined
+	let partId: string | undefined
+	let sketchId: string | undefined
+	let entityId: string | undefined
+	let type: SketchDimension["type"] | undefined
+	let value: number | undefined
+	let dimensionId: string | undefined
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) {
+			continue
+		}
+		if (arg === "--help" || arg === "-h") {
+			throw new CliHelpError(formatCadHelp())
+		}
+		if (arg === "--part") {
+			partId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--part=")) {
+			partId = arg.slice("--part=".length)
+			continue
+		}
+		if (arg === "--sketch") {
+			sketchId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--sketch=")) {
+			sketchId = arg.slice("--sketch=".length)
+			continue
+		}
+		if (arg === "--entity") {
+			entityId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--entity=")) {
+			entityId = arg.slice("--entity=".length)
+			continue
+		}
+		if (arg === "--type") {
+			type = parseSketchDimensionType(readOptionValue(args, index, arg))
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--type=")) {
+			type = parseSketchDimensionType(arg.slice("--type=".length))
+			continue
+		}
+		if (arg === "--value") {
+			value = parsePositiveNumber(readOptionValue(args, index, arg), arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--value=")) {
+			value = parsePositiveNumber(arg.slice("--value=".length), "--value")
+			continue
+		}
+		if (arg === "--id" || arg === "--dimension-id") {
+			dimensionId = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--id=")) {
+			dimensionId = arg.slice("--id=".length)
+			continue
+		}
+		if (arg.startsWith("--dimension-id=")) {
+			dimensionId = arg.slice("--dimension-id=".length)
+			continue
+		}
+		if (arg.startsWith("-")) {
+			throw new Error(`Unknown cad dimension set option: ${arg}`)
+		}
+		if (target) {
+			throw new Error(`Unexpected cad dimension set argument: ${arg}`)
+		}
+		target = arg
+	}
+	if (!partId || !sketchId || !entityId || !type || value === undefined) {
+		throw new Error(
+			"Usage: puppycad cad dimension set [project-id] --part <part-id> --sketch <sketch-id> --entity <entity-id> --type <lineLength|rectangleWidth|rectangleHeight> --value <number>"
+		)
+	}
+	return {
+		partId,
+		sketchId,
+		entityId,
+		type,
+		value,
+		...(target ? { target } : {}),
+		...(dimensionId ? { dimensionId } : {})
+	}
+}
+
+function parseSketchDimensionType(value: string): SketchDimension["type"] {
+	if (value === "lineLength" || value === "rectangleWidth" || value === "rectangleHeight") {
+		return value
+	}
+	throw new Error(`Invalid dimension type: ${value}`)
+}
+
+function parseSketchPlane(value: string): SketchPlane {
+	if (value === "XY" || value === "YZ" || value === "XZ") {
+		return value
+	}
+	throw new Error(`Invalid sketch plane: ${value}`)
+}
+
 function parseRenderArgs(args: readonly string[]): RenderOptions {
 	let target: string | undefined
 	let outPath: string | undefined
 	let width: number | undefined
 	let height: number | undefined
+	let showDimensions = false
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index]
 		if (!arg) {
@@ -1132,6 +1744,10 @@ function parseRenderArgs(args: readonly string[]): RenderOptions {
 			height = parsePositiveInteger(arg.slice("--height=".length), "--height")
 			continue
 		}
+		if (arg === "--show-dimensions") {
+			showDimensions = true
+			continue
+		}
 		if (arg.startsWith("-")) {
 			throw new Error(`Unknown render option: ${arg}`)
 		}
@@ -1147,7 +1763,8 @@ function parseRenderArgs(args: readonly string[]): RenderOptions {
 		outPath,
 		...(target ? { target } : {}),
 		...(width ? { width } : {}),
-		...(height ? { height } : {})
+		...(height ? { height } : {}),
+		...(showDimensions ? { showDimensions } : {})
 	}
 }
 
@@ -1155,6 +1772,22 @@ function parsePositiveInteger(value: string, option: string): number {
 	const parsed = Number(value)
 	if (!Number.isInteger(parsed) || parsed <= 0) {
 		throw new Error(`${option} requires a positive integer.`)
+	}
+	return parsed
+}
+
+function parsePositiveNumber(value: string, option: string): number {
+	const parsed = Number(value)
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		throw new Error(`${option} requires a positive number.`)
+	}
+	return parsed
+}
+
+function parseFiniteNumber(value: string, option: string): number {
+	const parsed = Number(value)
+	if (!Number.isFinite(parsed)) {
+		throw new Error(`${option} requires a finite number.`)
 	}
 	return parsed
 }
@@ -1195,6 +1828,10 @@ function escapeMermaidLabel(label: string): string {
 	return label.replaceAll('"', '\\"')
 }
 
+function getDefaultDimensionId(sketchId: string, type: SketchDimension["type"], entityId: string): string {
+	return `${sketchId}-${type}-${entityId}`
+}
+
 function formatInspectSummary(projectLabel: string, project: Project, stats: ProjectStats): string {
 	const documentLines = DOCUMENT_TYPES.map((type) => `  ${type}: ${stats.types[type]}`).join("\n")
 	const partLines = stats.parts.length > 0 ? stats.parts.map((part) => `  ${part.name} (${part.id}): ${part.features} features`).join("\n") : "  none"
@@ -1222,6 +1859,7 @@ function formatHelp(): string {
 		"  project list                    List server projects",
 		"  project create <name>           Create a server project",
 		"  project inspect [project-id]    Inspect a server project",
+		"  cad dimension set [project-id]  Set a sketch dimension constraint",
 		"  inspect [project-id|file]       Inspect a server project or local project file",
 		"  query features [project-id]     List part features",
 		"  query geometry [project-id]     List generated bodies/faces/edges",
@@ -1251,6 +1889,25 @@ function formatProjectHelp(): string {
 	return ["Usage: puppycad project <command>", "", "Commands:", "  list [--json]", "  create <name> [--json]", "  inspect [project-id] [--json]"].join("\n")
 }
 
+function formatCadHelp(): string {
+	return [
+		"Usage: puppycad cad dimension set [project-id] --part <part-id> --sketch <sketch-id> --entity <entity-id> --type <type> --value <number>",
+		"",
+		"Dimension types:",
+		"  lineLength",
+		"  rectangleWidth",
+		"  rectangleHeight",
+		"",
+		"Options:",
+		"  --part <id>          Part id",
+		"  --sketch <id>        Sketch id",
+		"  --entity <id>        Sketch entity id",
+		"  --type <type>        Dimension type",
+		"  --value <number>     Dimension value",
+		"  --id <id>            Dimension id, defaults to sketch/type/entity"
+	].join("\n")
+}
+
 function formatQueryHelp(): string {
 	return [
 		"Usage: puppycad query <query> [project-id] [options]",
@@ -1272,7 +1929,8 @@ function formatRenderHelp(): string {
 		"Options:",
 		"  -o, --out <file>   Write PNG preview to file",
 		"  --width <px>       Image width, default 1024",
-		"  --height <px>      Image height, default 768"
+		"  --height <px>      Image height, default 768",
+		"  --show-dimensions  Draw sketch dimension labels"
 	].join("\n")
 }
 

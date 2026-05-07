@@ -22,6 +22,7 @@ import type {
 	PCadGraphNode,
 	SerializedPCadState,
 	Sketch,
+	SketchConstraint,
 	SketchDimension,
 	SketchEntity,
 	SketchEntityNode,
@@ -573,6 +574,11 @@ function normalizePCadGraphNode(input: unknown): PCadGraphNode | undefined {
 		const p1 = normalizePoint2D(value.p1)
 		return sketchId && p0 && p1 ? { type: "sketchCornerRectangle", id, name, sketchId, p0, p1 } : undefined
 	}
+	if (value.type === "sketchConstraint") {
+		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
+		const constraint = normalizeSketchConstraint((value as { constraint?: unknown }).constraint)
+		return sketchId && constraint ? { type: "sketchConstraint", id, name, sketchId, constraint } : undefined
+	}
 	if (value.type === "extrude") {
 		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
 		const profileId = typeof value.profileId === "string" && value.profileId.trim() ? value.profileId.trim() : null
@@ -663,6 +669,37 @@ function normalizeSerializedSketchDimensions(input: unknown): SketchDimension[] 
 		}
 	}
 	return dimensions
+}
+
+function normalizeSketchConstraint(input: unknown): SketchConstraint | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { type?: unknown; entityId?: unknown; value?: unknown; a?: unknown; b?: unknown }
+	if (value.type === "lineLength" || value.type === "rectangleWidth" || value.type === "rectangleHeight") {
+		const entityId = typeof value.entityId === "string" && value.entityId.trim() ? value.entityId.trim() : null
+		const constraintValue = extractFiniteNumber(value.value, Number.NaN)
+		return entityId && Number.isFinite(constraintValue) && constraintValue > 0 ? { type: value.type, entityId, value: constraintValue } : undefined
+	}
+	if (value.type === "horizontal" || value.type === "vertical") {
+		const entityId = typeof value.entityId === "string" && value.entityId.trim() ? value.entityId.trim() : null
+		return entityId ? { type: value.type, entityId } : undefined
+	}
+	if (value.type === "coincident") {
+		const a = normalizeSketchPointRef(value.a)
+		const b = normalizeSketchPointRef(value.b)
+		return a && b ? { type: "coincident", a, b } : undefined
+	}
+	return undefined
+}
+
+function normalizeSketchPointRef(input: unknown): { type: "point"; entityId: string; point: "p0" | "p1" } | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { type?: unknown; entityId?: unknown; point?: unknown }
+	const entityId = typeof value.entityId === "string" && value.entityId.trim() ? value.entityId.trim() : null
+	return value.type === "point" && entityId && (value.point === "p0" || value.point === "p1") ? { type: "point", entityId, point: value.point } : undefined
 }
 
 function isSketchDimensionEntityNode(node: PCadGraphNode | undefined): node is SketchEntityNode {

@@ -3,10 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "bun:test"
 import type { PartProjectItemData, Project } from "../src/contract"
+import { extrudeSolidFeature } from "../src/cad/extrude"
 import { runPuppycadCli } from "../src/cli"
 import { PCadPart } from "../src/pcad/project"
 import { normalizeProjectFile } from "../src/project-file"
-import { getHealth, getProject, getProjectFileUrl, getProjects, persistProject, postProject } from "../src/server/save-project"
+import { getHealth, getProject, getProjectFileUrl, getProjects, persistProject, postProject, postProjectCommands } from "../src/server/save-project"
 
 const createdProjectIds: string[] = []
 
@@ -73,6 +74,122 @@ describe("puppycad CLI", () => {
 			type: "part",
 			name: "Bracket"
 		})
+	})
+
+	it("creates a constrained cube in a local file through cad commands", async () => {
+		const cwd = await createTempDir()
+		const output = createOutput()
+		const run = async (args: string[]) => runPuppycadCli(args, { cwd, output: output.output })
+
+		expect(await run(["init", "cube.pcad", "--part-name", "10mm constrained cube"])).toBe(0)
+		expect(await run(["cad", "sketch", "create", "cube.pcad", "--part", "part-1", "--sketch", "sketch-cube-base", "--plane", "XY", "--name", "Cube base sketch"])).toBe(0)
+		expect(
+			await run([
+				"cad",
+				"sketch",
+				"rectangle",
+				"cube.pcad",
+				"--part",
+				"part-1",
+				"--sketch",
+				"sketch-cube-base",
+				"--entity",
+				"cube-base-rect",
+				"--x0",
+				"0",
+				"--y0",
+				"0",
+				"--x1",
+				"8",
+				"--y1",
+				"6"
+			])
+		).toBe(0)
+		expect(
+			await run([
+				"cad",
+				"dimension",
+				"set",
+				"cube.pcad",
+				"--part",
+				"part-1",
+				"--sketch",
+				"sketch-cube-base",
+				"--entity",
+				"cube-base-rect",
+				"--type",
+				"rectangleWidth",
+				"--value",
+				"10",
+				"--id",
+				"dim-cube-width-10mm"
+			])
+		).toBe(0)
+		expect(
+			await run([
+				"cad",
+				"dimension",
+				"set",
+				"cube.pcad",
+				"--part",
+				"part-1",
+				"--sketch",
+				"sketch-cube-base",
+				"--entity",
+				"cube-base-rect",
+				"--type",
+				"rectangleHeight",
+				"--value",
+				"10",
+				"--id",
+				"dim-cube-height-10mm"
+			])
+		).toBe(0)
+		expect(await run(["cad", "sketch", "finish", "cube.pcad", "--part", "part-1", "--sketch", "sketch-cube-base"])).toBe(0)
+		expect(
+			await run([
+				"cad",
+				"extrude",
+				"create",
+				"cube.pcad",
+				"--part",
+				"part-1",
+				"--extrude",
+				"extrude-cube-10mm",
+				"--sketch",
+				"sketch-cube-base",
+				"--depth",
+				"10",
+				"--name",
+				"10mm cube"
+			])
+		).toBe(0)
+		expect(output.stderr).toEqual([])
+
+		const project = normalizeProjectFile(JSON.parse(await readFile(join(cwd, "cube.pcad"), "utf8")))
+		const part = project?.items[0]
+		if (!part || !("type" in part) || part.type !== "part" || !part.data) {
+			throw new Error("Expected part item")
+		}
+		const sketch = part.data.features.find((feature) => feature.type === "sketch")
+		const extrude = part.data.features.find((feature) => feature.type === "extrude")
+		expect(sketch).toMatchObject({
+			id: "sketch-cube-base",
+			dimensions: [
+				{ id: "dim-cube-width-10mm", type: "rectangleWidth", entityId: "cube-base-rect", value: 10 },
+				{ id: "dim-cube-height-10mm", type: "rectangleHeight", entityId: "cube-base-rect", value: 10 }
+			]
+		})
+		if (!extrude || extrude.type !== "extrude") {
+			throw new Error("Expected extrude")
+		}
+		const { solid } = extrudeSolidFeature(part.data, extrude)
+		const xs = solid.vertices.map((vertex) => vertex.position.x)
+		const ys = solid.vertices.map((vertex) => vertex.position.y)
+		const zs = solid.vertices.map((vertex) => vertex.position.z)
+		expect(Math.max(...xs) - Math.min(...xs)).toBe(10)
+		expect(Math.max(...ys) - Math.min(...ys)).toBe(10)
+		expect(Math.max(...zs) - Math.min(...zs)).toBe(10)
 	})
 
 	it("refuses to overwrite existing files without --force", async () => {
@@ -181,6 +298,68 @@ describe("puppycad CLI", () => {
 		expect(JSON.parse(evalOutput.stdout.join("\n"))).toMatchObject({ status: "ok", projectId, features: 2 })
 	})
 
+	it("sets sketch dimension constraints through server commands", async () => {
+		const projectId = `cli-dimension-test-${crypto.randomUUID()}`
+		createdProjectIds.push(projectId)
+		await persistProject(projectId, createProject(new PCadPart(createPartDocument()).getDocument()))
+
+		const fetch = createServerFetch()
+		const output = createOutput()
+		const code = await runPuppycadCli(
+			[
+				"--server-url",
+				"http://server.test",
+				"--json",
+				"cad",
+				"dimension",
+				"set",
+				projectId,
+				"--part",
+				"part-1",
+				"--sketch",
+				"sketch-1",
+				"--entity",
+				"rect-1",
+				"--type",
+				"rectangleWidth",
+				"--value",
+				"12",
+				"--id",
+				"dim-width"
+			],
+			{ output: output.output, fetch }
+		)
+
+		expect(code).toBe(0)
+		expect(output.stderr).toEqual([])
+		expect(JSON.parse(output.stdout.join("\n"))).toMatchObject({
+			projectId,
+			partId: "part-1",
+			sketchId: "sketch-1",
+			dimension: { id: "dim-width", type: "rectangleWidth", entityId: "rect-1", value: 12 }
+		})
+
+		const response = await getProject(new Request(`http://server.test/api/projects/${projectId}`), projectId)
+		const payload = (await response.json()) as { project?: Project }
+		const part = payload.project?.items[0]
+		if (!part || !("type" in part) || part.type !== "part" || !part.data) {
+			throw new Error("Expected part item")
+		}
+		const partData = part.data
+		const sketch = partData.features.find((feature) => feature.type === "sketch")
+		expect(sketch).toMatchObject({
+			type: "sketch",
+			id: "sketch-1",
+			dimensions: [{ id: "dim-width", type: "rectangleWidth", entityId: "rect-1", value: 12 }]
+		})
+		expect(partData.cad?.nodes).toContainEqual({
+			id: "dim-width",
+			type: "sketchConstraint",
+			sketchId: "sketch-1",
+			constraint: { type: "rectangleWidth", entityId: "rect-1", value: 12 }
+		})
+	})
+
 	it("queries generated geometry from server project snapshots", async () => {
 		const projectId = `cli-geometry-test-${crypto.randomUUID()}`
 		createdProjectIds.push(projectId)
@@ -217,12 +396,17 @@ describe("puppycad CLI", () => {
 		const cwd = await createTempDir()
 		const projectId = `cli-render-test-${crypto.randomUUID()}`
 		createdProjectIds.push(projectId)
-		await persistProject(projectId, createProject(new PCadPart(createPartDocument()).getDocument()))
+		const partDocument = createPartDocument()
+		const sketch = partDocument.features.find((feature) => feature.type === "sketch")
+		if (sketch?.type === "sketch") {
+			sketch.dimensions = [{ id: "dim-width", type: "rectangleWidth", entityId: "rect-1", value: 10 }]
+		}
+		await persistProject(projectId, createProject(new PCadPart(partDocument).getDocument()))
 
 		const fetch = createServerFetch()
 		const output = createOutput()
 		const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
-		const code = await runPuppycadCli(["--server-url", "http://server.test", "render", projectId, "--out", "preview.png", "--width", "320", "--height", "240"], {
+		const code = await runPuppycadCli(["--server-url", "http://server.test", "render", projectId, "--out", "preview.png", "--width", "320", "--height", "240", "--show-dimensions"], {
 			cwd,
 			output: output.output,
 			fetch,
@@ -230,6 +414,11 @@ describe("puppycad CLI", () => {
 				expect(bodies).toHaveLength(1)
 				expect(options.width).toBe(320)
 				expect(options.height).toBe(240)
+				expect(options.labels).toHaveLength(1)
+				expect(options.labels?.[0]?.text).toBe("10mm")
+				expect(options.labels?.[0]?.position.x).toBe(5)
+				expect(options.labels?.[0]?.position.y).toBeCloseTo(-1.8)
+				expect(options.labels?.[0]?.position.z).toBe(0)
 				return pngBytes
 			}
 		})
@@ -257,6 +446,10 @@ function createServerFetch(): (input: RequestInfo | URL, init?: RequestInit) => 
 		const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/)
 		if (projectMatch?.[1] && request.method === "GET") {
 			return getProject(request, decodeURIComponent(projectMatch[1]))
+		}
+		const commandMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/commands$/)
+		if (commandMatch?.[1] && request.method === "POST") {
+			return postProjectCommands(request, decodeURIComponent(commandMatch[1]))
 		}
 		return Response.json({ ok: false, message: `Unhandled test route ${request.method} ${url.pathname}` }, { status: 404 })
 	}

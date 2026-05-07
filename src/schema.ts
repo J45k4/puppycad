@@ -73,6 +73,17 @@ export type SketchCornerRectangleNode = PCadNode & {
 
 export type SketchEntityNode = SketchLineNode | SketchCornerRectangleNode
 
+export type SketchPointRef = {
+	readonly type: "point"
+	readonly entityId: string
+	readonly point: "p0" | "p1"
+}
+
+export type SketchEntityRef = {
+	readonly type: "entity"
+	readonly entityId: string
+}
+
 export type SketchDimension =
 	| {
 			id: string
@@ -97,6 +108,42 @@ export interface SketchNode extends PCadNode {
 	readonly type: "sketch"
 	readonly targetId: string
 	readonly dimensions: readonly SketchDimension[]
+}
+
+export type SketchConstraint =
+	| {
+			readonly type: "lineLength"
+			readonly entityId: string
+			readonly value: number
+	  }
+	| {
+			readonly type: "rectangleWidth"
+			readonly entityId: string
+			readonly value: number
+	  }
+	| {
+			readonly type: "rectangleHeight"
+			readonly entityId: string
+			readonly value: number
+	  }
+	| {
+			readonly type: "coincident"
+			readonly a: SketchPointRef
+			readonly b: SketchPointRef
+	  }
+	| {
+			readonly type: "horizontal"
+			readonly entityId: string
+	  }
+	| {
+			readonly type: "vertical"
+			readonly entityId: string
+	  }
+
+export interface SketchConstraintNode extends PCadNode {
+	readonly type: "sketchConstraint"
+	readonly sketchId: string
+	readonly constraint: SketchConstraint
 }
 
 export const EXTRUDE_OPERATIONS = ["newBody", "join", "cut"] as const
@@ -129,7 +176,7 @@ export interface ChamferNode extends PCadNode {
 	readonly d2?: number
 }
 
-export type PCadGraphNode = ReferencePlaneNode | SketchNode | SketchEntityNode | ExtrudeNode | FaceNode | EdgeNode | ChamferNode
+export type PCadGraphNode = ReferencePlaneNode | SketchNode | SketchEntityNode | SketchConstraintNode | ExtrudeNode | FaceNode | EdgeNode | ChamferNode
 
 export type PCadGraphRewrite =
 	| {

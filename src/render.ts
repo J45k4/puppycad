@@ -14,10 +14,16 @@ export type RenderGeometryBody = {
 	readonly faces: readonly SolidFace[]
 }
 
+export type RenderLabel = {
+	readonly text: string
+	readonly position: Vector3D
+}
+
 export type RenderPreviewOptions = {
 	width?: number
 	height?: number
 	background?: [number, number, number, number]
+	labels?: readonly RenderLabel[]
 	createContext?: HeadlessGlFactory
 }
 
@@ -49,7 +55,7 @@ export async function renderProjectPreviewPng(bodies: readonly RenderGeometryBod
 		throw new Error("Project has no generated solid geometry to render.")
 	}
 	if (!options.createContext) {
-		return renderMeshWithNodeWorker(mesh, width, height, background)
+		return renderMeshWithNodeWorker(mesh, width, height, background, options.labels ?? [])
 	}
 	const createContext = options.createContext
 	const gl = createContext(width, height, { preserveDrawingBuffer: true, antialias: true })
@@ -79,7 +85,7 @@ export async function renderProjectPreviewPng(bodies: readonly RenderGeometryBod
 	gl.uniform3f(gl.getUniformLocation(program, "lightDirection"), 0.45, 0.75, 0.48)
 	gl.drawArrays(gl.TRIANGLES, 0, mesh.positions.length / 3)
 
-	return readPngFromGl(gl, width, height)
+	return readPngFromGl(gl, width, height, options.labels ?? [], modelViewProjection)
 }
 
 function buildPreviewMesh(bodies: readonly RenderGeometryBody[]): { positions: number[]; normals: number[]; bounds: Bounds; modelMatrix: Mat4 } {
@@ -199,9 +205,10 @@ async function renderMeshWithNodeWorker(
 	mesh: { positions: number[]; normals: number[]; bounds: Bounds; modelMatrix: Mat4 },
 	width: number,
 	height: number,
-	background: [number, number, number, number]
+	background: [number, number, number, number],
+	labels: readonly RenderLabel[]
 ): Promise<Uint8Array> {
-	const input = JSON.stringify({ width, height, background, mesh, vertexShader: VERTEX_SHADER_SOURCE, fragmentShader: FRAGMENT_SHADER_SOURCE })
+	const input = JSON.stringify({ width, height, background, labels, mesh, vertexShader: VERTEX_SHADER_SOURCE, fragmentShader: FRAGMENT_SHADER_SOURCE })
 	const child = spawn(process.env.PUPPYCAD_NODE_RENDERER ?? "node", ["-e", NODE_RENDER_WORKER], {
 		stdio: ["pipe", "pipe", "pipe"],
 		env: process.env
@@ -260,7 +267,7 @@ process.stdin.on('end', () => {
     gl.uniform3f(gl.getUniformLocation(program, 'baseColor'), 0.16, 0.55, 0.84)
     gl.uniform3f(gl.getUniformLocation(program, 'lightDirection'), 0.45, 0.75, 0.48)
     gl.drawArrays(gl.TRIANGLES, 0, input.mesh.positions.length / 3)
-    process.stdout.write(JSON.stringify({ pngBase64: readPngFromGl(gl, input.width, input.height).toString('base64') }))
+    process.stdout.write(JSON.stringify({ pngBase64: readPngFromGl(gl, input.width, input.height, input.labels || [], mvp).toString('base64') }))
   } catch (error) {
     process.stdout.write(JSON.stringify({ error: error && error.message ? error.message : String(error) }))
   }
@@ -312,21 +319,33 @@ function multiply4(a, b) {
   for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) out[col * 4 + row] = a[0 * 4 + row] * b[col * 4 + 0] + a[1 * 4 + row] * b[col * 4 + 1] + a[2 * 4 + row] * b[col * 4 + 2] + a[3 * 4 + row] * b[col * 4 + 3]
   return out
 }
-function readPngFromGl(gl, width, height) {
+function readPngFromGl(gl, width, height, labels, mvp) {
   const pixels = new Uint8Array(width * height * 4)
   gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
-  const raw = Buffer.alloc((width * 4 + 1) * height)
+  const image = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y++) {
     const sy = height - 1 - y
+    for (let x = 0; x < width; x++) {
+      const source = (sy * width + x) * 4
+      const target = (y * width + x) * 4
+      image[target] = pixels[source]
+      image[target + 1] = pixels[source + 1]
+      image[target + 2] = pixels[source + 2]
+      image[target + 3] = pixels[source + 3]
+    }
+  }
+  drawLabels(image, width, height, labels, mvp)
+  const raw = Buffer.alloc((width * 4 + 1) * height)
+  for (let y = 0; y < height; y++) {
     const row = y * (width * 4 + 1)
     raw[row] = 0
     for (let x = 0; x < width; x++) {
-      const source = (sy * width + x) * 4
+      const source = (y * width + x) * 4
       const target = row + 1 + x * 4
-      raw[target] = pixels[source]
-      raw[target + 1] = pixels[source + 1]
-      raw[target + 2] = pixels[source + 2]
-      raw[target + 3] = pixels[source + 3]
+      raw[target] = image[source]
+      raw[target + 1] = image[source + 1]
+      raw[target + 2] = image[source + 2]
+      raw[target + 3] = image[source + 3]
     }
   }
   const header = Buffer.alloc(13)
@@ -348,6 +367,38 @@ function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
 function cross3(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]] }
 function dot3(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
 function normalize3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l] }
+function drawLabels(image, width, height, labels, mvp) {
+  for (const label of labels) {
+    if (!label || typeof label.text !== 'string' || !label.position) continue
+    const point = projectPoint(label.position, mvp, width, height)
+    if (!point) continue
+    drawLabel(image, width, height, Math.round(point.x), Math.round(point.y), label.text)
+  }
+}
+function projectPoint(position, m, width, height) {
+  const x = Number(position.x), y = Number(position.y), z = Number(position.z)
+  const cx = m[0]*x + m[4]*y + m[8]*z + m[12]
+  const cy = m[1]*x + m[5]*y + m[9]*z + m[13]
+  const cw = m[3]*x + m[7]*y + m[11]*z + m[15]
+  if (!Number.isFinite(cw) || Math.abs(cw) < 1e-6) return null
+  return { x: (cx / cw * 0.5 + 0.5) * width, y: (1 - (cy / cw * 0.5 + 0.5)) * height }
+}
+function drawLabel(image, width, height, cx, cy, text) {
+  const scale = 3, pad = 5
+  const textWidth = measureText(text) * scale
+  const textHeight = 7 * scale
+  const x = Math.max(0, Math.min(width - textWidth - pad * 2, Math.round(cx - textWidth / 2 - pad)))
+  const y = Math.max(0, Math.min(height - textHeight - pad * 2, Math.round(cy - textHeight / 2 - pad)))
+  fillRect(image, width, height, x, y, textWidth + pad * 2, textHeight + pad * 2, [255, 255, 255, 225])
+  strokeRect(image, width, height, x, y, textWidth + pad * 2, textHeight + pad * 2, [30, 40, 50, 255])
+  drawText(image, width, height, x + pad, y + pad, text, scale, [20, 25, 30, 255])
+}
+function measureText(text) { let width = 0; for (const ch of text) width += ((FONT[ch] || FONT['?'])[0].length + 1); return Math.max(0, width - 1) }
+function drawText(image, width, height, x, y, text, scale, color) { let cursor = x; for (const ch of text) { const glyph = FONT[ch] || FONT['?']; for (let gy = 0; gy < glyph.length; gy++) for (let gx = 0; gx < glyph[gy].length; gx++) if (glyph[gy][gx] === '1') fillRect(image, width, height, cursor + gx * scale, y + gy * scale, scale, scale, color); cursor += (glyph[0].length + 1) * scale } }
+function fillRect(image, width, height, x, y, w, h, color) { for (let yy = Math.max(0, y); yy < Math.min(height, y + h); yy++) for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx++) blendPixel(image, width, xx, yy, color) }
+function strokeRect(image, width, height, x, y, w, h, color) { fillRect(image, width, height, x, y, w, 1, color); fillRect(image, width, height, x, y + h - 1, w, 1, color); fillRect(image, width, height, x, y, 1, h, color); fillRect(image, width, height, x + w - 1, y, 1, h, color) }
+function blendPixel(image, width, x, y, color) { const i = (y * width + x) * 4; const a = color[3] / 255; image[i] = Math.round(color[0] * a + image[i] * (1 - a)); image[i + 1] = Math.round(color[1] * a + image[i + 1] * (1 - a)); image[i + 2] = Math.round(color[2] * a + image[i + 2] * (1 - a)); image[i + 3] = 255 }
+const FONT = { '0':['111','101','101','101','101','101','111'], '1':['010','110','010','010','010','010','111'], '2':['111','001','001','111','100','100','111'], '3':['111','001','001','111','001','001','111'], '4':['101','101','101','111','001','001','001'], '5':['111','100','100','111','001','001','111'], '6':['111','100','100','111','101','101','111'], '7':['111','001','001','010','010','010','010'], '8':['111','101','101','111','101','101','111'], '9':['111','101','101','111','001','001','111'], '.':['0','0','0','0','0','0','1'], '-':['000','000','000','111','000','000','000'], 'm':['00000','00000','11010','10101','10101','10101','10101'], '?':['111','001','011','010','000','010','000'] }
 `
 
 function orderFaceLoops(face: SolidFace, edgesById: ReadonlyMap<string, SolidEdge>, verticesById: ReadonlyMap<string, Vector3D>): Vec3[][] {
@@ -457,21 +508,33 @@ function createNormalMatrix(model: Mat4): Mat4 {
 	return model
 }
 
-function readPngFromGl(gl: WebGLRenderingContext, width: number, height: number): Uint8Array {
+function readPngFromGl(gl: WebGLRenderingContext, width: number, height: number, labels: readonly RenderLabel[] = [], modelViewProjection?: Mat4): Uint8Array {
 	const pixels = new Uint8Array(width * height * 4)
 	gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
-	const raw = Buffer.alloc((width * 4 + 1) * height)
+	const image = new Uint8Array(width * height * 4)
 	for (let y = 0; y < height; y += 1) {
 		const sourceY = height - 1 - y
+		for (let x = 0; x < width; x += 1) {
+			const source = (sourceY * width + x) * 4
+			const target = (y * width + x) * 4
+			image[target] = pixels[source] ?? 0
+			image[target + 1] = pixels[source + 1] ?? 0
+			image[target + 2] = pixels[source + 2] ?? 0
+			image[target + 3] = pixels[source + 3] ?? 255
+		}
+	}
+	drawLabels(image, width, height, labels, modelViewProjection)
+	const raw = Buffer.alloc((width * 4 + 1) * height)
+	for (let y = 0; y < height; y += 1) {
 		const rowStart = y * (width * 4 + 1)
 		raw[rowStart] = 0
 		for (let x = 0; x < width; x += 1) {
-			const source = (sourceY * width + x) * 4
+			const source = (y * width + x) * 4
 			const target = rowStart + 1 + x * 4
-			raw[target] = pixels[source] ?? 0
-			raw[target + 1] = pixels[source + 1] ?? 0
-			raw[target + 2] = pixels[source + 2] ?? 0
-			raw[target + 3] = pixels[source + 3] ?? 255
+			raw[target] = image[source] ?? 0
+			raw[target + 1] = image[source + 1] ?? 0
+			raw[target + 2] = image[source + 2] ?? 0
+			raw[target + 3] = image[source + 3] ?? 255
 		}
 	}
 	const header = Buffer.alloc(13)
@@ -577,6 +640,120 @@ function dot3(a: Vec3, b: Vec3): number {
 function normalize3(vector: Vec3): Vec3 {
 	const length = Math.hypot(vector[0], vector[1], vector[2]) || 1
 	return [vector[0] / length, vector[1] / length, vector[2] / length]
+}
+
+function drawLabels(image: Uint8Array, width: number, height: number, labels: readonly RenderLabel[], modelViewProjection: Mat4 | undefined): void {
+	if (!modelViewProjection) {
+		return
+	}
+	for (const label of labels) {
+		const point = projectPoint(label.position, modelViewProjection, width, height)
+		if (!point) {
+			continue
+		}
+		drawLabel(image, width, height, Math.round(point.x), Math.round(point.y), label.text)
+	}
+}
+
+function projectPoint(position: Vector3D, matrix: Mat4, width: number, height: number): { x: number; y: number } | null {
+	const clipX = (matrix[0] ?? 0) * position.x + (matrix[4] ?? 0) * position.y + (matrix[8] ?? 0) * position.z + (matrix[12] ?? 0)
+	const clipY = (matrix[1] ?? 0) * position.x + (matrix[5] ?? 0) * position.y + (matrix[9] ?? 0) * position.z + (matrix[13] ?? 0)
+	const clipW = (matrix[3] ?? 0) * position.x + (matrix[7] ?? 0) * position.y + (matrix[11] ?? 0) * position.z + (matrix[15] ?? 0)
+	if (!Number.isFinite(clipW) || Math.abs(clipW) < 1e-6) {
+		return null
+	}
+	return {
+		x: ((clipX / clipW) * 0.5 + 0.5) * width,
+		y: (1 - ((clipY / clipW) * 0.5 + 0.5)) * height
+	}
+}
+
+function drawLabel(image: Uint8Array, width: number, height: number, centerX: number, centerY: number, text: string): void {
+	const scale = 3
+	const padding = 5
+	const textWidth = measureText(text) * scale
+	const textHeight = 7 * scale
+	const boxWidth = textWidth + padding * 2
+	const boxHeight = textHeight + padding * 2
+	const x = clamp(Math.round(centerX - boxWidth / 2), 0, Math.max(0, width - boxWidth))
+	const y = clamp(Math.round(centerY - boxHeight / 2), 0, Math.max(0, height - boxHeight))
+	fillRect(image, width, height, x, y, boxWidth, boxHeight, [255, 255, 255, 225])
+	strokeRect(image, width, height, x, y, boxWidth, boxHeight, [30, 40, 50, 255])
+	drawText(image, width, height, x + padding, y + padding, text, scale, [20, 25, 30, 255])
+}
+
+function measureText(text: string): number {
+	let width = 0
+	const fallback = getGlyph("?")
+	for (const character of text) {
+		width += (FONT_5X7[character]?.[0]?.length ?? fallback[0]?.length ?? 0) + 1
+	}
+	return Math.max(0, width - 1)
+}
+
+function getGlyph(character: string): readonly string[] {
+	return FONT_5X7[character] ?? FONT_5X7["?"] ?? ["111", "001", "011", "010", "000", "010", "000"]
+}
+
+function drawText(image: Uint8Array, width: number, height: number, x: number, y: number, text: string, scale: number, color: readonly [number, number, number, number]): void {
+	let cursor = x
+	for (const character of text) {
+		const glyph = getGlyph(character)
+		for (let gy = 0; gy < glyph.length; gy += 1) {
+			const row = glyph[gy] ?? ""
+			for (let gx = 0; gx < row.length; gx += 1) {
+				if (row[gx] === "1") {
+					fillRect(image, width, height, cursor + gx * scale, y + gy * scale, scale, scale, color)
+				}
+			}
+		}
+		cursor += ((glyph[0]?.length ?? 0) + 1) * scale
+	}
+}
+
+function fillRect(image: Uint8Array, width: number, height: number, x: number, y: number, rectWidth: number, rectHeight: number, color: readonly [number, number, number, number]): void {
+	for (let yy = Math.max(0, y); yy < Math.min(height, y + rectHeight); yy += 1) {
+		for (let xx = Math.max(0, x); xx < Math.min(width, x + rectWidth); xx += 1) {
+			blendPixel(image, width, xx, yy, color)
+		}
+	}
+}
+
+function strokeRect(image: Uint8Array, width: number, height: number, x: number, y: number, rectWidth: number, rectHeight: number, color: readonly [number, number, number, number]): void {
+	fillRect(image, width, height, x, y, rectWidth, 1, color)
+	fillRect(image, width, height, x, y + rectHeight - 1, rectWidth, 1, color)
+	fillRect(image, width, height, x, y, 1, rectHeight, color)
+	fillRect(image, width, height, x + rectWidth - 1, y, 1, rectHeight, color)
+}
+
+function blendPixel(image: Uint8Array, width: number, x: number, y: number, color: readonly [number, number, number, number]): void {
+	const index = (y * width + x) * 4
+	const alpha = color[3] / 255
+	image[index] = Math.round(color[0] * alpha + (image[index] ?? 0) * (1 - alpha))
+	image[index + 1] = Math.round(color[1] * alpha + (image[index + 1] ?? 0) * (1 - alpha))
+	image[index + 2] = Math.round(color[2] * alpha + (image[index + 2] ?? 0) * (1 - alpha))
+	image[index + 3] = 255
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, value))
+}
+
+const FONT_5X7: Record<string, readonly string[]> = {
+	"0": ["111", "101", "101", "101", "101", "101", "111"],
+	"1": ["010", "110", "010", "010", "010", "010", "111"],
+	"2": ["111", "001", "001", "111", "100", "100", "111"],
+	"3": ["111", "001", "001", "111", "001", "001", "111"],
+	"4": ["101", "101", "101", "111", "001", "001", "001"],
+	"5": ["111", "100", "100", "111", "001", "001", "111"],
+	"6": ["111", "100", "100", "111", "101", "101", "111"],
+	"7": ["111", "001", "001", "010", "010", "010", "010"],
+	"8": ["111", "101", "101", "111", "101", "101", "111"],
+	"9": ["111", "101", "101", "111", "001", "001", "111"],
+	".": ["0", "0", "0", "0", "0", "0", "1"],
+	"-": ["000", "000", "000", "111", "000", "000", "000"],
+	m: ["00000", "00000", "11010", "10101", "10101", "10101", "10101"],
+	"?": ["111", "001", "011", "010", "000", "010", "000"]
 }
 
 function normalizeImageDimension(value: number | undefined, fallback: number, label: string): number {

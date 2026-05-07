@@ -1,6 +1,21 @@
 import { EXTRUDE_OPERATIONS } from "../schema"
+import { findSketchDimensionConstraintNode, getSketchConstraintEntityIds, getSketchConstraintNodesForEntity, sketchDimensionToConstraintNode } from "./sketch-constraints"
 import { getSketchEntityNodes, sketchEntityNodeToEntity, sketchEntityToNode } from "./sketch-entities"
-import type { ChamferNode, EdgeNode, FaceNode, ExtrudeNode, ExtrudeOperation, PCadGraphNode, PCadGraphRewrite, PCadState, SketchDimension, SketchEntity, SketchEntityNode, SketchNode } from "../schema"
+import type {
+	ChamferNode,
+	EdgeNode,
+	FaceNode,
+	ExtrudeNode,
+	ExtrudeOperation,
+	PCadGraphNode,
+	PCadGraphRewrite,
+	PCadState,
+	SketchConstraintNode,
+	SketchDimension,
+	SketchEntity,
+	SketchEntityNode,
+	SketchNode
+} from "../schema"
 
 export { EXTRUDE_OPERATIONS } from "../schema"
 export type {
@@ -18,11 +33,15 @@ export type {
 	PCadState,
 	ReferencePlaneName,
 	ReferencePlaneNode,
+	SketchConstraint,
+	SketchConstraintNode,
 	SketchDimension,
 	SketchEntity,
 	SketchEntityNode,
+	SketchEntityRef,
 	SketchNode,
 	SketchPlane,
+	SketchPointRef,
 	SolidEdge,
 	SolidFace,
 	SolidVertex
@@ -86,6 +105,8 @@ export function getNodeDependencies(node: PCadGraphNode): readonly string[] {
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return [node.sketchId]
+		case "sketchConstraint":
+			return [node.sketchId, ...getSketchConstraintEntityIds(node.constraint)]
 		case "extrude":
 			return [node.sketchId]
 		case "face":
@@ -240,12 +261,13 @@ export class CadEditor {
 		if (!removedEntity) {
 			return sketch
 		}
+		const constraintNodeIds = getSketchConstraintNodesForEntity(this.present, sketch.id, removedEntity.id).map((node) => node.id)
 		const nextSketch: SketchNode = {
 			...sketch,
-			dimensions: removedEntity ? sketch.dimensions.filter((dimension) => dimension.entityId !== removedEntity.id) : sketch.dimensions
+			dimensions: sketch.dimensions.filter((dimension) => dimension.entityId !== removedEntity.id)
 		}
 		this.commitMany([
-			{ type: "removeNodes", nodeIds: [removedEntity.id] },
+			{ type: "removeNodes", nodeIds: [removedEntity.id, ...constraintNodeIds] },
 			{ type: "replaceNode", node: nextSketch }
 		])
 		return nextSketch
@@ -254,12 +276,15 @@ export class CadEditor {
 	public clearSketch(sketchId: string): SketchNode {
 		const sketch = this.getSketchOrThrow(sketchId)
 		const entityNodeIds = getSketchEntityNodes(this.present, sketch.id).map((node) => node.id)
+		const constraintNodeIds = [...this.present.nodes.values()]
+			.filter((node): node is SketchConstraintNode => node.type === "sketchConstraint" && node.sketchId === sketch.id)
+			.map((node) => node.id)
 		const nextSketch: SketchNode = {
 			...sketch,
 			dimensions: []
 		}
 		this.commitMany([
-			{ type: "removeNodes", nodeIds: entityNodeIds },
+			{ type: "removeNodes", nodeIds: [...entityNodeIds, ...constraintNodeIds] },
 			{ type: "replaceNode", node: nextSketch }
 		])
 		return nextSketch
@@ -269,26 +294,30 @@ export class CadEditor {
 		const sketch = this.getSketchOrThrow(sketchId)
 		const entityNode = this.getSketchEntityOrThrow(sketch.id, dimension.entityId)
 		const entity = sketchEntityNodeToEntity(entityNode)
-		if (!entity) {
-			throw new Error(`Sketch entity "${dimension.entityId}" does not exist.`)
-		}
 		if (!Number.isFinite(dimension.value) || dimension.value <= 0) {
 			throw new Error("Sketch dimension value must be greater than zero.")
 		}
-
-		const dimensions = sketch.dimensions.filter((item) => !(item.entityId === dimension.entityId && item.type === dimension.type))
-		if (!entity || !canApplyDimensionToEntity(entity, dimension)) {
+		if (!canApplyDimensionToEntity(entity, dimension)) {
 			throw new Error(`Sketch dimension "${dimension.type}" cannot be applied to entity "${dimension.entityId}".`)
 		}
+
+		const dimensions = sketch.dimensions.filter((item) => !(item.entityId === dimension.entityId && item.type === dimension.type))
 		const nextEntityNode = sketchEntityToNode(sketch.id, applyDimensionToEntity(entity, dimension))
 		const nextSketch: SketchNode = {
 			...sketch,
 			dimensions: [...dimensions, dimension]
 		}
-		this.commitMany([
-			{ type: "replaceNode", node: nextEntityNode },
-			{ type: "replaceNode", node: nextSketch }
-		])
+		const existingConstraint = findSketchDimensionConstraintNode(this.present, sketch.id, dimension)
+		const constraintNode = sketchDimensionToConstraintNode(sketch.id, dimension)
+		const constraintRewrites: PCadGraphRewrite[] = existingConstraint
+			? existingConstraint.id === constraintNode.id
+				? [{ type: "replaceNode", node: constraintNode }]
+				: [
+						{ type: "removeNodes", nodeIds: [existingConstraint.id] },
+						{ type: "addNode", node: constraintNode }
+					]
+			: [{ type: "addNode", node: constraintNode }]
+		this.commitMany([{ type: "replaceNode", node: nextEntityNode }, { type: "replaceNode", node: nextSketch }, ...constraintRewrites])
 		return nextSketch
 	}
 
@@ -537,6 +566,9 @@ function validateNode(state: PCadState, node: PCadGraphNode): void {
 			validatePoint2D(node.p0, `Sketch rectangle "${node.id}" p0`)
 			validatePoint2D(node.p1, `Sketch rectangle "${node.id}" p1`)
 			return
+		case "sketchConstraint":
+			validateSketchConstraintNode(state, node)
+			return
 		case "extrude":
 			requireNodeType(state, node.sketchId, ["sketch"], `Extrude "${node.id}" sketch`)
 			if (!node.profileId) {
@@ -597,6 +629,47 @@ function validateSketchDimensions(state: PCadState, sketch: SketchNode): void {
 			throw new Error(`Sketch "${sketch.id}" dimension "${dimension.id}" cannot be applied to entity "${dimension.entityId}".`)
 		}
 	}
+}
+
+function validateSketchConstraintNode(state: PCadState, node: SketchConstraintNode): void {
+	requireNodeType(state, node.sketchId, ["sketch"], `Sketch constraint "${node.id}" sketch`)
+	switch (node.constraint.type) {
+		case "lineLength":
+		case "rectangleWidth":
+		case "rectangleHeight": {
+			if (!Number.isFinite(node.constraint.value) || node.constraint.value <= 0) {
+				throw new Error(`Sketch constraint "${node.id}" value must be greater than zero.`)
+			}
+			const entity = requireSketchEntityInSketch(state, node.sketchId, node.constraint.entityId, `Sketch constraint "${node.id}" entity`)
+			if (!canApplyDimensionToEntity(sketchEntityNodeToEntity(entity), { id: node.id, ...node.constraint })) {
+				throw new Error(`Sketch constraint "${node.id}" cannot be applied to entity "${node.constraint.entityId}".`)
+			}
+			return
+		}
+		case "horizontal":
+		case "vertical":
+			requireSketchEntityInSketch(state, node.sketchId, node.constraint.entityId, `Sketch constraint "${node.id}" entity`)
+			return
+		case "coincident":
+			requireSketchEntityPointRef(state, node.sketchId, node.constraint.a.entityId, node.constraint.a.point, `Sketch constraint "${node.id}" point a`)
+			requireSketchEntityPointRef(state, node.sketchId, node.constraint.b.entityId, node.constraint.b.point, `Sketch constraint "${node.id}" point b`)
+			return
+	}
+}
+
+function requireSketchEntityInSketch(state: PCadState, sketchId: string, entityId: string, label: string): SketchEntityNode {
+	const entity = requireNodeType(state, entityId, ["sketchLine", "sketchCornerRectangle"], label) as SketchEntityNode
+	if (entity.sketchId !== sketchId) {
+		throw new Error(`${label} "${entityId}" must belong to sketch "${sketchId}".`)
+	}
+	return entity
+}
+
+function requireSketchEntityPointRef(state: PCadState, sketchId: string, entityId: string, point: string, label: string): void {
+	if (point !== "p0" && point !== "p1") {
+		throw new Error(`${label} must reference p0 or p1.`)
+	}
+	requireSketchEntityInSketch(state, sketchId, entityId, label)
 }
 
 function validatePoint2D(point: { x: number; y: number }, label: string): void {

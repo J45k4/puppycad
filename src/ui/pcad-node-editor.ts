@@ -329,6 +329,15 @@ export class PCadNodeEditor extends UiComponent<HTMLDivElement> {
 			for (const row of sketchEntityRows(sketchEntityNodeToEntity(node))) {
 				this.inspector.appendChild(createReadonlyRow(row.label, row.value))
 			}
+		} else if (node.type === "sketchConstraint") {
+			this.inspector.appendChild(createReadonlyRow("Sketch", node.sketchId))
+			this.inspector.appendChild(createReadonlyRow("Constraint", node.constraint.type))
+			for (const entityId of getNodeDependencies(node).filter((id) => id !== node.sketchId)) {
+				this.inspector.appendChild(createReadonlyRow("Entity", entityId))
+			}
+			if ("value" in node.constraint) {
+				this.inspector.appendChild(createReadonlyRow("Value", formatNumber(node.constraint.value)))
+			}
 		} else if (node.type === "referencePlane") {
 			this.inspector.appendChild(createReadonlyRow("Plane", node.plane))
 		} else if (node.type === "face") {
@@ -929,14 +938,16 @@ function getTypeOrder(type: PCadGraphNode["type"]): number {
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return 2
-		case "extrude":
+		case "sketchConstraint":
 			return 3
-		case "face":
+		case "extrude":
 			return 4
-		case "edge":
+		case "face":
 			return 5
-		case "chamfer":
+		case "edge":
 			return 6
+		case "chamfer":
+			return 7
 	}
 }
 
@@ -953,6 +964,8 @@ function getNodeDetail(node: PCadGraphNode): string {
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return getSketchEntityDetail(sketchEntityNodeToEntity(node))
+		case "sketchConstraint":
+			return "value" in node.constraint ? `${node.constraint.type} ${formatNumber(node.constraint.value)}` : node.constraint.type
 		case "extrude":
 			return `Depth ${formatNumber(node.depth)}`
 		case "face":
@@ -969,7 +982,7 @@ function isNamedEditableNode(node: PCadGraphNode): node is Extract<PCadGraphNode
 }
 
 function isDeletableNode(node: PCadGraphNode): boolean {
-	return node.type === "sketch" || node.type === "extrude" || node.type === "chamfer"
+	return node.type === "sketch" || node.type === "sketchConstraint" || node.type === "extrude" || node.type === "chamfer"
 }
 
 function renderPCadNodeComponent(ctx: CanvasRenderingContext2D, component: CanvasComponent<PCadNodeComponentData>, selected: boolean): void {
@@ -1065,6 +1078,8 @@ function getNodePalette(type?: PCadGraphNode["type"] | GeneratedNodeType): { fil
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return { fill: "#ecfccb", border: "#84cc16", text: "#3f6212" }
+		case "sketchConstraint":
+			return { fill: "#fef9c3", border: "#eab308", text: "#854d0e" }
 		case "extrude":
 			return { fill: "#dbeafe", border: "#3b82f6", text: "#1d4ed8" }
 		case "face":
