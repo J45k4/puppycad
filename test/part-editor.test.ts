@@ -34,6 +34,18 @@ function dispatchPreviewPointer(window: HappyDOMWindow, canvas: HTMLCanvasElemen
 	canvas.dispatchEvent(event)
 }
 
+function dispatchPreviewWheel(window: HappyDOMWindow, canvas: HTMLCanvasElement, x: number, y: number, deltaY: number): void {
+	const event = new window.Event("wheel", { bubbles: true, cancelable: true }) as unknown as Event & {
+		clientX: number
+		clientY: number
+		deltaY: number
+	}
+	event.clientX = x
+	event.clientY = y
+	event.deltaY = deltaY
+	canvas.dispatchEvent(event)
+}
+
 function clickPreview(window: HappyDOMWindow, canvas: HTMLCanvasElement, x: number, y: number): void {
 	dispatchPreviewPointer(window, canvas, "pointermove", x, y)
 	dispatchPreviewPointer(window, canvas, "pointerdown", x, y)
@@ -346,6 +358,94 @@ function getOccludedExtrudeCornerPreviewPoint(editor: PartEditor, previewCanvas:
 	throw new Error("Expected an occluded corner candidate")
 }
 
+function getOccludedSketchSidePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, sketchId: string): { x: number; y: number; entityId: string; side: string } {
+	const partEditor = editor as unknown as {
+		drawPreview: () => void
+		previewCamera: THREE.PerspectiveCamera
+		previewContentGroup: THREE.Group
+		previewScene: THREE.Scene
+		previewSolids: Array<{
+			mesh: THREE.Mesh
+		}>
+		resolveSketchFrame: (target: unknown) => SketchFrame3D | null
+		sketchPointToPreviewWorld: (point: { x: number; y: number }, frame: SketchFrame3D) => THREE.Vector3
+	}
+	partEditor.drawPreview()
+	partEditor.previewScene.updateMatrixWorld(true)
+	partEditor.previewCamera.updateMatrixWorld(true)
+	const sketch = editor.getState().features.find((feature) => feature.type === "sketch" && feature.id === sketchId)
+	expect(sketch?.type).toBe("sketch")
+	if (!sketch || sketch.type !== "sketch") {
+		throw new Error(`Expected sketch ${sketchId}`)
+	}
+	const frame = partEditor.resolveSketchFrame(sketch.target)
+	expect(frame).toBeDefined()
+	if (!frame) {
+		throw new Error("Expected sketch frame")
+	}
+
+	const rect = previewCanvas.getBoundingClientRect()
+	const raycaster = new THREE.Raycaster()
+	for (const entity of sketch.entities) {
+		const sides =
+			entity.type === "line"
+				? [{ side: "line", start: entity.p0, end: entity.p1 }]
+				: [
+						{
+							side: "bottom",
+							start: { x: Math.min(entity.p0.x, entity.p1.x), y: Math.min(entity.p0.y, entity.p1.y) },
+							end: { x: Math.max(entity.p0.x, entity.p1.x), y: Math.min(entity.p0.y, entity.p1.y) }
+						},
+						{
+							side: "right",
+							start: { x: Math.max(entity.p0.x, entity.p1.x), y: Math.min(entity.p0.y, entity.p1.y) },
+							end: { x: Math.max(entity.p0.x, entity.p1.x), y: Math.max(entity.p0.y, entity.p1.y) }
+						},
+						{
+							side: "top",
+							start: { x: Math.min(entity.p0.x, entity.p1.x), y: Math.max(entity.p0.y, entity.p1.y) },
+							end: { x: Math.max(entity.p0.x, entity.p1.x), y: Math.max(entity.p0.y, entity.p1.y) }
+						},
+						{
+							side: "left",
+							start: { x: Math.min(entity.p0.x, entity.p1.x), y: Math.min(entity.p0.y, entity.p1.y) },
+							end: { x: Math.min(entity.p0.x, entity.p1.x), y: Math.max(entity.p0.y, entity.p1.y) }
+						}
+					]
+		for (const candidate of sides) {
+			const midpoint = {
+				x: (candidate.start.x + candidate.end.x) / 2,
+				y: (candidate.start.y + candidate.end.y) / 2
+			}
+			const worldPoint = partEditor.previewContentGroup.localToWorld(partEditor.sketchPointToPreviewWorld(midpoint, frame).clone())
+			const projected = worldPoint.clone().project(partEditor.previewCamera)
+			if (projected.z < -1 || projected.z > 1) {
+				continue
+			}
+			const x = rect.left + ((projected.x + 1) / 2) * rect.width
+			const y = rect.top + ((1 - projected.y) / 2) * rect.height
+			raycaster.setFromCamera(new THREE.Vector2(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1), partEditor.previewCamera)
+			const surfaceHit = raycaster.intersectObjects(
+				partEditor.previewSolids.map((solid) => solid.mesh),
+				false
+			)[0]
+			if (!surfaceHit) {
+				continue
+			}
+			const surfaceDepth = surfaceHit.point.clone().project(partEditor.previewCamera).z
+			if (projected.z > surfaceDepth + 0.0002) {
+				return {
+					x,
+					y,
+					entityId: entity.id,
+					side: candidate.side
+				}
+			}
+		}
+	}
+	throw new Error("Expected an occluded sketch side candidate")
+}
+
 function getExtrudeFacePreviewPoint(editor: PartEditor, previewCanvas: HTMLCanvasElement, extrudeId: string, faceLabel: string): { x: number; y: number } {
 	const partEditor = editor as unknown as {
 		drawPreview: () => void
@@ -507,6 +607,21 @@ function getSelectedSketchPreviewPoint(editor: PartEditor, previewCanvas: HTMLCa
 		throw new Error("Expected sketch frame")
 	}
 	return projectPreviewLocalPoint(editor, previewCanvas, sketchPointToPreviewLocalPoint(point, frame))
+}
+
+function objectTreeHasMaterialColor(root: THREE.Object3D, color: number): boolean {
+	let found = false
+	root.traverse((object) => {
+		const material = (object as { material?: THREE.Material | THREE.Material[] }).material
+		const materials = Array.isArray(material) ? material : material ? [material] : []
+		for (const entry of materials) {
+			const materialColor = (entry as THREE.Material & { color?: THREE.Color }).color
+			if (materialColor?.getHex() === color) {
+				found = true
+			}
+		}
+	})
+	return found
 }
 
 function toSketchPoint(localPoint: THREE.Vector3, frame: SketchFrame3D): { x: number; y: number } {
@@ -1269,6 +1384,258 @@ describe("PartEditor", () => {
 		)
 	})
 
+	it("highlights hovered rectangle sides and corners in the preview", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 140, 140)
+		clickPreview(domWindow, previewCanvas, 220, 220)
+
+		const sketch = editor.getState().features[0]
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		const rectangle = sketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+
+		const partEditor = editor as unknown as {
+			hoveredSketchTarget: { type: string; sketchId: string; entityId: string; side?: string; point?: { x: number; y: number } } | null
+			previewSketchGroup: THREE.Group
+			previewBaseDistance: number
+			drawPreview: () => void
+			resolveSketchFrame: (target: unknown) => SketchFrame3D | null
+			projectSketchMarkerCenterToPreviewPoint: (point: { x: number; y: number }, frame: SketchFrame3D) => { x: number; y: number } | null
+			getProjectedSketchMarkerRadius: (point: { x: number; y: number }, frame: SketchFrame3D, projectedCenter: { x: number; y: number }) => number
+		}
+		const topSidePoint = getSelectedSketchPreviewPoint(editor, previewCanvas, {
+			x: (rectangle.p0.x + rectangle.p1.x) / 2,
+			y: Math.max(rectangle.p0.y, rectangle.p1.y)
+		})
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointermove", topSidePoint.x, topSidePoint.y)
+
+		expect(partEditor.hoveredSketchTarget).toEqual({
+			type: "rectangleSide",
+			sketchId: sketch.id,
+			entityId: rectangle.id,
+			side: "top"
+		})
+		expect(objectTreeHasMaterialColor(partEditor.previewSketchGroup, 0x06b6d4)).toBe(true)
+
+		partEditor.previewBaseDistance = 1.4
+		partEditor.drawPreview()
+		const frame = partEditor.resolveSketchFrame(sketch.target)
+		expect(frame).toBeDefined()
+		if (!frame) {
+			throw new Error("Expected sketch frame")
+		}
+		const topRightSketchPoint = {
+			x: Math.max(rectangle.p0.x, rectangle.p1.x),
+			y: Math.max(rectangle.p0.y, rectangle.p1.y)
+		}
+		const topRightPoint = partEditor.projectSketchMarkerCenterToPreviewPoint(topRightSketchPoint, frame)
+		expect(topRightPoint).toBeDefined()
+		if (!topRightPoint) {
+			throw new Error("Expected projected corner")
+		}
+		const markerRadius = partEditor.getProjectedSketchMarkerRadius(topRightSketchPoint, frame, topRightPoint)
+		const cornerHoverPoint = {
+			x: topRightPoint.x + markerRadius * 0.8,
+			y: topRightPoint.y
+		}
+		expect(Math.abs(cornerHoverPoint.x - topRightPoint.x)).toBeGreaterThan(14)
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointermove", cornerHoverPoint.x, cornerHoverPoint.y)
+
+		expect(partEditor.hoveredSketchTarget?.type).toBe("corner")
+		expect(partEditor.hoveredSketchTarget?.sketchId).toBe(sketch.id)
+		expect(partEditor.hoveredSketchTarget?.entityId).toBe(rectangle.id)
+		expect(partEditor.hoveredSketchTarget?.point?.x).toBeCloseTo(Math.max(rectangle.p0.x, rectangle.p1.x), 6)
+		expect(partEditor.hoveredSketchTarget?.point?.y).toBeCloseTo(Math.max(rectangle.p0.y, rectangle.p1.y), 6)
+		expect(objectTreeHasMaterialColor(partEditor.previewSketchGroup, 0x06b6d4)).toBe(true)
+	})
+
+	it("highlights hovered sketch geometry when the sketch is not selected", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 140, 140)
+		clickPreview(domWindow, previewCanvas, 220, 220)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const baseExtrude = editor.listExtrudes()[0]
+		expect(baseExtrude).toBeDefined()
+		if (!baseExtrude) {
+			throw new Error("Expected base extrude")
+		}
+
+		const faceCenter = getExtrudeFacePreviewPoint(editor, previewCanvas, baseExtrude.id, "Top Face")
+		clickPreview(domWindow, previewCanvas, faceCenter.x, faceCenter.y)
+		const selectedFaceLabel = editor.root.textContent?.includes("Top Face selected.") ? "Top Face" : "Bottom Face"
+		expect(editor.root.textContent).toContain(`${selectedFaceLabel} selected.`)
+		clickButton(domWindow, editor.root, "Sketch")
+		clickButton(domWindow, editor.root, "Rectangle")
+		const start = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.3, 0.3)
+		const end = getExtrudeFacePreviewPointAt(editor, previewCanvas, baseExtrude.id, selectedFaceLabel, 0.7, 0.7)
+		clickPreview(domWindow, previewCanvas, start.x, start.y)
+		clickPreview(domWindow, previewCanvas, end.x, end.y)
+
+		const sketch = editor.getState().features.find((feature) => feature.type === "sketch" && feature.dirty)
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected dirty face sketch")
+		}
+		const rectangle = sketch.entities[0]
+		expect(rectangle?.type).toBe("cornerRectangle")
+		if (!rectangle || rectangle.type !== "cornerRectangle") {
+			throw new Error("Expected rectangle entity")
+		}
+		const frame = (editor as unknown as { resolveSketchFrame: (target: unknown) => SketchFrame3D | null }).resolveSketchFrame(sketch.target)
+		expect(frame).toBeDefined()
+		if (!frame) {
+			throw new Error("Expected sketch frame")
+		}
+		const topSidePoint = projectPreviewLocalPoint(
+			editor,
+			previewCanvas,
+			sketchPointToPreviewLocalPoint(
+				{
+					x: (rectangle.p0.x + rectangle.p1.x) / 2,
+					y: Math.max(rectangle.p0.y, rectangle.p1.y)
+				},
+				frame
+			)
+		)
+
+		clickButton(domWindow, editor.root, "Finish Sketch")
+
+		const partEditor = editor as unknown as {
+			activeTool: string
+			drawPreview: () => void
+			previewSolids: Array<{
+				extrudeId: string
+				faces: Array<{
+					faceId: string
+					label: string
+				}>
+			}>
+			selectExtrudeFace: (extrudeId: string, faceId?: string) => void
+			selectedSketchId: string | null
+			selectedSketchEdge: { type: string; entityId: string; side?: string; point?: { x: number; y: number } } | null
+			hoveredSketchTarget: { type: string; sketchId: string; entityId: string; side?: string; point?: { x: number; y: number } } | null
+			previewSketchGroup: THREE.Group
+		}
+		partEditor.drawPreview()
+		const previewSolid = partEditor.previewSolids.find((entry) => entry.extrudeId === baseExtrude.id)
+		expect(previewSolid).toBeDefined()
+		if (!previewSolid) {
+			throw new Error("Expected preview solid")
+		}
+		const selectedFace = previewSolid.faces.find((face) => face.label === selectedFaceLabel)
+		expect(selectedFace).toBeDefined()
+		if (!selectedFace) {
+			throw new Error(`Expected ${selectedFaceLabel}`)
+		}
+		partEditor.selectExtrudeFace(baseExtrude.id, selectedFace.faceId)
+
+		expect(partEditor.activeTool).toBe("view")
+		expect(partEditor.selectedSketchId).toBeNull()
+
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointermove", topSidePoint.x, topSidePoint.y)
+
+		expect(partEditor.hoveredSketchTarget).toEqual({
+			type: "rectangleSide",
+			sketchId: sketch.id,
+			entityId: rectangle.id,
+			side: "top"
+		})
+		expect(objectTreeHasMaterialColor(partEditor.previewSketchGroup, 0x06b6d4)).toBe(true)
+
+		clickPreview(domWindow, previewCanvas, topSidePoint.x, topSidePoint.y)
+
+		expect(partEditor.selectedSketchId).toBe(sketch.id)
+		expect(partEditor.selectedSketchEdge).toEqual({
+			type: "rectangleSide",
+			entityId: rectangle.id,
+			side: "top"
+		})
+		expect(editor.root.textContent).toContain("Sketch:")
+		expect(editor.root.textContent).not.toContain("Face:")
+
+		partEditor.selectExtrudeFace(baseExtrude.id, selectedFace.faceId)
+		const topRightSketchPoint = {
+			x: Math.max(rectangle.p0.x, rectangle.p1.x),
+			y: Math.max(rectangle.p0.y, rectangle.p1.y)
+		}
+		const topRightPoint = projectPreviewLocalPoint(editor, previewCanvas, sketchPointToPreviewLocalPoint(topRightSketchPoint, frame))
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointermove", topRightPoint.x, topRightPoint.y)
+		expect(partEditor.hoveredSketchTarget?.type).toBe("corner")
+
+		clickPreview(domWindow, previewCanvas, topRightPoint.x, topRightPoint.y)
+
+		expect(partEditor.selectedSketchId).toBe(sketch.id)
+		expect(partEditor.selectedSketchEdge?.type).toBe("corner")
+		expect(partEditor.selectedSketchEdge?.entityId).toBe(rectangle.id)
+		expect(partEditor.selectedSketchEdge?.point?.x).toBeCloseTo(topRightSketchPoint.x, 6)
+		expect(partEditor.selectedSketchEdge?.point?.y).toBeCloseTo(topRightSketchPoint.y, 6)
+	})
+
+	it("does not hover sketch geometry through an occluding body face", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+
+		const sketch = editor.getState().features[0]
+		expect(sketch?.type).toBe("sketch")
+		if (!sketch || sketch.type !== "sketch") {
+			throw new Error("Expected sketch")
+		}
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const partEditor = editor as unknown as {
+			drawPreview: () => void
+			hoveredSketchTarget: { type: string; sketchId: string; entityId: string; side?: string } | null
+			previewRotation: { yaw: number; pitch: number }
+		}
+		partEditor.previewRotation.yaw = -0.7
+		partEditor.previewRotation.pitch = 0.35
+		partEditor.drawPreview()
+
+		const occludedSide = getOccludedSketchSidePreviewPoint(editor, previewCanvas, sketch.id)
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointermove", occludedSide.x, occludedSide.y)
+
+		expect(
+			partEditor.hoveredSketchTarget?.sketchId === sketch.id &&
+				partEditor.hoveredSketchTarget?.entityId === occludedSide.entityId &&
+				partEditor.hoveredSketchTarget?.type === "rectangleSide" &&
+				partEditor.hoveredSketchTarget?.side === occludedSide.side
+		).toBe(false)
+	})
+
 	it("reopens dirty face sketches and allows side selection directly from the preview", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()
@@ -1585,6 +1952,42 @@ describe("PartEditor", () => {
 		expect(editor.root.textContent).toContain("Delete Extrude")
 		const heightInput = editor.root.querySelector('input[type="number"]') as HTMLInputElement | null
 		expect(heightInput?.value).toBe("30")
+	})
+
+	it("does not select an extrude when zooming from an unselected preview state", () => {
+		const editor = new PartEditor({
+			createPreviewRenderer: () => new FakePreviewRenderer()
+		})
+		const previewCanvas = getPreviewCanvas(editor.root)
+		setCanvasRect(previewCanvas)
+
+		editor.selectReferencePlane("Front")
+		editor.enterSketchMode()
+		clickButton(domWindow, editor.root, "Rectangle")
+		clickPreview(domWindow, previewCanvas, 145, 145)
+		clickPreview(domWindow, previewCanvas, 215, 215)
+		clickButton(domWindow, editor.root, "Finish Sketch")
+		clickButton(domWindow, editor.root, "Extrude")
+
+		const extrude = editor.listExtrudes()[0]
+		expect(extrude).toBeDefined()
+		if (!extrude) {
+			throw new Error("Expected extrude")
+		}
+
+		editor.selectReferencePlane("Front")
+		expect(editor.root.textContent).toContain("Front Plane")
+		expect(editor.root.textContent).not.toContain("Delete Extrude")
+
+		const previewPoint = getExtrudePreviewPoint(editor, previewCanvas, extrude.id)
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointermove", previewPoint.x, previewPoint.y)
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointerdown", previewPoint.x, previewPoint.y)
+		dispatchPreviewWheel(domWindow, previewCanvas, previewPoint.x, previewPoint.y, -120)
+		dispatchPreviewPointer(domWindow, previewCanvas, "pointerup", previewPoint.x, previewPoint.y)
+
+		expect(editor.root.textContent).toContain("Front Plane")
+		expect(editor.root.textContent).not.toContain("Delete Extrude")
+		expect(editor.root.textContent).not.toContain(`Extrude: ${extrude.name}`)
 	})
 
 	it("rotates around the point under the cursor instead of the world origin", () => {

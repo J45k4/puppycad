@@ -2303,6 +2303,25 @@ export async function deleteProjectState(projectId: string): Promise<void> {
 	}
 }
 
+export async function saveProjectState(projectId: string, project: Project): Promise<void> {
+	const normalized = normalizeProjectFile(project)
+	if (!normalized) {
+		throw new Error("Invalid PuppyCAD project file")
+	}
+	if (typeof indexedDB === "undefined") {
+		throw new Error("IndexedDB is not available")
+	}
+	const db = await openProjectDatabase()
+	const transaction = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
+	const store = transaction.objectStore(ProjectTreeView.STORE_NAME)
+	store.put(normalized, `${ProjectTreeView.STORE_KEY_PREFIX}${projectId}`)
+	await new Promise<void>((resolve, reject) => {
+		transaction.oncomplete = () => resolve()
+		transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"))
+		transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"))
+	})
+}
+
 function normalizePartEditorViewState(input: unknown): PartEditorViewState | undefined {
 	if (!input || typeof input !== "object") {
 		return undefined
