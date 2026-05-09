@@ -1,0 +1,938 @@
+	\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tikz-cd}
+\usepackage{multicol}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.75\baselineskip}
+
+\title{PuppyCadLang: A Graph Language for Design State and Evaluation}
+\author{Draft Specification}
+\date{May 9, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+PuppyCadLang is a language model for representing design state as a typed graph updated by explicit events. The goal is not to define a user-facing syntax, nor to prescribe a specific geometric kernel, PCB engine, or UI. Instead, the language defines the semantic objects that a design system manipulates: nodes, references, constraints, rewrites, derived facts, diagnostics, and provenance. The central claim is that design intent and computed consequences can coexist in one graph, provided that the system records how each fact was produced and what sources it depends on. This paper describes the core language model, the role of first-class constraint nodes, the event-sourced update mechanism, and the evaluator model used to compute profiles, geometry, routing, and validation results.
+\end{abstract}
+
+\section{Introduction}
+
+Most CAD systems are organized around domain-specific editors and opaque feature histories. Mechanical sketches, solids, PCB traces, schematic nets, and validation messages are often represented in separate internal models connected by ad hoc translation layers. This makes it difficult to preserve design intent, inspect dependencies, or allow software agents to participate in editing at the same semantic level as a human user.
+
+PuppyCadLang proposes a different foundation. A design is represented as a typed graph. The graph contains authored facts, derived facts, and diagnostic facts. Changes to the graph are recorded as explicit events. Solvers, geometry kernels, validators, and other evaluators do not mutate private internal state as their primary output; instead, they emit graph events that can be inspected, replayed, invalidated, and recomputed.
+
+This paper narrows scope to the pure language aspects of the system. It deliberately does not define a textual syntax, cloud execution model, supplier network, or product workflow. Those may be layered on top of the language, but they are not required to understand the semantics of PuppyCadLang itself.
+
+\section{Research Context and Lineage}
+
+PuppyCadLang does not begin from zero. It combines several lines of existing research and system design practice.
+
+First, \emph{Sketchpad} established the importance of named graphical objects, reusable structure, and declarative geometric relations in interactive design systems \cite{sutherland1963}. PuppyCadLang inherits that commitment to semantic objects rather than raw drawing traces.
+
+Second, the geometric constraint solving literature in CAD treats constraints as relations over geometric entities and distinguishes several computation strategies, including graph-constructive, decomposition--recombination, rule-oriented, and numerical methods \cite{fudos1997,jermann2006}. That literature motivates the separation made in this paper between a constraint node, which declares a relation, and a solver, which computes with respect to that declaration.
+
+Third, typed attributed graph transformation provides a formal language for describing rewrites over typed graph structures \cite{heckel2005,ehrig2006}. PuppyCadLang borrows this viewpoint by treating graph rewrites as first-class semantic objects, while deliberately using a smaller mutation vocabulary suited to an event-sourced design system.
+
+Finally, provenance and persistent identification research motivate two non-negotiable requirements of the language: derived facts should record what they depend on, and graph nodes should remain stably referenceable across reevaluation \cite{buneman2001,farjana2018}. These concerns are especially important in design systems, where local edits often invalidate downstream geometry, topology, and diagnostics.
+
+Assembly information modeling provides another important part of the lineage. Prior work on assembly representation, the Open Assembly Model, and assembly ontologies shows how instances, relationships, kinematics, and lifecycle semantics can be modeled in a vendor-neutral way across design phases \cite{lyons1997,baysal2004,rachuri2005,rachuri2006,fiorentini2007}. The rigid-motion formalism used later in this paper also aligns with the classical kinematics literature on matrix-based mechanism notation and configuration spaces over $SE(3)$ \cite{denavit1955,murray1994}.
+
+\section{Goals}
+
+The language is intended to satisfy five core goals:
+
+\begin{enumerate}
+  \item \textbf{One semantic graph.} Intent, derived geometry, validation output, and domain relationships should be representable in one graph model.
+  \item \textbf{Stable identity.} Nodes should preserve identity across edits so that references, constraints, selections, and generated outputs remain meaningful.
+  \item \textbf{Explicit dependencies.} The sources of derived results should be visible and inspectable.
+  \item \textbf{Deterministic recomputation.} Evaluators should be able to regenerate outputs from explicit graph inputs.
+  \item \textbf{Agent readability.} The language should describe semantic objects rather than pixels or tool gestures.
+\end{enumerate}
+
+\section{Core Semantic Model}
+
+PuppyCadLang defines two persistent artifacts:
+
+\begin{enumerate}
+  \item an \emph{event log}, which records graph rewrites and their provenance, and
+  \item a \emph{folded graph state}, which is the current materialized result of applying those events.
+\end{enumerate}
+
+Conceptually,
+
+\[
+\text{graph}_0 + \text{event}_1 + \text{event}_2 + \cdots + \text{event}_n \rightarrow \text{graph}_n
+\]
+
+The graph is the current semantic state. The event log is the explanation for how that state came to exist.
+
+This separation is important. A graph alone tells the system what is currently true. The event log tells the system whether a fact was authored directly, computed by a solver, emitted by a validator, or imported from another subsystem. The language therefore distinguishes between \emph{what exists} and \emph{how it came to exist} without requiring separate graph types.
+
+\section{Nodes}
+
+The graph is composed of typed nodes. Every meaningful design fact is modeled as a node rather than an unstructured drawing command.
+
+A node should contain at least the following fields:
+
+\begin{center}
+\begin{tabular}{@{}p{0.38\linewidth}p{0.48\linewidth}@{}}
+\toprule
+Field & Meaning \\
+\midrule
+\texttt{id} & Stable identifier for references and updates \\
+\texttt{type} & Stable semantic discriminator \\
+\texttt{domain} & Vocabulary family, such as core or cad \\
+\texttt{name} & Optional human-readable label \\
+\texttt{references} & Links to other node identifiers \\
+\texttt{attributes} & Typed node-specific data payload \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The language does not require every relationship to be encoded as a separate graph-edge object. A lightweight representation can store references directly on nodes. For example, a constraint node may simply store the identifiers of the entities it constrains. If later implementations require explicit graph-edge objects for indexing, querying, or fine-grained provenance on the links themselves, that can be added without changing the conceptual model. This point concerns storage of inter-node references, not whether domain objects such as geometric edges may appear as first-class nodes.
+
+\section{Reference and Constraint Semantics}
+
+The previous section defines how nodes are stored. This section defines how references and constraints should be interpreted.
+
+\subsection{Reference Semantics}
+
+A reference is a typed relation from one node to another node or to a named subfeature of a node. A reference should minimally record a target identifier, a semantic role, and, when needed, a selector. The selector allows the language to refer to entities below the node level, such as a line endpoint, an arc center, a sketch plane normal, a footprint pad, a pin, or a mate frame.
+
+Let $\mathsf{resolve}_G(r)$ denote resolution of a reference $r$ in graph state $G$. Resolution may return a semantic object, a stale object, or $\bot$ when no valid target can be found. This distinction matters because constraints rarely apply to whole nodes only. A coincidence relation usually targets endpoints, a concentricity relation targets centers or axes, and a mate relation targets frames or attachment features rather than entire parts.
+
+\subsection{Constraint Semantics}
+
+A constraint node is a declarative relation rather than an imperative action. One useful abstract model is
+
+\[
+c = (\kappa, R, P, \pi)
+\]
+
+where $\kappa$ is the constraint kind, $R$ is an ordered list of typed references, $P$ is a typed parameter block, and $\pi$ is a policy block that describes enforcement and diagnostic behavior.
+
+Given a graph state $G$, the meaning of the constraint is obtained by resolving its references and interpreting its kind over the resolved objects:
+
+\[
+\mathsf{eval}(c, G) = \left[\!\left[ \kappa \right]\!\right](\mathsf{resolve}_G(R); P)
+\]
+
+The result should be richer than a Boolean. In practice, the evaluator should be able to classify a constraint as satisfied, unsatisfied, undefined, ambiguous, overconstrained, or stale, and it should be able to attach witness data such as residuals, missing references, or conflict sets.
+
+Not all constraints should be treated identically. Some are \emph{driving} constraints intended to shape geometry. Some are \emph{checked} constraints used only for validation. Some are \emph{advisory} constraints that influence ranking or choice without forcing a hard failure. The policy block should make this distinction explicit.
+
+\subsection{Running Example: Coincident Constraint}
+
+It is useful to ground the abstract model in the simplest nontrivial case. Suppose the graph contains two sketch-point nodes, $p_A$ and $p_B$. A coincidence constraint can then be represented as a node whose references identify those operands and whose policy declares whether the relation is driving or merely checked:
+
+\[
+c_{\mathrm{coincident}} = (\text{coincident}, [p_A, p_B], \varnothing, \{\text{mode}=\text{driving}\})
+\]
+
+In an informal surface notation, one might write this as \texttt{Coincident} applied to \texttt{pointA} and \texttt{pointB}. That notation is only expository shorthand; the language claim made here is about the semantic node, not about a mandated concrete syntax.
+
+Semantically, this node states that the resolved positions of $p_A$ and $p_B$ should be equal. Evaluating the constraint means resolving the two references, reading their current positions, and checking whether they coincide to within the system's geometric tolerance. If $p_A=(10, 5)$ and $p_B=(10.3, 5)$ in millimeters, the evaluator may return a status such as unsatisfied together with witness data indicating the positional residual.
+
+This example also clarifies the earlier discussion of references and edges. The constraint is already a first-class node. The points it constrains are first-class nodes. The references from the constraint to those points need not themselves be stored as separate graph-edge records unless the implementation wants those links to carry their own identity or metadata. By contrast, if the modeled object is itself a geometric edge of a profile or solid, that geometric edge may still appear as an ordinary domain node and be referenced like any other entity.
+
+The same informal surface notation extends naturally to other common sketch relations:
+
+\begin{itemize}
+  \item \texttt{Horizontal(line)} constrains a line to have horizontal direction.
+  \item \texttt{Vertical(line)} constrains a line to have vertical direction.
+  \item \texttt{Parallel(lineA, lineB)} constrains two lines to have equal direction up to sign.
+  \item \texttt{Perpendicular(lineA, lineB)} constrains two lines to meet at a right angle.
+  \item \texttt{Angle(lineA, lineB, value)} constrains the relative angle between two lines to a target value.
+  \item \texttt{Collinear(lineA, lineB)} constrains two lines to lie on the same supporting line.
+  \item \texttt{LineLength(line, value)} constrains a line segment to have a target length.
+  \item \texttt{Radius(circleOrArc, value)} constrains a circular carrier to have a target radius.
+  \item \texttt{Diameter(circleOrArc, value)} constrains a circular carrier to have a target diameter.
+  \item \texttt{ArcLength(arc, value)} constrains an arc to have a target length along its carrier.
+  \item \texttt{Distance(entityA, entityB, value)} constrains the geometric separation of two resolved entities.
+  \item \texttt{Offset(entityA, entityB, value)} constrains one entity to lie at a prescribed offset from another.
+\end{itemize}
+
+To make these examples precise, let a line $\ell$ be represented by two resolved endpoints $a_\ell, b_\ell \in \mathbb{R}^2$ with direction vector
+
+\[
+d_\ell = b_\ell - a_\ell.
+\]
+
+Assume for the moment that $d_\ell \neq 0$, so the line is nondegenerate. Let $e_x = (1,0)$ and $e_y = (0,1)$ denote distinguished axes of the sketch frame, let $u \cdot v$ denote the Euclidean dot product, and let
+
+\[
+\det(u,v) = u_x v_y - u_y v_x
+\]
+
+denote the signed $2 \times 2$ determinant. Then the common line constraints above can be interpreted as follows:
+
+\begin{itemize}
+  \item \textbf{Horizontal.} \texttt{Horizontal($\ell$)} requires $d_\ell \cdot e_y = 0$, equivalently $d_{\ell,y} = 0$. A natural residual is $r_{\mathrm{h}}(\ell) = d_{\ell,y}$.
+  \item \textbf{Vertical.} \texttt{Vertical($\ell$)} requires $d_\ell \cdot e_x = 0$, equivalently $d_{\ell,x} = 0$. A natural residual is $r_{\mathrm{v}}(\ell) = d_{\ell,x}$.
+  \item \textbf{Parallel.} \texttt{Parallel($\ell_A, \ell_B$)} requires $\det(d_{\ell_A}, d_{\ell_B}) = 0$. This captures equality of direction up to sign, since both parallel and anti-parallel vectors have zero determinant. A natural residual is $r_{\parallel}(\ell_A, \ell_B) = \det(d_{\ell_A}, d_{\ell_B})$.
+  \item \textbf{Perpendicular.} \texttt{Perpendicular($\ell_A, \ell_B$)} requires $d_{\ell_A} \cdot d_{\ell_B} = 0$. A natural residual is $r_{\perp}(\ell_A, \ell_B) = d_{\ell_A} \cdot d_{\ell_B}$.
+  \item \textbf{Angle.} \texttt{Angle($\ell_A, \ell_B, \theta$)} requires the relative angle between the two direction vectors to equal a target $\theta$. One common formulation is
+  \[
+  \frac{d_{\ell_A} \cdot d_{\ell_B}}{\lVert d_{\ell_A} \rVert \, \lVert d_{\ell_B} \rVert} = \cos \theta,
+  \]
+  provided both lines are nondegenerate. When orientation matters, one may instead use the signed-angle formulation
+  \[
+  \operatorname{atan2}(\det(d_{\ell_A}, d_{\ell_B}), d_{\ell_A} \cdot d_{\ell_B}).
+  \]
+  \item \textbf{Collinear.} \texttt{Collinear($\ell_A, \ell_B$)} requires both that the lines be parallel and that they share the same supporting line. One convenient formulation is
+  \[
+  \det(d_{\ell_A}, d_{\ell_B}) = 0
+  \quad \text{and} \quad
+  \det(a_{\ell_B} - a_{\ell_A}, d_{\ell_A}) = 0.
+  \]
+  The first equation enforces parallelism; the second enforces that one point of $\ell_B$ lies on the supporting line of $\ell_A$.
+\end{itemize}
+
+A second family of common sketch constraints controls metric size and scalar separation. Let a resolved circle or arc $\gamma$ carry a center $c_\gamma \in \mathbb{R}^2$ and radius $\rho_\gamma > 0$. If $\gamma$ is an arc, let it also carry a sweep angle $\phi_\gamma$, so that its unsigned arc length is $\rho_\gamma |\phi_\gamma|$. Finally, let $S_E \subseteq \mathbb{R}^2$ denote the geometric carrier set associated with a resolved entity $E$. Then the additional constraints above can be interpreted as follows:
+
+\begin{itemize}
+  \item \textbf{LineLength.} \texttt{LineLength($\ell, L$)} requires
+  \[
+  \lVert d_\ell \rVert = L.
+  \]
+  A natural residual is $r_{\mathrm{len}}(\ell, L) = \lVert d_\ell \rVert - L$. Many solvers instead use the polynomial form $\lVert d_\ell \rVert^2 - L^2 = 0$ to avoid a square root.
+  \item \textbf{Radius.} \texttt{Radius($\gamma, r$)} requires
+  \[
+  \rho_\gamma = r,
+  \]
+  with residual $r_{\mathrm{rad}}(\gamma, r) = \rho_\gamma - r$.
+  \item \textbf{Diameter.} \texttt{Diameter($\gamma, D$)} requires
+  \[
+  2\rho_\gamma = D,
+  \]
+  with residual $r_{\mathrm{diam}}(\gamma, D) = 2\rho_\gamma - D$.
+  \item \textbf{ArcLength.} \texttt{ArcLength($\gamma, s$)} for an arc requires
+  \[
+  \rho_\gamma |\phi_\gamma| = s.
+  \]
+  When arc orientation matters, a signed formulation may use $\rho_\gamma \phi_\gamma$ instead of $\rho_\gamma |\phi_\gamma|$.
+  \item \textbf{Distance.} \texttt{Distance($E_A, E_B, \delta$)} requires the geometric distance between two resolved entities to equal a target $\delta$, where
+  \[
+  \operatorname{dist}(E_A, E_B) = \inf_{x \in S_{E_A},\, y \in S_{E_B}} \lVert x-y \rVert.
+  \]
+  The corresponding residual is $r_{\mathrm{dist}}(E_A, E_B, \delta) = \operatorname{dist}(E_A, E_B) - \delta$. For point--point distance this reduces to an ordinary Euclidean norm; for point--line or line--line distance it reduces to the familiar perpendicular-separation formulas.
+  \item \textbf{Offset.} \texttt{Offset($E_A, E_B, \delta$)} states that $E_B$ lies in an offset family of $E_A$ at separation $\delta$. The exact semantics depend on entity type. For lines, a convenient formulation is
+  \[
+  \det(d_{\ell_A}, d_{\ell_B}) = 0
+  \quad \text{and} \quad
+  \operatorname{dist}(\ell_A, \ell_B) = \delta.
+  \]
+  If $\hat d_{\ell_A} = d_{\ell_A}/\lVert d_{\ell_A} \rVert$, the second equation may be written as $|\det(a_{\ell_B} - a_{\ell_A}, \hat d_{\ell_A})| = \delta$. For circles, one natural meaning is concentricity together with
+  \[
+  |\rho_{\gamma_B} - \rho_{\gamma_A}| = \delta.
+  \]
+  For more general curves, offset is often best treated as a domain-specific derived relation rather than a single universal primitive equation.
+\end{itemize}
+
+These formulas are useful because they make evaluation and satisfaction precise. Evaluating such a constraint amounts to computing its residual or residual vector from resolved operands. Satisfying it means proposing graph rewrites that drive those residuals to zero, subject to editability, tolerance, and solver policy. Degenerate lines with coincident endpoints form an important special case: most of the relations above are undefined or ill-conditioned when $d_\ell = 0$, so evaluators should emit either an undefined status or a diagnostic rather than silently treating the relation as satisfied.
+
+Again, these are expository shorthands rather than mandated syntax. Semantically, each of these examples denotes a constraint node with a kind, an ordered list of references, an optional parameter block, and a policy block. For instance, \texttt{Angle(lineA, lineB, value)} differs from \texttt{Parallel(lineA, lineB)} chiefly in that its parameter block contains the target angle, whereas \texttt{Horizontal(line)} can often be interpreted as a special case of an angle constraint relative to a distinguished horizontal frame.
+
+\subsection{Constraint Computation}
+
+Constraint computation has two distinct phases.
+
+\begin{enumerate}
+  \item \textbf{Evaluation.} Resolve references, normalize parameters and units, and determine the current status of the declared relation.
+  \item \textbf{Satisfaction.} When permitted by policy, invoke a solver that proposes graph rewrites intended to move the graph toward a state in which the relation holds.
+\end{enumerate}
+
+For a set of constraints $C$ over graph state $G$, a solver computes something of the form
+
+\[
+\mathsf{solve}(C, G) \rightsquigarrow (\Delta, \Gamma)
+\]
+
+where $\Delta$ is a set of graph rewrites and $\Gamma$ is a set of diagnostics. This distinction is important: a constraint node does not itself compute geometry. An evaluator computes with respect to the constraint node.
+
+For example, if $C = \{c_{\mathrm{coincident}}\}$ and the editable degrees of freedom permit motion of $p_B$ but not $p_A$, then one admissible result is for $\Delta$ to contain a rewrite that updates the position of $p_B$ so that $p_B \gets p_A$, while $\Gamma$ remains empty. If neither point is editable, then the same evaluation may instead yield $\Delta = \varnothing$ together with a diagnostic in $\Gamma$ explaining that the relation is unsatisfied but not repairable under the current edit policy.
+
+For simple local relations, $\Delta$ may be derived by graph rules or closed-form constructions. For coupled or nonlinear systems, $\Delta$ may come from decomposition--recombination methods, graph-constructive methods, or numerical solvers \cite{fudos1997,jermann2006}. This is why the language should record both the declared relation and the authority that produced a computed consequence.
+
+The solver should also declare which variables it is allowed to move. Constraints state relations, but they do not by themselves specify which degrees of freedom are editable. Making the editable state explicit prevents a checked manufacturing or clearance rule from silently moving geometry that should instead produce a diagnostic.
+
+\subsection{Stable Identity}
+
+Stable identifiers are a foundational requirement. A line, constraint, profile, face, pad, or diagnostic should be referable even after unrelated parts of the graph change. Without stable identity, downstream nodes become brittle: a dimension can no longer point to the intended edge, a diagnostic can no longer highlight the correct source object, and an agent cannot safely patch a graph in place. This is the same family of problems studied in the persistent naming literature for parametric CAD \cite{farjana2018}.
+
+Identity should therefore attach to the semantic role of a node, not merely to its storage position in a list or the transient order in which a tool created it.
+
+\subsection{Node Kinds}
+
+PuppyCadLang does not hard-code a closed universe of node types, but it expects several broad categories to recur:
+
+\begin{itemize}
+  \item \textbf{Intent nodes}, such as sketch entities, constraints, feature definitions, net declarations, or assembly relationships.
+  \item \textbf{Derived nodes}, such as recognized profiles, solved placements, generated edges, traced routes, or inferred connectivity.
+  \item \textbf{Diagnostic nodes}, such as underconstrained warnings, rule violations, ambiguity reports, or stale-result markers.
+  \item \textbf{Structural nodes}, such as parts, boards, subassemblies, coordinate frames, layers, and root documents.
+\end{itemize}
+
+The language does not require these categories to appear in the \texttt{type} field. They can be inferred from provenance and authority metadata attached to the event log.
+
+\section{Events and Rewrites}
+
+An event is the durable record of a graph change. The language treats graph rewrites as the primitive mutation unit, aligning the design language with the broader literature on typed graph transformation while keeping a smaller operational core \cite{heckel2005,ehrig2006}.
+
+Each event should record:
+
+\begin{itemize}
+  \item a stable event identifier,
+  \item an authority or producer class,
+  \item a timestamp,
+  \item one or more rewrites,
+  \item optional source node identifiers,
+  \item an optional source hash for stale-result detection, and
+  \item optional diagnostics or execution metadata.
+\end{itemize}
+
+The minimal rewrite vocabulary is intentionally small:
+
+\begin{itemize}
+  \item \texttt{addNode}: insert a new typed node,
+  \item \texttt{replaceNode}: replace an existing node revision while preserving semantic identity,
+  \item \texttt{removeNodes}: remove one or more nodes, and
+  \item \texttt{setRootNodes}: define visible or exported root nodes.
+\end{itemize}
+
+This rewrite set is expressive enough for early implementations because richer actions compile into it. For example, drawing a line becomes \texttt{addNode} on a sketch-line node; solving a sketch becomes a sequence of \texttt{replaceNode} or \texttt{addNode} operations; invalidating stale outputs becomes \texttt{removeNodes} or the addition of diagnostic nodes.
+
+\subsection{Authority}
+
+The event log, not the node type, determines whether a fact is intended, computed, or observed. A line node and a profile node may both be ordinary graph nodes, but the line may have entered the graph through a user-authored event while the profile may have entered through a detector event. This distinction is essential because authority determines how the system should treat later edits.
+
+Typical authority classes include user, agent, solver, kernel, router, and validator. The set is open-ended, but the purpose is always the same: to explain whether a graph fact is authoritative intent, a recomputable consequence, or an observational report.
+
+\section{Constraint Nodes}
+
+Constraints are first-class language objects. A constraint is not a one-time command and not merely an annotation on geometry. It is a persistent node that asserts a relationship over other nodes.
+
+A constraint node should answer at least four questions:
+
+\begin{enumerate}
+  \item \textbf{What relation is being asserted?}
+  Horizontality, coincidence, fixed length, alignment, clearance, symmetry, and so on.
+  \item \textbf{Which nodes participate?}
+  The node must explicitly reference the entities or subfeatures it constrains.
+  \item \textbf{What parameters does the relation require?}
+  For example, a target distance, angle, tolerance, offset, or inequality threshold.
+  \item \textbf{How should satisfaction be interpreted?}
+  The system needs a way to classify the relation as satisfied, unsatisfied, ambiguous, or overconstraining.
+\end{enumerate}
+
+In this model, a constraint node is itself a design fact. It survives across edits, can be selected in the interface, can produce diagnostics, and can serve as input to a solver.
+
+The important consequence is that the language can separate declaration from computation. The node says \emph{what relation must hold}. The evaluator determines \emph{whether it holds now} and, when appropriate, \emph{what rewrites would make it hold}. That separation makes the system easier to inspect, replay, and debug.
+
+\subsection{Why First-Class Constraints Matter}
+
+Treating constraints as nodes has several benefits.
+
+First, design intent becomes explicit. A sketch is not merely a set of endpoints that happen to align numerically; it carries the declared relation that those endpoints are coincident.
+
+Second, the solver interface becomes cleaner. Instead of recovering intent heuristically from geometry, the solver reads a set of constraint nodes and emits explicit consequences.
+
+Third, diagnostics become more actionable. The system can report that a specific constraint node is unsatisfied, redundant, or conflicting, rather than only showing that a geometry snapshot failed to solve.
+
+Fourth, constraints can extend beyond pure geometry. The same language form can express electrical spacing rules, enclosure alignment rules, or manufacturing tolerances, provided that those domains define the appropriate node types and evaluator semantics.
+
+\section{Evaluators}
+
+An evaluator is a graph program that reads graph facts and emits graph events. It is the executable component of the language.
+
+Evaluators may include sketch solvers, profile detectors, geometry kernels, PCB routers, diagram layout engines, and validators. Despite differing implementation strategies, they share the same semantic contract:
+
+\begin{enumerate}
+  \item read an explicit subset of the graph,
+  \item produce a derived result or diagnostic,
+  \item emit that result as graph rewrites packaged in an event, and
+  \item record the dependencies needed for auditing and recomputation.
+\end{enumerate}
+
+The evaluator model keeps the language uniform. A detected profile, a generated face set, and a clearance warning are all represented as graph-level outputs. This greatly simplifies inspection and agent collaboration because every result is visible through the same data model.
+
+\subsection{Determinism and Replay}
+
+Evaluators should be deterministic whenever possible. If the same evaluator version reads the same source nodes and configuration, it should emit the same rewrites. When strict determinism is not possible, the event should record enough information to audit the choice made, such as seeds, ranking criteria, or selected solution branches.
+
+Replay matters for three reasons: reproducibility, stale-result detection, and distributed collaboration. A graph system becomes easier to debug when one can ask not only what a solver produced, but also which inputs and decisions caused that result.
+
+\section{Provenance and Staleness}
+
+Derived nodes are only meaningful relative to the sources that produced them. A profile depends on sketch entities. A solved placement depends on a set of constraints. A body face depends on the feature and the input topology from which it was generated. If any of those sources change, the derived result may become stale.
+
+This use of provenance is close in spirit to the distinction between why-provenance and where-provenance in the database literature: the system should be able to say both which prior facts justified a result and where in the source graph those facts came from \cite{buneman2001}.
+
+For that reason, events that introduce derived or observational facts should record at least:
+
+\begin{itemize}
+  \item \texttt{sourceIds}: the nodes consulted during evaluation,
+  \item \texttt{sourceHash}: a digest of the relevant source content,
+  \item \texttt{authority}: the evaluator or producer class, and
+  \item \texttt{validityPolicy}: whether the result is durable, recomputable, observational, or external.
+\end{itemize}
+
+When a source changes, the runtime can compare hashes and mark the dependent result stale. The precise response is an implementation choice. A system may remove stale derived nodes eagerly, preserve them with explicit stale markers, or queue reevaluation. The language does not force one policy, but it does require enough provenance to make such policies principled.
+
+\section{Diagnostics as Graph Facts}
+
+Diagnostics should also be nodes. A warning is not merely a transient UI banner; it is a semantic statement about the current graph.
+
+Diagnostic nodes should reference the source nodes to which they apply and should classify the observation they encode. Typical examples include:
+
+\begin{itemize}
+  \item underconstrained systems,
+  \item unsatisfied constraints,
+  \item ambiguous solution branches,
+  \item missing references,
+  \item invalid topology inputs, and
+  \item stale derived outputs.
+\end{itemize}
+
+Representing diagnostics in the graph has three practical advantages. First, the UI can directly select and highlight referenced source nodes. Second, agents can inspect and patch the graph in response to diagnostics. Third, validation history can be stored and compared across revisions using the same event infrastructure as any other design fact.
+
+\section{Typing and Domains}
+
+PuppyCadLang is intentionally multi-domain, but each domain shares the same core graph laws. The type system therefore has two layers.
+
+The first layer is \emph{core typing}: identifiers, references, events, rewrites, transforms, units, and diagnostics. These are universal language concepts.
+
+The second layer is \emph{domain typing}: sketches, lines, arcs, profiles, faces, nets, pads, layers, mates, tolerances, and other specialized semantic objects. Domains extend the vocabulary of the language without changing its mutation model.
+
+This separation allows implementations to evolve incrementally. A system can begin with core graph operations and a small sketch domain, then later add routing, assembly, or fabrication vocabularies while preserving the same event and provenance machinery.
+
+\section{Assembly Semantics}
+
+Assemblies are already implicit in the language vocabulary, but the preceding sections do not yet define them formally. This section gives a mathematical account of assemblies as instance graphs with spatial constraints, and then broadens that account to the richer multi-domain product graph that PuppyCadLang ultimately aims to support.
+
+The formulation here is informed by prior literature on assembly modeling, including NIST's work on assembly representations and the Open Assembly Model, along with subsequent ontology-oriented treatments of assembly structure and interoperability \cite{lyons1997,baysal2004,rachuri2005,rachuri2006,fiorentini2007}. The treatment of rigid transforms and joint freedoms also follows standard kinematic formulations built on matrix methods and $SE(3)$ representations \cite{denavit1955,murray1994}.
+
+\subsection{Assembly Intuition}
+
+An assembly is a graph of part instances plus spatial relations between them. In a practical PuppyCad intermediate representation, an assembly contains \texttt{instances} and optional \texttt{mates}; each instance references a part definition and may carry a transform, while each mate has a type such as \texttt{fasten}, \texttt{revolute}, \texttt{prismatic}, \texttt{planar}, or \texttt{ball}.
+
+Conceptually,
+
+\[
+\text{Assembly} = \text{parts placed in space} + \text{constraints between their local frames}.
+\]
+
+\subsection{Coordinate Spaces}
+
+Let
+
+\[
+\begin{aligned}
+W &= \text{world coordinate frame}, \\
+P_i &= \text{local frame of instance } i, \\
+C_{i,j} &= \text{connector frame } j \text{ on instance } i.
+\end{aligned}
+\]
+
+Each part instance has a rigid transform
+
+\[
+T_i \in SE(3),
+\]
+
+where
+
+\[
+SE(3) = \{(R,t) \mid R \in SO(3),\ t \in \mathbb{R}^3\}.
+\]
+
+This transform maps local part coordinates into world coordinates:
+
+\[
+x_W = T_i x_{P_i}.
+\]
+
+In homogeneous matrix form,
+
+\[
+T_i =
+\begin{bmatrix}
+R_i & t_i \\
+0 & 1
+\end{bmatrix},
+\]
+
+where $R_i$ is a rotation and $t_i$ is a translation.
+
+\subsection{Part Definitions and Instances}
+
+Let $P$ be the set of part definitions,
+
+\[
+P = \{p_1, p_2, \dots, p_n\}.
+\]
+
+Each part definition can be modeled as
+
+\[
+p = (\mathrm{id}, G_p, K_p, \Theta_p),
+\]
+
+where $\mathrm{id}$ is a stable part identifier, $G_p$ is the part geometry graph, $K_p$ is the set of connector frames on the part, and $\Theta_p$ collects parameter or environment values.
+
+A connector is a local frame attached to the part. For $k \in K_p$,
+
+\[
+F_k \in SE(3)
+\]
+
+denotes the connector transform relative to the part-local frame.
+
+Let $I$ be the set of assembly instances,
+
+\[
+I = \{i_1, i_2, \dots, i_m\}.
+\]
+
+Each instance is of the form
+
+\[
+i = (\mathrm{id}_i, \mathrm{part}_i, T_i, \Theta_i),
+\]
+
+where $\mathrm{id}_i$ is a stable instance identifier, $\mathrm{part}_i$ references a part definition, $T_i$ is the world transform, and $\Theta_i$ stores instance-local parameter overrides.
+
+The function
+
+\[
+\operatorname{part} : I \to P
+\]
+
+maps every instance to the part it instantiates, while
+
+\[
+\operatorname{pose} : I \to SE(3)
+\]
+
+maps every instance to its current world transform.
+
+\subsection{Connector World Transforms}
+
+If instance $i$ has world transform $T_i$ and connector $k$ on its referenced part has local transform $F_k$, then the connector's world transform is
+
+\[
+C_{i,k} = T_i F_k.
+\]
+
+This matters because mates usually relate connector frames rather than entire parts. A mate between connector $k_a$ on instance $a$ and connector $k_b$ on instance $b$ therefore constrains the world frames $C_{a,k_a}$ and $C_{b,k_b}$.
+
+\subsection{Assembly Graph}
+
+At the mechanical level, an assembly may be written as
+
+\[
+A = (I, M, R),
+\]
+
+where $I$ is the set of part instances, $M$ is the set of mates or assembly constraints, and $R$ is the set of root or output instances and subassemblies.
+
+Equivalently, one may view the assembly as a typed graph
+
+\[
+A = (V, E),
+\]
+
+where $V$ contains instances, connectors, derived bodies, and diagnostics, and $E$ contains references and constraint relations between them. In the simplest mechanical case, the instance set provides the primary vertices and the mate set provides the primary edges.
+
+\subsection{Mate Definition}
+
+A mate is a constraint between two connector references:
+
+\[
+m = (\mathrm{type}, a, b, \pi),
+\]
+
+where the type may be \texttt{fasten}, \texttt{revolute}, \texttt{prismatic}, \texttt{planar}, or \texttt{ball}, the connector references $a$ and $b$ identify the constrained frames, and $\pi$ stores mate-specific parameters.
+
+A connector reference has the form
+
+\[
+a = (i_a, k_a),
+\]
+
+where $i_a$ is an instance and $k_a$ is a connector on that instance's part. The mate thereby constrains
+
+\[
+C_a = T_{i_a} F_{k_a}
+\qquad \text{and} \qquad
+C_b = T_{i_b} F_{k_b}.
+\]
+
+Each mate defines a constraint function
+
+\[
+\phi_m(T_{i_a}, T_{i_b}) = 0.
+\]
+
+For a set of mates $M = \{m_1, \dots, m_q\}$, the full assembly solve problem is
+
+\[
+\Phi(T_1, T_2, \dots, T_n) =
+\begin{bmatrix}
+\phi_{m_1} \\
+\phi_{m_2} \\
+\vdots \\
+\phi_{m_q}
+\end{bmatrix}
+= 0.
+\]
+
+The solver seeks instance transforms satisfying all mate equations simultaneously.
+
+\subsection{Mate Types}
+
+\paragraph{Fasten.}
+A fasten mate removes all relative motion between two connector frames. If
+
+\[
+C_a = T_a F_a
+\qquad \text{and} \qquad
+C_b = T_b F_b,
+\]
+
+then a fasten mate requires
+
+\[
+C_a = C_b,
+\]
+
+equivalently $T_a F_a = T_b F_b$. This removes all six relative degrees of freedom: three translational and three rotational.
+
+\paragraph{Revolute.}
+A revolute mate allows rotation about a shared axis. Let $o(C)$ denote the origin of connector frame $C$ and $z(C)$ denote its local $z$-axis expressed in world coordinates. Then the revolute constraints are
+
+\[
+o(C_a) = o(C_b)
+\qquad \text{and} \qquad
+z(C_a) \parallel z(C_b).
+\]
+
+The remaining free variable is an angle $\theta \in S^1$, so the relative transform has the form
+
+\[
+C_b^{-1} C_a = R_z(\theta).
+\]
+
+This removes five degrees of freedom and leaves one rotational degree of freedom.
+
+\paragraph{Prismatic.}
+A prismatic mate allows translation along a shared axis. It constrains the connector axes to align, fixes relative rotation up to any prescribed orientation offset, and fixes translation perpendicular to the axis while leaving one translational parameter free. In a normalized local representation,
+
+\[
+C_b^{-1} C_a =
+\begin{bmatrix}
+I & [0,0,d]^T \\
+0 & 1
+\end{bmatrix},
+\qquad d \in \mathbb{R}.
+\]
+
+This removes five degrees of freedom and leaves one translational degree of freedom.
+
+\paragraph{Planar.}
+A planar mate constrains one connector frame to remain on a plane while allowing two translations within that plane and one rotation about the plane normal. Let $n_b$ be the plane normal and $o_b$ a point on the plane. If $o_a$ is the origin of the constrained connector, then
+
+\[
+n_b \cdot (o_a - o_b) = 0
+\qquad \text{and} \qquad
+z(C_a) \parallel z(C_b).
+\]
+
+This removes three degrees of freedom and leaves two in-plane translations and one rotational degree of freedom.
+
+\paragraph{Ball.}
+A ball, or spherical, mate constrains connector origins to coincide while leaving orientation free:
+
+\[
+o(C_a) = o(C_b)
+\qquad \text{and} \qquad
+R_b^{-1} R_a \in SO(3).
+\]
+
+This removes three translational degrees of freedom and leaves three rotational degrees of freedom.
+
+\subsection{Degrees of Freedom and Solve Problem}
+
+Each unconstrained rigid instance has six degrees of freedom. For $n$ free instances,
+
+\[
+DOF_{\mathrm{raw}} = 6n.
+\]
+
+Usually one instance or world reference is fixed to remove global rigid motion, contributing a six-dimensional gauge that should not be counted as meaningful freedom. A convenient effective count is therefore
+
+\[
+DOF_{\mathrm{effective}} = 6n - 6 - \operatorname{rank}(J),
+\]
+
+where $J$ is the Jacobian of the mate constraint system. Heuristically, positive effective degree count suggests an underconstrained assembly, zero suggests a fully constrained assembly, and negative count suggests either inconsistency or redundant constraints. In practice, overconstraint should be detected by inconsistency and rank deficiency analysis rather than by raw counting alone.
+
+Let the unknown vector of instance poses be denoted by
+
+\[
+x =
+\begin{bmatrix}
+T_1 \\
+T_2 \\
+\vdots \\
+T_n
+\end{bmatrix}.
+\]
+
+Because each $T_i \in SE(3)$, a numerical solver usually parameterizes each transform by a translation $t \in \mathbb{R}^3$ together with either a unit quaternion or a local rotation update in the Lie algebra $\mathfrak{so}(3)$. The solve objective is typically written as
+
+\[
+\min_x \|\Phi(x)\|^2
+\]
+
+subject to $T_i \in SE(3)$ and any optional joint limits.
+
+\subsection{Assembly Evaluation as Graph Rewriting}
+
+In PuppyCadLang, assembly solving should be an evaluator over the graph rather than a hidden side effect. An authored assembly graph may contain nodes such as:
+
+\begin{itemize}
+  \item \texttt{assembly}, \texttt{assemblyInstance}, \texttt{mate}, \texttt{connector}, and \texttt{part};
+  \item derived or updated nodes such as \texttt{resolvedInstancePose}, \texttt{assemblyJoint}, \texttt{assemblyDOF}, \texttt{assemblyDiagnostic}, \texttt{collisionDiagnostic}, and \texttt{motionRange}.
+\end{itemize}
+
+Mathematically, the evaluator acts as
+
+\[
+\operatorname{eval}_{\mathrm{assembly}} : G \to G'
+\]
+
+or, in event-log form,
+
+\[
+\operatorname{eval}_{\mathrm{assembly}}(G) \to \Delta G,
+\]
+
+where $\Delta G$ is a set of graph rewrites. In the one-graph model, the result is not a separate derived graph; rather, the same graph is updated by solver or evaluator events.
+
+An assembly-solve event should therefore record at least an identifier, the event kind, the source instance and mate identifiers, the source hash, and the rewrites that update poses and diagnostics. If any source instance, connector, part, or mate changes, the event becomes stale and can be recomputed.
+
+\subsection{Assembly Validity}
+
+An assembly is valid when several conditions hold.
+
+\paragraph{Reference validity.}
+Every instance must reference an existing part,
+
+\[
+\forall i \in I, \operatorname{part}(i) \in P,
+\]
+
+and every mate must reference existing instances and connectors.
+
+\paragraph{Transform validity.}
+Every instance transform must be a valid rigid transform:
+
+\[
+T_i \in SE(3).
+\]
+
+\paragraph{Constraint consistency.}
+There must exist a set of transforms satisfying all mate constraints:
+
+\[
+\exists T_1, \dots, T_n \in SE(3)
+\quad \text{such that} \quad
+\Phi(T_1, \dots, T_n) = 0.
+\]
+
+\paragraph{Collision validity.}
+If transformed solid bodies $B_i$ are associated with the instances, then one may additionally require
+
+\[
+(T_i B_i) \cap (T_j B_j) = \emptyset
+\]
+
+for disallowed collisions.
+
+\paragraph{Build validity.}
+If the assembly is intended to be built, one may further require that each physical instance resolve to a realizable part definition, process, supplier, or manufacturing instruction.
+
+\subsection{Product Assemblies Beyond Mechanical Placement}
+
+In PuppyCadLang, assembly should not be restricted to three-dimensional placement alone. The same graph may connect mechanical parts, PCBs, connectors, wire harnesses, supplier parts, manufacturing operations, assembly instructions, and test procedures. A richer product assembly may therefore be written as
+
+\[
+A = (I, M, B, S, Q),
+\]
+
+where $I$ is the instance set, $M$ is the set of mechanical, electrical, or logical mates, $B$ is the set of bill-of-material relations, $S$ is the set of supplier or procurement relations, and $Q$ is the set of validation or quality constraints.
+
+A general assembly relation may then be modeled as
+
+\[
+r = (\mathrm{type}, \mathrm{source}, \mathrm{target}, \mathrm{params}),
+\]
+
+with examples including fastening one connector to another, mounting a PCB hole to an enclosure boss, plugging a connector into a cutout, using a footprint for a component, sourcing a requirement from a supplier offer, or validating a product by a test procedure. Mechanical mates are therefore one subtype of a larger relation language.
+
+\subsection{Formal Product Assembly Graph}
+
+At full generality, a product assembly is a typed attributed graph
+
+\[
+A = (V, E, \tau, \alpha),
+\]
+
+where $V$ is the node set, $E \subseteq V \times V$ is the relation set, $\tau$ is the type function, and $\alpha$ is the attribute function.
+
+Let
+
+\[
+V_{\mathrm{mech}} = \{v \in V \mid \tau(v) \in \mathrm{MechanicalTypes}\},
+\]
+
+and define the induced mechanical subgraph by
+
+\[
+A_{\mathrm{mech}} = A[V_{\mathrm{mech}}].
+\]
+
+Similarly one may define $A_{\mathrm{elec}}$, $A_{\mathrm{supply}}$, $A_{\mathrm{docs}}$, and $A_{\mathrm{validation}}$. The full product graph is the union of these typed subgraphs.
+
+This gives a concise formal definition:
+
+\[
+\mathrm{Assembly} = (V, E, \tau, \alpha, \mathcal{C}, \mathcal{E}),
+\]
+
+where $\mathcal{C}$ is the set of constraints over nodes and relations, and $\mathcal{E}$ is the set of evaluators that produce graph rewrites.
+
+The meaning of an assembly is then the least fixed point obtained by applying all relevant evaluators until no non-stale rewrites remain:
+
+\[
+G^* = \mu G.\ \operatorname{eval}(G).
+\]
+
+In practical terms, the runtime repeatedly applies assembly, geometry, electronics, supply, and validation evaluators until the graph reaches a stable state.
+
+\section{A Minimal Execution Cycle}
+
+The language encourages a simple execution loop:
+
+\begin{enumerate}
+  \item Author or update intent nodes.
+  \item Record the change as an event containing rewrites.
+  \item Run evaluators over the affected subgraph.
+  \item Emit derived nodes and diagnostics as new events.
+  \item Mark or regenerate stale outputs when sources change.
+\end{enumerate}
+
+This cycle is important because it keeps the implementation honest. Instead of hiding solver state or geometry consequences in private caches, the system projects meaningful results back into the graph. As a consequence, the language becomes inspectable, serializable, and naturally compatible with collaborative or agent-driven editing.
+
+\section{Implementation Guidance}
+
+The language model suggests several practical implementation choices.
+
+\begin{itemize}
+  \item \textbf{Folded cache.} Keep a materialized graph for fast interaction, but treat it as a fold over the event log rather than an independent source of truth.
+  \item \textbf{Node-local references.} Begin with references stored in nodes rather than a separate edge table; add explicit edges only when query or indexing pressure justifies them.
+  \item \textbf{Incremental evaluators.} Restrict evaluator inputs to declared source nodes so that recomputation can be localized.
+  \item \textbf{Versioned authorities.} Record evaluator identity and version when derived nodes matter for reproducibility.
+  \item \textbf{Constraint-first modeling.} Prefer explicit constraint nodes over hidden dimensional side channels or tool-specific flags.
+\end{itemize}
+
+These choices keep the language implementation small while preserving the semantics needed for later growth.
+
+\section{Conclusion}
+
+PuppyCadLang defines a language for design state rather than a syntax for drawing commands. Its basic claim is that design intent, derived structure, and validation output can all be represented as typed nodes inside one graph, provided that the system records explicit events, stable identities, source dependencies, and evaluator authority.
+
+Within this model, a constraint node does real semantic work: it states a persistent relation, participates in solving, and supports diagnostics. An evaluator likewise becomes a first-class participant in the language, not a hidden side effect, because its outputs are graph events with inspectable provenance.
+
+This foundation is deliberately narrow. It does not yet define a textual grammar, a UI, or a deployment architecture. What it does define is the semantic core needed to build those layers cleanly: a graph language in which design facts can be authored, derived, validated, and recomputed in a uniform and inspectable way.
+
+\begin{thebibliography}{99}
+
+\bibitem{sutherland1963}
+Ivan E. Sutherland.
+\newblock \emph{Sketchpad: A Man-Machine Graphical Communication System}.
+\newblock PhD thesis, Massachusetts Institute of Technology, 1963.
+
+\bibitem{fudos1997}
+Ioannis Fudos and Christoph M. Hoffmann.
+\newblock A graph-constructive approach to solving systems of geometric constraints.
+\newblock \emph{ACM Transactions on Graphics}, 16(2):179--216, 1997.
+
+\bibitem{jermann2006}
+Christophe Jermann, Gilles Trombettoni, Bertrand Neveu, and Pascal Mathis.
+\newblock Decomposition of geometric constraint systems: A survey.
+\newblock \emph{International Journal of Computational Geometry \& Applications}, 16(5--6):379--414, 2006.
+
+\bibitem{heckel2005}
+Reiko Heckel.
+\newblock Graph transformation in a nutshell.
+\newblock In \emph{Dagstuhl Seminar Proceedings 4101: Language Engineering for Model-Driven Software Development}, pages 1--12, 2005.
+
+\bibitem{ehrig2006}
+Hartmut Ehrig and Karsten Ehrig.
+\newblock Overview of formal concepts for model transformations based on typed attributed graph transformation.
+\newblock \emph{Electronic Notes in Theoretical Computer Science}, 152:3--22, 2006.
+
+\bibitem{buneman2001}
+Peter Buneman, Sanjeev Khanna, and Wang-Chiew Tan.
+\newblock Why and where: A characterization of data provenance.
+\newblock In \emph{Database Theory---ICDT 2001}, volume 1973 of \emph{Lecture Notes in Computer Science}, pages 316--330. Springer, 2001.
+
+\bibitem{farjana2018}
+Shahjadi Hisan Farjana and Soonhung Han.
+\newblock Mechanisms of persistent identification of topological entities in CAD systems: A review.
+\newblock \emph{Alexandria Engineering Journal}, 57(4):2837--2849, 2018.
+
+\bibitem{lyons1997}
+Kevin W. Lyons, Venkat Rajan, and Raj Sreerangam.
+\newblock \emph{Representations and Methodologies for Assembly Modeling}.
+\newblock NIST Interagency/Internal Report 6059, National Institute of Standards and Technology, 1997.
+
+\bibitem{baysal2004}
+Mehmet M. Baysal, Utpal Roy, Sudarsan Rachuri, Ram D. Sriram, and Kevin W. Lyons.
+\newblock The Open Assembly Model for the exchange of assembly and tolerance information: Overview and example.
+\newblock In \emph{Proceedings of the ASME Design Engineering Technical Conferences}, 2004.
+
+\bibitem{rachuri2005}
+Sudarsan Rachuri, Mehmet M. Baysal, Utpal Roy, Sebti Foufou, Conrad Bock, Steven J. Fenves, Eswaran Subrahmanian, Kevin W. Lyons, and Ram D. Sriram.
+\newblock Information models for product representation: Core and assembly models.
+\newblock \emph{International Journal of Product Development}, 2005.
+
+\bibitem{rachuri2006}
+Sudarsan Rachuri, Y. H. Han, Sebti Foufou, Shaw C. Feng, Utpal Roy, Fujun Wang, Ram D. Sriram, and Kevin W. Lyons.
+\newblock Assembly model representation from conceptual to the detailed design.
+\newblock \emph{Journal of Computing and Information Science in Engineering}, 2006.
+
+\bibitem{fiorentini2007}
+Xenia Fiorentini, Iacopo Gambino, V. C. Liang, Sebti Foufou, Sudarsan Rachuri, Mahesh Mani, and Conrad E. Bock.
+\newblock \emph{An Ontology for Assembly Representation}.
+\newblock NIST Interagency/Internal Report 7436, National Institute of Standards and Technology, 2007.
+
+\bibitem{denavit1955}
+J. Denavit and R. S. Hartenberg.
+\newblock A kinematic notation for lower-pair mechanisms based on matrices.
+\newblock \emph{Journal of Applied Mechanics}, 22(2):215--221, 1955.
+
+\bibitem{murray1994}
+Richard M. Murray, Zexiang Li, and S. Shankar Sastry.
+\newblock \emph{A Mathematical Introduction to Robotic Manipulation}.
+\newblock CRC Press, 1994.
+
+\end{thebibliography}
+
+\end{document}
