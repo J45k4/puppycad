@@ -1,4 +1,4 @@
-import type { PCadState, SketchConstraint, SketchConstraintNode, SketchDimension } from "../schema"
+import type { PCadState, SketchConstraint, SketchConstraintNode, SketchConstraintRef, SketchDimension } from "../schema"
 
 export function isSketchConstraintNode(node: { type: string } | null | undefined): node is SketchConstraintNode {
 	return node?.type === "sketchConstraint"
@@ -77,6 +77,10 @@ export function getSketchConstraintEntityIds(constraint: SketchConstraint): stri
 		case "vertical":
 			return [constraint.entityId]
 		case "coincident":
-			return [constraint.a.entityId, constraint.b.entityId]
+			return [getSketchConstraintRefDependencyId(constraint.a), getSketchConstraintRefDependencyId(constraint.b)]
 	}
+}
+
+function getSketchConstraintRefDependencyId(ref: SketchConstraintRef): string {
+	return ref.type === "edge" ? ref.edgeId : ref.entityId
 }
