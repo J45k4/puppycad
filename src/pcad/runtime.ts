@@ -35,7 +35,9 @@ export type {
 	ReferencePlaneNode,
 	SketchConstraint,
 	SketchConstraintNode,
+	SketchConstraintRef,
 	SketchDimension,
+	SketchEdgeRef,
 	SketchEntity,
 	SketchEntityNode,
 	SketchEntityRef,
@@ -651,8 +653,11 @@ function validateSketchConstraintNode(state: PCadState, node: SketchConstraintNo
 			requireSketchEntityInSketch(state, node.sketchId, node.constraint.entityId, `Sketch constraint "${node.id}" entity`)
 			return
 		case "coincident":
-			requireSketchEntityPointRef(state, node.sketchId, node.constraint.a.entityId, node.constraint.a.point, `Sketch constraint "${node.id}" point a`)
-			requireSketchEntityPointRef(state, node.sketchId, node.constraint.b.entityId, node.constraint.b.point, `Sketch constraint "${node.id}" point b`)
+			requireSketchConstraintRef(state, node.sketchId, node.constraint.a, `Sketch constraint "${node.id}" reference a`)
+			requireSketchConstraintRef(state, node.sketchId, node.constraint.b, `Sketch constraint "${node.id}" reference b`)
+			if (node.constraint.a.type === "edge" && node.constraint.b.type === "edge") {
+				throw new Error(`Sketch constraint "${node.id}" must connect at least one sketch point.`)
+			}
 			return
 	}
 }
@@ -665,11 +670,26 @@ function requireSketchEntityInSketch(state: PCadState, sketchId: string, entityI
 	return entity
 }
 
-function requireSketchEntityPointRef(state: PCadState, sketchId: string, entityId: string, point: string, label: string): void {
-	if (point !== "p0" && point !== "p1") {
-		throw new Error(`${label} must reference p0 or p1.`)
+function requireSketchConstraintRef(state: PCadState, sketchId: string, ref: { type: string; entityId?: string; edgeId?: string; point?: string }, label: string): void {
+	if (ref.type === "point") {
+		const entityId = ref.entityId ?? ""
+		if (ref.point !== "p0" && ref.point !== "p1") {
+			throw new Error(`${label} must reference p0 or p1.`)
+		}
+		requireSketchEntityInSketch(state, sketchId, entityId, label)
+		return
 	}
-	requireSketchEntityInSketch(state, sketchId, entityId, label)
+	if (ref.type === "edge") {
+		const edgeId = ref.edgeId ?? ""
+		const edge = requireNodeType(state, edgeId, ["edge"], label) as EdgeNode
+		const sketch = requireNodeType(state, sketchId, ["sketch"], label) as SketchNode
+		const target = requireNodeType(state, sketch.targetId, ["face"], `Sketch "${sketchId}" target`)
+		if (target.type !== "face" || edge.sourceId !== target.sourceId) {
+			throw new Error(`${label} "${edgeId}" must belong to the solid face that sketch "${sketchId}" targets.`)
+		}
+		return
+	}
+	throw new Error(`${label} must reference a sketch point or target solid edge.`)
 }
 
 function validatePoint2D(point: { x: number; y: number }, label: string): void {

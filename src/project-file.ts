@@ -686,20 +686,27 @@ function normalizeSketchConstraint(input: unknown): SketchConstraint | undefined
 		return entityId ? { type: value.type, entityId } : undefined
 	}
 	if (value.type === "coincident") {
-		const a = normalizeSketchPointRef(value.a)
-		const b = normalizeSketchPointRef(value.b)
+		const a = normalizeSketchConstraintRef(value.a)
+		const b = normalizeSketchConstraintRef(value.b)
 		return a && b ? { type: "coincident", a, b } : undefined
 	}
 	return undefined
 }
 
-function normalizeSketchPointRef(input: unknown): { type: "point"; entityId: string; point: "p0" | "p1" } | undefined {
+function normalizeSketchConstraintRef(input: unknown): { type: "point"; entityId: string; point: "p0" | "p1" } | { type: "edge"; edgeId: string } | undefined {
 	if (!input || typeof input !== "object") {
 		return undefined
 	}
-	const value = input as { type?: unknown; entityId?: unknown; point?: unknown }
-	const entityId = typeof value.entityId === "string" && value.entityId.trim() ? value.entityId.trim() : null
-	return value.type === "point" && entityId && (value.point === "p0" || value.point === "p1") ? { type: "point", entityId, point: value.point } : undefined
+	const value = input as { type?: unknown; entityId?: unknown; edgeId?: unknown; point?: unknown }
+	if (value.type === "point") {
+		const entityId = typeof value.entityId === "string" && value.entityId.trim() ? value.entityId.trim() : null
+		return entityId && (value.point === "p0" || value.point === "p1") ? { type: "point", entityId, point: value.point } : undefined
+	}
+	if (value.type === "edge") {
+		const edgeId = typeof value.edgeId === "string" && value.edgeId.trim() ? value.edgeId.trim() : null
+		return edgeId ? { type: "edge", edgeId } : undefined
+	}
+	return undefined
 }
 
 function isSketchDimensionEntityNode(node: PCadGraphNode | undefined): node is SketchEntityNode {

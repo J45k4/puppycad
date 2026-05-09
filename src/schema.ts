@@ -79,6 +79,13 @@ export type SketchPointRef = {
 	readonly point: "p0" | "p1"
 }
 
+export type SketchEdgeRef = {
+	readonly type: "edge"
+	readonly edgeId: string
+}
+
+export type SketchConstraintRef = SketchPointRef | SketchEdgeRef
+
 export type SketchEntityRef = {
 	readonly type: "entity"
 	readonly entityId: string
@@ -128,8 +135,8 @@ export type SketchConstraint =
 	  }
 	| {
 			readonly type: "coincident"
-			readonly a: SketchPointRef
-			readonly b: SketchPointRef
+			readonly a: SketchConstraintRef
+			readonly b: SketchConstraintRef
 	  }
 	| {
 			readonly type: "horizontal"

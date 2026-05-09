@@ -58,6 +58,27 @@ const face: FaceNode = {
 	faceId: "generated-face-1"
 }
 
+const faceSketch: SketchNode = {
+	id: "sketch-on-face",
+	type: "sketch",
+	name: "Face Sketch",
+	targetId: face.id,
+	dimensions: []
+}
+
+const faceSketchLine = sketchEntityToNode(faceSketch.id, { id: "face-line-1", type: "line", p0: { x: 0, y: 0 }, p1: { x: 1, y: 0 } })
+
+const edgeCoincidentConstraint: SketchConstraintNode = {
+	id: "constraint-edge-coincident",
+	type: "sketchConstraint",
+	sketchId: faceSketch.id,
+	constraint: {
+		type: "coincident",
+		a: { type: "point", entityId: faceSketchLine.id, point: "p0" },
+		b: { type: "edge", edgeId: edge.id }
+	}
+}
+
 function createValidState(): PCadState {
 	return {
 		nodes: new Map<string, PCadGraphNode>([
@@ -143,6 +164,7 @@ describe("PCad dependencies", () => {
 		expect(getNodeDependencies(sketch)).toEqual([plane.id])
 		expect(getNodeDependencies(sketchRectangle)).toEqual([sketch.id])
 		expect(getNodeDependencies(sketchConstraint)).toEqual([sketch.id, sketchRectangle.id])
+		expect(getNodeDependencies(edgeCoincidentConstraint)).toEqual([faceSketch.id, faceSketchLine.id, edge.id])
 		expect(getNodeDependencies(extrude)).toEqual([sketch.id])
 		expect(getNodeDependencies(face)).toEqual([extrude.id])
 		expect(getNodeDependencies(edge)).toEqual([extrude.id])
@@ -260,6 +282,56 @@ describe("CadEditor", () => {
 				rootNodeIds: [plane.id]
 			})
 		).toThrow('Sketch constraint "bad-constraint" cannot be applied to entity "rect-1".')
+	})
+
+	it("allows sketch constraints to reference an edge on the sketched solid face", () => {
+		expect(() =>
+			validatePCadState({
+				nodes: new Map<string, PCadGraphNode>([
+					[plane.id, plane],
+					[sketch.id, sketch],
+					[sketchRectangle.id, sketchRectangle],
+					[extrude.id, extrude],
+					[face.id, face],
+					[edge.id, edge],
+					[faceSketch.id, faceSketch],
+					[faceSketchLine.id, faceSketchLine],
+					[edgeCoincidentConstraint.id, edgeCoincidentConstraint]
+				]),
+				rootNodeIds: [extrude.id]
+			})
+		).not.toThrow()
+	})
+
+	it("rejects edge constraints outside the sketched face source", () => {
+		const otherExtrude: ExtrudeNode = { ...extrude, id: "extrude-other" }
+		const otherEdge: EdgeNode = { ...edge, id: "edge-other", sourceId: otherExtrude.id }
+		const badConstraint: SketchConstraintNode = {
+			...edgeCoincidentConstraint,
+			id: "bad-edge-constraint",
+			constraint: {
+				type: "coincident",
+				a: { type: "point", entityId: faceSketchLine.id, point: "p0" },
+				b: { type: "edge", edgeId: otherEdge.id }
+			}
+		}
+		expect(() =>
+			validatePCadState({
+				nodes: new Map<string, PCadGraphNode>([
+					[plane.id, plane],
+					[sketch.id, sketch],
+					[sketchRectangle.id, sketchRectangle],
+					[extrude.id, extrude],
+					[otherExtrude.id, otherExtrude],
+					[face.id, face],
+					[otherEdge.id, otherEdge],
+					[faceSketch.id, faceSketch],
+					[faceSketchLine.id, faceSketchLine],
+					[badConstraint.id, badConstraint]
+				]),
+				rootNodeIds: [extrude.id, otherExtrude.id]
+			})
+		).toThrow('Sketch constraint "bad-edge-constraint" reference b "edge-other" must belong to the solid face that sketch "sketch-on-face" targets.')
 	})
 
 	it("rejects invalid ids, depths, and extrude operations", () => {
