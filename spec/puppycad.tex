@@ -410,6 +410,166 @@ The second layer is \emph{domain typing}: sketches, lines, arcs, profiles, faces
 
 This separation allows implementations to evolve incrementally. A system can begin with core graph operations and a small sketch domain, then later add routing, assembly, or fabrication vocabularies while preserving the same event and provenance machinery.
 
+\section{Domain Concept Vocabulary}
+
+The preceding sections define the core graph laws: nodes, references, constraints, events, evaluators, provenance, and diagnostics. A practical CAD language also needs a shared vocabulary of domain concepts. These concepts should not be understood as separate subsystems with incompatible data models. Rather, each concept family should be expressible using the same graph primitives already described.
+
+This section therefore records the major semantic families that PuppyCadLang should be able to represent. The list is not a closed type universe. It is a guide to the kinds of nodes, references, constraints, derived facts, and diagnostics that domain extensions should introduce.
+
+\subsection{Core Geometric Concepts}
+
+Core geometry begins with coordinate systems. A coordinate frame or workplane is not merely a UI convenience; it is a semantic object that determines how lower-dimensional geometry is embedded in a larger space. A frame may be represented by a rigid transform
+
+\[
+F \in SE(3),
+\]
+
+or, for a two-dimensional sketch, by an origin together with two basis directions spanning a local plane. A workplane can then be modeled as a frame plus a policy describing whether geometry authored on it is fixed, derived, construction-only, or editable.
+
+Units and dimensional quantities should also be first-class language concepts. A scalar value such as \texttt{10} is insufficient by itself. A dimensioned quantity should record both magnitude and unit, and evaluators should normalize compatible units before computation. Informally,
+
+\[
+q = (v, u),
+\]
+
+where $v$ is a numeric value and $u$ is a unit such as millimeter, inch, degree, radian, kilogram, or newton. Parameters, dimensions, tolerances, material properties, and simulation loads all rely on this same idea.
+
+Tolerances and numeric precision should be explicit because geometric evaluation is rarely exact. Constraint satisfaction, topology classification, collision detection, and manufacturing checks all depend on comparison thresholds. The language should therefore distinguish exact symbolic intent from numeric evaluation policy. For example, a constraint may declare exact coincidence as design intent, while the evaluator reports satisfaction relative to a tolerance $\epsilon$.
+
+The basic geometric carriers include points, vectors, curves, surfaces, and solids. These entities describe shape in a continuous geometric sense. They should be distinguished from topology, which describes how pieces of geometry are connected. In a boundary-representation model, for example, vertices, edges, loops, faces, shells, and bodies are topological entities, while the points, curves, and surfaces supporting them are geometric entities.
+
+This distinction is essential:
+
+\[
+\text{geometry} = \text{metric shape},
+\qquad
+\text{topology} = \text{incidence and adjacency structure}.
+\]
+
+A topological edge may be supported by a geometric curve. A face may be supported by a surface. A shell may be a connected set of oriented faces. A body may be a closed, valid shell or a collection of shells depending on the domain policy.
+
+Parametric dependencies connect geometry to parameters, expressions, constraints, and upstream features. A line length may depend on a named parameter. A hole diameter may depend on a design table. A generated face may depend on a sketch profile and an extrude feature. These dependencies should be represented in the graph rather than hidden in feature-local state.
+
+Feature identity across topology changes is a special case of stable reference identity. When a fillet, boolean operation, or regeneration step creates, removes, splits, or merges faces and edges, downstream references may become ambiguous or stale. This is the well-known topological naming problem. PuppyCadLang should not assume that generated subgeometry can be safely referenced by list position or creation order. Instead, generated subgeometry should carry selectors, provenance, and matching evidence sufficient for reevaluation and diagnostic reporting.
+
+\subsection{Sketch and Two-Dimensional Constraint Concepts}
+
+A sketch is a graph-local two-dimensional modeling context. It should identify a sketch plane, a local coordinate frame, authored sketch entities, construction geometry, constraints, dimensions, and solve scope.
+
+Construction geometry is geometry used to define intent but not necessarily used to create material features. A construction line may participate in midpoint, symmetry, tangent, or projection constraints while being excluded from profile detection or extrusion. This distinction should be represented as an attribute or policy on the sketch entity, not as a separate hidden geometry class.
+
+Dimensions are constraints. A distance dimension, angle dimension, radius dimension, or diameter dimension is not merely an annotation; it asserts a relation that may drive or check the sketch. This keeps dimensional intent inside the same model as geometric intent.
+
+Common geometric constraints include coincidence, parallelism, perpendicularity, tangency, equality, symmetry, and concentricity. These should all be represented as constraint nodes with references to their operands and, where needed, parameter blocks and enforcement policies.
+
+Sketch evaluation should classify constraint status. Useful statuses include underconstrained, fully constrained, overconstrained, inconsistent, ambiguous, stale, and undefined. These statuses should be emitted as graph facts or diagnostics rather than transient solver messages.
+
+Constraint groups or solve scopes are also important. A sketch may contain multiple independent groups of constraints, or a system may intentionally solve only a subset of constraints during an edit. A solve scope should therefore identify the participating entities, constraints, editable variables, fixed variables, and policy used by the solver.
+
+\subsection{Feature Modeling}
+
+A feature is a parametric graph object that transforms references, parameters, and input geometry into derived geometry. Examples include extrude, revolve, sweep, loft, fillet, chamfer, pattern, mirror, and boolean operations such as union, subtract, and intersect.
+
+A feature may be modeled abstractly as
+
+\[
+f = (\kappa, R, P, \pi),
+\]
+
+where $\kappa$ is the feature kind, $R$ is a set of references, $P$ is a parameter block, and $\pi$ is a policy block. This mirrors the structure of constraint nodes, but the evaluator for a feature produces derived geometry rather than only constraint status or repair rewrites.
+
+The traditional feature tree should be understood as one possible presentation of a deeper dependency graph. A feature tree imposes a visible sequence. A dependency graph records the actual source relationships among sketches, parameters, bodies, features, generated faces, diagnostics, and downstream references. The regeneration order is then a topological ordering of the relevant dependency graph, subject to explicit ordering constraints when the domain requires them.
+
+Features may be active, suppressed, failed, stale, or partially evaluated. A suppressed feature remains part of design intent but does not contribute its normal derived outputs. A failed feature should produce diagnostics while preserving the rest of the graph whenever possible. A stale feature result should retain enough provenance to explain which source change invalidated it.
+
+References to generated subgeometry are especially important. A downstream fillet may refer to an edge generated by an extrude; a drawing dimension may refer to a face generated by a boolean; a mate connector may be attached to a hole face. These references should use stable selectors and provenance-aware identity rather than fragile indices into kernel output.
+
+\subsection{Solid and Body Semantics}
+
+Solid modeling requires a vocabulary for bodies, shells, faces, loops, edges, and vertices. In a boundary-representation model, a body is represented by oriented topological entities supported by geometric carriers. The language does not need to prescribe a specific kernel, but it should be able to represent the semantic outputs of such a kernel.
+
+A valid solid body is often expected to be manifold and watertight. Manifoldness means that local neighborhoods behave like the expected dimension of the modeled object. Non-manifold cases, such as an edge shared by more than two faces in an ordinary solid body, should be representable but diagnosable. A closed shell or watertight body should have no unintended gaps, open boundaries, or inconsistent adjacency.
+
+Surface normal orientation is also semantic. Face orientation determines inside and outside, affects mass-property computation, and influences manufacturing and rendering. Evaluators should be able to emit diagnostics for inverted normals, inconsistent shell orientation, self-intersection, open shells, sliver faces, zero-length edges, and other body-validity problems.
+
+Mass properties should be represented as derived graph facts. Volume, surface area, center of mass, inertia tensor, bounding boxes, and material-dependent properties are computed consequences of geometry, material assignment, and evaluator policy. They should record source dependencies and evaluator authority like any other derived node.
+
+\subsection{Assembly Concepts}
+
+The formal treatment of assemblies appears in the next section, but the domain vocabulary can be summarized here. An assembly distinguishes part definitions from part instances. A part definition describes reusable design content. A part instance places that content into an assembly context with its own transform, parameter overrides, configuration, and identity.
+
+Subassemblies are assemblies used as instances inside larger assemblies. They should preserve internal relationships while exposing selected connectors, frames, parameters, or degrees of freedom to the parent assembly.
+
+Mates, joints, and assembly constraints relate instances through connector frames or attachment features. Connectors provide named local frames on parts or subassemblies. Mates then constrain those frames through relations such as fasten, revolute, prismatic, planar, ball, tangent, gear, slot, or domain-specific alignment rules.
+
+Degrees of freedom are derived facts of the assembly constraint system. A grounded or fixed instance removes global rigid motion or intentionally locks an instance pose. Motion limits and configuration states constrain the range of valid positions for joints or movable assemblies.
+
+Collision and interference detection are evaluators over transformed bodies. Their outputs should be diagnostic nodes referencing the colliding instances, bodies, faces, or regions. Exploded views and assembly steps should also be graph facts: they describe presentation state, build order, or instruction semantics rather than changing the underlying physical definition of the assembly.
+
+\subsection{Design Intent}
+
+Design intent is the set of authored relationships that explain why the design has its current form and how it should respond to edits. Parameters, variables, equations, expressions, named references, configurations, variants, and design tables are all design-intent objects.
+
+A parameter node may define a named value. An expression node may define a value in terms of other parameters. A design table may define multiple configurations by assigning different values to a shared parameter set. A variant may select a different feature state, material, supplier part, or assembly option.
+
+Named references are central to intent preservation. A user or agent should be able to refer to \texttt{mountingHoleAxis}, \texttt{frontPanelPlane}, or \texttt{connectorJ1Frame} rather than to an incidental face index. Stable names and selectors help the system preserve intent under edits.
+
+Constraints should therefore be understood as intent, not merely as solver inputs. A solved sketch is not just a set of coordinates; it is a set of authored relations whose consequences happen to produce coordinates. When geometry changes, the system should preserve declared intent where possible and emit diagnostics where preservation fails.
+
+\subsection{Evaluation and Recomputation}
+
+Evaluation is governed by a dependency graph. Each derived fact should record the authored and derived sources consulted to produce it. Dirty or stale marking occurs when a source changes in a way that invalidates a dependent result.
+
+Incremental recomputation should operate over affected subgraphs rather than the whole design whenever possible. If a sketch parameter changes, the system should identify dependent constraints, profiles, features, bodies, drawings, simulations, assemblies, and diagnostics through recorded dependencies.
+
+Evaluator authority and versioning matter for reproducibility. A profile detector, geometry kernel, router, simulation engine, or manufacturing checker should identify itself and its version when producing derived facts. Determinism and replay require that the same evaluator version, source graph, configuration, and policy produce the same result or record enough information to explain nondeterministic choices.
+
+Conflicts between evaluators should be explicit. Two evaluators may propose incompatible rewrites, or an authored fact may conflict with a derived recommendation. The language should support conflict diagnostics and resolution policies based on authority, recency, scope, or user choice.
+
+Partial failure should not make the entire graph unusable. A failed fillet, stale drawing view, invalid PCB clearance, or unsolved mate should produce diagnostics while preserving unaffected graph regions. This is one of the practical benefits of representing diagnostics and derived facts in the same graph as authored intent.
+
+\subsection{Manufacturing and Fabrication Concepts}
+
+Manufacturing semantics can be layered onto the same graph model. Material assignments, surface finishes, manufacturing processes, fabrication constraints, and supplier requirements should all be representable as nodes or constraints.
+
+Typical manufacturability constraints include minimum wall thickness, draft angles, bend radius for sheet metal, tool accessibility for CNC machining, support and overhang checks for additive manufacturing, and process-specific limits on feature size or tolerance.
+
+Tolerance stackups are higher-level derived analyses over dimensions, assemblies, manufacturing assumptions, and statistical or worst-case policies. A tolerance-stack evaluator should emit results and diagnostics as graph facts with explicit references to the contributing dimensions, mates, part instances, and process assumptions.
+
+\subsection{Drawings and Documentation}
+
+Drawings should be treated as derived graph facts rather than separate opaque files. Projection views, section views, detail views, cuts, dimensions, annotations, center marks, GD\&T symbols, and tables should reference the model entities from which they are produced.
+
+A drawing view depends on model geometry, configuration, orientation, scale, projection policy, and display style. A drawing dimension depends on referenced geometry or topology plus annotation policy. When model geometry changes, drawing facts may become stale or may be updated by a drawing evaluator.
+
+Bill-of-material extraction is likewise a graph evaluation problem. A BOM depends on part definitions, instances, quantities, configurations, materials, supplier links, and suppression or inclusion rules. Revision history and review annotations should also be represented semantically so that documentation changes can be inspected, diffed, and replayed.
+
+\subsection{Electronics and Mechatronics Concepts}
+
+When PuppyCadLang is extended into electronics or mechatronics, the same graph model can represent PCB and electrical concepts. A PCB board outline, layer stackup, pads, vias, traces, copper zones, nets, components, and keepouts can all be graph nodes with domain-specific attributes and references.
+
+The language should distinguish schematic symbols from physical footprints. A component may have a logical schematic representation, a physical footprint, supplier metadata, and mechanical placement constraints. Nets express electrical connectivity, while traces and vias express routed physical implementation.
+
+Clearance and design rules are constraints or validators over PCB geometry and electrical classes. Mechanical-electrical alignment is also important: connector placement, mounting holes, board outlines, cutouts, keepouts, and enclosure interfaces should share references through the same graph rather than through ad hoc file exchange.
+
+\subsection{Simulation and Analysis Concepts}
+
+Simulation inputs and outputs should also be graph facts. Loads, boundary conditions, contacts, fixtures, thermal sources, electrical constraints, material models, and analysis settings are authored or configured facts. Meshes, solver matrices, field results, plots, and pass-fail checks are derived facts.
+
+An FEA mesh is a derived graph object produced from geometry, meshing policy, material assumptions, and boundary conditions. Thermal, electrical, structural, and motion analyses should record their source dependencies and evaluator authority.
+
+Simulation results are only meaningful relative to their assumptions. The graph should therefore preserve analysis assumptions, simplifications, units, solver settings, convergence status, and validity diagnostics. If the design changes, the system should be able to determine whether a simulation result remains valid, becomes stale, or requires recomputation.
+
+\subsection{Versioning and Collaboration Concepts}
+
+Because PuppyCadLang is event-sourced, versioning can be understood as structured history over graph rewrites. Branching creates divergent event histories from a shared graph state. Merging attempts to combine those histories into a new graph state.
+
+Conflict semantics should be graph-aware. A semantic conflict is not merely a textual file conflict; it may involve incompatible parameter edits, competing rewrites to the same node, stale derived facts, contradictory constraints, or incompatible evaluator outputs.
+
+Authorship and provenance should be recorded at the event level. A reviewable design change should identify which nodes were added, replaced, removed, or invalidated; which authority produced the change; and which prior facts the change depended on.
+
+Semantic diffs should compare graph meaning rather than only serialized text. Useful diffs include changed parameters, added constraints, removed references, modified feature inputs, changed generated bodies, altered mates, new diagnostics, resolved diagnostics, and changed manufacturing or simulation status.
+
 \section{Assembly Semantics}
 
 Assemblies are already implicit in the language vocabulary, but the preceding sections do not yet define them formally. This section gives a mathematical account of assemblies as instance graphs with spatial constraints, and then broadens that account to the richer multi-domain product graph that PuppyCadLang ultimately aims to support.
