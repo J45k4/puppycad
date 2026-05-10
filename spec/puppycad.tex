@@ -8,7 +8,7 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.75\baselineskip}
 
-\title{PuppyCadLang: A Graph Language for Design State and Evaluation}
+\title{PuppyCad: A Graph Language for Design State and Evaluation}
 \author{Draft Specification}
 \date{May 9, 2026}
 
@@ -16,26 +16,26 @@
 \maketitle
 
 \begin{abstract}
-PuppyCadLang is a language model for representing design state as a typed graph updated by explicit events. The goal is not to define a user-facing syntax, nor to prescribe a specific geometric kernel, PCB engine, or UI. Instead, the language defines the semantic objects that a design system manipulates: nodes, references, constraints, rewrites, derived facts, diagnostics, and provenance. The central claim is that design intent and computed consequences can coexist in one graph, provided that the system records how each fact was produced and what sources it depends on. This paper describes the core language model, the role of first-class constraint nodes, the event-sourced update mechanism, and the evaluator model used to compute profiles, geometry, routing, and validation results.
+PuppyCad is a language model for representing design state as a typed graph updated by explicit events. The goal is not to define a user-facing syntax, nor to prescribe a specific geometric kernel, PCB engine, or UI. Instead, the language defines the semantic objects that a design system manipulates: nodes, references, constraints, rewrites, derived facts, diagnostics, and provenance. The central claim is that design intent and computed consequences can coexist in one graph, provided that the system records how each fact was produced and what sources it depends on. This paper describes the core language model, the role of first-class constraint nodes, the event-sourced update mechanism, and the evaluator model used to compute profiles, geometry, routing, and validation results.
 \end{abstract}
 
 \section{Introduction}
 
 Most CAD systems are organized around domain-specific editors and opaque feature histories. Mechanical sketches, solids, PCB traces, schematic nets, and validation messages are often represented in separate internal models connected by ad hoc translation layers. This makes it difficult to preserve design intent, inspect dependencies, or allow software agents to participate in editing at the same semantic level as a human user.
 
-PuppyCadLang proposes a different foundation. A design is represented as a typed graph. The graph contains authored facts, derived facts, and diagnostic facts. Changes to the graph are recorded as explicit events. Solvers, geometry kernels, validators, and other evaluators do not mutate private internal state as their primary output; instead, they emit graph events that can be inspected, replayed, invalidated, and recomputed.
+PuppyCad proposes a different foundation. A design is represented as a typed graph. The graph contains authored facts, derived facts, and diagnostic facts. Changes to the graph are recorded as explicit events. Solvers, geometry kernels, validators, and other evaluators do not mutate private internal state as their primary output; instead, they emit graph events that can be inspected, replayed, invalidated, and recomputed.
 
-This paper narrows scope to the pure language aspects of the system. It deliberately does not define a textual syntax, cloud execution model, supplier network, or product workflow. Those may be layered on top of the language, but they are not required to understand the semantics of PuppyCadLang itself.
+This paper narrows scope to the pure language aspects of the system. It deliberately does not define a textual syntax, cloud execution model, supplier network, or product workflow. Those may be layered on top of the language, but they are not required to understand the semantics of PuppyCad itself.
 
 \section{Research Context and Lineage}
 
-PuppyCadLang does not begin from zero. It combines several lines of existing research and system design practice.
+PuppyCad does not begin from zero. It combines several lines of existing research and system design practice.
 
-First, \emph{Sketchpad} established the importance of named graphical objects, reusable structure, and declarative geometric relations in interactive design systems \cite{sutherland1963}. PuppyCadLang inherits that commitment to semantic objects rather than raw drawing traces.
+First, \emph{Sketchpad} established the importance of named graphical objects, reusable structure, and declarative geometric relations in interactive design systems \cite{sutherland1963}. PuppyCad inherits that commitment to semantic objects rather than raw drawing traces.
 
 Second, the geometric constraint solving literature in CAD treats constraints as relations over geometric entities and distinguishes several computation strategies, including graph-constructive, decomposition--recombination, rule-oriented, and numerical methods \cite{fudos1997,jermann2006}. That literature motivates the separation made in this paper between a constraint node, which declares a relation, and a solver, which computes with respect to that declaration.
 
-Third, typed attributed graph transformation provides a formal language for describing rewrites over typed graph structures \cite{heckel2005,ehrig2006}. PuppyCadLang borrows this viewpoint by treating graph rewrites as first-class semantic objects, while deliberately using a smaller mutation vocabulary suited to an event-sourced design system.
+Third, typed attributed graph transformation provides a formal language for describing rewrites over typed graph structures \cite{heckel2005,ehrig2006}. PuppyCad borrows this viewpoint by treating graph rewrites as first-class semantic objects, while deliberately using a smaller mutation vocabulary suited to an event-sourced design system.
 
 Finally, provenance and persistent identification research motivate two non-negotiable requirements of the language: derived facts should record what they depend on, and graph nodes should remain stably referenceable across reevaluation \cite{buneman2001,farjana2018}. These concerns are especially important in design systems, where local edits often invalidate downstream geometry, topology, and diagnostics.
 
@@ -55,7 +55,7 @@ The language is intended to satisfy five core goals:
 
 \section{Core Semantic Model}
 
-PuppyCadLang defines two persistent artifacts:
+PuppyCad defines two persistent artifacts:
 
 \begin{enumerate}
   \item an \emph{event log}, which records graph rewrites and their provenance, and
@@ -268,7 +268,7 @@ Identity should therefore attach to the semantic role of a node, not merely to i
 
 \subsection{Node Kinds}
 
-PuppyCadLang does not hard-code a closed universe of node types, but it expects several broad categories to recur:
+PuppyCad does not hard-code a closed universe of node types, but it expects several broad categories to recur:
 
 \begin{itemize}
   \item \textbf{Intent nodes}, such as sketch entities, constraints, feature definitions, net declarations, or assembly relationships.
@@ -402,7 +402,7 @@ Representing diagnostics in the graph has three practical advantages. First, the
 
 \section{Typing and Domains}
 
-PuppyCadLang is intentionally multi-domain, but each domain shares the same core graph laws. The type system therefore has two layers.
+PuppyCad is intentionally multi-domain, but each domain shares the same core graph laws. The type system therefore has two layers.
 
 The first layer is \emph{core typing}: identifiers, references, events, rewrites, transforms, units, and diagnostics. These are universal language concepts.
 
@@ -414,7 +414,7 @@ This separation allows implementations to evolve incrementally. A system can beg
 
 The preceding sections define the core graph laws: nodes, references, constraints, events, evaluators, provenance, and diagnostics. A practical CAD language also needs a shared vocabulary of domain concepts. These concepts should not be understood as separate subsystems with incompatible data models. Rather, each concept family should be expressible using the same graph primitives already described.
 
-This section therefore records the major semantic families that PuppyCadLang should be able to represent. The list is not a closed type universe. It is a guide to the kinds of nodes, references, constraints, derived facts, and diagnostics that domain extensions should introduce.
+This section therefore records the major semantic families that PuppyCad should be able to represent. The list is not a closed type universe. It is a guide to the kinds of nodes, references, constraints, derived facts, and diagnostics that domain extensions should introduce.
 
 \subsection{Core Geometric Concepts}
 
@@ -450,7 +450,7 @@ A topological edge may be supported by a geometric curve. A face may be supporte
 
 Parametric dependencies connect geometry to parameters, expressions, constraints, and upstream features. A line length may depend on a named parameter. A hole diameter may depend on a design table. A generated face may depend on a sketch profile and an extrude feature. These dependencies should be represented in the graph rather than hidden in feature-local state.
 
-Feature identity across topology changes is a special case of stable reference identity. When a fillet, boolean operation, or regeneration step creates, removes, splits, or merges faces and edges, downstream references may become ambiguous or stale. This is the well-known topological naming problem. PuppyCadLang should not assume that generated subgeometry can be safely referenced by list position or creation order. Instead, generated subgeometry should carry selectors, provenance, and matching evidence sufficient for reevaluation and diagnostic reporting.
+Feature identity across topology changes is a special case of stable reference identity. When a fillet, boolean operation, or regeneration step creates, removes, splits, or merges faces and edges, downstream references may become ambiguous or stale. This is the well-known topological naming problem. PuppyCad should not assume that generated subgeometry can be safely referenced by list position or creation order. Instead, generated subgeometry should carry selectors, provenance, and matching evidence sufficient for reevaluation and diagnostic reporting.
 
 \subsection{Sketch and Two-Dimensional Constraint Concepts}
 
@@ -546,7 +546,7 @@ Bill-of-material extraction is likewise a graph evaluation problem. A BOM depend
 
 \subsection{Electronics and Mechatronics Concepts}
 
-When PuppyCadLang is extended into electronics or mechatronics, the same graph model can represent PCB and electrical concepts. A PCB board outline, layer stackup, pads, vias, traces, copper zones, nets, components, and keepouts can all be graph nodes with domain-specific attributes and references.
+When PuppyCad is extended into electronics or mechatronics, the same graph model can represent PCB and electrical concepts. A PCB board outline, layer stackup, pads, vias, traces, copper zones, nets, components, and keepouts can all be graph nodes with domain-specific attributes and references.
 
 The language should distinguish schematic symbols from physical footprints. A component may have a logical schematic representation, a physical footprint, supplier metadata, and mechanical placement constraints. Nets express electrical connectivity, while traces and vias express routed physical implementation.
 
@@ -562,7 +562,7 @@ Simulation results are only meaningful relative to their assumptions. The graph 
 
 \subsection{Versioning and Collaboration Concepts}
 
-Because PuppyCadLang is event-sourced, versioning can be understood as structured history over graph rewrites. Branching creates divergent event histories from a shared graph state. Merging attempts to combine those histories into a new graph state.
+Because PuppyCad is event-sourced, versioning can be understood as structured history over graph rewrites. Branching creates divergent event histories from a shared graph state. Merging attempts to combine those histories into a new graph state.
 
 Conflict semantics should be graph-aware. A semantic conflict is not merely a textual file conflict; it may involve incompatible parameter edits, competing rewrites to the same node, stale derived facts, contradictory constraints, or incompatible evaluator outputs.
 
@@ -572,7 +572,7 @@ Semantic diffs should compare graph meaning rather than only serialized text. Us
 
 \section{Assembly Semantics}
 
-Assemblies are already implicit in the language vocabulary, but the preceding sections do not yet define them formally. This section gives a mathematical account of assemblies as instance graphs with spatial constraints, and then broadens that account to the richer multi-domain product graph that PuppyCadLang ultimately aims to support.
+Assemblies are already implicit in the language vocabulary, but the preceding sections do not yet define them formally. This section gives a mathematical account of assemblies as instance graphs with spatial constraints, and then broadens that account to the richer multi-domain product graph that PuppyCad ultimately aims to support.
 
 The formulation here is informed by prior literature on assembly modeling, including NIST's work on assembly representations and the Open Assembly Model, along with subsequent ontology-oriented treatments of assembly structure and interoperability \cite{lyons1997,baysal2004,rachuri2005,rachuri2006,fiorentini2007}. The treatment of rigid transforms and joint freedoms also follows standard kinematic formulations built on matrix methods and $SE(3)$ representations \cite{denavit1955,murray1994}.
 
@@ -863,7 +863,7 @@ subject to $T_i \in SE(3)$ and any optional joint limits.
 
 \subsection{Assembly Evaluation as Graph Rewriting}
 
-In PuppyCadLang, assembly solving should be an evaluator over the graph rather than a hidden side effect. An authored assembly graph may contain nodes such as:
+In PuppyCad, assembly solving should be an evaluator over the graph rather than a hidden side effect. An authored assembly graph may contain nodes such as:
 
 \begin{itemize}
   \item \texttt{assembly}, \texttt{assemblyInstance}, \texttt{mate}, \texttt{connector}, and \texttt{part};
@@ -929,7 +929,7 @@ If the assembly is intended to be built, one may further require that each physi
 
 \subsection{Product Assemblies Beyond Mechanical Placement}
 
-In PuppyCadLang, assembly should not be restricted to three-dimensional placement alone. The same graph may connect mechanical parts, PCBs, connectors, wire harnesses, supplier parts, manufacturing operations, assembly instructions, and test procedures. A richer product assembly may therefore be written as
+In PuppyCad, assembly should not be restricted to three-dimensional placement alone. The same graph may connect mechanical parts, PCBs, connectors, wire harnesses, supplier parts, manufacturing operations, assembly instructions, and test procedures. A richer product assembly may therefore be written as
 
 \[
 A = (I, M, B, S, Q),
@@ -1015,7 +1015,7 @@ These choices keep the language implementation small while preserving the semant
 
 \section{Conclusion}
 
-PuppyCadLang defines a language for design state rather than a syntax for drawing commands. Its basic claim is that design intent, derived structure, and validation output can all be represented as typed nodes inside one graph, provided that the system records explicit events, stable identities, source dependencies, and evaluator authority.
+PuppyCad defines a language for design state rather than a syntax for drawing commands. Its basic claim is that design intent, derived structure, and validation output can all be represented as typed nodes inside one graph, provided that the system records explicit events, stable identities, source dependencies, and evaluator authority.
 
 Within this model, a constraint node does real semantic work: it states a persistent relation, participates in solving, and supports diagnostics. An evaluator likewise becomes a first-class participant in the language, not a hidden side effect, because its outputs are graph events with inspectable provenance.
 
