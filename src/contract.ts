@@ -1,5 +1,3 @@
-import type { Body, Sketch as RuntimeSketch } from "./puppycad"
-import type { Pin } from "./puppycad"
 import type { PartDocument } from "./schema"
 import type { Point2D, Transform3D, Vector3D } from "./types"
 
@@ -16,7 +14,7 @@ export type SchematicReference = NamedReference & {
 
 export type Pad = {
 	type?: "smd" | "through"
-	pin: Pin
+	pin: NamedReference
 	x: number
 	y: number
 	width: number
@@ -39,10 +37,6 @@ export interface FootprintSpec {
 }
 
 export type PortKind = "mechanical" | "electrical"
-
-export interface FeatureContext {
-	target: Body | RuntimeSketch
-}
 
 export type LayerMaterial =
 	| "copper"

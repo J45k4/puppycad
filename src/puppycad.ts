@@ -1,7 +1,7 @@
 // PuppyCad – Core type & class skeleton
 // MIT License – © PuppyCorp
 
-import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, PortKind, SchematicReference, TraceSegment, UUID } from "./contract"
+import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, SchematicReference, TraceSegment, UUID } from "./contract"
 
 export { PCadPart, PCadProject, PCadProjectSyncError, PuppyCadClient } from "./pcad/project"
 export type { PCadProjectSyncResult } from "./pcad/project"
@@ -41,7 +41,6 @@ export type {
 	FaceReference,
 	Feature,
 	FeatureId,
-	FeatureContext,
 	FilletEdgeTarget,
 	FilletFeature,
 	FootprintOutline,
@@ -106,10 +105,6 @@ export abstract class Entity {
 	}
 }
 
-export interface Motion {
-	step(dt: number): void
-}
-
 export class Vec3 {
 	x: number
 	y: number
@@ -148,14 +143,6 @@ export class Transform {
 	}
 
 	// TODO: add combine, invert, apply methods
-}
-
-export class Group extends Entity {
-	children: Entity[] = []
-
-	addChild(child: Entity): void {
-		this.children.push(child)
-	}
 }
 
 /** Pad shape types for electronic footprints */
@@ -200,250 +187,6 @@ export class Footprint extends Entity {
 		}
 	}
 }
-
-// ---- Simulation / Kinematics -----------------------------------------------
-export class RotationalMotion implements Motion {
-	constructor(
-		public entity: Entity,
-		public axis: Vec3,
-		public angularVelocity: number
-	) {}
-	step(dt: number) {
-		const transform = this.entity.transform
-		if (!transform) {
-			return
-		}
-		const angle = this.angularVelocity * dt
-		const half = angle / 2
-		const [ax, ay, az] = [this.axis.x, this.axis.y, this.axis.z]
-		const sinH = Math.sin(half)
-		const cosH = Math.cos(half)
-		const dq: [number, number, number, number] = [ax * sinH, ay * sinH, az * sinH, cosH]
-		const [qx, qy, qz, qw] = transform.rotation
-		const [rx, ry, rz, rw] = dq
-		transform.rotation = [rw * qx + rx * qw + ry * qz - rz * qy, rw * qy - rx * qz + ry * qw + rz * qx, rw * qz + rx * qy - ry * qx + rz * qw, rw * qw - rx * qx - ry * qy - rz * qz]
-	}
-}
-export class SimEngine {
-	motions: Motion[] = []
-	addMotion(m: Motion) {
-		this.motions.push(m)
-	}
-	step(dt: number) {
-		for (const motion of this.motions) {
-			motion.step(dt)
-		}
-	}
-}
-
-// ---- Constraint System ------------------------------------------------------
-
-/** Enumerates available constraint types for mechanical and electrical domains */
-export enum ConstraintType {
-	// Mechanical constraints
-	Coincident = "coincident",
-	Distance = "distance",
-	Angle = "angle",
-	Parallel = "parallel",
-	Perpendicular = "perpendicular",
-	Concentric = "concentric",
-	Tangent = "tangent",
-	Fixed = "fixed",
-	// Electrical constraints
-	Clearance = "clearance",
-	NetTie = "netTie",
-	Alignment = "alignment"
-}
-
-/** Base class for any constraint between two entities */
-export abstract class Constraint {
-	readonly id: UUID
-	type: ConstraintType
-	lhs: Entity
-	rhs: Entity
-
-	protected constructor(type: ConstraintType, lhs: Entity, rhs: Entity) {
-		this.id = crypto.randomUUID()
-		this.type = type
-		this.lhs = lhs
-		this.rhs = rhs
-	}
-}
-
-export class CoincidentConstraint extends Constraint {
-	constructor(lhs: Entity, rhs: Entity) {
-		super(ConstraintType.Coincident, lhs, rhs)
-	}
-}
-
-export class DistanceConstraint extends Constraint {
-	distance: number
-	constructor(lhs: Entity, rhs: Entity, distance: number) {
-		super(ConstraintType.Distance, lhs, rhs)
-		this.distance = distance
-	}
-}
-
-export class AngleConstraint extends Constraint {
-	angleDegrees: number
-	constructor(lhs: Entity, rhs: Entity, angleDegrees: number) {
-		super(ConstraintType.Angle, lhs, rhs)
-		this.angleDegrees = angleDegrees
-	}
-}
-
-export class ParallelConstraint extends Constraint {
-	constructor(lhs: Entity, rhs: Entity) {
-		super(ConstraintType.Parallel, lhs, rhs)
-	}
-}
-
-export class PerpendicularConstraint extends Constraint {
-	constructor(lhs: Entity, rhs: Entity) {
-		super(ConstraintType.Perpendicular, lhs, rhs)
-	}
-}
-
-export class ConcentricConstraint extends Constraint {
-	constructor(lhs: Entity, rhs: Entity) {
-		super(ConstraintType.Concentric, lhs, rhs)
-	}
-}
-
-export class TangentConstraint extends Constraint {
-	constructor(lhs: Entity, rhs: Entity) {
-		super(ConstraintType.Tangent, lhs, rhs)
-	}
-}
-
-export class FixedConstraint extends Constraint {
-	constructor(entity: Entity) {
-		super(ConstraintType.Fixed, entity, entity)
-	}
-}
-
-/** Ensures two nets maintain a minimum clearance distance */
-export class ClearanceConstraint extends Constraint {
-	clearance: number
-	constructor(lhs: Entity, rhs: Entity, clearance: number) {
-		super(ConstraintType.Clearance, lhs, rhs)
-		this.clearance = clearance
-	}
-}
-
-export class NetTieConstraint extends Constraint {
-	constructor(lhs: Entity, rhs: Entity) {
-		super(ConstraintType.NetTie, lhs, rhs)
-	}
-}
-
-export class AlignmentConstraint extends Constraint {
-	axis: "x" | "y"
-	offset: number
-	constructor(lhs: Entity, rhs: Entity, axis: "x" | "y", offset: number) {
-		super(ConstraintType.Alignment, lhs, rhs)
-		this.axis = axis
-		this.offset = offset
-	}
-}
-
-export class Port extends Entity {
-	kind: PortKind
-	constructor(name: string, kind: PortKind = "mechanical") {
-		super(name)
-		this.kind = kind
-	}
-}
-
-export class BlockTemplate extends Group {
-	ports: Port[] = []
-}
-
-export class BlockInstance extends Group {
-	template: BlockTemplate
-	portMap: Map<UUID, Port> = new Map()
-
-	constructor(template: BlockTemplate, name = `${template.name}_inst`) {
-		super(name)
-		this.template = template
-		for (const child of template.children) {
-			this.addChild(structuredClone(child))
-		}
-		for (const port of template.ports) {
-			const clonedPort = structuredClone(port) as Port
-			this.portMap.set(port.id, clonedPort)
-			this.addChild(clonedPort)
-		}
-	}
-}
-
-export class Circle extends Entity {
-	diameter: number
-
-	public constructor(name: string, diameter: number) {
-		super(name)
-		this.diameter = diameter
-	}
-}
-
-export class Rectangle {}
-
-export class Line {}
-
-export class Edge {
-	start: Vec3 = new Vec3()
-	end: Vec3 = new Vec3()
-	type: "line" | "arc" | "circle" | "spline" = "line"
-}
-
-export class Face {
-	edges: Edge[] = []
-}
-
-export class RuntimeFeature {}
-
-export class Sketch extends Entity {
-	// TODO: 2‑D curve definitions (lines, arcs, splines)
-	extrusionDepth = 0
-	direction: { x: number; y: number; z: number } = { x: 0, y: 0, z: 1 }
-	operation: "add" | "cut" | "intersect" = "add" // boolean operation type
-	features: RuntimeFeature[] = []
-}
-
-export class Body extends Entity {
-	// Placeholder for B‑Rep or mesh representation
-}
-
-export class Assembly extends Group {
-	constraints: Constraint[] = []
-}
-
-// export type NetNode = Pad | Port;
-
-// export class Pad extends Entity {
-// 	number: string;
-// 	position: Vec3;
-// 	// ... other pad properties as before
-// 	constructor(number: string, position: Vec3) {
-// 		super("Pad");
-// 		this.number = number;
-// 		this.position = position;
-// 	}
-
-// 	public static parse(obj: any): Pad {
-// 		const pad = new Pad(obj.number, new Vec3(obj.position.x, obj.position.y, obj.position.z))
-// 		return pad
-// 	}
-
-// 	public serialize() {
-// 		return {
-// 			type: "pad",
-// 			id: this.id,
-// 			number: this.number,
-// 			position: { x: this.position.x, y: this.position.y, z: this.position.z }
-// 		}
-// 	}
-// }
 
 export class Pin extends Entity {
 	public component?: Component
@@ -722,76 +465,5 @@ export class PCB extends Entity {
 			nets: this.nets.map((net) => net.id),
 			components: this.components.map((component) => component.id)
 		}
-	}
-}
-
-// ---- Parametric & Expression System ----------------------------------------
-
-export class Parameter {
-	name: string
-	expression: string | number
-	constructor(name: string, expression: string | number) {
-		this.name = name
-		this.expression = expression
-	}
-}
-
-// ---- Design Root ------------------------------------------------------------
-
-export class Design {
-	assemblies: Assembly[] = []
-	pcbs: PCB[] = []
-	templates: BlockTemplate[] = []
-	parameters: Record<string, Parameter> = {}
-
-	addAssembly(asm: Assembly): void {
-		this.assemblies.push(asm)
-	}
-	addPCB(board: PCB): void {
-		this.pcbs.push(board)
-	}
-	addTemplate(tpl: BlockTemplate): void {
-		this.templates.push(tpl)
-	}
-}
-
-export class Netlist {
-	nets: Net[] = []
-
-	addNet(net: Net): void {
-		this.nets.push(net)
-	}
-}
-
-export class Plane {}
-
-export class Path {}
-
-export class Profile {
-	public points: Vec3[]
-
-	public constructor(points: number[][]) {
-		this.points = points.map(([x, y, z]) => new Vec3(x, y, z))
-	}
-}
-
-export class Solid {
-	private profile: Profile
-
-	public constructor(profile: Profile) {
-		this.profile = profile
-	}
-
-	public sweep(path: Path) {}
-}
-
-export class LinePath extends Path {
-	public start: Vec3
-	public end: Vec3
-
-	public constructor(start: Vec3, end: Vec3) {
-		super()
-		this.start = start
-		this.end = end
 	}
 }
