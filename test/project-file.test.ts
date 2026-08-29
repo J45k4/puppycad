@@ -284,6 +284,95 @@ describe("normalizeProjectFile", () => {
 		expect(file.selectedPath).toEqual([3, 0])
 	})
 
+	it("preserves and validates assembly instances, connectors, mates, and actuators", () => {
+		const file = normalizeProjectFile({
+			version: 4,
+			revision: 2,
+			items: [
+				{ id: "base", type: "part", name: "Base", data: { features: [] } },
+				{ id: "arm", type: "part", name: "Arm", data: { features: [] } },
+				{
+					id: "robot-assembly",
+					type: "assembly",
+					name: "Robot assembly",
+					data: {
+						id: "robot",
+						name: "Robot",
+						instances: [
+							{ id: "base-instance", partId: "base" },
+							{ id: "arm-instance", partId: "arm", transform: { translation: { x: 10, y: 0, z: 2 }, rotation: { x: 0, y: 0, z: 45 } } },
+							{ id: "arm-instance", partId: "duplicate" },
+							{ id: "bad-instance" }
+						],
+						connectors: [
+							{ id: "base-axis", instanceId: "base-instance", position: { x: 0, y: 0, z: 0 } },
+							{ id: "arm-axis", name: "Arm axis", instanceId: "arm-instance", position: { x: 10, y: 0, z: 2 }, rotation: { x: 0, y: 0, z: 45 } },
+							{ id: "world", instanceId: null, position: { x: 0, y: 0, z: 0 } },
+							{ id: "bad-connector", instanceId: "missing", position: { x: 0, y: 0, z: 0 } }
+						],
+						mates: [
+							{
+								id: "shoulder",
+								name: "Shoulder",
+								type: "revolute",
+								a: { instanceId: "base-instance", connectorId: "base-axis" },
+								b: { instanceId: "arm-instance", connectorId: "arm-axis" },
+								params: { minDeg: -20, maxDeg: 90, invalid: Number.NaN }
+							},
+							{
+								id: "invalid",
+								type: "revolute",
+								a: { instanceId: "base-instance", connectorId: "arm-axis" },
+								b: { instanceId: "arm-instance", connectorId: "arm-axis" }
+							}
+						],
+						actuators: [
+							{
+								id: "shoulder-servo",
+								type: "servo",
+								mateId: "shoulder",
+								homeDeg: 0,
+								commandRange: { minDeg: -20, maxDeg: 90 },
+								maxTorqueNcm: 30
+							},
+							{ id: "bad-servo", type: "servo", mateId: "missing", homeDeg: 0, commandRange: { minDeg: -20, maxDeg: 90 } }
+						],
+						variables: { payloadKg: 2.5, enabled: true, label: "prototype", invalid: null }
+					}
+				}
+			],
+			selectedPath: [2]
+		})
+
+		const assembly = file?.items[2]
+		if (!assembly || !("type" in assembly) || assembly.type !== "assembly" || !assembly.data) {
+			throw new Error("Expected normalized assembly")
+		}
+		expect(assembly.data.instances).toHaveLength(2)
+		expect(assembly.data.connectors).toHaveLength(3)
+		expect(assembly.data.mates).toEqual([
+			{
+				id: "shoulder",
+				name: "Shoulder",
+				type: "revolute",
+				a: { instanceId: "base-instance", connectorId: "base-axis" },
+				b: { instanceId: "arm-instance", connectorId: "arm-axis" },
+				params: { minDeg: -20, maxDeg: 90 }
+			}
+		])
+		expect(assembly.data.actuators).toEqual([
+			{
+				id: "shoulder-servo",
+				type: "servo",
+				mateId: "shoulder",
+				homeDeg: 0,
+				commandRange: { minDeg: -20, maxDeg: 90 },
+				maxTorqueNcm: 30
+			}
+		])
+		expect(assembly.data.variables).toEqual({ payloadKg: 2.5, enabled: true, label: "prototype" })
+	})
+
 	it("preserves visibility flags on entries and part state", () => {
 		const input = {
 			version: 2,

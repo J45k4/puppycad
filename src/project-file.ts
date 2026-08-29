@@ -1,4 +1,11 @@
 import type {
+	Assembly,
+	AssemblyActuator,
+	AssemblyConnector,
+	AssemblyInstance,
+	AssemblyMate,
+	AssemblyMateReference,
+	AssemblyMateType,
 	PartProjectItemData,
 	PartProjectPreviewRotation,
 	Project,
@@ -9,7 +16,9 @@ import type {
 	SchemanticProjectComponentData,
 	SchemanticProjectConnection,
 	SchemanticProjectConnectionEndpoint,
-	SchemanticProjectItemData
+	SchemanticProjectItemData,
+	ScalarVariableValue,
+	Variables
 } from "./contract"
 import { materializeSketch } from "./cad/sketch"
 import { sketchEntityToNode } from "./pcad/sketch-entities"
@@ -34,7 +43,7 @@ import type {
 	SolidFace,
 	SolidVertex
 } from "./schema"
-import type { Point2D, Quaternion, Vector3D } from "./types"
+import type { Point2D, Quaternion, Transform3D, Vector3D } from "./types"
 
 export const PROJECT_FILE_VERSION = 4 as const
 
@@ -172,6 +181,19 @@ function normalizeProjectFileEntries(input: unknown, usedIds: Set<string>, path:
 			continue
 		}
 
+		if (type === "assembly") {
+			const data = normalizeAssemblyProjectItemData((rawItem as { data?: unknown }).data, id, name)
+			const visible = normalizeVisibleFlag(rawItem)
+			items.push({
+				id,
+				type,
+				name,
+				...(data ? { data } : {}),
+				...(visible === undefined ? {} : { visible })
+			})
+			continue
+		}
+
 		const visible = normalizeVisibleFlag(rawItem)
 		items.push({
 			id,
@@ -290,6 +312,16 @@ function cloneProjectFileEntry(entry: ProjectNode): ProjectNode {
 			type: entry.type,
 			name: entry.name,
 			data: clonePartProjectItemData(entry.data),
+			...(entry.visible === undefined ? {} : { visible: entry.visible })
+		}
+	}
+
+	if (entry.type === "assembly") {
+		return {
+			id: entry.id,
+			type: entry.type,
+			name: entry.name,
+			...(entry.data ? { data: structuredClone(entry.data) as Assembly } : {}),
 			...(entry.visible === undefined ? {} : { visible: entry.visible })
 		}
 	}
@@ -442,6 +474,274 @@ function normalizeConnectionEndpoint(endpoint: SchemanticProjectConnectionEndpoi
 	}
 	const ratio = typeof endpoint.ratio === "number" && Number.isFinite(endpoint.ratio) ? Math.min(Math.max(endpoint.ratio, 0), 1) : 0.5
 	return { componentId, edge, ratio }
+}
+
+function normalizeAssemblyProjectItemData(input: unknown, defaultId: string, defaultName: string): Assembly | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as {
+		id?: unknown
+		name?: unknown
+		instances?: unknown
+		connectors?: unknown
+		mates?: unknown
+		actuators?: unknown
+		variables?: unknown
+	}
+	const id = normalizeNonEmptyString(value.id) ?? defaultId
+	const name = normalizeNonEmptyString(value.name) ?? defaultName
+	const instances = normalizeAssemblyInstances(value.instances)
+	const instanceIds = new Set(instances.map((instance) => instance.id))
+	const connectors = normalizeAssemblyConnectors(value.connectors, instanceIds)
+	const connectorById = new Map(connectors.map((connector) => [connector.id, connector] as const))
+	const mates = normalizeAssemblyMates(value.mates, instanceIds, connectorById, Array.isArray(value.connectors))
+	const mateIds = new Set(mates.map((mate) => mate.id))
+	const actuators = normalizeAssemblyActuators(value.actuators, mateIds)
+	const variables = normalizeVariables(value.variables)
+
+	return {
+		id,
+		name,
+		instances,
+		...(connectors.length > 0 ? { connectors } : {}),
+		...(mates.length > 0 ? { mates } : {}),
+		...(actuators.length > 0 ? { actuators } : {}),
+		...(Object.keys(variables).length > 0 ? { variables } : {})
+	}
+}
+
+function normalizeAssemblyInstances(input: unknown): AssemblyInstance[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	const instances: AssemblyInstance[] = []
+	const usedIds = new Set<string>()
+	for (const raw of input) {
+		if (!raw || typeof raw !== "object") {
+			continue
+		}
+		const value = raw as { id?: unknown; partId?: unknown; transform?: unknown }
+		const id = normalizeNonEmptyString(value.id)
+		const partId = normalizeNonEmptyString(value.partId)
+		if (!id || !partId || usedIds.has(id)) {
+			continue
+		}
+		const transform = normalizeTransform3D(value.transform)
+		instances.push({ id, partId, ...(transform ? { transform } : {}) })
+		usedIds.add(id)
+	}
+	return instances
+}
+
+function normalizeAssemblyConnectors(input: unknown, instanceIds: Set<string>): AssemblyConnector[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	const connectors: AssemblyConnector[] = []
+	const usedIds = new Set<string>()
+	for (const raw of input) {
+		if (!raw || typeof raw !== "object") {
+			continue
+		}
+		const value = raw as { id?: unknown; name?: unknown; instanceId?: unknown; position?: unknown; rotation?: unknown }
+		const id = normalizeNonEmptyString(value.id)
+		const instanceId = value.instanceId === null ? null : normalizeNonEmptyString(value.instanceId)
+		const position = normalizeVector3D(value.position)
+		if (!id || usedIds.has(id) || instanceId === undefined || (instanceId !== null && !instanceIds.has(instanceId)) || !position) {
+			continue
+		}
+		const name = normalizeNonEmptyString(value.name)
+		const rotation = normalizeVector3D(value.rotation)
+		connectors.push({
+			id,
+			...(name ? { name } : {}),
+			instanceId,
+			position,
+			...(rotation ? { rotation } : {})
+		})
+		usedIds.add(id)
+	}
+	return connectors
+}
+
+function normalizeAssemblyMates(input: unknown, instanceIds: Set<string>, connectorById: ReadonlyMap<string, AssemblyConnector>, validateConnectors: boolean): AssemblyMate[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	const mates: AssemblyMate[] = []
+	const usedIds = new Set<string>()
+	for (let index = 0; index < input.length; index += 1) {
+		const raw = input[index]
+		if (!raw || typeof raw !== "object") {
+			continue
+		}
+		const value = raw as { id?: unknown; name?: unknown; type?: unknown; a?: unknown; b?: unknown; params?: unknown }
+		const preferredId = normalizeNonEmptyString(value.id) ?? `mate-${index + 1}`
+		const id = makeUniqueString(preferredId, usedIds)
+		const type = normalizeAssemblyMateType(value.type)
+		const a = normalizeAssemblyMateReference(value.a, instanceIds, connectorById, validateConnectors)
+		const b = normalizeAssemblyMateReference(value.b, instanceIds, connectorById, validateConnectors)
+		if (!type || !a || !b) {
+			continue
+		}
+		const name = normalizeNonEmptyString(value.name)
+		const params = normalizeVariables(value.params)
+		mates.push({
+			id,
+			...(name ? { name } : {}),
+			type,
+			a,
+			b,
+			...(Object.keys(params).length > 0 ? { params } : {})
+		})
+		usedIds.add(id)
+	}
+	return mates
+}
+
+function normalizeAssemblyMateReference(
+	input: unknown,
+	instanceIds: Set<string>,
+	connectorById: ReadonlyMap<string, AssemblyConnector>,
+	validateConnectors: boolean
+): AssemblyMateReference | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { instanceId?: unknown; connectorId?: unknown }
+	const instanceId = value.instanceId === null ? null : normalizeNonEmptyString(value.instanceId)
+	const connectorId = normalizeNonEmptyString(value.connectorId)
+	if (instanceId === undefined || (instanceId !== null && !instanceIds.has(instanceId)) || !connectorId) {
+		return undefined
+	}
+	const connector = connectorById.get(connectorId)
+	if (validateConnectors && (!connector || connector.instanceId !== instanceId)) {
+		return undefined
+	}
+	return { instanceId, connectorId }
+}
+
+function normalizeAssemblyActuators(input: unknown, mateIds: Set<string>): AssemblyActuator[] {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	const actuators: AssemblyActuator[] = []
+	const usedIds = new Set<string>()
+	for (const raw of input) {
+		if (!raw || typeof raw !== "object") {
+			continue
+		}
+		const value = raw as {
+			id?: unknown
+			name?: unknown
+			type?: unknown
+			mateId?: unknown
+			homeDeg?: unknown
+			commandRange?: unknown
+			maxTorqueNcm?: unknown
+			maxSpeedDegPerSec?: unknown
+		}
+		const id = normalizeNonEmptyString(value.id)
+		const mateId = normalizeNonEmptyString(value.mateId)
+		const homeDeg = normalizeFiniteNumber(value.homeDeg)
+		const range = normalizeAngleRange(value.commandRange)
+		if (!id || usedIds.has(id) || value.type !== "servo" || !mateId || !mateIds.has(mateId) || homeDeg === undefined || !range || homeDeg < range.minDeg || homeDeg > range.maxDeg) {
+			continue
+		}
+		const name = normalizeNonEmptyString(value.name)
+		const maxTorqueNcm = normalizePositiveNumber(value.maxTorqueNcm)
+		const maxSpeedDegPerSec = normalizePositiveNumber(value.maxSpeedDegPerSec)
+		actuators.push({
+			id,
+			...(name ? { name } : {}),
+			type: "servo",
+			mateId,
+			homeDeg,
+			commandRange: range,
+			...(maxTorqueNcm === undefined ? {} : { maxTorqueNcm }),
+			...(maxSpeedDegPerSec === undefined ? {} : { maxSpeedDegPerSec })
+		})
+		usedIds.add(id)
+	}
+	return actuators
+}
+
+function normalizeAssemblyMateType(input: unknown): AssemblyMateType | undefined {
+	return input === "fasten" || input === "revolute" || input === "prismatic" || input === "planar" || input === "ball" ? input : undefined
+}
+
+function normalizeTransform3D(input: unknown): Transform3D | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { translation?: unknown; rotation?: unknown; scale?: unknown }
+	const translation = normalizeVector3D(value.translation)
+	const rotation = normalizeVector3D(value.rotation)
+	const scale = normalizeVector3D(value.scale)
+	if (!translation && !rotation && !scale) {
+		return undefined
+	}
+	return {
+		...(translation ? { translation } : {}),
+		...(rotation ? { rotation } : {}),
+		...(scale ? { scale } : {})
+	}
+}
+
+function normalizeVariables(input: unknown): Variables {
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		return {}
+	}
+	const variables: Variables = {}
+	for (const [key, value] of Object.entries(input)) {
+		const normalizedKey = key.trim()
+		const normalizedValue = normalizeScalarVariable(value)
+		if (normalizedKey && normalizedValue !== undefined) {
+			variables[normalizedKey] = normalizedValue
+		}
+	}
+	return variables
+}
+
+function normalizeScalarVariable(value: unknown): ScalarVariableValue | undefined {
+	if (typeof value === "number") {
+		return Number.isFinite(value) ? value : undefined
+	}
+	return typeof value === "string" || typeof value === "boolean" ? value : undefined
+}
+
+function normalizeAngleRange(input: unknown): { minDeg: number; maxDeg: number } | undefined {
+	if (!input || typeof input !== "object") {
+		return undefined
+	}
+	const value = input as { minDeg?: unknown; maxDeg?: unknown }
+	const minDeg = normalizeFiniteNumber(value.minDeg)
+	const maxDeg = normalizeFiniteNumber(value.maxDeg)
+	return minDeg !== undefined && maxDeg !== undefined && minDeg <= maxDeg ? { minDeg, maxDeg } : undefined
+}
+
+function normalizePositiveNumber(input: unknown): number | undefined {
+	const value = normalizeFiniteNumber(input)
+	return value !== undefined && value > 0 ? value : undefined
+}
+
+function normalizeFiniteNumber(input: unknown): number | undefined {
+	return typeof input === "number" && Number.isFinite(input) ? input : undefined
+}
+
+function normalizeNonEmptyString(input: unknown): string | undefined {
+	return typeof input === "string" && input.trim() ? input.trim() : undefined
+}
+
+function makeUniqueString(preferred: string, used: Set<string>): string {
+	let candidate = preferred
+	let suffix = 2
+	while (used.has(candidate)) {
+		candidate = `${preferred}-${suffix}`
+		suffix += 1
+	}
+	return candidate
 }
 
 function clonePartProjectItemData(data: PartProjectItemData | undefined): PartProjectItemData | undefined {

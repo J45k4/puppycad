@@ -1,5 +1,3 @@
-import type { Body, Sketch as RuntimeSketch } from "./puppycad"
-import type { Pin } from "./puppycad"
 import type { PartDocument } from "./schema"
 import type { Point2D, Transform3D, Vector3D } from "./types"
 
@@ -16,7 +14,7 @@ export type SchematicReference = NamedReference & {
 
 export type Pad = {
 	type?: "smd" | "through"
-	pin: Pin
+	pin: NamedReference
 	x: number
 	y: number
 	width: number
@@ -39,10 +37,6 @@ export interface FootprintSpec {
 }
 
 export type PortKind = "mechanical" | "electrical"
-
-export interface FeatureContext {
-	target: Body | RuntimeSketch
-}
 
 export type LayerMaterial =
 	| "copper"
@@ -444,7 +438,7 @@ export type Part = {
 export type AssemblyMateType = "fasten" | "revolute" | "prismatic" | "planar" | "ball"
 
 export type AssemblyMateReference = {
-	instanceId: string
+	instanceId: string | null
 	connectorId: string
 }
 
@@ -454,18 +448,46 @@ export type AssemblyInstance = {
 	transform?: Transform3D
 }
 
+export type AssemblyConnector = {
+	id: string
+	name?: string
+	instanceId: string | null
+	position: Vector3D
+	rotation?: Vector3D
+}
+
 export type AssemblyMate = {
+	id: string
+	name?: string
 	type: AssemblyMateType
 	a: AssemblyMateReference
 	b: AssemblyMateReference
 	params?: Variables
 }
 
+export type AssemblyServoActuator = {
+	id: string
+	name?: string
+	type: "servo"
+	mateId: string
+	homeDeg: number
+	commandRange: {
+		minDeg: number
+		maxDeg: number
+	}
+	maxTorqueNcm?: number
+	maxSpeedDegPerSec?: number
+}
+
+export type AssemblyActuator = AssemblyServoActuator
+
 export type Assembly = {
 	id: string
 	name: string
 	instances: AssemblyInstance[]
+	connectors?: AssemblyConnector[]
 	mates?: AssemblyMate[]
+	actuators?: AssemblyActuator[]
 	variables?: Variables
 }
 

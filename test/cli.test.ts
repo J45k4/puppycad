@@ -428,6 +428,84 @@ describe("puppycad CLI", () => {
 		expect(output.stdout.join("\n")).toContain("Rendered")
 		expect(new Uint8Array(await readFile(join(cwd, "preview.png")))).toEqual(pngBytes)
 	})
+
+	it("compiles, inspects, and renders a TypeScript model source", async () => {
+		const cwd = await createTempDir()
+		const sourcePath = join(import.meta.dir, "../examples/three-finger-hand.pcad.ts")
+		const compileOutput = createOutput()
+		const compileCode = await runPuppycadCli(["model", "compile", sourcePath, "--out", "hand.pcad", "--graph", "hand.graph.json"], {
+			cwd,
+			output: compileOutput.output
+		})
+
+		expect(compileCode).toBe(0)
+		expect(compileOutput.stderr).toEqual([])
+		expect(compileOutput.stdout.join("\n")).toContain("48 bodies, 18 mates, 3 servos")
+		const project = normalizeProjectFile(JSON.parse(await readFile(join(cwd, "hand.pcad"), "utf8")))
+		expect(project?.items).toHaveLength(49)
+		expect(project?.items.find((item) => "type" in item && item.type === "assembly")).toMatchObject({
+			id: "three-finger-hand/assembly",
+			data: {
+				instances: expect.any(Array),
+				connectors: expect.any(Array),
+				mates: expect.any(Array),
+				actuators: expect.any(Array)
+			}
+		})
+		const graph = JSON.parse(await readFile(join(cwd, "hand.graph.json"), "utf8")) as { kind?: unknown; servos?: unknown[] }
+		expect(graph.kind).toBe("puppycad.model/v1")
+		expect(graph.servos).toHaveLength(3)
+
+		const inspectOutput = createOutput()
+		expect(await runPuppycadCli(["inspect", sourcePath], { cwd, output: inspectOutput.output })).toBe(0)
+		expect(inspectOutput.stdout.join("\n")).toContain("mates: 18 (12 revolute, 6 fixed)")
+
+		const assemblyOutput = createOutput()
+		expect(await runPuppycadCli(["query", "assemblies", sourcePath, "--json"], { cwd, output: assemblyOutput.output })).toBe(0)
+		const assemblies = JSON.parse(assemblyOutput.stdout.join("\n")) as {
+			assemblies: Array<{ instances: unknown[]; connectors: unknown[]; mates: unknown[]; actuators: unknown[] }>
+		}
+		expect(assemblies.assemblies).toHaveLength(1)
+		expect(assemblies.assemblies[0]?.instances).toHaveLength(48)
+		expect(assemblies.assemblies[0]?.connectors).toHaveLength(39)
+		expect(assemblies.assemblies[0]?.mates).toHaveLength(18)
+		expect(assemblies.assemblies[0]?.actuators).toHaveLength(3)
+
+		const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+		const renderOutput = createOutput()
+		const renderCode = await runPuppycadCli(["render", sourcePath, "--out", "hand.png"], {
+			cwd,
+			output: renderOutput.output,
+			renderPng: async (bodies) => {
+				expect(bodies).toHaveLength(48)
+				return pngBytes
+			}
+		})
+		expect(renderCode).toBe(0)
+		expect(renderOutput.stderr).toEqual([])
+		expect(new Uint8Array(await readFile(join(cwd, "hand.png")))).toEqual(pngBytes)
+	})
+
+	it("reloads changed dependencies of TypeScript model sources", async () => {
+		const cwd = await createTempDir()
+		const dependencyPath = join(cwd, "dimensions.ts")
+		const sourcePath = join(cwd, "reload.model.ts")
+		await writeFile(dependencyPath, "export const depth = 1\n", "utf8")
+		await writeFile(
+			sourcePath,
+			`import { defineModel, rectangle, v2 } from ${JSON.stringify(join(import.meta.dir, "../src/model-dsl.ts"))}\nimport { depth } from "./dimensions.ts"\nexport default defineModel({ id: "reload", name: "Reload" }, (model) => model.body("body", { outline: rectangle(v2(0, 0), 2, 2), depth }))\n`,
+			"utf8"
+		)
+
+		const first = createOutput()
+		expect(await runPuppycadCli(["inspect", sourcePath, "--json"], { cwd, output: first.output })).toBe(0)
+		expect(JSON.parse(first.stdout.join("\n")).model.bodies[0].depth).toBe(1)
+
+		await writeFile(dependencyPath, "export const depth = 2\n", "utf8")
+		const second = createOutput()
+		expect(await runPuppycadCli(["inspect", sourcePath, "--json"], { cwd, output: second.output })).toBe(0)
+		expect(JSON.parse(second.stdout.join("\n")).model.bodies[0].depth).toBe(2)
+	})
 })
 
 function createServerFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {

@@ -4,7 +4,9 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { extrudeSolidFeature } from "./cad/extrude"
-import type { Project, ProjectDocument, ProjectDocumentType, ProjectNode } from "./contract"
+import type { AssemblyActuator, AssemblyConnector, AssemblyInstance, AssemblyMate, Project, ProjectDocument, ProjectDocumentType, ProjectNode, Variables } from "./contract"
+import { compileModel, serializeModelGraph, type ModelDefinition } from "./model-dsl"
+import { isTypeScriptModelPath, loadModelSource } from "./model-loader"
 import { PCadPart, PuppyCadClient } from "./pcad/project"
 import { applySyncedProjectCommands, type CadCommand, type SyncedProjectCommand } from "./project-commands"
 import { createProjectFile, normalizeProjectFile, serializeProjectFile } from "./project-file"
@@ -67,6 +69,12 @@ type InitOptions = {
 type InspectOptions = {
 	target?: string
 	json: boolean
+}
+
+type ModelCompileOptions = {
+	sourcePath: string
+	outPath: string
+	graphPath?: string
 }
 
 type ProjectStats = {
@@ -221,6 +229,9 @@ export async function runPuppycadCli(args: readonly string[], options: CliOption
 		if (command === "cad") {
 			return await runCadCommand(rest, context)
 		}
+		if (command === "model") {
+			return await runModelCommand(rest, context)
+		}
 		if (command === "query") {
 			return await runQueryCommand(rest, context)
 		}
@@ -366,6 +377,56 @@ function parseInspectArgs(args: readonly string[]): InspectOptions {
 	}
 
 	return { target, json }
+}
+
+function parseModelCompileArgs(args: readonly string[]): ModelCompileOptions {
+	let sourcePath: string | undefined
+	let outPath: string | undefined
+	let graphPath: string | undefined
+
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+		if (!arg) {
+			continue
+		}
+		if (arg === "--help" || arg === "-h") {
+			throw new CliHelpError(formatModelHelp())
+		}
+		if (arg === "--out" || arg === "-o") {
+			outPath = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--out=")) {
+			outPath = arg.slice("--out=".length)
+			continue
+		}
+		if (arg === "--graph") {
+			graphPath = readOptionValue(args, index, arg)
+			index += 1
+			continue
+		}
+		if (arg.startsWith("--graph=")) {
+			graphPath = arg.slice("--graph=".length)
+			continue
+		}
+		if (arg.startsWith("-")) {
+			throw new Error(`Unknown model compile option: ${arg}`)
+		}
+		if (sourcePath) {
+			throw new Error(`Unexpected model compile argument: ${arg}`)
+		}
+		sourcePath = arg
+	}
+
+	if (!sourcePath || !outPath) {
+		throw new Error("Usage: puppycad model compile <source.pcad.ts> --out <project.pcad> [--graph <graph.json>]")
+	}
+	return {
+		sourcePath,
+		outPath,
+		...(graphPath ? { graphPath } : {})
+	}
 }
 
 async function runConfigCommand(args: readonly string[], context: CliContext): Promise<number> {
@@ -517,9 +578,54 @@ async function runInspectCommand(args: readonly string[], context: CliContext): 
 	const options = parseInspectArgs(args)
 	const json = context.globals.json || options.json
 	if (options.target && (await shouldInspectLocalFile(options.target, context.cwd))) {
+		if (isTypeScriptModelPath(options.target)) {
+			return await runModelSourceInspect(options.target, json, context)
+		}
 		return await runFileInspect({ target: options.target, json }, context.cwd, context.output)
 	}
 	return await runServerInspect(options.target, { ...context, globals: { ...context.globals, json } })
+}
+
+async function runModelCommand(args: readonly string[], context: CliContext): Promise<number> {
+	const [action, ...rest] = args
+	if (!action || action === "--help" || action === "-h") {
+		context.output.stdout(formatModelHelp())
+		return 0
+	}
+	if (action !== "compile") {
+		throw new Error(`Unknown model command: ${action}`)
+	}
+
+	const options = parseModelCompileArgs(rest)
+	const sourcePath = resolve(context.cwd, options.sourcePath)
+	const model = await loadModelSource(sourcePath)
+	const compiled = compileModel(model)
+	const outPath = resolve(context.cwd, options.outPath)
+	if (outPath === sourcePath) {
+		throw new Error("The compiled .pcad output cannot overwrite its TypeScript model source.")
+	}
+	const graphPath = options.graphPath ? resolve(context.cwd, options.graphPath) : undefined
+	if (graphPath === sourcePath || graphPath === outPath) {
+		throw new Error("The model graph output must be different from the TypeScript source and compiled .pcad output.")
+	}
+	await mkdir(dirname(outPath), { recursive: true })
+	await writeFile(outPath, `${serializeProjectFile(compiled.project)}\n`, "utf8")
+
+	if (graphPath) {
+		await mkdir(dirname(graphPath), { recursive: true })
+		await writeFile(graphPath, `${serializeModelGraph(model)}\n`, "utf8")
+	}
+
+	const summary = summarizeModel(model)
+	if (context.globals.json) {
+		writeStdout(context, JSON.stringify({ source: sourcePath, out: outPath, ...(graphPath ? { graph: graphPath } : {}), ...summary }, null, 2))
+		return 0
+	}
+	writeStdout(
+		context,
+		`Compiled ${model.name} as one assembly (${summary.bodies} bodies, ${summary.mates} mates, ${summary.servos} servos) to ${outPath}${graphPath ? `\nWrote model graph to ${graphPath}` : ""}`
+	)
+	return 0
 }
 
 async function runCadCommand(args: readonly string[], context: CliContext): Promise<number> {
@@ -604,11 +710,30 @@ async function runQueryCommand(args: readonly string[], context: CliContext): Pr
 		context.output.stdout(formatQueryHelp())
 		return 0
 	}
-	if (!["features", "geometry", "bodies", "faces", "edges", "bbox"].includes(query)) {
+	if (!["features", "geometry", "bodies", "faces", "edges", "bbox", "assemblies"].includes(query)) {
 		throw new Error(`Unknown query: ${query}`)
 	}
 	const { target, bodyId } = parseQueryArgs(rest, `query ${query}`)
-	const { projectId, project } = await loadServerProject(context, target)
+	const { projectId, project } = await loadProjectForRead(context, target)
+	if (query === "assemblies") {
+		const assemblies = collectProjectAssemblies(project)
+		if (context.globals.json) {
+			writeStdout(context, JSON.stringify({ projectId, assemblies }, null, 2))
+			return 0
+		}
+		writeStdout(
+			context,
+			assemblies.length > 0
+				? assemblies
+						.map(
+							(assembly) =>
+								`${assembly.id} instances=${assembly.instances.length} connectors=${assembly.connectors.length} mates=${assembly.mates.length} actuators=${assembly.actuators.length}`
+						)
+						.join("\n")
+				: "No assemblies."
+		)
+		return 0
+	}
 	if (query !== "features") {
 		const geometry = collectProjectGeometry(project)
 		return writeGeometryQuery(query, projectId, geometry, bodyId, context)
@@ -686,7 +811,7 @@ function writeGeometryQuery(query: string, projectId: string, geometry: CliGeome
 
 async function runGraphCommand(args: readonly string[], context: CliContext): Promise<number> {
 	const { target, mermaid } = parseProjectTargetArgs(args, "graph", ["--mermaid"])
-	const { projectId, project } = await loadServerProject(context, target)
+	const { projectId, project } = await loadProjectForRead(context, target)
 	const graph = collectProjectGraph(project)
 	if (mermaid) {
 		writeStdout(context, formatMermaidGraph(graph.nodes, graph.edges))
@@ -702,7 +827,7 @@ async function runGraphCommand(args: readonly string[], context: CliContext): Pr
 
 async function runEvalCommand(args: readonly string[], context: CliContext): Promise<number> {
 	const { target, explain } = parseProjectTargetArgs(args, "eval", ["--explain"])
-	const { projectId, project } = await loadServerProject(context, target)
+	const { projectId, project } = await loadProjectForRead(context, target)
 	const stats = collectProjectStats(project)
 	const features = collectProjectFeatures(project)
 	const result = {
@@ -806,6 +931,51 @@ async function runFileInspect(options: InspectOptions, cwd: string, output: CliO
 	return 0
 }
 
+async function runModelSourceInspect(target: string, json: boolean, context: CliContext): Promise<number> {
+	const filePath = resolve(context.cwd, target)
+	const model = await loadModelSource(filePath)
+	const compiled = compileModel(model)
+	const stats = collectProjectStats(compiled.project)
+	const modelSummary = summarizeModel(model)
+	if (json) {
+		context.output.stdout(JSON.stringify({ file: filePath, model, modelSummary, project: compiled.project, stats }, null, 2))
+		return 0
+	}
+	context.output.stdout(
+		[
+			formatInspectSummary(filePath, compiled.project, stats),
+			"TypeScript model:",
+			`  id: ${model.id}`,
+			`  components: ${modelSummary.components}`,
+			`  bodies: ${modelSummary.bodies}`,
+			`  frames: ${modelSummary.frames}`,
+			`  mates: ${modelSummary.mates} (${modelSummary.revoluteMates} revolute, ${modelSummary.fixedMates} fixed)`,
+			`  servos: ${modelSummary.servos}`
+		].join("\n")
+	)
+	return 0
+}
+
+function summarizeModel(model: ModelDefinition): {
+	components: number
+	bodies: number
+	frames: number
+	mates: number
+	fixedMates: number
+	revoluteMates: number
+	servos: number
+} {
+	return {
+		components: model.components.length,
+		bodies: model.bodies.length,
+		frames: model.frames.length,
+		mates: model.mates.length,
+		fixedMates: model.mates.filter((mate) => mate.type === "fixed").length,
+		revoluteMates: model.mates.filter((mate) => mate.type === "revolute").length,
+		servos: model.servos.length
+	}
+}
+
 function createInitialProject(options: InitOptions): Project {
 	const items: ProjectNode[] = options.empty
 		? []
@@ -871,6 +1041,33 @@ function collectProjectFeatures(project: Project): CliFeature[] {
 		}
 	})
 	return features
+}
+
+function collectProjectAssemblies(project: Project) {
+	const assemblies: Array<{
+		id: string
+		name: string
+		instances: AssemblyInstance[]
+		connectors: AssemblyConnector[]
+		mates: AssemblyMate[]
+		actuators: AssemblyActuator[]
+		variables: Variables
+	}> = []
+	visitProjectNodes(project.items, (node) => {
+		if (isProjectFolder(node) || node.type !== "assembly") {
+			return
+		}
+		assemblies.push({
+			id: node.id,
+			name: node.name,
+			instances: node.data?.instances ?? [],
+			connectors: node.data?.connectors ?? [],
+			mates: node.data?.mates ?? [],
+			actuators: node.data?.actuators ?? [],
+			variables: node.data?.variables ?? {}
+		})
+	})
+	return assemblies
 }
 
 function collectProjectGraph(project: Project): { nodes: CliGraphNode[]; edges: CliGraphEdge[] } {
@@ -1080,6 +1277,10 @@ function isProjectFolder(node: ProjectNode): node is Exclude<ProjectNode, Projec
 async function loadProjectForRead(context: CliContext, target: string | undefined): Promise<{ projectId: string; project: Project }> {
 	if (target && (await shouldInspectLocalFile(target, context.cwd))) {
 		const filePath = resolve(context.cwd, target)
+		if (isTypeScriptModelPath(filePath)) {
+			const model = await loadModelSource(filePath)
+			return { projectId: filePath, project: compileModel(model).project }
+		}
 		const raw = await readFile(filePath, "utf8").catch((error: unknown) => {
 			throw new Error(`Unable to read project file: ${formatFileError(error)}`)
 		})
@@ -1096,6 +1297,9 @@ async function executeCadCommand(context: CliContext, target: string | undefined
 	const syncedCommand: SyncedProjectCommand = { type: "cad", partId, command }
 	if (target && (await shouldInspectLocalFile(target, context.cwd))) {
 		const filePath = resolve(context.cwd, target)
+		if (isTypeScriptModelPath(filePath)) {
+			throw new Error(`TypeScript model sources are read-only from the CLI. Edit ${filePath}, or compile it to a .pcad file before applying CAD commands.`)
+		}
 		const raw = await readFile(filePath, "utf8").catch((error: unknown) => {
 			throw new Error(`Unable to read project file: ${formatFileError(error)}`)
 		})
@@ -1793,7 +1997,7 @@ function parseFiniteNumber(value: string, option: string): number {
 }
 
 async function shouldInspectLocalFile(target: string, cwd: string): Promise<boolean> {
-	if (target.endsWith(".pcad") || target.endsWith(".json") || target.includes("/") || target.includes("\\")) {
+	if (target.endsWith(".pcad") || target.endsWith(".json") || isTypeScriptModelPath(target) || target.includes("/") || target.includes("\\")) {
 		return true
 	}
 	return fileExists(resolve(cwd, target))
@@ -1860,13 +2064,15 @@ function formatHelp(): string {
 		"  project create <name>           Create a server project",
 		"  project inspect [project-id]    Inspect a server project",
 		"  cad dimension set [project-id]  Set a sketch dimension constraint",
-		"  inspect [project-id|file]       Inspect a server project or local project file",
+		"  model compile <source>           Compile a TypeScript model to .pcad",
+		"  inspect [project-id|file]       Inspect a server project, .pcad, or TypeScript model",
 		"  query features [project-id]     List part features",
 		"  query geometry [project-id]     List generated bodies/faces/edges",
 		"  query bodies|faces|edges|bbox   Inspect generated geometry",
+		"  query assemblies [project-id]   Inspect assembly instances and mates",
 		"  graph [project-id]              Print the feature graph",
 		"  eval [project-id]               Validate/evaluate the project snapshot",
-		"  render [project-id] --out <png> Render a PNG preview",
+		"  render [project-id|file] --out  Render a project or TypeScript model preview",
 		"  init [file]                     Create a local PuppyCAD project file",
 		"  validate [file]                 Validate and summarize a local project file",
 		"",
@@ -1910,7 +2116,7 @@ function formatCadHelp(): string {
 
 function formatQueryHelp(): string {
 	return [
-		"Usage: puppycad query <query> [project-id] [options]",
+		"Usage: puppycad query <query> [project-id|file] [options]",
 		"",
 		"Queries:",
 		"  features [project-id] --json",
@@ -1918,19 +2124,32 @@ function formatQueryHelp(): string {
 		"  bodies [project-id] --json",
 		"  faces [project-id] [--body <body-id>] --json",
 		"  edges [project-id] [--body <body-id>] --json",
-		"  bbox [project-id] [--body <body-id>] --json"
+		"  bbox [project-id] [--body <body-id>] --json",
+		"  assemblies [project-id] --json"
 	].join("\n")
 }
 
 function formatRenderHelp(): string {
 	return [
-		"Usage: puppycad render [project-id] --out <preview.png> [options]",
+		"Usage: puppycad render [project-id|project.pcad|model.pcad.ts] --out <preview.png> [options]",
 		"",
 		"Options:",
 		"  -o, --out <file>   Write PNG preview to file",
 		"  --width <px>       Image width, default 1024",
 		"  --height <px>      Image height, default 768",
 		"  --show-dimensions  Draw sketch dimension labels"
+	].join("\n")
+}
+
+function formatModelHelp(): string {
+	return [
+		"Usage: puppycad model <command>",
+		"",
+		"Commands:",
+		"  compile <source.pcad.ts> --out <project.pcad> [--graph <graph.json>]",
+		"",
+		"TypeScript sources execute as trusted local code. The source is the editable model;",
+		"the .pcad project and optional graph JSON are generated artifacts."
 	].join("\n")
 }
 
@@ -1950,7 +2169,7 @@ function formatInitHelp(): string {
 }
 
 function formatInspectHelp(): string {
-	return ["Usage: puppycad inspect [project-id|file] [options]", "", "Options:", "  --json    Print project data and stats as JSON"].join("\n")
+	return ["Usage: puppycad inspect [project-id|project.pcad|model.pcad.ts] [options]", "", "Options:", "  --json    Print project data and stats as JSON"].join("\n")
 }
 
 function readOptionValue(args: readonly string[], index: number, option: string): string {
