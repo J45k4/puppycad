@@ -485,6 +485,27 @@ describe("puppycad CLI", () => {
 		expect(renderOutput.stderr).toEqual([])
 		expect(new Uint8Array(await readFile(join(cwd, "hand.png")))).toEqual(pngBytes)
 	})
+
+	it("reloads changed dependencies of TypeScript model sources", async () => {
+		const cwd = await createTempDir()
+		const dependencyPath = join(cwd, "dimensions.ts")
+		const sourcePath = join(cwd, "reload.model.ts")
+		await writeFile(dependencyPath, "export const depth = 1\n", "utf8")
+		await writeFile(
+			sourcePath,
+			`import { defineModel, rectangle, v2 } from ${JSON.stringify(join(import.meta.dir, "../src/model-dsl.ts"))}\nimport { depth } from "./dimensions.ts"\nexport default defineModel({ id: "reload", name: "Reload" }, (model) => model.body("body", { outline: rectangle(v2(0, 0), 2, 2), depth }))\n`,
+			"utf8"
+		)
+
+		const first = createOutput()
+		expect(await runPuppycadCli(["inspect", sourcePath, "--json"], { cwd, output: first.output })).toBe(0)
+		expect(JSON.parse(first.stdout.join("\n")).model.bodies[0].depth).toBe(1)
+
+		await writeFile(dependencyPath, "export const depth = 2\n", "utf8")
+		const second = createOutput()
+		expect(await runPuppycadCli(["inspect", sourcePath, "--json"], { cwd, output: second.output })).toBe(0)
+		expect(JSON.parse(second.stdout.join("\n")).model.bodies[0].depth).toBe(2)
+	})
 })
 
 function createServerFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {

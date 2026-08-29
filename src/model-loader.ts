@@ -24,11 +24,9 @@ export async function loadModelSource(filePath: string): Promise<ModelDefinition
 		throw new Error(`TypeScript model source is not a file: ${filePath}`)
 	}
 
-	const sourceUrl = pathToFileURL(filePath)
-	sourceUrl.searchParams.set("puppycadMtime", String(sourceStat.mtimeMs))
 	let module: ModelModule
 	try {
-		module = (await import(sourceUrl.href)) as ModelModule
+		module = await importModelInFreshWorker(pathToFileURL(filePath).href)
 	} catch (error) {
 		throw new Error(`Unable to execute TypeScript model source ${filePath}: ${error instanceof Error ? error.message : String(error)}`)
 	}
@@ -38,6 +36,37 @@ export async function loadModelSource(filePath: string): Promise<ModelDefinition
 		throw new Error(`TypeScript model source ${filePath} must default-export a model from defineModel(), or export it as "model".`)
 	}
 	return candidate
+}
+
+type WorkerResult = { ok: true; module: ModelModule } | { ok: false; error: string }
+
+function importModelInFreshWorker(sourceUrl: string): Promise<ModelModule> {
+	const workerSource = `
+		import(${JSON.stringify(sourceUrl)})
+			.then((module) => postMessage({ ok: true, module: { default: module.default, model: module.model } }))
+			.catch((error) => postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+	`
+	const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" }))
+	const worker = new Worker(workerUrl)
+
+	return new Promise((resolve, reject) => {
+		const cleanup = () => {
+			worker.terminate()
+			URL.revokeObjectURL(workerUrl)
+		}
+		worker.onmessage = (event: MessageEvent<WorkerResult>) => {
+			cleanup()
+			if (event.data.ok) {
+				resolve(event.data.module)
+			} else {
+				reject(new Error(event.data.error))
+			}
+		}
+		worker.onerror = (event) => {
+			cleanup()
+			reject(new Error(event.message || "Model worker failed."))
+		}
+	})
 }
 
 function formatFileError(error: unknown): string {

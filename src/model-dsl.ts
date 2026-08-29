@@ -517,6 +517,13 @@ export function validateModel(model: ModelDefinition): void {
 			if (Math.hypot(mate.axis.x, mate.axis.y, mate.axis.z) <= Number.EPSILON) {
 				throw new Error(`Revolute mate "${mate.id}" axis must be non-zero.`)
 			}
+			if (mate.limits) {
+				assertFiniteNumber(mate.limits.minDeg, `Revolute mate "${mate.id}" minimum limit`)
+				assertFiniteNumber(mate.limits.maxDeg, `Revolute mate "${mate.id}" maximum limit`)
+				if (mate.limits.minDeg > mate.limits.maxDeg) {
+					throw new Error(`Revolute mate "${mate.id}" minimum limit cannot exceed its maximum limit.`)
+				}
+			}
 		}
 	}
 	for (const servo of model.servos) {
@@ -530,6 +537,18 @@ export function validateModel(model: ModelDefinition): void {
 		assertFiniteNumber(servo.homeDeg, `Servo "${servo.id}" home command`)
 		assertFiniteNumber(servo.commandRange.minDeg, `Servo "${servo.id}" minimum command`)
 		assertFiniteNumber(servo.commandRange.maxDeg, `Servo "${servo.id}" maximum command`)
+		if (servo.commandRange.minDeg > servo.commandRange.maxDeg) {
+			throw new Error(`Servo "${servo.id}" minimum command cannot exceed its maximum command.`)
+		}
+		if (servo.homeDeg < servo.commandRange.minDeg || servo.homeDeg > servo.commandRange.maxDeg) {
+			throw new Error(`Servo "${servo.id}" home command must be within its command range.`)
+		}
+		if (servo.maxTorqueNcm !== undefined) {
+			assertPositiveNumber(servo.maxTorqueNcm, `Servo "${servo.id}" maximum torque`)
+		}
+		if (servo.maxSpeedDegPerSec !== undefined) {
+			assertPositiveNumber(servo.maxSpeedDegPerSec, `Servo "${servo.id}" maximum speed`)
+		}
 	}
 }
 

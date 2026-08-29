@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import handModel from "../examples/three-finger-hand.pcad.ts"
 import { extrudeSolidFeature } from "../src/cad/extrude"
-import { capsule, circle, compileModel, component, defineModel, serializeModelGraph, v2 } from "../src/model-dsl"
+import { capsule, circle, compileModel, component, defineModel, serializeModelGraph, validateModel, v2 } from "../src/model-dsl"
 import { normalizeProjectFile } from "../src/project-file"
 
 describe("TypeScript model DSL", () => {
@@ -131,5 +131,27 @@ describe("TypeScript model DSL", () => {
 				model.body("same", { outline: circle(v2(0, 0), 3), depth: 1 })
 			})
 		).toThrow('Duplicate body id "bad/same"')
+	})
+
+	it("rejects invalid limits and actuator values in externally supplied graphs", () => {
+		const invalidLimits = structuredClone(handModel)
+		const revolute = invalidLimits.mates.find((mate) => mate.type === "revolute")
+		if (!revolute || revolute.type !== "revolute") {
+			throw new Error("Expected a revolute mate")
+		}
+		revolute.limits = { minDeg: 20, maxDeg: 10 }
+		expect(() => validateModel(invalidLimits)).toThrow("minimum limit cannot exceed its maximum limit")
+
+		const invalidServo = structuredClone(handModel)
+		const servo = invalidServo.servos[0]
+		if (!servo) {
+			throw new Error("Expected a servo")
+		}
+		servo.homeDeg = 100
+		expect(() => validateModel(invalidServo)).toThrow("home command must be within its command range")
+
+		servo.homeDeg = 10
+		servo.maxTorqueNcm = 0
+		expect(() => validateModel(invalidServo)).toThrow("maximum torque must be a positive finite number")
 	})
 })
