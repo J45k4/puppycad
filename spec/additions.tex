@@ -1,0 +1,1146 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.65\baselineskip}
+
+\newcommand{\Type}[1]{\texttt{#1}}
+\newcommand{\Field}[1]{\ensuremath{\mathrm{#1}}}
+
+\title{Proposed Mathematical Additions\\to the PuppyCAD Design Graph Specification}
+\author{Draft Additions}
+\date{July 16, 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Purpose and Scope}
+
+The PuppyCAD specification describes a design as a graph containing authored
+intent, derived geometry, constraints, and diagnostics. This document proposes
+a more precise mathematical foundation for that graph without prescribing an
+implementation, programming language, storage format, geometry kernel, or
+solver algorithm.
+
+The additions are intended to answer questions such as:
+
+\begin{itemize}
+  \item What exactly is the graph at a particular moment?
+  \item When is a node well-typed?
+  \item What is the difference between a dependency and a geometric relation?
+  \item What does a reference resolve to?
+  \item What does applying an event mean?
+  \item When is evaluator output stale?
+  \item What does it mean for a constraint to be satisfied?
+  \item Can a graph be valid when a feature has failed?
+\end{itemize}
+
+The proposed definitions describe observable semantics. Implementations remain
+free to choose their own data structures, serialization, hashing algorithm,
+solver, kernel, cache, and user interface as long as those choices preserve the
+semantics.
+
+\subsection{Non-goals}
+
+This document does not define:
+
+\begin{itemize}
+  \item a textual or binary file format,
+  \item a concrete representation of identifiers, references, or argument values,
+  \item a particular event storage strategy,
+  \item a numerical constraint-solving algorithm,
+  \item a solid-modeling or topology kernel,
+  \item a query language or selector syntax,
+  \item an API, command-line interface, or user interface.
+\end{itemize}
+
+These may be specified separately. Their observable behavior should conform to
+the abstract semantics defined here.
+
+\section{Common Notation}
+
+Let:
+
+\begin{itemize}
+  \item $I$ be the universe of node identifiers,
+  \item $T$ be the universe of node types,
+  \item $V$ be the universe of argument values,
+  \item $A$ be the universe of authorities, such as users, agents, solvers,
+    kernels, and importers,
+  \item $\mathcal{R}$ be the universe of references,
+  \item $\mathcal{P}(X)$ be the power set of $X$, and
+  \item $X^*$ be the set of finite ordered sequences over $X$.
+\end{itemize}
+
+A node has the existing PuppyCAD form:
+
+\[
+n=(\operatorname{id}(n),\operatorname{type}(n),
+   \operatorname{src}(n),\operatorname{arg}(n)),
+\]
+
+where:
+
+\[
+\operatorname{id}(n)\in I,\qquad
+\operatorname{type}(n)\in T,\qquad
+\operatorname{src}(n)\in\mathcal{R}^*,\qquad
+\operatorname{arg}(n)\in V.
+\]
+
+The precise representation of a reference or argument value is deliberately
+left unspecified.
+
+\section{Graph Snapshots and Event History}
+
+\subsection{Motivation}
+
+The current graph definition places the live node set, root set, and event log
+in one tuple. This makes it unclear whether the node set is independently
+authoritative or the result of folding the log. It also makes implementations
+that retain only a snapshot, only a log, or both difficult to describe.
+
+\subsection{Graph snapshot}
+
+A \textbf{graph snapshot} is:
+
+\[
+S=(N,R),
+\]
+
+where $N$ is a finite set of live nodes and $R\subseteq I$ is a finite set of
+root identifiers. If a domain needs a presentation order among roots, that
+order is a separate relation rather than part of root membership.
+
+The following identity invariants hold:
+
+\[
+\forall n_1,n_2\in N:\
+\operatorname{id}(n_1)=\operatorname{id}(n_2)\implies n_1=n_2,
+\]
+
+and:
+
+\[
+R\subseteq\operatorname{ids}(N),
+\qquad
+\operatorname{ids}(N)=\{\operatorname{id}(n)\mid n\in N\}.
+\]
+
+\subsection{History and folding}
+
+A \textbf{history} is a finite ordered sequence of events:
+
+\[
+H=(e_1,e_2,\ldots,e_k).
+\]
+
+Event application is a partial function:
+
+\[
+\operatorname{apply}:\mathcal{S}\times E\rightharpoonup\mathcal{S},
+\]
+
+where $\mathcal{S}$ is the universe of snapshots. It is partial because an
+event may not be applicable to a particular snapshot. Adding a node whose
+identifier is already live is one example.
+
+Folding a history is defined recursively:
+
+\[
+\operatorname{fold}(S_0,())=S_0
+\]
+
+and:
+
+\[
+\operatorname{fold}(S_0,(e_1,\ldots,e_k))
+=
+\operatorname{apply}
+\left(
+  \operatorname{fold}(S_0,(e_1,\ldots,e_{k-1})),e_k
+\right).
+\]
+
+The current snapshot is therefore:
+
+\[
+S_k=\operatorname{fold}(S_0,H).
+\]
+
+An implementation may store $S_k$, $H$, or both. If it stores both, they must
+satisfy the consistency invariant above.
+
+\subsection{Example}
+
+Suppose the initial snapshot contains only an XY reference plane:
+
+\[
+S_0=(\{p_{xy}\},\{\operatorname{id}(p_{xy})\}).
+\]
+
+The history contains three events:
+
+\begin{enumerate}
+  \item add sketch $s_1$ on $p_{xy}$,
+  \item add rectangle entities to $s_1$, and
+  \item add extrusion $x_1$ from a profile in $s_1$.
+\end{enumerate}
+
+Then:
+
+\[
+S_3=\operatorname{fold}(S_0,(e_1,e_2,e_3)).
+\]
+
+Snapshot $S_3$ describes what currently exists. The history explains how that
+state arose. These are related but distinct concepts.
+
+\section{The Typed Attributed Graph}
+
+\subsection{Motivation}
+
+Listing node types describes an intended vocabulary, but it does not formally
+state which source references and arguments are legal for each type. Without a
+typing relation, the specification cannot distinguish a malformed extrusion
+from a valid one at the abstract level.
+
+\subsection{Type environment}
+
+Let a \textbf{type environment} be a mapping:
+
+\[
+\Gamma:T\rightarrow
+(\operatorname{SrcSig},\operatorname{ArgSig},\operatorname{Class}).
+\]
+
+For every type $t$, $\Gamma(t)$ describes:
+
+\begin{itemize}
+  \item the expected roles and target types of source references,
+  \item the mathematical shape and dimensions of its arguments, and
+  \item its semantic class, such as authored, derived, or diagnostic.
+\end{itemize}
+
+The judgment:
+
+\[
+\Gamma;S\vdash n
+\]
+
+means that node $n$ is well-typed in snapshot $S$. The judgment:
+
+\[
+\Gamma\vdash S
+\]
+
+means that the complete snapshot is well-typed.
+
+At minimum, well-typedness requires:
+
+\begin{enumerate}
+  \item every live node has a unique identifier,
+  \item every root identifies a live node,
+  \item every required reference resolves with an accepted cardinality,
+  \item resolved targets have types permitted by the source signature,
+  \item arguments have the required value kind and physical dimension, and
+  \item node-local invariants hold.
+\end{enumerate}
+
+\subsection{Example: extrusion}
+
+An abstract type rule for an extrusion may require exactly one profile source,
+a distance having dimension $L$, a direction vector or inherited profile
+normal, and an operation that creates, joins, or cuts material:
+
+\[
+\frac{
+  \operatorname{resolve}_S(r_p)=\{p\}
+  \quad
+  \operatorname{type}(p)=\Type{Profile}
+  \quad
+  \dim(d)=L
+  \quad
+  op\in\{\mathrm{create},\mathrm{join},\mathrm{cut}\}
+}{
+  \Gamma;S\vdash
+  (i,\Type{Extrude},(r_p),(d,op))
+}.
+\]
+
+This rule does not say how an extrusion is represented in memory or how a solid
+is calculated. It defines only when the authored fact is meaningful.
+
+\subsection{Open vocabulary}
+
+An open vocabulary is compatible with formal typing. An extension introduces a
+new type together with its source signature, argument signature, and semantic
+class. Qualified type names are useful at the abstract level because the
+existing vocabulary uses names such as \Type{Shell} for more than one concept.
+For example:
+
+\[
+\Type{feature:Shell}\neq\Type{topology:Shell}.
+\]
+
+The exact spelling is not important. The important invariant is that a type
+denotes one semantic contract within a type environment.
+
+\section{Edge Roles and Graph Structure}
+
+\subsection{Motivation}
+
+The source field currently carries several meanings. An extrusion consumes a
+profile, a perpendicular constraint relates two lines, a diagnostic observes a
+failed feature, and a generated face records provenance from an extrusion.
+Treating all of these as one undifferentiated dependency makes evaluation and
+cycle rules unclear.
+
+\subsection{Labelled edges}
+
+Each source position has a role from a set $K$, for example:
+
+\[
+K=\{\mathrm{input},\mathrm{relation},\mathrm{provenance},
+     \mathrm{observation},\mathrm{containment}\}.
+\]
+
+Resolving source references induces a labelled edge relation:
+
+\[
+D_S\subseteq I\times K\times I.
+\]
+
+An edge $(u,k,v)\in D_S$ means that node $v$ refers to node $u$ in role $k$.
+A useful projection is:
+
+\[
+D_S^{\mathrm{input}}
+=
+\{(u,v)\mid(u,\mathrm{input},v)\in D_S\}.
+\]
+
+Corresponding projections exist for provenance, relations, observations, and
+containment. The specification may impose different invariants on them:
+
+\begin{itemize}
+  \item evaluation inputs may be required to form an acyclic graph,
+  \item symmetric constraint relations may contain cycles,
+  \item containment may be required to form a forest, and
+  \item diagnostics must not become material-producing inputs unless a type
+    contract explicitly permits it.
+\end{itemize}
+
+\subsection{Example}
+
+Consider two lines constrained to be perpendicular and then used to define a
+profile. The constraint edges are relational; the path from profile to
+extrusion is an evaluation dependency.
+
+\begin{verbatim}
+line-a -- relation --> perpendicular-constraint <-- relation -- line-b
+   |                                                               |
+   +--------------------- input -----------------------------------+
+                                  |
+                               profile
+                                  |
+                                input
+                                  |
+                               extrude
+\end{verbatim}
+
+The constraint subgraph may contain loops. The material evaluation path is
+directional. Invalidation algorithms need the latter, while a constraint solver
+needs the former.
+
+\section{Reference Semantics}
+
+\subsection{Motivation}
+
+A reference status alone does not state what was selected, whether multiple
+results are intentional, or what cardinality its consumer requires. Staleness
+is also conceptually different from missing or ambiguous resolution.
+
+\subsection{Set-valued resolution}
+
+A reference resolves to a set of targets:
+
+\[
+\operatorname{resolve}_S:
+\mathcal{R}\rightarrow\mathcal{P}(\operatorname{Target}(S)).
+\]
+
+A target may be a whole node or a semantic subfeature of a node. A reference
+also has an expected cardinality:
+
+\[
+\operatorname{card}(r)\in
+\{\mathrm{one},\mathrm{zeroOrOne},\mathrm{oneOrMore},\mathrm{many}\}.
+\]
+
+For a reference that expects exactly one target:
+
+\[
+\operatorname{resolutionStatus}_S(r)=
+\begin{cases}
+\mathrm{missing} & |\operatorname{resolve}_S(r)|=0,\\
+\mathrm{valid} & |\operatorname{resolve}_S(r)|=1,\\
+\mathrm{ambiguous} & |\operatorname{resolve}_S(r)|>1.
+\end{cases}
+\]
+
+For a set-valued query, multiple results may be valid. Ambiguity is therefore
+not equivalent to resolving more than one target. It means resolving to a
+cardinality not accepted by the consuming source position.
+
+Staleness is not a reference-resolution status. It is a relationship between a
+derived fact and the current versions of its sources.
+
+\subsection{Example: semantic face selector}
+
+Suppose an extrusion produces two planar cap faces and several side faces. A
+selector requests ``the cap face whose outward normal is $+Z$.'' If exactly one
+face satisfies that semantic predicate, the selector is valid.
+
+If a later operation splits the cap into two disconnected coplanar faces, the
+same selector may resolve to two faces. A consumer expecting one face now sees
+\Type{ambiguous}; a consumer accepting a face set may continue to be valid.
+
+\subsection{Stability expectation}
+
+The specification need not prescribe a topology-naming algorithm, but it should
+define the desired invariance. If snapshots $S$ and $S'$ preserve the semantic
+evidence named by selector $r$, then resolution should preserve the
+corresponding target under a topology correspondence $\phi$:
+
+\[
+\operatorname{resolve}_{S'}(r)
+=
+\phi(\operatorname{resolve}_S(r)).
+\]
+
+When no unique correspondence exists, the result should be explicitly missing
+or ambiguous rather than silently rebound by creation order.
+
+\section{Events as Atomic State Transitions}
+
+\subsection{Motivation}
+
+The rewrite vocabulary states the intended mutations but not their
+preconditions, atomicity, or failure behavior.
+
+\subsection{Event transition}
+
+Write:
+
+\[
+S\xrightarrow{e}S'
+\]
+
+when applying event $e$ to snapshot $S$ produces snapshot $S'$. An event
+contains an ordered finite sequence of rewrites:
+
+\[
+e=(i,a,(w_1,\ldots,w_m),P),
+\]
+
+where $i$ is the event identity, $a\in A$ is its authority, and $P$ is its
+provenance or precondition record.
+
+An event is \textbf{atomic}: either every rewrite is applicable in order and the
+complete transition occurs, or the snapshot remains unchanged.
+
+\subsection{Add node}
+
+For $S=(N,R)$:
+
+\[
+\frac{
+  \operatorname{id}(n)\notin\operatorname{ids}(N)
+  \quad
+  \Gamma;(N\cup\{n\},R)\vdash n
+}{
+  (N,R)\xrightarrow{\operatorname{AddNode}(n)}(N\cup\{n\},R)
+}.
+\]
+
+\subsection{Replace node}
+
+Replacement preserves semantic identity:
+
+\[
+\frac{
+  \operatorname{id}(n')=i
+  \quad
+  \exists n\in N:\operatorname{id}(n)=i
+  \quad
+  \Gamma;((N-\{n\})\cup\{n'\},R)\vdash n'
+}{
+  (N,R)\xrightarrow{\operatorname{ReplaceNode}(i,n')}
+  ((N-\{n\})\cup\{n'\},R)
+}.
+\]
+
+Preserving the identifier does not automatically mean every semantic reference
+remains valid. Evaluators and reference resolution determine the consequences
+of the changed content.
+
+\subsection{Remove nodes}
+
+Removal can be defined without an implicit cascade:
+
+\[
+(N,R)\xrightarrow{\operatorname{RemoveNodes}(J)}
+(N-\{n\in N\mid\operatorname{id}(n)\in J\},R-J).
+\]
+
+References from remaining nodes may subsequently become missing. A higher-level
+cascade operation can be defined as a computed event containing all required
+removals, but it should not be hidden inside the primitive rewrite.
+
+\subsection{Example: atomic rectangle creation}
+
+Creating a solver-native rectangle may add four lines and eight constraints.
+If the fourth line has a duplicate identifier, applying only the first three
+lines would leave an unintended partial rectangle. Atomic event semantics
+require the complete creation event to fail, leaving the original snapshot
+unchanged.
+
+\section{Authored, Derived, and Diagnostic Facts}
+
+\subsection{Motivation}
+
+The specification places all facts in one dialect, which is useful, but it needs
+rules preventing solver output from being confused with authored intent.
+
+\subsection{Fact classes}
+
+Partition the live nodes by semantic class:
+
+\[
+N=N_A\uplus N_D\uplus N_X,
+\]
+
+where:
+
+\begin{itemize}
+  \item $N_A$ contains authored or imported design intent,
+  \item $N_D$ contains derived evaluator output, and
+  \item $N_X$ contains diagnostics and observations.
+\end{itemize}
+
+This is a semantic partition. It may be represented by node type, provenance,
+authority, or another mechanism.
+
+Every derived or diagnostic node has provenance:
+
+\[
+\operatorname{prov}(n)=(a,v,Q,f),
+\]
+
+where:
+
+\begin{itemize}
+  \item $a\in A$ is the producing authority,
+  \item $v$ identifies the evaluator semantics or version,
+  \item $Q\subseteq I$ is the set of consulted source nodes, and
+  \item $f$ is a fingerprint of the relevant source facts.
+\end{itemize}
+
+The core authority rule is:
+
+\begin{quote}
+An evaluator may create, replace, mark stale, or remove facts for which it has
+authority. It may not silently rewrite authored intent.
+\end{quote}
+
+An evaluator may propose a repair to authored intent, but accepting that
+proposal produces a separate authored event with an appropriate authority.
+
+\subsection{Example: constraint repair}
+
+A line is authored with endpoints $(0,0)$ and $(9.8,0.2)$, together with
+horizontal and length-10 constraints. The solver derives a solved line from
+$(0,0)$ to $(10,0)$.
+
+The solved coordinates are a derived fact. They do not replace the authored
+coordinates. If the user chooses to apply the solved position, that choice is a
+new authored event rather than an unobservable solver mutation.
+
+\section{Provenance, Currency, and Staleness}
+
+\subsection{Motivation}
+
+The specification refers to source hashes but does not define the semantic
+condition that a hash is intended to represent.
+
+\subsection{Definitions}
+
+Let:
+
+\[
+\operatorname{fingerprint}_S(Q)
+\]
+
+be an abstract fingerprint of the source facts in $Q$ that are relevant to an
+evaluator. The concrete fingerprint algorithm is outside the abstract
+specification.
+
+A derived node $d$ with provenance $(a,v,Q,f)$ is \textbf{current} in snapshot
+$S=(N,R)$ when:
+
+\[
+\operatorname{current}_S(d)
+\iff
+Q\subseteq\operatorname{ids}(N)
+\land
+f=\operatorname{fingerprint}_S(Q).
+\]
+
+It is \textbf{stale} when all required sources still exist but their relevant
+facts have changed:
+
+\[
+\operatorname{stale}_S(d)
+\iff
+Q\subseteq\operatorname{ids}(N)
+\land
+f\neq\operatorname{fingerprint}_S(Q).
+\]
+
+It is \textbf{orphaned} when at least one required source no longer exists:
+
+\[
+\operatorname{orphaned}_S(d)
+\iff
+Q\nsubseteq\operatorname{ids}(N).
+\]
+
+Separating stale from orphaned is useful: stale output may be recomputed from
+available inputs, while orphaned output first requires repairing or replacing a
+missing reference.
+
+\subsection{Relevance requirement}
+
+The fingerprint should cover only source facts relevant to the evaluator
+result. Renaming a sketch should not necessarily stale its generated geometry,
+while changing a constrained point should.
+
+The abstract requirement is:
+
+\[
+S\equiv_{E,Q}S'
+\implies
+\operatorname{fingerprint}_S(Q)
+=
+\operatorname{fingerprint}_{S'}(Q),
+\]
+
+where $S\equiv_{E,Q}S'$ means evaluator $E$ observes the same relevant facts
+in both snapshots.
+
+\subsection{Example}
+
+An extrusion result records the profile, distance parameter, direction, and
+operation as its source facts. Changing the display color of the sketch does not
+stale the body. Changing the extrusion distance from 10 mm to 12 mm does.
+
+\section{Evaluators and Evaluation Closure}
+
+\subsection{Motivation}
+
+The execution cycle explains when evaluators run, but not what an evaluator is
+or what it means for evaluation to be complete.
+
+\subsection{Evaluator definition}
+
+An evaluator is an abstract partial function:
+
+\[
+E_i:\mathcal{S}\rightharpoonup\Delta,
+\]
+
+where $\Delta$ is an event or finite sequence of events containing derived
+facts, diagnostics, staleness marks, or removals under that evaluator's
+authority.
+
+An evaluator is \textbf{applicable} when its required inputs exist and satisfy
+its input typing rules. An applicable evaluator may still produce a diagnostic
+instead of its normal output.
+
+Let $\mathcal{E}=\{E_1,\ldots,E_m\}$ be the evaluator set for a chosen target.
+One evaluation step is:
+
+\[
+S_{k+1}=\operatorname{step}_{\mathcal{E}}(S_k).
+\]
+
+A snapshot has reached \textbf{evaluation closure} for target $t$ when no
+applicable evaluator can add a newer required fact or replace a stale required
+fact:
+
+\[
+\operatorname{closed}_{\mathcal{E},t}(S)
+\iff
+\operatorname{step}_{\mathcal{E},t}(S)=S.
+\]
+
+This equality is semantic. Implementations may replace equivalent caches or
+bookkeeping without changing design state.
+
+\subsection{Desired evaluator properties}
+
+The specification should identify which of these properties are required and
+which are desirable:
+
+\begin{itemize}
+  \item \textbf{Soundness:} emitted facts satisfy the semantic contract of their
+    node types.
+  \item \textbf{Authority confinement:} an evaluator changes only facts under
+    its authority.
+  \item \textbf{Determinism:} equivalent inputs produce semantically equivalent
+    outputs.
+  \item \textbf{Termination:} repeated evaluation reaches closure for supported
+    finite inputs.
+  \item \textbf{Confluence:} different valid evaluator schedules reach
+    equivalent closed snapshots.
+  \item \textbf{Locality:} changes outside declared source facts do not change
+    evaluator output.
+\end{itemize}
+
+If strict determinism or confluence is not required for numerical evaluators,
+the specification should define an equivalence relation or tolerance under
+which results are considered the same.
+
+\subsection{Example: failed extrusion}
+
+A profile evaluator detects a closed region. The extrusion evaluator attempts
+to create a body, but the geometry is self-intersecting. It emits a diagnostic
+sourced from the extrusion and profile instead of a generated body.
+
+Evaluation has still reached closure if the diagnostic is current and no
+evaluator can produce a body from those inputs. Failure to create geometry is
+not the same as failure of the graph evaluation mechanism.
+
+\section{Constraint Semantics}
+
+\subsection{Motivation}
+
+The constraint vocabulary describes intended meanings in prose, but it does not
+define the state over which constraints operate or distinguish checking from
+solving.
+
+\subsection{Geometric state}
+
+For a sketch $s$, let:
+
+\[
+x_s\in X_s
+\]
+
+be its geometric state. Components of $x_s$ are the degrees of freedom exposed
+by its entities, such as point coordinates, circle centers, and radii. An
+authored sketch supplies an initial or preferred state:
+
+\[
+x_s^0\in X_s.
+\]
+
+Each constraint $c$ induces a residual function:
+
+\[
+F_c:X_s\rightarrow\mathbb{R}^{m_c}.
+\]
+
+The constraint is satisfied at $x$ under tolerance $\varepsilon_c$ when:
+
+\[
+\lVert F_c(x)\rVert_{W_c}\leq\varepsilon_c,
+\]
+
+where $W_c$ permits dimension-aware scaling of residual components.
+
+\subsection{Example residuals}
+
+For a line with endpoints $p_0=(x_0,y_0)$ and $p_1=(x_1,y_1)$, a horizontal
+constraint has residual:
+
+\[
+F_{\mathrm{horizontal}}(x)=y_1-y_0.
+\]
+
+A vertical constraint has residual:
+
+\[
+F_{\mathrm{vertical}}(x)=x_1-x_0.
+\]
+
+A length constraint with target $d$ has residual:
+
+\[
+F_{\mathrm{length}}(x)=\lVert p_1-p_0\rVert-d.
+\]
+
+Coincidence of points $p$ and $q$ has residual:
+
+\[
+F_{\mathrm{coincident}}(x)=p-q.
+\]
+
+Perpendicular line directions $u$ and $v$ have residual:
+
+\[
+F_{\mathrm{perpendicular}}(x)=u\cdot v.
+\]
+
+These equations define satisfaction. They do not prescribe how a solver finds
+$x$.
+
+\subsection{Constraint policies}
+
+The three policies can be defined as follows:
+
+\begin{itemize}
+  \item A \textbf{driving} constraint participates in determining a solved state
+    $x_s^*$.
+  \item A \textbf{checked} constraint is evaluated at $x_s^*$ but does not alter
+    the admissible solution set.
+  \item An \textbf{advisory} constraint reports its residual without making
+    failure of the relation an evaluation failure.
+\end{itemize}
+
+A solved state for driving constraints $C_D$ satisfies:
+
+\[
+\forall c\in C_D:
+\lVert F_c(x_s^*)\rVert_{W_c}\leq\varepsilon_c.
+\]
+
+When several solutions exist, the specification may define the preferred
+result abstractly as one minimizing deviation from authored intent:
+
+\[
+x_s^*\in
+\operatorname*{argmin}_{x\in X_s}
+d(x,x_s^0)
+\quad
+\text{subject to all driving constraints.}
+\]
+
+The metric $d$ can remain evaluator-defined. Stating the stability objective
+explains why small edits should normally lead to nearby solutions.
+
+\subsection{Constraint statuses}
+
+\begin{itemize}
+  \item \Type{satisfied}: a solution exists and the residual is within tolerance.
+  \item \Type{unsatisfied}: evaluated geometry violates the relation.
+  \item \Type{undefined}: the relation cannot be evaluated, such as an angle
+    involving a zero-length line.
+  \item \Type{ambiguous}: references or solution selection do not determine the
+    intended relation uniquely.
+  \item \Type{overconstrained}: a subset of driving constraints has no common
+    solution, or contains redundancy under a policy that treats redundancy as
+    overconstraint.
+  \item \Type{stale}: the recorded status was derived from source facts that
+    have changed.
+\end{itemize}
+
+\Type{underconstrained} should also be considered as a sketch-solve status. It
+means the solution set retains degrees of freedom:
+
+\[
+\dim(\mathcal{S})>0,
+\]
+
+where $\mathcal{S}\subseteq X_s$ is the set satisfying the driving constraints.
+
+\subsection{Example: constrained rectangle}
+
+A rectangle represented by four lines has eight endpoint points before
+shared-corner constraints are considered. Coincident corner constraints connect
+adjacent endpoints, horizontal and vertical constraints establish orientation,
+and width and height constraints establish size. Even then, the rectangle
+retains global translation unless a point or center is fixed. The solver should
+report the remaining two translational degrees of freedom rather than treating
+the sketch as invalid.
+
+\section{Quantities, Dimensions, and Frames}
+
+\subsection{Motivation}
+
+The specification requires compatible units and inherited frames, but the
+mathematical rules for compatibility and coordinate conversion are implicit.
+
+\subsection{Dimensions and quantities}
+
+Let $\mathcal{D}$ be a free abelian group of physical dimensions generated by
+base dimensions such as length $L$, angle $\Theta$, mass $M$, and time $T$. A
+quantity is:
+
+\[
+q=(v,d,u),
+\]
+
+where $v$ is its numeric value, $d\in\mathcal{D}$ is its dimension, and $u$ is
+a unit representation for that dimension.
+
+Addition and comparison require equal dimensions:
+
+\[
+d(q_1)=d(q_2).
+\]
+
+Multiplication combines dimensions:
+
+\[
+d(q_1q_2)=d(q_1)+d(q_2),
+\]
+
+and division subtracts them. Unit conversion changes the numeric representation
+but not the physical quantity.
+
+For example, 10 mm and 1 cm may be compared because both have dimension $L$ and
+normalize to the same physical quantity. Adding 10 mm to 30 degrees is
+ill-typed regardless of numeric representation.
+
+\subsection{Frames}
+
+Let every frame $f$ define an invertible transform into its parent frame:
+
+\[
+T_f\in\operatorname{Aff}(n),
+\]
+
+or, for rigid mechanical frames, $T_f\in SE(3)$. If frame ancestry connects
+$f_a$ and $f_b$, coordinate conversion is defined by composition:
+
+\[
+p_b=T_b^{-1}T_a p_a.
+\]
+
+Geometric relations involving entities from different frames must either
+convert them into a common frame or be undefined when no common frame
+relationship exists.
+
+For example, a PCB connector frame may be defined relative to a board. An
+enclosure cutout may be defined relative to a part. Assembly instances supply
+transforms that bring both into an assembly frame. A distance constraint between
+the connector and cutout is meaningful only after composing those transforms
+into a shared coordinate system.
+
+\section{Validity Judgments}
+
+\subsection{Motivation}
+
+The word \emph{valid} can refer to graph integrity, reference resolution,
+evaluator currency, constraint satisfaction, geometric validity, or
+manufacturability. A single predicate obscures useful partial states.
+
+\subsection{Independent predicates}
+
+The graph is \textbf{well-formed} when it satisfies identity, root, typing, and
+required-reference invariants:
+
+\[
+\operatorname{WellFormed}_{\Gamma}(S).
+\]
+
+A target is \textbf{resolvable} when its required references resolve with
+accepted cardinalities:
+
+\[
+\operatorname{Resolvable}(S,t).
+\]
+
+A target is \textbf{current} when every required derived fact is current:
+
+\[
+\operatorname{Current}(S,t).
+\]
+
+A target is \textbf{evaluable} when applicable evaluators have sufficient
+well-typed input:
+
+\[
+\operatorname{Evaluable}_{\mathcal{E}}(S,t).
+\]
+
+A target is \textbf{satisfied} under policy $P$ when its required constraints
+satisfy that policy:
+
+\[
+\operatorname{Satisfied}_{P}(S,t).
+\]
+
+A generated body is \textbf{geometrically valid} according to the topology and
+geometry contract:
+
+\[
+\operatorname{GeometryValid}(S,b).
+\]
+
+These predicates should not be collapsed. In particular:
+
+\[
+\operatorname{WellFormed}(S)
+\not\!\!\implies
+\operatorname{Satisfied}(S,t),
+\]
+
+and:
+
+\[
+\operatorname{WellFormed}(S)
+\not\!\!\implies
+\operatorname{GeometryValid}(S,b).
+\]
+
+\subsection{Example}
+
+A graph contains a well-typed extrusion whose profile is self-intersecting. Its
+references resolve, its distance has a length unit, and the evaluator has
+emitted a current diagnostic explaining why no solid exists.
+
+The graph is well-formed and evaluation is current. The extrusion has not
+succeeded, and no geometrically valid body exists. This is an inspectable design
+failure, not graph corruption.
+
+\section{Complete Worked Example}
+
+Consider a sketch containing four lines intended to form a 40 mm by 20 mm
+rectangle, followed by a 10 mm extrusion.
+
+\subsection{Authored nodes}
+
+Let the authored node set contain:
+
+\begin{itemize}
+  \item frame $f_{xy}$,
+  \item sketch $s$ on $f_{xy}$,
+  \item lines $l_1,l_2,l_3,l_4$,
+  \item four coincidence constraints $c_1,\ldots,c_4$,
+  \item two horizontal constraints,
+  \item two vertical constraints,
+  \item width constraint $c_w=40\,\mathrm{mm}$,
+  \item height constraint $c_h=20\,\mathrm{mm}$, and
+  \item extrusion $x$ with distance $10\,\mathrm{mm}$.
+\end{itemize}
+
+These nodes are authored facts even if the initial line coordinates are
+imperfect.
+
+\subsection{Sketch evaluation}
+
+The sketch evaluator reads the sketch entities and constraints:
+
+\[
+Q_s=\{s,l_1,l_2,l_3,l_4,c_1,\ldots,c_h\}.
+\]
+
+It finds a solved state $x_s^*$ satisfying the driving constraints and emits:
+
+\begin{itemize}
+  \item a \Type{SolvedSketch} node, and
+  \item an underconstrained diagnostic reporting two global translational
+    degrees of freedom.
+\end{itemize}
+
+The diagnostic does not make the graph malformed. It describes the solution
+space.
+
+\subsection{Profile and feature evaluation}
+
+The profile evaluator consumes the solved sketch and identifies one bounded
+region $p$. Its provenance records the sketch solution and relevant entity
+identities. The profile is a derived fact, not authored topology.
+
+The extrusion evaluator resolves its profile selector to $\{p\}$, verifies that
+$10\,\mathrm{mm}$ has dimension $L$, and emits a generated body $b$ with
+provenance from $x$ and $p$.
+
+The dependency path is:
+
+\begin{verbatim}
+authored lines + constraints
+            |
+            v
+       solved sketch
+            |
+            v
+          profile
+            |
+            v
+     generated body
+\end{verbatim}
+
+\subsection{Editing the width}
+
+An authored event replaces $c_w$ with a constraint whose value is
+$50\,\mathrm{mm}$ while preserving the constraint identifier. Immediately after
+the event:
+
+\begin{itemize}
+  \item the authored graph remains well-formed,
+  \item the old solved sketch is stale,
+  \item the old profile is stale because its source solution is stale, and
+  \item the generated body is stale through the transitive provenance chain.
+\end{itemize}
+
+Evaluation produces a new solved sketch, profile, and body. Stable authored
+identifiers remain unchanged. Derived topology identifiers may be preserved
+when semantic correspondence exists; otherwise dependent selectors become
+missing or ambiguous rather than silently selecting unrelated topology.
+
+\subsection{Removing a line}
+
+If $l_3$ is removed without a cascade:
+
+\begin{itemize}
+  \item constraints referring to $l_3$ remain authored but have missing
+    references,
+  \item the sketch is no longer resolvable for profile evaluation,
+  \item old derived results become orphaned or stale, and
+  \item diagnostics identify the missing line references.
+\end{itemize}
+
+This state remains well-defined as a partially broken design. A later event may
+restore a line with the same semantic identity or repair the affected
+constraints.
+
+\section{Suggested Organization of the Main Specification}
+
+These additions can be incorporated without turning the main specification
+into an implementation document. A possible structure is:
+
+\begin{enumerate}
+  \item \textbf{Mathematical preliminaries:} identifiers, types, references,
+    snapshots, and histories.
+  \item \textbf{Typed node graph:} type environment, well-formedness, edge
+    roles, and roots.
+  \item \textbf{Reference semantics:} set-valued resolution, cardinality,
+    selectors, and stability.
+  \item \textbf{Transition semantics:} atomic events and rewrite rules.
+  \item \textbf{Fact classes and provenance:} authored, derived, diagnostic,
+    current, stale, and orphaned.
+  \item \textbf{Evaluation semantics:} evaluators, authority, closure, and
+    diagnostics.
+  \item \textbf{Domain relations:} constraint satisfaction, quantities, units,
+    and frames.
+  \item \textbf{Validity judgments:} structural validity separated from
+    evaluation and geometry success.
+  \item \textbf{Node vocabulary:} the existing domain-specific node tables.
+  \item \textbf{Worked examples:} small normative examples exercising the
+    abstract rules.
+\end{enumerate}
+
+The existing vocabulary can then be understood as a collection of type
+declarations inside this semantic framework. The framework says what every
+conforming PuppyCAD graph means; later documents may independently define
+concrete syntax, storage, APIs, kernels, solvers, or user interaction.
+
+\end{document}

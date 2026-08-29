@@ -18,6 +18,8 @@
 
 When making changes always check docs folder if it needs to be updated and update it if needed.
 
+if modifying the spec rerender the pdf version
+
 ## 3. Testing
 
 - When making changes always check if there are relevant unit tests and if not add them. If there are relevant unit tests, run them and update them if needed.
