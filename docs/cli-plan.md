@@ -1,8 +1,8 @@
 # Puppycad CLI Plan
 
-The Puppycad CLI is not a terminal clone of the GUI. It is the control surface for a running PCAD/Puppycad engine server.
+The Puppycad CLI is not a terminal clone of the GUI. It is the control surface for a running PCAD/Puppycad engine server and a compiler frontend for code-first TypeScript models.
 
-For now, do **not** design around a custom `.pcad` DSL or text source format. The source of truth is the server/project engine API. A textual CAD format may come later, but the CLI should first become a reliable client for inspecting, mutating, evaluating, rendering, exporting, and debugging server-backed projects.
+Server projects remain the source of truth for interactive GUI editing and synchronized mutation. For code-first work, a `.pcad.ts` module is the source of truth and compiles into the same project/feature graph consumed by the server engine. Generated `.pcad` JSON is an interchange snapshot or cache, not a second hand-authored CAD language.
 
 ## Design principle
 
@@ -12,7 +12,7 @@ The CLI talks to the PCAD server and exposes engine capabilities in a scriptable
 - useful human output for terminal use
 - deterministic commands
 - stable IDs/names from the engine model
-- no duplicate CAD model inside the CLI
+- no duplicate geometry evaluator inside the CLI
 - CLI behavior should reuse the same APIs as the GUI/server
 
 If something is hard to expose through the CLI, that probably means the server/engine API needs a clearer abstraction.
@@ -20,9 +20,10 @@ If something is hard to expose through the CLI, that probably means the server/e
 ## Architecture
 
 ```text
-CLI -> PCAD server API -> project/feature graph/evaluator/renderer/exporter
+TypeScript model -> deterministic model graph -> project/feature graph
+CLI -> PCAD server API or local compiled graph -> evaluator/renderer/exporter
 GUI -> PCAD server API -> same engine
-Agents/scripts -> CLI or PCAD server API
+Agents/scripts -> TypeScript model, CLI, or PCAD server API
 ```
 
 The CLI may have local convenience commands, but it should not become a separate implementation of CAD operations.

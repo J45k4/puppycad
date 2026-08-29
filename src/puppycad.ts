@@ -5,8 +5,16 @@ import type { BoardShape, LayerDefinition, LayerMaterial, NamedReference, Pad, P
 
 export { PCadPart, PCadProject, PCadProjectSyncError, PuppyCadClient } from "./pcad/project"
 export type { PCadProjectSyncResult } from "./pcad/project"
+export * from "./model-dsl"
 
 export type {
+	AssemblyActuator,
+	AssemblyConnector,
+	AssemblyInstance,
+	AssemblyMate,
+	AssemblyMateReference,
+	AssemblyMateType,
+	AssemblyServoActuator,
 	BaseFeature,
 	BoardShape,
 	ChamferEdgeTarget,
@@ -54,6 +62,7 @@ export type {
 	ResolvedProfileReference,
 	PartProjectItemData,
 	Project,
+	ProjectAssemblyDocument,
 	SchematicReference,
 	SketchProfileReference,
 	SketchEntity,
