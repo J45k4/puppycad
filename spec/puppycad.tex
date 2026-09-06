@@ -10,7 +10,7 @@
 
 \title{PuppyCad: A Graph Dialect for Design State}
 \author{Draft Specification}
-\date{May 9, 2026}
+\date{September 6, 2026}
 
 \begin{document}
 \maketitle
@@ -18,6 +18,170 @@
 \begin{abstract}
 PuppyCad represents design state as a graph of typed semantic nodes. The graph contains authored intent, constraints, evaluatable features, derived geometry, and diagnostics in one dialect. This document defines the core node form, the initial node vocabulary, the event model, and the derived properties used by evaluators. It does not define a concrete text file format; a textual syntax can lower into the graph dialect described here.
 \end{abstract}
+
+\section{Implementation Status and Live SDK Contract}
+
+This section describes the implemented TypeScript SDK as of September 6, 2026.
+The graph vocabulary in the following sections remains a design specification;
+it must not be read as a claim that every node or evaluator is implemented.
+
+\subsection{Reusable Parts and Persistence}
+
+A live project contains reusable part definitions and assembly documents.
+\Type{project.part(id, builder)} replaces one part definition;
+\Type{project.assembly(id, builder)} replaces one assembly.
+Stable ids make reruns update existing definitions. Unrelated documents remain
+unchanged. Each accepted command batch is atomic, saved to disk, broadcast to
+viewers, and recorded as one undo step. Undo history is currently in memory.
+A stale whole-project save is rejected rather than overwriting newer changes.
+
+Part coordinates and dimensions are in millimetres. Assembly instances reference
+part ids and carry independent transforms. Part STL export uses local part
+coordinates, not the assembled pose. Recipes are persisted as ordered
+\Type{solidSteps} alongside the existing sketch and extrusion features;
+these recipes are not yet lowered into the general PCad node vocabulary.
+GUI saves preserve them. Both the solid-feature GUI and TypeScript SDK author
+these recipes. GUI changes update the saved project; they do not rewrite source
+files. Rerunning a TypeScript definition replaces GUI changes to that definition.
+
+\subsection{Solid and Assembly UI Editing}
+
+Parts with solid recipes open in a dedicated feature editor beside the evaluated
+3D preview. Users can add, delete, rename, and reorder extrusion or revolve
+operations; choose join, cut, or intersection; edit extrusion depth, taper,
+translation, source sketch support, revolve angle, and tessellation. The profile
+editor exposes every outline and hole vertex as numerical coordinates and as
+ draggable handles. Profile centres and dimensions can be changed, circle and
+rectangle profiles can replace existing loops, and holes can be added or removed.
+Revolve resizing preserves the minimum radius and height. Profile fillet and
+chamfer radius, vertex indices, and segmentation are editable, as are supported
+source-edge finishes. Kernel restrictions below still apply.
+
+The assembly viewport uses right-button drag to rotate, middle-button drag to
+pan in screen axes, and the wheel to zoom. Pan distance accounts for zoom;
+releasing the button or losing pointer capture ends the drag.
+Rotation picks a pivot under the cursor once at the start of each drag. A surface hit supplies the pivot; an empty-space miss uses a point along the cursor ray at the default view distance (the part preview base distance, or three times the assembly bounding-box diagonal). The pivot stays at its screen position without recentering the view.
+
+The assembly panel edits part references, instance positions, rotations and
+scales, connector attachment and frames, and both endpoints of fixed connections.
+Users can add or remove instances, connectors, and fixed connections, or open the
+referenced part directly. Removing an instance or connector removes dependent
+connections; renaming references updates their users. Fixed-connected poses are
+computed from connector frames, so relative placement is edited at connectors.
+Conflicting loops and scaled fixed-connected instances are rejected.
+
+Edits remain drafts until Apply. Successful Apply validates and evaluates the
+whole candidate, replaces one document through the project command API, saves it,
+broadcasts it, and records one undo step. Invalid geometry or references leave the
+accepted document intact and show an inline error; Discard restores the accepted
+values. Document selection does not create server history entries. Part edits
+refresh assembly previews and subsequent STL exports. Browser reload and project
+undo/redo operate on the persisted recipe. GUI changes are not synchronised back
+to their originating TypeScript file. Existing legacy sketch editors remain
+available for parts without solid recipes.
+
+\subsection{Solid Evaluation}
+
+The shared mesh evaluator uses JSCAD solid operations for SDK part previews,
+assembly previews, CLI geometry queries and PNG rendering, and individual STL export. An extrusion step references an
+existing sketch/extrusion feature. A revolve step stores a closed profile whose
+coordinates are radius and height; the rotation axis is local Z.
+Full revolutions and capped partial revolutions are supported. Negative radii
+and angles outside $(0,360]$ degrees are rejected.
+
+Each step has operation \Type{join}, \Type{cut}, or \Type{intersect}.
+The first step must be a join. Later operations apply in recipe order to the
+accumulated solid. Touching or overlapping additions are combined before export;
+internal coincident faces are not exported as separate parts. Cuts support blind
+sockets as well as through openings. An empty result or invalid operation rejects
+the update. Disconnected material may remain as multiple closed shells in one
+part; a successful export does not certify that a part is physically connected.
+
+Extrusions may specify positive \Type{topScale}, producing a linear taper about
+the sketch origin. Sketch-face attachment uses the source extrusion frame.
+Those source references are not persistent selectors on arbitrary boolean output
+faces. Explicit translations support locating cutting tools and solid features.
+Face-attached additions inherit translations from the source extrusion chain.
+
+\subsection{Fillets, Chamfers, and Mesh Accuracy}
+
+\Type{fillet(featureId, radius, vertices, segments)} replaces selected profile
+corners with tangent circular arcs. On an extrusion these round longitudinal
+edges; on a revolve they create rounded circular edges such as a bowl rim.
+\Type{chamfer} cuts selected profile corners by the specified edge distance.
+Overlapping corner trims, degenerate corners, and invalid radii are rejected.
+
+\Type{filletEdge} supports convex straight source-extrusion edges with a radius
+and a bounded number of tangent segments. Existing source-edge chamfers are also
+included in assembly previews and STL export, including unequal distances.
+Arbitrary concave edges, interacting fillets, and edge selection on boolean or
+revolved output are not general-purpose B-rep filleting capabilities.
+
+Curved surfaces and fillets are tessellated approximations, with explicit segment
+counts. Export triangulation splits T-junctions before forming triangles and
+uses a small weld tolerance. Tests check closed edge incidence, positive signed
+volume, and analytical volumes for representative solids. This is not an exact
+B-rep kernel or a universal manufacturing certification. STEP and GLB export
+remain unimplemented. Printing tolerances, strength, and water retention require
+physical validation.
+
+\subsection{Fixed Assembly Constraints}
+
+The fixed-mate solver aligns full connector frames using translations and XYZ
+Euler rotations in degrees. It traverses the constraint graph independently of
+mate declaration order. A world connector grounds its connected component;
+otherwise the component retains a root instance pose. Consistent closed loops
+are accepted. Conflicting loops reject the update with the responsible mate id.
+Scaled instances cannot participate in fixed constraints.
+
+Saved fixed constraints are solved again when project data is normalized and
+when an assembly is displayed. Updating saved connector coordinates therefore
+updates the assembled pose. Connector coordinates are explicit values, not
+associative references to arbitrary part topology: rerun the authoring script
+when a dimension changes their intended locations. Revolute metadata is preserved,
+but motion, dynamics, and general mixed-joint solving remain unimplemented.
+
+\subsection{Reference Reconstruction and Verification Boundary}
+
+\Type{examples/flower-holder-parts.ts} reconstructs the five distinct bodies in
+\Type{bowl\_with\_flowerholder.gltf} using authored dimensions and solid features,
+not imported triangle bodies. The original file is retained as a regression
+fixture. \Type{examples/flower-holder-live.ts} publishes these parts and their
+assembly to the running viewer.
+
+The bowl is 100 mm tall, with outer radii 85 mm at its base and 112.5 mm at the
+rim, a 2.5 mm floor, and a 2.5 mm wall measured normal to the conical surface.
+The upper ring has radii 97 and 113 mm, is 5 mm thick, and carries four integral
+60 mm legs of radius 4.95 mm. The lower ring has two 25 mm tall walls spanning
+radii 97--100 and 110--113 mm, joined by four socket bridges at heights 20--25 mm.
+Both rings retain the measured open quadrant and asymmetric opening cut planes.
+
+The three-arm holder retains its offset hub, with centre coordinates
+$(45/\sqrt{2},45/\sqrt{2})$ mm relative to the rings, a 16 mm hub radius,
+20 mm arm width, three 6.475 mm radius locating pins, and a 6.65 mm radius stem
+hole. Its 8 mm plate and 10 mm pins form one part. The stem has a 16 mm shaft
+diameter, a 22 mm shoulder diameter, a 3 mm tip fillet, five 5 mm transverse holes,
+and a 3.5 mm transverse connector hole. Total length, including its bottom
+connector, is 264 mm.
+
+All five parts export separately with their lowest surface at local $z=0$.
+The saved assembly reproduces the glTF's partially exploded pose: the bowl is
+offset below the rings, not falsely attached to them. Four leg/socket mates,
+three holder pin mates, one stem mate, and a world anchor give nine fixed
+constraints across five instances. Measured input translations are reconciled
+within sub-micron floating-point export differences.
+
+Regression tests compare every unique vertex and 2,000 area-weighted surface
+samples per part in both directions against the original glTF. The maximum
+permitted sampled surface distance is 0.13 mm; measured differences are below
+0.12 mm, dominated by the source glTF's polygonal approximation of large arcs.
+Tests also require closed mesh edge incidence, positive volume, volume agreement
+within 0.6 percent, and matching assembly translations. Matching-camera renders
+compare the entire saved pose without independent rescaling.
+
+These checks establish digital reference fidelity, not physical fit, strength,
+or water retention. The original clearance dimensions are preserved rather than
+replaced with new untested mechanical design choices.
 
 \section{Introduction}
 
@@ -420,6 +584,7 @@ A PuppyCad graph is valid for a chosen evaluation target when:
 
 Validity does not require every constraint to be satisfied or every feature to succeed. Unsatisfied constraints, failed features, invalid topology, and stale evaluator outputs are valid graph states when represented by diagnostics.
 
+\clearpage
 \section{Execution}
 
 The minimal execution cycle is:

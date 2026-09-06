@@ -5,7 +5,9 @@
 		"indentWidth": 8,
 		"indentStyle": "tab"
 	},
-	"files": {},
+	"files": {
+		"ignore": ["workdir/**"]
+	},
 	"javascript": {
 		"formatter": {
 			"quoteStyle": "double",

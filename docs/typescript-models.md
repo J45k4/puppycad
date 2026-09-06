@@ -1,5 +1,7 @@
 # TypeScript model source
 
+For scripts that edit a live server project, see the [live SDK](live-sdk.md). It separates reusable part definitions from assembly instances and broadcasts edits to the viewer. The source-file compiler described below remains available through the CLI and `project.model(model)`.
+
 PuppyCAD's code-first model layer treats a `.pcad.ts` module as the editable model. The module default-exports the result of `defineModel()` (a named `model` export is also accepted). It does not serialize arbitrary JavaScript functions into a project file.
 
 ```mermaid

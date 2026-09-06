@@ -1,3 +1,5 @@
+import { SolidFeaturePanel } from "./solid-features"
+import { createPartGeometries } from "../part-mesh"
 import type { PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../contract"
 import { extrudeSolidFeature, getExtrudedFaceDescriptors, resolveSketchTargetFrame, type ExtrudedFaceDescriptor, type ExtrudedSolid, type SketchFrame3D } from "../cad/extrude"
 import type { PartAction } from "../part-actions"
@@ -111,7 +113,7 @@ type PreviewSolidVisual = {
 	faces: PreviewFaceVisual[]
 }
 
-type PreviewRendererLike = Pick<THREE.WebGLRenderer, "render" | "setClearColor" | "setPixelRatio" | "setSize">
+type PreviewRendererLike = Pick<THREE.WebGLRenderer, "render" | "setClearColor" | "setPixelRatio" | "setSize"> & Partial<Pick<THREE.WebGLRenderer, "dispose" | "forceContextLoss">>
 
 export type PartEditorState = PartProjectItemData
 
@@ -128,6 +130,7 @@ type PartEditorOptions = {
 	initialState?: PartEditorState
 	initialViewState?: PartEditorViewState
 	onStateChange?: () => void
+	onSolidDocumentChange?: (next: PartEditorState, previous: PartEditorState) => void
 	onViewStateChange?: (state: PartEditorViewState) => void
 	onCadCommand?: (command: CadCommand, previousState: PartEditorState) => void
 	createPreviewRenderer?: (canvas: HTMLCanvasElement) => PreviewRendererLike
@@ -198,6 +201,8 @@ const PREVIEW_SKETCH_POINT_RADIUS = 0.12
 const PREVIEW_SKETCH_LABEL_OFFSET = 0.08
 
 export class PartEditor extends UiComponent<HTMLDivElement> {
+	private disposed = false
+	private readonly handleWindowResize = () => queueFrame(() => this.updatePreviewSize())
 	private readonly sketchCanvas: HTMLCanvasElement
 	private readonly sketchCtx: CanvasRenderingContext2D
 	private readonly previewCanvas: HTMLCanvasElement
@@ -245,6 +250,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewOrbitPivot = new THREE.Vector3()
 	private readonly previewPointer = new THREE.Vector2()
 	private readonly previewRaycaster = new THREE.Raycaster()
+	private get maxPreviewDistance(): number {
+		return this.solidSteps ? 100000 : PREVIEW_MAX_CAMERA_DISTANCE
+	}
+	private solidDocument?: PartEditorState
+	private solidSteps: PartEditorState["solidSteps"]
 	private readonly migrationWarnings: string[]
 	private referencePlaneVisibility: PartProjectReferencePlaneVisibility = {
 		Front: true,
@@ -304,6 +314,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.onStateChange = options?.onStateChange
 		this.onViewStateChange = options?.onViewStateChange
 		this.onCadCommand = options?.onCadCommand
+		this.solidSteps = structuredClone(options?.initialState?.solidSteps)
+		if (this.solidSteps) this.solidDocument = structuredClone(options?.initialState)
 		this.migrationWarnings = [...(options?.initialState?.migrationWarnings ?? [])]
 
 		this.root.style.width = "100%"
@@ -572,13 +584,23 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.style.cursor = "grab"
 		this.previewCanvas.tabIndex = 0
 		this.previewContainer.appendChild(this.previewCanvas)
+		if (this.solidSteps) {
+			const fit = document.createElement("button")
+			fit.textContent = "Fit part"
+			fit.style.cssText = "position:absolute;left:12px;top:12px;z-index:5"
+			fit.onclick = () => {
+				this.fitSolidPreview()
+				this.onViewStateChange?.(this.getViewState())
+			}
+			this.previewContainer.append(fit)
+		}
 
 		this.previewRenderer = createPreviewRenderer(this.previewCanvas, options?.createPreviewRenderer)
 		this.previewRenderer.setPixelRatio(Math.min(2, getDevicePixelRatio()))
 		this.previewRenderer.setClearColor(0xf1f5f9, 1)
 
 		this.previewScene = new THREE.Scene()
-		this.previewCamera = new THREE.PerspectiveCamera(PREVIEW_FIELD_OF_VIEW, 1, 0.01, 200)
+		this.previewCamera = new THREE.PerspectiveCamera(PREVIEW_FIELD_OF_VIEW, 1, 0.01, this.solidSteps ? 1000000 : 200)
 		this.previewCamera.position.set(0, 0.18, this.previewBaseDistance)
 
 		this.previewRootGroup = new THREE.Group()
@@ -611,8 +633,32 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		document.addEventListener("keydown", this.handleDocumentKeyDown, true)
 
 		this.restoreState(options?.initialState)
+		if (this.solidSteps) {
+			const panel = new SolidFeaturePanel(this.getState(), (next) => {
+				const previous = this.getState()
+				this.solidSteps = structuredClone(next.solidSteps)
+				this.solidDocument = structuredClone(next)
+				this.restoreState(next)
+				this.sketchVisible = false
+				this.referencePlaneVisibility = { Front: false, Top: false, Right: false }
+				this.syncPreviewGeometry()
+				this.fitSolidPreview()
+				options?.onSolidDocumentChange?.(this.getState(), previous)
+				this.onStateChange?.()
+			})
+			this.quickActionsRail.remove()
+			const workspace = document.createElement("div")
+			workspace.style.cssText = "display:flex;flex:1;min-height:0;min-width:0"
+			workspace.append(panel.root, this.previewContainer)
+			this.root.replaceChildren(workspace)
+			this.sketchVisible = false
+			this.referencePlaneVisibility = { Front: false, Top: false, Right: false }
+			this.syncPreviewGeometry()
+		}
 		if (options?.initialViewState) {
 			this.applyViewState(options.initialViewState)
+		} else if (this.solidSteps) {
+			this.fitSolidPreview()
 		}
 
 		if (typeof ResizeObserver === "function") {
@@ -621,14 +667,38 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			})
 			this.resizeObserver.observe(this.previewContainer)
 		} else if (typeof window !== "undefined") {
-			window.addEventListener("resize", () => queueFrame(() => this.updatePreviewSize()))
+			window.addEventListener("resize", this.handleWindowResize)
 		}
 
 		queueFrame(() => this.updatePreviewSize())
 	}
 
+	public dispose(): void {
+		if (this.disposed) return
+		this.disposed = true
+		this.resizeObserver?.disconnect()
+		window.removeEventListener("resize", this.handleWindowResize)
+		document.removeEventListener("keydown", this.handleDocumentKeyDown, true)
+		document.removeEventListener("mousemove", this.handleNodePreviewResizeMove)
+		document.removeEventListener("mouseup", this.handleNodePreviewResizeEnd)
+		disposeObject3D(this.previewScene)
+		this.previewRenderer.dispose?.()
+		this.previewRenderer.forceContextLoss?.()
+	}
+
+	private fitSolidPreview(): void {
+		const bounds = new THREE.Box3().setFromObject(this.previewSolidsGroup)
+		if (bounds.isEmpty()) return
+		const center = bounds.getCenter(new THREE.Vector3())
+		this.previewOrbitPivot.copy(center)
+		this.previewPan.copy(center).multiplyScalar(-1)
+		this.previewBaseDistance = Math.max(10, bounds.getSize(new THREE.Vector3()).length() * 0.95)
+		this.drawPreview()
+	}
 	public getState(): PartEditorState {
+		if (this.solidDocument) return structuredClone(this.solidDocument)
 		return {
+			...(this.solidSteps ? { solidSteps: structuredClone(this.solidSteps) } : {}),
 			cad: serializePCadState(this.cadEditor.getState()),
 			tree: {
 				orderedNodeIds: [...this.partTreeState.orderedNodeIds],
@@ -680,7 +750,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewRotation.pitch = state.previewRotation.pitch
 		this.previewPan.set(state.previewPan.x, state.previewPan.y, state.previewPan.z)
 		this.previewOrbitPivot.set(state.previewOrbitPivot.x, state.previewOrbitPivot.y, state.previewOrbitPivot.z)
-		this.previewBaseDistance = THREE.MathUtils.clamp(state.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		this.previewBaseDistance = THREE.MathUtils.clamp(state.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
 		this.refreshReferencePlaneStyles()
 		this.syncPreviewGeometry()
 		this.updateControls()
@@ -1245,6 +1315,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	public listFeatureTreeEntries(): FeatureTreeListEntry[] {
+		if (this.solidSteps) return []
 		return this.partTreeState.orderedNodeIds
 			.map((nodeId): FeatureTreeListEntry | null => {
 				const feature = this.features.find((candidate) => candidate.id === nodeId)
@@ -2312,7 +2383,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		event.preventDefault()
 		this.pendingPreviewSelectionClick = null
 		const zoomFactor = Math.exp(event.deltaY * PREVIEW_ZOOM_SENSITIVITY)
-		this.previewBaseDistance = THREE.MathUtils.clamp(this.previewBaseDistance * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		this.previewBaseDistance = THREE.MathUtils.clamp(this.previewBaseDistance * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
 		this.drawPreview()
 		this.emitViewStateChange()
 	}
@@ -3425,6 +3496,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private updatePreviewSize(): void {
+		if (this.disposed) return
 		const rect = this.previewCanvas.getBoundingClientRect()
 		const width = Math.max(0, Math.floor(rect.width || this.previewContainer.clientWidth || 960))
 		const height = Math.max(0, Math.floor(rect.height || this.previewContainer.clientHeight || 640))
@@ -3439,6 +3511,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private drawPreview(): void {
+		if (this.disposed) return
 		this.syncPreviewView()
 		this.previewRenderer.render(this.previewScene, this.previewCamera)
 	}
@@ -3447,7 +3520,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const rect = this.previewCanvas.getBoundingClientRect()
 		const width = Math.max(1, rect.width || this.previewContainer.clientWidth || 960)
 		const height = Math.max(1, rect.height || this.previewContainer.clientHeight || 640)
-		const cameraDistance = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		const cameraDistance = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
 		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(cameraDistance - (this.previewPan.z + this.previewOrbitPivot.z)))
 		const verticalFovRadians = THREE.MathUtils.degToRad(this.previewCamera.fov)
 		const visibleHeight = 2 * distance * Math.tan(verticalFovRadians / 2)
@@ -3671,11 +3744,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (sketch) {
 			if (sketch.target.type === "face") {
 				const faceHit = this.getPreviewFaceIntersection(clientX, clientY, sketch.target.face)
-				return faceHit ? this.previewContentGroup.worldToLocal(faceHit.intersectionPoint.clone()) : null
+				return faceHit ? this.previewContentGroup.worldToLocal(faceHit.intersectionPoint.clone()) : this.getPreviewDepthAnchorPoint(clientX, clientY)
 			}
 			const selectedPlane = SKETCH_PLANE_TO_REFERENCE_PLANE[sketch.target.plane]
 			const planeHit = this.getReferencePlaneIntersection(clientX, clientY, selectedPlane)
-			return planeHit ? this.previewContentGroup.worldToLocal(planeHit.intersectionPoint.clone()) : null
+			return planeHit ? this.previewContentGroup.worldToLocal(planeHit.intersectionPoint.clone()) : this.getPreviewDepthAnchorPoint(clientX, clientY)
 		}
 
 		const faceHit = this.getPreviewFaceIntersection(clientX, clientY)
@@ -3690,14 +3763,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (planeHit) {
 			return this.previewContentGroup.worldToLocal(planeHit.intersectionPoint.clone())
 		}
-		const viewportCenter = this.getPreviewViewportCenterClientPoint()
-		if (viewportCenter && (Math.abs(viewportCenter.x - clientX) > 1e-3 || Math.abs(viewportCenter.y - clientY) > 1e-3)) {
-			const centerOrbitAnchor = this.getOrbitAnchorPoint(viewportCenter.x, viewportCenter.y)
-			if (centerOrbitAnchor) {
-				return centerOrbitAnchor
-			}
-		}
-		return this.getPreviewDepthAnchorPoint(viewportCenter?.x ?? clientX, viewportCenter?.y ?? clientY)
+		return this.getPreviewDepthAnchorPoint(clientX, clientY)
 	}
 
 	private setPreviewOrbitPivot(nextPivot: THREE.Vector3 | null): void {
@@ -3716,22 +3782,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!this.setPreviewRaycaster(clientX, clientY)) {
 			return null
 		}
-		const fallbackDistance = Math.max(6, Math.min(24, this.previewBaseDistance * 0.65))
-		const cameraForward = this.previewCamera.getWorldDirection(new THREE.Vector3()).normalize()
-		const planePoint =
-			this.previewOrbitPivot.lengthSq() > 1e-12
-				? this.previewContentGroup.localToWorld(this.previewOrbitPivot.clone())
-				: this.previewCamera.position.clone().add(cameraForward.clone().multiplyScalar(fallbackDistance))
-		const denominator = this.previewRaycaster.ray.direction.dot(cameraForward)
-		if (Math.abs(denominator) <= 1e-6) {
-			const fallbackPoint = this.previewRaycaster.ray.origin.clone().add(this.previewRaycaster.ray.direction.clone().multiplyScalar(fallbackDistance))
-			return this.previewContentGroup.worldToLocal(fallbackPoint)
-		}
-		const distanceAlongRay = planePoint.clone().sub(this.previewRaycaster.ray.origin).dot(cameraForward) / denominator
-		const anchorWorldPoint =
-			distanceAlongRay > 0
-				? this.previewRaycaster.ray.origin.clone().add(this.previewRaycaster.ray.direction.clone().multiplyScalar(distanceAlongRay))
-				: this.previewRaycaster.ray.origin.clone().add(this.previewRaycaster.ray.direction.clone().multiplyScalar(fallbackDistance))
+		const anchorWorldPoint = this.previewRaycaster.ray.at(Math.max(1, this.previewBaseDistance), new THREE.Vector3())
 		return this.previewContentGroup.worldToLocal(anchorWorldPoint)
 	}
 
@@ -3883,7 +3934,19 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			features: structuredClone(this.features) as PartFeature[]
 		}
 		const nextSolids: Solid[] = []
-		for (const extrude of this.features.filter((feature): feature is SolidExtrude => feature.type === "extrude")) {
+		if (this.solidSteps) {
+			try {
+				for (const geometry of createPartGeometries({ ...partState, solidSteps: this.solidSteps })) {
+					const material = new THREE.MeshStandardMaterial({ color: 0x65b5a4, roughness: 0.65 })
+					const mesh = new THREE.Mesh(geometry, material)
+					this.previewSolids.push({ extrudeId: "evaluated-part", mesh, fillMaterial: material, edges: [], corners: [], faces: [] })
+					this.previewSolidsGroup.add(mesh)
+				}
+			} catch (error) {
+				this.warningText.textContent = error instanceof Error ? error.message : String(error)
+			}
+		}
+		for (const extrude of this.features.filter((feature): feature is SolidExtrude => !this.solidSteps && feature.type === "extrude")) {
 			try {
 				const extrusion = extrudeSolidFeature(partState, extrude)
 				nextSolids.push(structuredClone(extrusion.solid) as Solid)
@@ -4597,7 +4660,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private syncPreviewView(): void {
-		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, PREVIEW_MAX_CAMERA_DISTANCE)
+		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
 		this.previewRootGroup.position.copy(this.previewPan).add(this.previewOrbitPivot)
 		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
 		this.previewContentGroup.position.copy(this.previewOrbitPivot).multiplyScalar(-1)

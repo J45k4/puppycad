@@ -5,7 +5,12 @@
 	"bin": {
 		"puppycad": "./src/cli.ts"
 	},
+	"exports": {
+		"./sdk": "./src/sdk.ts",
+		"./model-dsl": "./src/model-dsl.ts"
+	},
 	"scripts": {
+		"dev": "NODE_ENV=development bun --hot src/main.ts",
 		"lint": "bunx biome lint .",
 		"lint-fix": "bunx biome lint . --fix",
 		"format": "bunx biome format",
@@ -23,6 +28,7 @@
 		"typescript": "^5"
 	},
 	"dependencies": {
+		"@jscad/modeling": "^2.13.0",
 		"three": "^0.182.0"
 	},
 	"optionalDependencies": {

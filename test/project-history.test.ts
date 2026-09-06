@@ -49,4 +49,15 @@ describe("ProjectView history", () => {
 		await Promise.resolve()
 		expect(treeView.treeView.buildProjectFile().items).toHaveLength(1)
 	})
+	it("preserves assembly data and the selected document across a live update", () => {
+		const view = new ProjectView({ projectId: "assembly-roundtrip", projectName: "Project", onBack: () => undefined })
+		const tree = (view as unknown as { treeView: { restoreFromProjectFile: (project: Project, preserveSelection?: boolean) => void; buildProjectFile: () => Project } }).treeView
+		const assembly = { id: "assembly", name: "Fixture", instances: [], connectors: [{ id: "world", instanceId: null, position: { x: 1, y: 2, z: 3 } }] }
+		const project: Project = { version: 4, revision: 0, items: [{ id: "assembly", name: "Fixture", type: "assembly", data: assembly }], selectedPath: [0] }
+		tree.restoreFromProjectFile(project)
+		expect(tree.buildProjectFile().items[0]).toMatchObject({ data: assembly })
+		tree.restoreFromProjectFile({ ...project, revision: 1, selectedPath: null }, true)
+		expect(tree.buildProjectFile().selectedPath).toEqual([0])
+		expect(tree.buildProjectFile().items[0]).toMatchObject({ data: assembly })
+	})
 })

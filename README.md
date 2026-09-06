@@ -1,5 +1,24 @@
 # puppycad
 
+## Development
+
+Install dependencies with `bun install`, then run `bun dev` to start PuppyCAD at
+http://localhost:5337 in development mode with hot reloading.
+
+## Live TypeScript SDK
+
+Design server-backed projects with reusable parts and an assembly that positions and connects them. The viewer updates after each SDK operation, and the assembly view offers separate STL downloads for supported parts.
+
+```sh
+bun dev
+# In another terminal; prints the project ID and viewer URL:
+bun examples/flower-holder-live.ts
+# Update the same project:
+bun examples/flower-holder-live.ts <project-id>
+```
+
+See [the live SDK guide](docs/live-sdk.md) for part definitions, holes, fixed connections, export limits, and the existing model DSL bridge.
+
 ## TypeScript models
 
 PuppyCAD supports code-first `.pcad.ts` models. TypeScript is the editable source of truth; PuppyCAD evaluates it into a deterministic model graph containing bodies, component instances, frames, mates, and actuators. That graph compiles to the existing v4 project/geometry engine for rendering and export.

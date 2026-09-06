@@ -1,11 +1,14 @@
+import { evaluateSolid } from "./solid-model"
 import type { PartAction } from "./part-actions"
 import { applyPartAction } from "./part-actions"
 import type { PartProjectItemData, Project, ProjectDocument, ProjectDocumentType, ProjectNode } from "./contract"
 import { normalizeProjectFile } from "./project-file"
 import { createPartRuntimeState, createPartRuntimeStateFromFeatures, materializePartFeatures, serializePCadState } from "./pcad/part-state"
 import type { PartFeature } from "./schema"
+import { extrudeSolidFeature } from "./cad/extrude"
 
 export type ProjectCommand =
+	| { type: "upsertDocument"; document: Extract<ProjectDocument, { type: "part" | "assembly" }> }
 	| {
 			type: "createItem"
 			id: string
@@ -75,6 +78,11 @@ export function applySyncedProjectCommands(project: Project, commands: readonly 
 	for (const command of commands) {
 		applySyncedProjectCommand(nextProject, command)
 	}
+	for (const command of commands) {
+		if (command.type === "upsertDocument" && command.document.type === "assembly") {
+			validateAssemblyReferences(nextProject, command.document)
+		}
+	}
 	return nextProject
 }
 
@@ -91,6 +99,9 @@ function applySyncedProjectCommand(project: Project, command: SyncedProjectComma
 
 function applyProjectCommand(project: Project, command: ProjectCommand): void {
 	switch (command.type) {
+		case "upsertDocument":
+			upsertDocument(project, command.document)
+			return
 		case "createItem":
 			createProjectItem(project, command)
 			return
@@ -109,6 +120,90 @@ function applyProjectCommand(project: Project, command: ProjectCommand): void {
 		case "setNodeVisibility":
 			setProjectNodeVisibility(project, command.nodeId, command.visible)
 			return
+		default:
+			throw new ProjectCommandError("invalid_command", "Unsupported project command.")
+	}
+}
+
+function upsertDocument(project: Project, document: Extract<ProjectDocument, { type: "part" | "assembly" }>): void {
+	if (!document || !["part", "assembly"].includes(document.type) || !document.data) {
+		throw new ProjectCommandError("invalid_document", "A part or assembly document with data is required.")
+	}
+	if (document.type === "assembly" && !Array.isArray(document.data?.instances)) {
+		throw new ProjectCommandError("invalid_document", "Assembly instances must be an array.")
+	}
+	if (document.type === "part" && Array.isArray(document.data?.features)) {
+		for (const feature of document.data.features) {
+			if (feature?.type === "extrude" && (!Number.isFinite(feature.depth) || feature.depth <= 0)) {
+				throw new ProjectCommandError("invalid_geometry", "Extrusion depth must be a positive finite number.")
+			}
+		}
+	}
+	const id = normalizeCommandId(document.id, "document id")
+	const normalized = normalizeProjectFile({ ...project, items: [document] })?.items[0]
+	if (!normalized || "kind" in normalized || normalized.type !== document.type) {
+		throw new ProjectCommandError("invalid_document", "Invalid project document.")
+	}
+	if (document.type === "part" && normalized.type === "part") {
+		if (!Array.isArray(document.data?.features) || document.data.features.length !== normalized.data?.features.length) {
+			throw new ProjectCommandError("invalid_document", "Invalid part features.")
+		}
+		if (normalized.data.solidSteps) {
+			try {
+				evaluateSolid(normalized.data)
+			} catch (error) {
+				throw new ProjectCommandError("invalid_geometry", error instanceof Error ? error.message : "Invalid solid operations.")
+			}
+		}
+		const ids = new Set<string>()
+		for (const feature of normalized.data.features) {
+			if (ids.has(feature.id)) throw new ProjectCommandError("invalid_document", "Duplicate feature id.")
+			ids.add(feature.id)
+			if (feature.type === "extrude") {
+				try {
+					extrudeSolidFeature(normalized.data, feature)
+				} catch (error) {
+					throw new ProjectCommandError("invalid_geometry", error instanceof Error ? error.message : "Invalid extrusion.")
+				}
+			}
+		}
+	}
+	if (document.type === "assembly" && normalized.type === "assembly") {
+		for (const key of ["instances", "connectors", "mates", "actuators"] as const) {
+			const original = document.data?.[key] ?? []
+			if (!Array.isArray(original) || original.length !== (normalized.data?.[key]?.length ?? 0)) {
+				throw new ProjectCommandError("invalid_document", `Invalid assembly ${key}.`)
+			}
+		}
+	}
+	const existing = findNodeWithParent(project.items, id)
+	if (existing) {
+		if ("kind" in existing.node || existing.node.type !== document.type) {
+			throw new ProjectCommandError("document_type_conflict", "Cannot replace a different document type.")
+		}
+		existing.siblings[existing.index] = { ...normalized, visible: existing.node.visible ?? normalized.visible }
+	} else {
+		project.items.push(normalized)
+	}
+}
+
+function validateAssemblyReferences(project: Project, document: Extract<ProjectDocument, { type: "assembly" }>): void {
+	const assembly = document.data
+	if (!assembly) throw new ProjectCommandError("invalid_document", "Assembly data is required.")
+	const instances = new Map(assembly.instances.map((instance) => [instance.id, instance]))
+	const connectors = new Map((assembly.connectors ?? []).map((connector) => [connector.id, connector]))
+	for (const instance of assembly.instances) {
+		const part = findNodeById(project.items, instance.partId)
+		if (!part || "kind" in part || part.type !== "part") throw new ProjectCommandError("missing_part", `Assembly part "${instance.partId}" does not exist.`)
+	}
+	for (const connector of connectors.values()) {
+		if (connector.instanceId !== null && !instances.has(connector.instanceId)) throw new ProjectCommandError("missing_instance", "Connector instance does not exist.")
+	}
+	for (const mate of assembly.mates ?? []) {
+		for (const ref of [mate.a, mate.b]) {
+			if (!connectors.has(ref.connectorId) || connectors.get(ref.connectorId)?.instanceId !== ref.instanceId)
+				throw new ProjectCommandError("missing_connector", "Mate connector does not exist on that instance.")
+		}
 	}
 }
 

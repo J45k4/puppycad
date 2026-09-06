@@ -315,6 +315,7 @@ export type Sketch = {
 export type PartFeature = Sketch | SolidExtrude | SolidChamfer
 
 export type PartDocument = {
+	solidSteps?: import("./solid-model").SolidStep[]
 	cad?: SerializedPCadState
 	tree?: PartTreeState
 	features: PartFeature[]

@@ -42,6 +42,8 @@ puppycad --project <project-id> query features --json
 puppycad --server-url http://localhost:5337 --project bracket render --out preview.png
 ```
 
+Run `bun dev` from the repository root to start the GUI and API server in development mode with hot reloading.
+
 Default server can be `http://localhost:5337` while developing. Server URL resolution is:
 
 1. `--server-url`

@@ -4,7 +4,7 @@ import { PartEditor } from "./part"
 import type { PartEditorState, PartEditorViewState } from "./part"
 import { PCBEditor } from "./pcb"
 import { SchemanticEditor, type SchemanticEditorState } from "./schemantic"
-import type { Project, ProjectDocumentType, ProjectFolder as PersistedProjectFolder, ProjectNode as PersistedProjectNode } from "../contract"
+import type { Assembly, Project, ProjectDocumentType, ProjectFolder as PersistedProjectFolder, ProjectNode as PersistedProjectNode } from "../contract"
 import { PCadProject, PCadProjectSyncError, PuppyCadClient, type PCadProjectSyncResult } from "../pcad/project"
 import type { SyncedProjectCommand } from "../project-commands"
 import { PART_PROJECT_DEFAULT_PREVIEW_DISTANCE, PART_PROJECT_DEFAULT_ROTATION, PROJECT_FILE_MIME_TYPE, createProjectFile, normalizeProjectFile, serializeProjectFile } from "../project-file"
@@ -35,11 +35,17 @@ type PartProjectItem = BaseProjectItem & {
 	getViewState: () => PartEditorViewState
 }
 
-type OtherProjectItem = BaseProjectItem & {
-	type: Exclude<ProjectDocumentType, "schemantic" | "part">
+type AssemblyProjectItem = BaseProjectItem & {
+	type: "assembly"
+	editor: AssemblyEditor
+	getState: () => Assembly
 }
 
-export type ProjectItem = SchemanticProjectItem | PartProjectItem | OtherProjectItem
+type OtherProjectItem = BaseProjectItem & {
+	type: Exclude<ProjectDocumentType, "schemantic" | "part" | "assembly">
+}
+
+export type ProjectItem = SchemanticProjectItem | PartProjectItem | AssemblyProjectItem | OtherProjectItem
 
 type ProjectFolder = {
 	id: string
@@ -1487,7 +1493,12 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			this.onItemSelected?.(node)
 		}
 		if (selectionChanged) {
-			this.schedulePersist()
+			if (this.serverBacked) {
+				try {
+					localStorage.setItem(`puppycad-selection:${this.projectId}`, node.id)
+				} catch {}
+				if (this.persistenceEnabled) void this.saveToIndexedDB()
+			} else this.schedulePersist()
 		}
 	}
 
@@ -1499,7 +1510,8 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		partState?: PartEditorState,
 		visible = true,
 		id = this.createProjectNodeId(),
-		partViewState?: PartEditorViewState
+		partViewState?: PartEditorViewState,
+		assemblyState?: Assembly
 	): ProjectItem {
 		const resolvedName = this.resolveItemName(type, name, existingNodes)
 		switch (type) {
@@ -1524,12 +1536,17 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					initialState: partState,
 					initialViewState: partViewState ?? this.loadPartViewState(id),
 					onStateChange: () => {
-						this.schedulePersist()
+						if (!partState?.solidSteps || !this.serverBacked) this.schedulePersist()
 						this.renderItems()
 					},
 					onViewStateChange: (state) => {
 						this.savePartViewState(id, state)
 						this.renderItems()
+					},
+					onSolidDocumentChange: (next, previous) => {
+						this.recordPartUndoSnapshot(id, previous)
+						for (const node of this.idNodeMap.values()) if (isProjectItem(node) && node.type === "assembly") node.editor.refreshParts()
+						this.enqueueCommand({ type: "upsertDocument", document: { id, type: "part", name: resolvedName, data: next } })
 					},
 					onCadCommand: (command, previousState) => {
 						this.recordPartUndoSnapshot(id, previousState)
@@ -1546,8 +1563,21 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					getViewState: () => editor.getViewState()
 				}
 			}
-			case "assembly":
-				return { id, type, name: resolvedName, editor: new AssemblyEditor(), visible }
+			case "assembly": {
+				const editor = new AssemblyEditor({
+					assembly: assemblyState ?? { id, name: resolvedName, instances: [] },
+					getParts: () => this.buildProjectFileEntries(this.items),
+					onChange: (next) => {
+						this.recordUndoSnapshot()
+						this.enqueueCommand({ type: "upsertDocument", document: { id, type: "assembly", name: resolvedName, data: next } })
+						if (!this.serverBacked) this.schedulePersist()
+					},
+					onOpenPart: (partId) => {
+						this.handleSelectionById(partId)
+					}
+				})
+				return { id, type, name: resolvedName, editor, visible, getState: () => editor.getState() }
+			}
 			case "diagram": {
 				const editor = createDiagramEditor()
 				return {
@@ -1824,7 +1854,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private applyProjectSyncResult(result: PCadProjectSyncResult): void {
 		this.updateServerHistoryState(result)
 		this.serverRevision = result.revision
-		this.restoreFromProjectFile(result.project)
+		this.restoreFromProjectFile(result.project, true)
 		if (this.persistenceEnabled) {
 			void this.saveToIndexedDB()
 		}
@@ -2005,7 +2035,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				if (result.originClientId === this.clientId) {
 					return
 				}
-				this.restoreFromProjectFile(result.project)
+				this.restoreFromProjectFile(result.project, true)
 				if (this.persistenceEnabled) {
 					void this.saveToIndexedDB()
 				}
@@ -2125,17 +2155,51 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					visible: node.visible
 				}
 			}
+			if (node.type === "assembly") {
+				return { id: node.id, type: node.type, name: node.name, visible: node.visible, data: node.getState() }
+			}
 			return { id: node.id, type: node.type, name: node.name, visible: node.visible }
 		})
 	}
 
-	private restoreFromProjectFile(projectFile: Project) {
+	private restoreFromProjectFile(projectFile: Project, preserveSelection = false) {
+		let selectedId = preserveSelection && this.selectedPath ? this.getNodeByPath(this.selectedPath)?.id : undefined
+		if (!selectedId && this.serverBacked) {
+			try {
+				selectedId = localStorage.getItem(`puppycad-selection:${this.projectId}`) ?? undefined
+			} catch {}
+		}
+		if (this.persistTimeout !== null) {
+			window.clearTimeout(this.persistTimeout)
+			this.persistTimeout = null
+		}
+		const disposeEditors = (nodes: ProjectNode[]) => {
+			for (const node of nodes) {
+				if (isFolder(node)) disposeEditors(node.children)
+				else if (node.type === "assembly" || node.type === "part") node.editor.dispose()
+			}
+		}
+		disposeEditors(this.items)
 		this.isRestoring = true
 		try {
 			const partViewStates = this.capturePartViewStates()
 			this.items = this.createNodesFromEntries(projectFile.items, partViewStates)
 			this.serverRevision = projectFile.revision
 			this.selectedPath = projectFile.selectedPath ? projectFile.selectedPath.slice() : null
+			if (selectedId) {
+				const findPath = (nodes: ProjectNode[], prefix: number[] = []): number[] | null => {
+					for (const [i, node] of nodes.entries()) {
+						const path = [...prefix, i]
+						if (node.id === selectedId) return path
+						if (isFolder(node)) {
+							const found = findPath(node.children, path)
+							if (found) return found
+						}
+					}
+					return null
+				}
+				this.selectedPath = findPath(this.items)
+			}
 			this.renderItems()
 			if (this.selectedPath) {
 				const selectedNode = this.getNodeByPath(this.selectedPath)
@@ -2182,7 +2246,19 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			const schemanticState = entry.type === "schemantic" ? entry.data : undefined
 			const partState = entry.type === "part" ? entry.data : undefined
 			const partViewState = entry.type === "part" ? (partViewStates.get(entry.id) ?? this.loadPartViewState(entry.id)) : undefined
-			nodes.push(this.createProjectItem(entry.type, entry.name, nodes, schemanticState, partState, entry.visible ?? true, entry.id, partViewState))
+			nodes.push(
+				this.createProjectItem(
+					entry.type,
+					entry.name,
+					nodes,
+					schemanticState,
+					partState,
+					entry.visible ?? true,
+					entry.id,
+					partViewState,
+					entry.type === "assembly" ? entry.data : undefined
+				)
+			)
 		}
 		return nodes
 	}

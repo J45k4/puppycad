@@ -51,7 +51,7 @@ export class PuppyCadClient {
 	private readonly createEventSource?: PCadEventSourceFactory
 
 	public constructor(args?: { fetch?: PCadFetch; apiBasePath?: string; createEventSource?: PCadEventSourceFactory }) {
-		this.fetch = args?.fetch ?? fetch
+		this.fetch = args?.fetch ?? ((input, init) => globalThis.fetch(input, init))
 		this.apiBasePath = args?.apiBasePath?.replace(/\/$/, "") ?? ""
 		this.createEventSource = args?.createEventSource
 	}

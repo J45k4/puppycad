@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createPartSolid } from "./part-mesh"
 
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
@@ -1100,6 +1101,14 @@ function collectProjectGeometry(project: Project): CliGeometry {
 			return
 		}
 		const part = new PCadPart(node.data).getDocument() as PartDocument
+		if (part.solidSteps) {
+			try {
+				bodies.push(toCliGeometryBody(node.id, createPartSolid(part)))
+			} catch (error) {
+				errors.push({ partId: node.id, featureId: "solidSteps", message: formatFileError(error) })
+			}
+			return
+		}
 		for (const feature of part.features) {
 			if (feature.type !== "extrude") {
 				continue

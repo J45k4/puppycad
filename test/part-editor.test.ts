@@ -1,3 +1,4 @@
+import { PartBuilder, v2 } from "../src/sdk"
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Window as HappyDOMWindow } from "happy-dom"
 import * as THREE from "three"
@@ -717,6 +718,62 @@ describe("PartEditor", () => {
 			callback(0)
 			return 1
 		}) as typeof globalThis.requestAnimationFrame
+	})
+
+	it("applies solid UI changes through the document callback with an intact undo snapshot", () => {
+		const builder = new PartBuilder()
+		builder.extrude("base", { outline: [v2(0, 0), v2(20, 0), v2(20, 20), v2(0, 20)], depth: 5 })
+		let previous: unknown
+		let next: unknown
+		const editor = new PartEditor({
+			initialState: builder.document,
+			createPreviewRenderer: () => new FakePreviewRenderer(),
+			onSolidDocumentChange: (n, p) => {
+				next = n
+				previous = p
+			}
+		})
+		const input = editor.root.querySelector<HTMLInputElement>('input[aria-label="Extrusion depth (mm)"]')
+		if (!input) throw Error("Missing depth control")
+		input.value = "15"
+		input.dispatchEvent(new domWindow.Event("change") as unknown as Event)
+		clickButton(domWindow, editor.root, "Apply changes")
+		expect(previous).toEqual(builder.document)
+		expect(next).toEqual(editor.getState())
+		const feature = editor.getState().features.find((f) => f.type === "extrude")
+		expect(feature?.type === "extrude" && feature.depth).toBe(15)
+		const reopened = new PartEditor({ initialState: editor.getState(), createPreviewRenderer: () => new FakePreviewRenderer() })
+		expect(reopened.getState()).toEqual(editor.getState())
+		editor.dispose()
+		reopened.dispose()
+	})
+
+	it("preserves and fits a revolved SDK recipe when saving the part editor", () => {
+		const builder = new PartBuilder()
+		builder.revolve("bowl", { outline: [v2(0, 0), v2(50, 0), v2(75, 55), v2(72, 55), v2(47, 4), v2(0, 4)] })
+		const editor = new PartEditor({ initialState: builder.document, createPreviewRenderer: () => new FakePreviewRenderer() })
+		expect(editor.getState().solidSteps).toEqual(builder.document.solidSteps)
+		expect(editor.getViewState().previewBaseDistance).toBeGreaterThan(150)
+		clickButton(domWindow, editor.root, "Fit part")
+		expect(editor.getViewState().previewOrbitPivot.z).toBeCloseTo(27.5)
+		editor.dispose()
+	})
+	it("releases the preview context once when replaced by a live project update", () => {
+		let disposed = 0
+		let contextsReleased = 0
+		const renderer = Object.assign(new FakePreviewRenderer(), {
+			dispose: () => {
+				disposed++
+			},
+			forceContextLoss: () => {
+				contextsReleased++
+			}
+		})
+		const editor = new PartEditor({ createPreviewRenderer: () => renderer })
+		editor.dispose()
+		editor.dispose()
+		expect(disposed).toBe(1)
+		expect(contextsReleased).toBe(1)
 	})
 
 	it("switches between graphic and node editor modes", () => {
@@ -2030,7 +2087,7 @@ describe("PartEditor", () => {
 		expect(Math.hypot(rotatedPoint.x - startPoint.x, rotatedPoint.y - startPoint.y)).toBeLessThan(2)
 	})
 
-	it("falls back to the view-center target when rotating over empty space", () => {
+	it("falls back along the cursor ray when rotating over empty space", () => {
 		const editor = new PartEditor({
 			createPreviewRenderer: () => new FakePreviewRenderer()
 		})
@@ -2066,13 +2123,14 @@ describe("PartEditor", () => {
 		}
 		partEditor.previewBaseDistance = 48
 		partEditor.drawPreview()
-		const expectedPivot = partEditor.getOrbitAnchorPoint(180, 180)
+		const emptyPoint = findEmptyPreviewPoint(editor, previewCanvas)
+		const expectedPivot = partEditor.getOrbitAnchorPoint(emptyPoint.x, emptyPoint.y)
+		expect(expectedPivot?.distanceTo(partEditor.getOrbitAnchorPoint(180, 180) as THREE.Vector3)).toBeGreaterThan(1)
 		expect(expectedPivot).toBeDefined()
 		if (!expectedPivot) {
-			throw new Error("Expected center fallback pivot")
+			throw new Error("Expected cursor-ray fallback pivot")
 		}
 		expect(partEditor.previewOrbitPivot.length()).toBe(0)
-		const emptyPoint = findEmptyPreviewPoint(editor, previewCanvas)
 
 		rotatePreview(domWindow, previewCanvas, emptyPoint.x, emptyPoint.y, emptyPoint.x + 50, emptyPoint.y + 35)
 

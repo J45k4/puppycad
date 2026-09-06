@@ -126,31 +126,39 @@ export async function putProject(request: Request, projectId: string): Promise<R
 		return Response.json({ ok: false, code: "invalid_project", message: "Invalid project file." }, { status: 400 })
 	}
 
-	try {
-		const currentProject = await loadProject(projectId)
-		if (currentProject) {
-			pushProjectHistory(undoStacksByProjectId, projectId, currentProject)
-			clearProjectRedoHistory(projectId)
+	return withProjectQueue(projectId, async () => {
+		try {
+			const currentProject = await loadProject(projectId)
+			if (currentProject && projectFile.revision !== currentProject.revision) {
+				return Response.json(
+					{ ok: false, code: "revision_conflict", message: "Project changed on the server. Reload before saving a full snapshot.", revision: currentProject.revision },
+					{ status: 409 }
+				)
+			}
+			if (currentProject) {
+				projectFile.revision = currentProject.revision + 1
+			}
+			const project = await persistProject(projectId, projectFile)
+			if (currentProject) {
+				pushProjectHistory(undoStacksByProjectId, projectId, currentProject)
+				clearProjectRedoHistory(projectId)
+			}
+			const originClientId = request.headers.get("X-PuppyCAD-Client-Id")?.trim() || "unknown"
+			broadcastProjectChanged({
+				type: "projectChanged",
+				projectId,
+				revision: project.revision,
+				originClientId,
+				commands: [],
+				project,
+				...getProjectHistoryState(projectId)
+			})
+			return Response.json({ ok: true, projectId, revision: project.revision, project, ...getProjectHistoryState(projectId) })
+		} catch (error) {
+			console.error("Failed to persist project", error)
+			return Response.json({ ok: false, code: "persist_failed", message: "Unable to persist project." }, { status: 500 })
 		}
-		if (currentProject) {
-			projectFile.revision = currentProject.revision + 1
-		}
-		const project = await persistProject(projectId, projectFile)
-		const originClientId = request.headers.get("X-PuppyCAD-Client-Id")?.trim() || "unknown"
-		broadcastProjectChanged({
-			type: "projectChanged",
-			projectId,
-			revision: project.revision,
-			originClientId,
-			commands: [],
-			project,
-			...getProjectHistoryState(projectId)
-		})
-		return Response.json({ ok: true, projectId, revision: project.revision, project, ...getProjectHistoryState(projectId) })
-	} catch (error) {
-		console.error("Failed to persist project", error)
-		return Response.json({ ok: false, code: "persist_failed", message: "Unable to persist project." }, { status: 500 })
-	}
+	})
 }
 
 export async function postProject(request: Request): Promise<Response> {
@@ -181,11 +189,11 @@ export async function postProjectCommands(request: Request, projectId: string): 
 			return Response.json({ ok: false, code: "not_found", message: "Project not found." }, { status: 404 })
 		}
 		try {
-			pushProjectHistory(undoStacksByProjectId, projectId, currentProject)
 			const nextProject = applySyncedProjectCommands(currentProject, commandRequest.commands)
-			clearProjectRedoHistory(projectId)
 			nextProject.revision = currentProject.revision + 1
 			const project = await persistProject(projectId, nextProject)
+			pushProjectHistory(undoStacksByProjectId, projectId, currentProject)
+			clearProjectRedoHistory(projectId)
 			broadcastProjectChanged({
 				type: "projectChanged",
 				projectId,
@@ -197,7 +205,6 @@ export async function postProjectCommands(request: Request, projectId: string): 
 			})
 			return Response.json({ ok: true, projectId, revision: project.revision, project, ...getProjectHistoryState(projectId) })
 		} catch (error) {
-			popProjectHistory(undoStacksByProjectId, projectId)
 			if (error instanceof ProjectCommandError) {
 				return Response.json({ ok: false, code: error.code, message: error.message, revision: currentProject.revision }, { status: 400 })
 			}

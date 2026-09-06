@@ -229,3 +229,18 @@ describe("PCadProject", () => {
 		}
 	})
 })
+
+it("calls the browser fetch with its global receiver", async () => {
+	const original = globalThis.fetch
+	let receiver: unknown
+	globalThis.fetch = function (this: unknown) {
+		receiver = this
+		return Promise.resolve(Response.json({ ok: true }))
+	} as unknown as typeof globalThis.fetch
+	try {
+		await new PuppyCadClient().getHealth()
+		expect(receiver).toBe(globalThis)
+	} finally {
+		globalThis.fetch = original
+	}
+})

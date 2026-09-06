@@ -33,8 +33,10 @@ if command -v latexmk >/dev/null 2>&1; then
 elif command -v pdflatex >/dev/null 2>&1; then
 	pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$out_dir" puppycad.tex
 	pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$out_dir" puppycad.tex
+elif command -v tectonic >/dev/null 2>&1; then
+	tectonic --keep-logs --outdir "$out_dir" puppycad.tex
 else
-	echo "error: install latexmk or pdflatex to render spec/puppycad.tex" >&2
+	echo "error: install latexmk, pdflatex, or tectonic to render spec/puppycad.tex" >&2
 	exit 127
 fi
 

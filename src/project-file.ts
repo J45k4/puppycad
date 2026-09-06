@@ -1,3 +1,4 @@
+import { solveFixedAssembly } from "./assembly-solver"
 import type {
 	Assembly,
 	AssemblyActuator,
@@ -500,7 +501,7 @@ function normalizeAssemblyProjectItemData(input: unknown, defaultId: string, def
 	const actuators = normalizeAssemblyActuators(value.actuators, mateIds)
 	const variables = normalizeVariables(value.variables)
 
-	return {
+	return solveFixedAssembly({
 		id,
 		name,
 		instances,
@@ -508,7 +509,7 @@ function normalizeAssemblyProjectItemData(input: unknown, defaultId: string, def
 		...(mates.length > 0 ? { mates } : {}),
 		...(actuators.length > 0 ? { actuators } : {}),
 		...(Object.keys(variables).length > 0 ? { variables } : {})
-	}
+	})
 }
 
 function normalizeAssemblyInstances(input: unknown): AssemblyInstance[] {
@@ -783,7 +784,9 @@ type LegacyExtrudedModel = {
 	startOffset?: number
 }
 
-function normalizeSchemaPartProjectItemData(input: { features?: unknown; solids?: unknown; migrationWarnings?: unknown; cad?: unknown; tree?: unknown }): PartProjectItemData {
+function normalizeSchemaPartProjectItemData(input: { solidSteps?: unknown; features?: unknown; solids?: unknown; migrationWarnings?: unknown; cad?: unknown; tree?: unknown }): PartProjectItemData {
+	const solidSteps = input.solidSteps === undefined ? undefined : (structuredClone(input.solidSteps) as import("./solid-model").SolidStep[])
+	if (solidSteps !== undefined && !Array.isArray(solidSteps)) throw new Error("Solid steps must be an array.")
 	const featuresInput = Array.isArray(input.features) ? input.features : []
 	const features = featuresInput.map((feature, index) => normalizePartFeature(feature, index)).filter((feature): feature is PartFeature => feature !== undefined)
 	const solids = normalizeSolids(input.solids)
@@ -792,6 +795,7 @@ function normalizeSchemaPartProjectItemData(input: { features?: unknown; solids?
 	const tree = normalizePartTreeState(input.tree)
 
 	return {
+		...(solidSteps ? { solidSteps } : {}),
 		...(cad ? { cad } : {}),
 		...(tree ? { tree } : {}),
 		features,

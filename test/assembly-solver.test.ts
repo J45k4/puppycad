@@ -1,0 +1,56 @@
+import { expect, it } from "bun:test"
+import { AssemblyBuilder, solveFixedAssembly } from "../src/sdk"
+import { createProjectFile, normalizeProjectFile } from "../src/project-file"
+const part = { id: "part", kind: "part" as const }
+it("solves out-of-order fixed mates and re-solves persisted connector edits", () => {
+	const b = new AssemblyBuilder("assembly")
+	const root = b.instance("root", part, { translation: { x: 10, y: 0, z: 0 } })
+	const middle = b.instance("middle", part)
+	const end = b.instance("end", part)
+	const r = b.connector("r", root, { x: 0, y: 0, z: 4 })
+	const m = b.connector("m", middle, { x: 0, y: 0, z: 0 })
+	const mt = b.connector("mt", middle, { x: 0, y: 0, z: 8 })
+	const e = b.connector("e", end, { x: 0, y: 0, z: 0 })
+	b.fasten("end-first", mt, e)
+	b.fasten("root-last", r, m)
+	expect(b.solve().instances[2]?.transform?.translation).toEqual({ x: 10, y: 0, z: 12 })
+	const data = b.solve()
+	const connector = data.connectors?.find((c) => c.id === "mt")
+	if (!connector) throw new Error("connector")
+	connector.position.z = 18
+	const project = createProjectFile({ items: [{ id: "assembly", type: "assembly", name: "Assembly", data }], selectedPath: null })
+	const saved = normalizeProjectFile(JSON.parse(JSON.stringify(project)))?.items[0]
+	if (!saved || "kind" in saved || saved.type !== "assembly") throw new Error("assembly")
+	expect(saved.data?.instances[2]?.transform?.translation?.z).toBe(22)
+})
+it("checks closed loops and rolls back conflicting constraints", () => {
+	const b = new AssemblyBuilder("assembly")
+	const a = b.instance("a", part)
+	const c = b.instance("c", part)
+	const d = b.instance("d", part)
+	const ac = b.connector("a", a, { x: 0, y: 0, z: 0 })
+	const cc = b.connector("c", c, { x: 0, y: 0, z: 0 })
+	const dc = b.connector("d", d, { x: 0, y: 0, z: 0 })
+	b.fasten("a-c", ac, cc)
+	b.fasten("c-d", cc, dc)
+	b.fasten("d-a", dc, ac)
+	expect(b.solve().mates).toHaveLength(3)
+	const bad = b.connector("bad", d, { x: 1, y: 0, z: 0 })
+	expect(() => b.fasten("conflict", bad, ac)).toThrow("Conflicting")
+	expect(b.data.mates).toHaveLength(3)
+})
+it("grounds world connections even when the world reference is on the child side", () => {
+	const b = new AssemblyBuilder("assembly")
+	const a = b.instance("a", part)
+	b.fasten("ground", b.connector("a", a, { x: 0, y: 0, z: 3 }), b.connector("world", null, { x: 5, y: 6, z: 7 }))
+	expect(b.solve().instances[0]?.transform?.translation).toEqual({ x: 5, y: 6, z: 4 })
+})
+it("keeps input immutable and rejects scaled fixed instances", () => {
+	const b = new AssemblyBuilder("assembly")
+	const a = b.instance("a", part, { scale: { x: 2, y: 1, z: 1 } })
+	const c = b.instance("c", part)
+	expect(() => b.fasten("bad", b.connector("a", a, { x: 0, y: 0, z: 0 }), b.connector("c", c, { x: 0, y: 0, z: 0 }))).toThrow("unscaled")
+	const input = structuredClone(b.data)
+	solveFixedAssembly(input)
+	expect(input).toEqual(b.data)
+})

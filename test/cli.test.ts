@@ -1,3 +1,4 @@
+import { PartBuilder, v2 } from "../src/sdk"
 import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -574,3 +575,15 @@ function createProject(part: PartProjectItemData): Project {
 		selectedPath: null
 	}
 }
+
+it("queries evaluated revolve geometry from a persisted SDK part", async () => {
+	const cwd = await createTempDir()
+	const builder = new PartBuilder()
+	builder.revolve("cylinder", { outline: [v2(0, 0), v2(10, 0), v2(10, 20), v2(0, 20)] })
+	await writeFile(join(cwd, "solid.pcad"), JSON.stringify({ schemaVersion: 4, revision: 0, items: [{ id: "part", type: "part", name: "Cylinder", data: builder.document }], selectedPath: null }))
+	const { output, stdout, stderr } = createOutput()
+	const code = await runPuppycadCli(["query", "bodies", "solid.pcad", "--json"], { cwd, output })
+	expect(code).toBe(0)
+	expect(stderr).toEqual([])
+	expect(stdout.join("\n")).toContain("evaluated-solid")
+})
