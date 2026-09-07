@@ -200,3 +200,53 @@ describe("Assembly properties UI", () => {
 		expect(() => validateAssemblyEdit(b, parts)).toThrow("Conflicting")
 	})
 })
+
+it("selects an assembly instance without applying or losing draft edits", () => {
+	const assembly: Assembly = {
+		id: "a",
+		name: "Assembly",
+		instances: [
+			{ id: "first", partId: "p" },
+			{ id: "second", partId: "p" }
+		]
+	}
+	let applied: Assembly | undefined
+	const selections: (string | null)[] = []
+	const properties = new AssemblyProperties(
+		assembly,
+		() => [{ id: "p", name: "Part", type: "part", data: part() }],
+		(next) => {
+			applied = next
+		},
+		undefined,
+		(id) => {
+			selections.push(id)
+		}
+	)
+	edit(properties.root, "Position (mm) X", "12")
+	properties.selectInstance("second")
+	const selectedButton = requireValue(Array.from(properties.root.querySelectorAll("button")).find((b) => b.textContent === "Select second"))
+	expect(selectedButton.getAttribute("aria-pressed")).toBe("true")
+	expect((selectedButton.parentElement as HTMLDetailsElement).open).toBe(true)
+	expect(applied).toBeUndefined()
+	click(properties.root, "Select first")
+	expect(selections).toEqual(["first"])
+	properties.selectInstance(null)
+	expect(properties.root.querySelectorAll('[aria-pressed="true"]').length).toBe(0)
+	click(properties.root, "Apply assembly changes")
+	expect(applied?.instances[0]?.transform?.translation?.x).toBe(12)
+})
+
+it("opens the picked sketch entity and preserves pending solid edits", () => {
+	const original = part()
+	let applied: PartDocument | undefined
+	const panel = new SolidFeaturePanel(original, (next) => {
+		applied = next
+	})
+	edit(panel.root, "Extrusion depth (mm)", "8")
+	panel.selectSource({ stepId: "body", sketchId: "body/sketch", loopIndex: 1, edgeIndex: 0, entityId: "body/sketch/1/0", distance: 0, border: [] })
+	expect(panel.root.querySelector("[data-selected-source]")?.textContent).toContain("body/sketch/1/0")
+	expect(panel.root.querySelector('[aria-label="Selected sketch entity"]')).not.toBeNull()
+	click(panel.root, "Apply changes")
+	expect(applied?.features.find((f) => f.type === "extrude")?.depth).toBe(8)
+})

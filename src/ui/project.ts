@@ -2408,6 +2408,7 @@ function normalizePartEditorViewState(input: unknown): PartEditorViewState | und
 		previewRotation?: unknown
 		previewPan?: unknown
 		previewOrbitPivot?: unknown
+		projection?: unknown
 		previewBaseDistance?: unknown
 	}
 	const referencePlaneVisibility = value.referencePlaneVisibility as Partial<Record<keyof PartEditorViewState["referencePlaneVisibility"], unknown>> | undefined
@@ -2432,6 +2433,7 @@ function normalizePartEditorViewState(input: unknown): PartEditorViewState | und
 		previewRotation: normalizePartViewRotation(value.previewRotation),
 		previewPan: normalizePartViewVector(value.previewPan),
 		previewOrbitPivot: normalizePartViewVector(value.previewOrbitPivot),
+		projection: value.projection === "orthographic" ? "orthographic" : "perspective",
 		previewBaseDistance: typeof value.previewBaseDistance === "number" && Number.isFinite(value.previewBaseDistance) ? value.previewBaseDistance : PART_PROJECT_DEFAULT_PREVIEW_DISTANCE
 	}
 }

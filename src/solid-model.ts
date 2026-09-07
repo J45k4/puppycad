@@ -166,7 +166,7 @@ export function evaluateSolid(document: PartDocument): Geom3 {
 }
 
 /** A face-attached extrusion inherits the explicit translation of its source chain. */
-function extrusionTranslation(document: PartDocument, featureId: string, visited = new Set<string>()): { x: number; y: number; z: number } {
+export function extrusionTranslation(document: PartDocument, featureId: string, visited = new Set<string>()): { x: number; y: number; z: number } {
 	if (visited.has(featureId)) throw new Error("Cyclic extrusion attachment.")
 	visited.add(featureId)
 	const offset = { ...(document.solidSteps?.find((s) => s.featureId === featureId)?.translation ?? { x: 0, y: 0, z: 0 }) }

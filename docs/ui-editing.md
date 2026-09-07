@@ -10,13 +10,13 @@ Open the saved project and choose a part in the project tree. All five reconstru
 4. Edit profile fillets/chamfers, including vertex indices (zero-based), radius/distance, and segment count. Extrusion source-edge finishes also expose their edge and distances.
 5. Click **Apply changes**. A valid edit rebuilds the preview and saves the entire part as one undo step. Invalid geometry shows an error and leaves the last accepted part intact. **Discard changes** restores accepted values.
 
-**Add extrusion**, **Add revolve**, **Move up/down**, and **Delete feature** change the feature sequence. A cut must follow a joined solid; a profile must remain closed. References to a removed source may need to be reattached before Apply. The preview shows the accepted solid while controls contain a draft. Use **Fit part** after orbiting or zooming.
+**Add extrusion**, **Add revolve**, **Move up/down**, and **Delete feature** change the feature sequence. A cut must follow a joined solid; a profile must remain closed. References to a removed source may need to be reattached before Apply. The preview shows the accepted solid while controls contain a draft. Use **Fit part** after orbiting, panning, or zooming; it recenters the geometry and fits the current viewport width and height.
 
 The profile editor preserves the original polygon coordinates until they are edited. Circle replacement constructs a newly tessellated circle; resizing a revolve preserves its minimum radius and height. Apply verifies the complete solid with the same evaluator used for STL export. This does not expand the kernel's supported fillet or boolean cases.
 
 ## Assembly
 
-Open the assembly to edit **Instances**, **Connectors**, and **Fixed connections**. Hold the **right mouse button and drag** in the 3D viewport to rotate; hold the **middle mouse button and drag** to pan; use the wheel to zoom. Right-drag suppresses the browser context menu. Primary touch/pen dragging also rotates.
+Open the assembly to edit **Instances**, **Connectors**, and **Fixed connections**. Click a part in the 3D viewport to highlight its instance and open its properties. Each instance also has a keyboard-accessible **Select** button. Click empty space or press Escape in the viewport to clear selection. Use **Edit part geometry** in the selected instance to open its part definition. Hold the **right mouse button and drag** in the 3D viewport to rotate; hold the **middle mouse button and drag** to pan; use the wheel to zoom toward the cursor. Zoom supports close detail inspection and distant overviews, with only broad numerical safety bounds. **Fit assembly** (F while the viewport is focused) restores the whole model; **Fit selected part** (Shift+F) frames the selected instance. Both preserve the viewing angle. The +/− keys zoom around the viewport center. Right-drag suppresses the browser context menu. Primary touch/pen dragging also rotates.
 
 - Instances choose a reusable part and carry position, rotation, and scale. **Edit part geometry** opens its definition. A change to that definition affects every instance.
 - Connectors attach to an instance or to **World (ground)** and expose their position and rotation.
@@ -32,3 +32,11 @@ Apply writes through the same project command API as the SDK. Server-backed proj
 UI editing changes the saved `.pcad` project, not `examples/flower-holder-parts.ts`. Rerunning the example will replace the corresponding definitions with its source dimensions. Use the assembly's part download buttons to export the currently accepted geometry as STL.
 
 Rotation picks a pivot under the cursor once at the start of each drag. A surface hit supplies the pivot; an empty-space miss uses a point along the cursor ray at the default view distance (the part preview base distance, or three times the assembly bounding-box diagonal). The pivot stays at its screen position without recentering the view.
+
+## Projection
+
+Both part previews and assembly views have a **Projection** selector. **Perspective** shows depth with nearer features appearing larger; **Orthographic** keeps parallel edges parallel. Orthographic close-ups change magnification while keeping the whole part inside the camera depth range, so zoom does not slice through it. Switching preserves the viewing direction and scale at the view target. Orbit, pan, zoom, selection, and Fit work in both modes. Part projection is saved with its local view state; assembly projection is remembered on this browser.
+
+## Selecting a sketch from a solid
+
+Hover over a selectable border to preview its highlight without changing the sketch panel. Click to keep the selection and open its sketch. Moving away clears the hover preview while preserving a clicked selection. The orange highlight follows the nearest rim edges of the evaluated mesh, including when the click lands just inside a hole wall. Click an extrusion outline or hole border in the part preview to highlight its source profile in orange and open the creating feature’s sketch controls. A hole made by a boolean cut selects the cutting feature’s outline. The panel identifies the sketch and source line segment, highlights that segment in the profile preview, and preserves pending draft edits. Current picking supports straight, untapered extrusion profiles, including translated and face-attached features; revolved and finished edges do not yet have source picking. Tessellated circles expose their actual line segments.

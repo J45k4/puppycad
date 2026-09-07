@@ -1,3 +1,6 @@
+import { pickSolidSketchSource, sourceRimSegments } from "./solid-source"
+import { projectionControl, matchOrthographic, fitOrthographicDepth, type Projection } from "./projection"
+import { partContentBounds, partFitDistance } from "./part-fit"
 import { SolidFeaturePanel } from "./solid-features"
 import { createPartGeometries } from "../part-mesh"
 import type { PartProjectItemData, PartProjectPreviewRotation, PartProjectReferencePlaneVisibility } from "../contract"
@@ -118,6 +121,7 @@ type PreviewRendererLike = Pick<THREE.WebGLRenderer, "render" | "setClearColor" 
 export type PartEditorState = PartProjectItemData
 
 export type PartEditorViewState = {
+	projection?: Projection
 	sketchVisible: boolean
 	referencePlaneVisibility: PartProjectReferencePlaneVisibility
 	previewRotation: PartProjectPreviewRotation
@@ -209,6 +213,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly previewRenderer: PreviewRendererLike
 	private readonly previewScene: THREE.Scene
 	private readonly previewCamera: THREE.PerspectiveCamera
+	private readonly orthographicCamera = new THREE.OrthographicCamera()
+	private projection: Projection = "perspective"
+	private projectionSelect?: HTMLSelectElement
+	private get activePreviewCamera(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+		return this.projection === "orthographic" ? this.orthographicCamera : this.previewCamera
+	}
 	private readonly previewRootGroup: THREE.Group
 	private readonly previewContentGroup: THREE.Group
 	private readonly previewReferenceGroup: THREE.Group
@@ -253,6 +263,11 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private get maxPreviewDistance(): number {
 		return this.solidSteps ? 100000 : PREVIEW_MAX_CAMERA_DISTANCE
 	}
+	private solidPanel?: SolidFeaturePanel
+	private sourceHighlight?: THREE.LineSegments
+	private selectedSource: ReturnType<typeof pickSolidSketchSource> = null
+	private sourceHoverTimer?: ReturnType<typeof setTimeout>
+	private sourceEdges?: THREE.Vector3[]
 	private solidDocument?: PartEditorState
 	private solidSteps: PartEditorState["solidSteps"]
 	private readonly migrationWarnings: string[]
@@ -584,6 +599,16 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewCanvas.style.cursor = "grab"
 		this.previewCanvas.tabIndex = 0
 		this.previewContainer.appendChild(this.previewCanvas)
+		this.projectionSelect = projectionControl(this.projection, (mode) => {
+			this.projection = mode
+			this.drawPreview()
+			this.onViewStateChange?.(this.getViewState())
+		})
+		this.projectionSelect.style.position = "absolute"
+		this.projectionSelect.style.right = "12px"
+		this.projectionSelect.style.top = "12px"
+		this.projectionSelect.style.zIndex = "5"
+		this.previewContainer.append(this.projectionSelect)
 		if (this.solidSteps) {
 			const fit = document.createElement("button")
 			fit.textContent = "Fit part"
@@ -646,6 +671,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				options?.onSolidDocumentChange?.(this.getState(), previous)
 				this.onStateChange?.()
 			})
+			this.solidPanel = panel
 			this.quickActionsRail.remove()
 			const workspace = document.createElement("div")
 			workspace.style.cssText = "display:flex;flex:1;min-height:0;min-width:0"
@@ -674,6 +700,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	public dispose(): void {
+		clearTimeout(this.sourceHoverTimer)
 		if (this.disposed) return
 		this.disposed = true
 		this.resizeObserver?.disconnect()
@@ -687,12 +714,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private fitSolidPreview(): void {
-		const bounds = new THREE.Box3().setFromObject(this.previewSolidsGroup)
+		const bounds = partContentBounds(this.previewContentGroup, this.previewSolidsGroup)
 		if (bounds.isEmpty()) return
 		const center = bounds.getCenter(new THREE.Vector3())
 		this.previewOrbitPivot.copy(center)
 		this.previewPan.copy(center).multiplyScalar(-1)
-		this.previewBaseDistance = Math.max(10, bounds.getSize(new THREE.Vector3()).length() * 0.95)
+		const aspect = (this.previewContainer.clientWidth || 800) / (this.previewContainer.clientHeight || 500)
+		this.previewBaseDistance = partFitDistance(bounds, PREVIEW_FIELD_OF_VIEW, aspect)
 		this.drawPreview()
 	}
 	public getState(): PartEditorState {
@@ -732,11 +760,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				y: this.previewOrbitPivot.y,
 				z: this.previewOrbitPivot.z
 			},
+			projection: this.projection,
 			previewBaseDistance: this.previewBaseDistance
 		}
 	}
 
 	public applyViewState(state: PartEditorViewState): void {
+		this.projection = state.projection ?? "perspective"
+		if (this.projectionSelect) this.projectionSelect.value = this.projection
 		this.sketchVisible = state.sketchVisible
 		this.referencePlaneVisibility = {
 			Front: state.referencePlaneVisibility.Front,
@@ -2210,6 +2241,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerDown = (event: PointerEvent): void => {
+		clearTimeout(this.sourceHoverTimer)
 		this.previewCanvas.focus({ preventScroll: true })
 		const isLeftMouseClick = event.pointerType === "mouse" ? event.button === 0 : false
 		const isRightMouseClick = event.pointerType === "mouse" ? event.button === 2 : event.isPrimary && event.button === 0
@@ -2261,6 +2293,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handlePreviewPointerMove = (event: PointerEvent): void => {
+		if (this.solidPanel && !this.isRotatingPreview && !this.isPanningPreview && event.buttons === 0) {
+			clearTimeout(this.sourceHoverTimer)
+			this.sourceHoverTimer = setTimeout(() => {
+				if (!this.disposed) this.selectSolidSourceAt(event.clientX, event.clientY, true)
+			}, 60)
+			return
+		}
 		if (this.pendingPreviewSelectionClick) {
 			const dx = event.clientX - this.pendingPreviewSelectionClick.startX
 			const dy = event.clientY - this.pendingPreviewSelectionClick.startY
@@ -2336,6 +2375,67 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.emitViewStateChange()
 	}
 
+	private selectSolidSourceAt(clientX: number, clientY: number, hover = false): void {
+		const rect = this.previewCanvas.getBoundingClientRect()
+		this.syncPreviewView()
+		this.activePreviewCamera.updateMatrixWorld()
+		this.previewContentGroup.updateWorldMatrix(true, true)
+		const ray = new THREE.Raycaster()
+		let chosen: ReturnType<typeof pickSolidSketchSource> = null
+		const units = this.getPreviewPanUnitsPerPixel()
+		const document = this.getState()
+		for (const [dx, dy] of [
+			[0, 0],
+			[4, 0],
+			[-4, 0],
+			[0, 4],
+			[0, -4]
+		]) {
+			const pointer = new THREE.Vector2(((clientX + (dx ?? 0) - rect.left) / rect.width) * 2 - 1, 1 - ((clientY + (dy ?? 0) - rect.top) / rect.height) * 2)
+			ray.setFromCamera(pointer, this.activePreviewCamera)
+			const hit = ray.intersectObject(this.previewSolidsGroup, true)[0]
+			if (!hit) continue
+			const source = pickSolidSketchSource(document, this.previewContentGroup.worldToLocal(hit.point.clone()), Math.max(units.x, units.y) * 6)
+			if (source && (!chosen || source.distance < chosen.distance)) chosen = source
+		}
+		if (!hover) {
+			this.selectedSource = chosen
+			if (chosen) this.solidPanel?.selectSource(chosen)
+		}
+		this.previewCanvas.style.cursor = chosen ? "pointer" : "grab"
+		this.drawSourceHighlight(chosen ?? (hover ? this.selectedSource : null))
+		this.drawPreview()
+	}
+
+	private drawSourceHighlight(chosen: ReturnType<typeof pickSolidSketchSource>): void {
+		if (this.sourceHighlight) {
+			this.sourceHighlight.removeFromParent()
+			this.sourceHighlight.geometry.dispose()
+			;(this.sourceHighlight.material as THREE.LineBasicMaterial).dispose()
+			this.sourceHighlight = undefined
+		}
+		if (chosen) {
+			const edges: THREE.Vector3[] = this.sourceEdges ?? []
+			if (!this.sourceEdges)
+				this.previewSolidsGroup.traverse((object) => {
+					if (!(object instanceof THREE.Mesh)) return
+					const geometry = new THREE.EdgesGeometry(object.geometry, 15)
+					const position = geometry.getAttribute("position")
+					const matrix = this.previewContentGroup.matrixWorld.clone().invert().multiply(object.matrixWorld)
+					for (let i = 0; i < position.count; i++) edges.push(new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(matrix))
+					geometry.dispose()
+				})
+			this.sourceEdges = edges
+			this.sourceHighlight = new THREE.LineSegments(
+				new THREE.BufferGeometry().setFromPoints(sourceRimSegments(chosen, edges)),
+				new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: false })
+			)
+			this.sourceHighlight.renderOrder = 20
+			this.previewContentGroup.add(this.sourceHighlight)
+		}
+		this.drawPreview()
+	}
+
 	private handlePreviewPointerUp = (event: PointerEvent): void => {
 		if (typeof this.previewCanvas.hasPointerCapture === "function" && Number.isFinite(event.pointerId) && this.previewCanvas.hasPointerCapture(event.pointerId)) {
 			this.previewCanvas.releasePointerCapture(event.pointerId)
@@ -2350,7 +2450,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				const dy = endY - pendingSelection.startY
 				if (dx * dx + dy * dy <= PREVIEW_CLICK_MOVE_TOLERANCE * PREVIEW_CLICK_MOVE_TOLERANCE) {
 					event.preventDefault()
-					this.selectPreviewTargetAt(pendingSelection.startX, pendingSelection.startY)
+					if (this.solidPanel) this.selectSolidSourceAt(pendingSelection.startX, pendingSelection.startY)
+					else this.selectPreviewTargetAt(pendingSelection.startX, pendingSelection.startY)
 				}
 			}
 		}
@@ -2359,6 +2460,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.reverseRotatePreview = false
 		this.lastRotationPointer = null
 		if (event.type === "pointerleave" || event.type === "pointercancel") {
+			clearTimeout(this.sourceHoverTimer)
+			if (this.solidPanel) this.drawSourceHighlight(this.selectedSource)
 			this.hoveredReferencePlane = null
 			this.hoveredExtrudeId = null
 			this.hoveredFaceId = null
@@ -3028,8 +3131,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.syncPreviewView()
 		this.previewScene.updateMatrixWorld(true)
-		this.previewCamera.updateMatrixWorld(true)
-		const projected = this.previewContentGroup.localToWorld(localPoint.clone()).project(this.previewCamera)
+		this.activePreviewCamera.updateMatrixWorld(true)
+		const projected = this.previewContentGroup.localToWorld(localPoint.clone()).project(this.activePreviewCamera)
 		if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y) || !Number.isFinite(projected.z)) {
 			return null
 		}
@@ -3513,7 +3616,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private drawPreview(): void {
 		if (this.disposed) return
 		this.syncPreviewView()
-		this.previewRenderer.render(this.previewScene, this.previewCamera)
+		this.previewRenderer.render(this.previewScene, this.activePreviewCamera)
 	}
 
 	private getPreviewPanUnitsPerPixel(): Point2D {
@@ -3521,7 +3624,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		const width = Math.max(1, rect.width || this.previewContainer.clientWidth || 960)
 		const height = Math.max(1, rect.height || this.previewContainer.clientHeight || 640)
 		const cameraDistance = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
-		const distance = Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(cameraDistance - (this.previewPan.z + this.previewOrbitPivot.z)))
+		const distance = this.projection === "orthographic" ? cameraDistance : Math.max(PREVIEW_MIN_CAMERA_DISTANCE, Math.abs(cameraDistance - (this.previewPan.z + this.previewOrbitPivot.z)))
 		const verticalFovRadians = THREE.MathUtils.degToRad(this.previewCamera.fov)
 		const visibleHeight = 2 * distance * Math.tan(verticalFovRadians / 2)
 		return {
@@ -3599,7 +3702,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.syncPreviewView()
 		this.previewScene.updateMatrixWorld(true)
-		this.previewCamera.updateMatrixWorld(true)
+		this.activePreviewCamera.updateMatrixWorld(true)
 
 		const pointer = { x: clientX, y: clientY }
 		const maxDistanceSquared = PREVIEW_CORNER_HIT_TOLERANCE * PREVIEW_CORNER_HIT_TOLERANCE
@@ -3655,7 +3758,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		this.syncPreviewView()
 		this.previewScene.updateMatrixWorld(true)
-		this.previewCamera.updateMatrixWorld(true)
+		this.activePreviewCamera.updateMatrixWorld(true)
 
 		const pointer = { x: clientX, y: clientY }
 		const maxDistanceSquared = PREVIEW_EDGE_HIT_TOLERANCE * PREVIEW_EDGE_HIT_TOLERANCE
@@ -3728,7 +3831,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private projectWorldPointToClient(worldPoint: THREE.Vector3, rect: DOMRect): (Point2D & { depth: number }) | null {
-		const projected = worldPoint.clone().project(this.previewCamera)
+		const projected = worldPoint.clone().project(this.activePreviewCamera)
 		if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y) || !Number.isFinite(projected.z) || projected.z < -1 || projected.z > 1) {
 			return null
 		}
@@ -3865,9 +3968,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.previewPointer.copy(pointer)
 		this.syncPreviewView()
-		this.previewCamera.updateMatrixWorld()
+		this.activePreviewCamera.updateMatrixWorld()
 		this.previewScene.updateMatrixWorld(true)
-		this.previewRaycaster.setFromCamera(this.previewPointer, this.previewCamera)
+		this.previewRaycaster.setFromCamera(this.previewPointer, this.activePreviewCamera)
 		return true
 	}
 
@@ -3903,6 +4006,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private syncPreviewGeometry(): void {
+		clearTimeout(this.sourceHoverTimer)
+		this.sourceEdges = undefined
+		this.selectedSource = null
+		if (this.sourceHighlight) {
+			this.sourceHighlight.removeFromParent()
+			this.sourceHighlight.geometry.dispose()
+			;(this.sourceHighlight.material as THREE.LineBasicMaterial).dispose()
+			this.sourceHighlight = undefined
+		}
 		for (const solid of this.previewSolids) {
 			this.previewSolidsGroup.remove(solid.mesh)
 			for (const edge of solid.edges) {
@@ -4661,9 +4773,14 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 	private syncPreviewView(): void {
 		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
+		matchOrthographic(this.previewCamera, this.orthographicCamera, this.previewCamera.position.z)
 		this.previewRootGroup.position.copy(this.previewPan).add(this.previewOrbitPivot)
 		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
 		this.previewContentGroup.position.copy(this.previewOrbitPivot).multiplyScalar(-1)
+		if (this.projection === "orthographic") {
+			this.previewRootGroup.updateWorldMatrix(true, true)
+			fitOrthographicDepth(this.orthographicCamera, new THREE.Box3().setFromObject(this.previewContentGroup))
+		}
 	}
 
 	private getFirstVisibleReferencePlane(): ReferencePlaneName | null {

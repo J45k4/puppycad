@@ -1,3 +1,4 @@
+import type { SketchSource } from "./solid-source"
 import type { PartDocument } from "../schema"
 import type { Point2D } from "../types"
 import { PartBuilder, circle, rectangle, v2 } from "../sdk"
@@ -13,6 +14,15 @@ export class SolidFeaturePanel {
 	private draft: PartDocument
 	private loops = new Map<string, Point2D[][]>()
 	private selected = 0
+	private source: SketchSource | null = null
+	public selectSource(source: SketchSource): void {
+		const index = this.draft.solidSteps?.findIndex((step) => step.id === source.stepId) ?? -1
+		if (index < 0) return
+		this.selected = index
+		this.source = source
+		this.render()
+		this.root.querySelector("[data-selected-source]")?.scrollIntoView?.({ block: "nearest" })
+	}
 	private status = document.createElement("p")
 	constructor(
 		private accepted: PartDocument,
@@ -82,6 +92,7 @@ export class SolidFeaturePanel {
 		steps.forEach((step, i) => {
 			const entry = button(`${i + 1}. ${step.id} · ${step.operation}`, () => {
 				this.selected = i
+				this.source = null
 				this.render()
 			})
 			entry.setAttribute("aria-pressed", String(i === this.selected))
@@ -211,7 +222,17 @@ export class SolidFeaturePanel {
 		this.loops.set(step.id, loops)
 		const profiles = section(this.root, step.type === "revolve" ? "Revolve profile (radius / height)" : "Sketch profile and holes", true)
 		loops.forEach((points, index) => {
-			const group = section(profiles, index === 0 ? "Outline" : `Hole ${index}`, index === 0)
+			const picked = this.source?.stepId === step.id && this.source.loopIndex === index
+			const group = section(profiles, index === 0 ? "Outline" : `Hole ${index}`, index === 0 || picked)
+			if (picked && this.source) {
+				group.setAttribute("data-selected-source", "true")
+				group.style.borderColor = "#d98200"
+				group.style.background = "#fff4db"
+				note(
+					group,
+					`Selected sketch: ${this.source.sketchId}. Entity: ${this.source.entityId ?? `profile segment ${this.source.edgeIndex}`}. Feature: ${step.id} (${step.operation}).`
+				)
+			}
 			const minX = Math.min(...points.map((p) => p.x))
 			const maxX = Math.max(...points.map((p) => p.x))
 			const minY = Math.min(...points.map((p) => p.y))
@@ -242,7 +263,7 @@ export class SolidFeaturePanel {
 				this.render()
 				this.changed()
 			})
-			this.profileSvg(group, points)
+			this.profileSvg(group, points, picked ? this.source?.edgeIndex : undefined)
 			const shape = section(group, "Replace profile shape")
 			let radius = 10
 			let segments = 64
@@ -325,7 +346,7 @@ export class SolidFeaturePanel {
 				})
 			)
 	}
-	private profileSvg(parent: HTMLElement, points: Point2D[]) {
+	private profileSvg(parent: HTMLElement, points: Point2D[], selectedEdge?: number) {
 		const ns = "http://www.w3.org/2000/svg"
 		const svg = document.createElementNS(ns, "svg")
 		svg.setAttribute("viewBox", "0 0 300 190")
@@ -342,6 +363,21 @@ export class SolidFeaturePanel {
 		polygon.setAttribute("fill", "#83c8b4")
 		polygon.setAttribute("stroke", "#257965")
 		svg.append(polygon)
+		if (selectedEdge !== undefined) {
+			const a = points[selectedEdge]
+			const b = points[(selectedEdge + 1) % points.length]
+			if (a && b) {
+				const line = document.createElementNS(ns, "line")
+				line.setAttribute("x1", String(150 + (a.x - cx) * scale))
+				line.setAttribute("y1", String(95 - (a.y - cy) * scale))
+				line.setAttribute("x2", String(150 + (b.x - cx) * scale))
+				line.setAttribute("y2", String(95 - (b.y - cy) * scale))
+				line.setAttribute("stroke", "#e68a00")
+				line.setAttribute("stroke-width", "4")
+				line.setAttribute("aria-label", "Selected sketch entity")
+				svg.append(line)
+			}
+		}
 		const draw = () => polygon.setAttribute("points", points.map((p) => `${150 + (p.x - cx) * scale},${95 - (p.y - cy) * scale}`).join(" "))
 		draw()
 		points.forEach((p, i) => {

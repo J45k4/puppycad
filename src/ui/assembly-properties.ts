@@ -36,11 +36,14 @@ export class AssemblyProperties {
 	readonly root = document.createElement("aside")
 	private draft: Assembly
 	private status = document.createElement("p")
+	private selectedInstance: string | null = null
+	private instanceRows = new Map<string, HTMLDetailsElement>()
 	constructor(
 		private accepted: Assembly,
 		private getParts: () => ProjectNode[],
 		private apply: (next: Assembly) => void,
-		private openPart?: (id: string) => void
+		private openPart?: (id: string) => void,
+		private onSelectInstance?: (id: string | null) => void
 	) {
 		this.draft = structuredClone(accepted)
 		this.root.style.cssText = panelStyle
@@ -50,11 +53,26 @@ export class AssemblyProperties {
 	public refreshChoices(): void {
 		this.render()
 	}
+	public selectInstance(id: string | null): void {
+		this.selectedInstance = id
+		for (const [instanceId, row] of this.instanceRows) {
+			const selected = instanceId === id
+			row.style.borderColor = selected ? "#246bd1" : "#cbd5e1"
+			row.style.background = selected ? "#e8f0ff" : "transparent"
+			row.querySelector("button")?.setAttribute("aria-pressed", String(selected))
+			if (selected) {
+				row.open = true
+				if (row.parentElement?.tagName === "DETAILS") (row.parentElement as HTMLDetailsElement).open = true
+				row.scrollIntoView?.({ block: "nearest" })
+			}
+		}
+	}
 	private changed = () => {
 		this.status.textContent = "Unsaved assembly changes."
 	}
 	private render() {
 		this.root.replaceChildren()
+		this.instanceRows.clear()
 		const title = document.createElement("h2")
 		title.textContent = "Assembly"
 		title.style.margin = "0"
@@ -91,6 +109,13 @@ export class AssemblyProperties {
 		const instances = section(this.root, `Instances (${this.draft.instances.length})`, true)
 		for (const instance of this.draft.instances) {
 			const row = section(instances, instance.id)
+			this.instanceRows.set(instance.id, row)
+			const pick = button(`Select ${instance.id}`, () => {
+				this.selectInstance(instance.id)
+				this.onSelectInstance?.(instance.id)
+			})
+			pick.setAttribute("aria-pressed", String(this.selectedInstance === instance.id))
+			row.append(pick)
 			field(row, "Instance name", instance.id, (v) => {
 				if (!v.trim() || this.draft.instances.some((i) => i !== instance && i.id === v)) {
 					this.status.textContent = "Instance names must be unique and nonempty."
@@ -224,6 +249,7 @@ export class AssemblyProperties {
 				this.changed()
 			})
 		)
+		this.selectInstance(this.selectedInstance)
 	}
 	private unique(prefix: string, values: { id: string }[]): string {
 		let id = `${prefix}-${values.length + 1}`

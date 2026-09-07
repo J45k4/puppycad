@@ -1,8 +1,11 @@
+import { projectionControl, type Projection } from "./projection"
+import { assemblyZoom, anchorAssemblyZoom, assemblyFitHalfHeight } from "./assembly-zoom"
+import { button } from "./model-fields"
 import { pickOrbitPivot, orbitAssemblyTarget } from "./orbit-pivot"
 import { bindAssemblyOrbit, panAssemblyTarget } from "./assembly-orbit"
 import { AssemblyProperties } from "./assembly-properties"
 import { requireValue } from "../required"
-import { AmbientLight, Box3, Color, DirectionalLight, Group, Mesh, MeshLambertMaterial, OrthographicCamera, Vector2, Scene, Vector3, WebGLRenderer } from "three"
+import { AmbientLight, Box3, Color, DirectionalLight, Group, Mesh, MeshLambertMaterial, OrthographicCamera, PerspectiveCamera, Raycaster, Vector2, Scene, Vector3, WebGLRenderer } from "three"
 import type { Assembly, ProjectNode, ProjectPartDocument } from "../contract"
 import { createPartGeometries, exportPartStl } from "../part-mesh"
 import { transformMatrix, solveFixedAssembly } from "../assembly-solver"
@@ -28,15 +31,27 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 		const title = document.createElement("strong")
 		title.textContent = `${this.assembly.name} · ${this.assembly.instances.length} instances · ${this.assembly.mates?.length ?? 0} connections`
 		const hint = document.createElement("span")
-		hint.textContent = "Right-drag to rotate · Middle-drag to pan · Scroll to zoom · Dimensions in mm"
+		hint.textContent = "Click a part to select · Right-drag to rotate · Middle-drag to pan · Scroll to zoom at cursor · F to fit · Dimensions in mm"
 		heading.append(title, hint)
 		this.root.append(heading)
 		const viewport = document.createElement("div")
 		viewport.style.cssText = "flex:1;min-height:300px;overflow:hidden;touch-action:none;position:relative"
 		viewport.tabIndex = 0
-		viewport.setAttribute("aria-label", "Assembly preview. Hold the right mouse button and drag to rotate. Hold the middle button and drag to pan. Arrow keys rotate; plus and minus zoom.")
+		viewport.setAttribute(
+			"aria-label",
+			"Assembly preview. Click a part to select it; Escape clears selection. Hold the right mouse button and drag to rotate. Hold the middle button and drag to pan. Arrow keys rotate; plus and minus zoom. F fits the assembly; Shift+F fits the selected part."
+		)
 		const workspace = document.createElement("div")
 		workspace.style.cssText = "display:flex;flex:1;min-height:0"
+		let selectPreviewInstance = (_id: string | null) => {}
+		let selectedInstance: string | null = null
+		let fitView = (_selected: boolean) => {}
+		const fitAll = button("Fit assembly", () => fitView(false))
+		fitAll.title = "Fit assembly (F)"
+		const fitSelected = button("Fit selected part", () => fitView(true))
+		fitSelected.title = "Fit selected part (Shift+F)"
+		fitSelected.disabled = true
+		heading.append(fitAll, fitSelected)
 		const properties = new AssemblyProperties(
 			this.assembly,
 			args?.getParts ?? (() => []),
@@ -46,7 +61,8 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 				title.textContent = `${next.name} · ${next.instances.length} instances · ${next.mates?.length ?? 0} connections`
 				this.refreshPreview()
 			},
-			args?.onOpenPart
+			args?.onOpenPart,
+			(id) => selectPreviewInstance(id)
 		)
 		workspace.append(properties.root, viewport)
 		this.root.append(workspace)
@@ -55,6 +71,19 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 		this.root.append(footer)
 		let initialized = false
 		let render = () => {}
+		let projection: Projection = "orthographic"
+		try {
+			projection = localStorage.getItem("puppycad-assembly-projection") === "perspective" ? "perspective" : "orthographic"
+		} catch {}
+		heading.append(
+			projectionControl(projection, (mode) => {
+				projection = mode
+				try {
+					localStorage.setItem("puppycad-assembly-projection", mode)
+				} catch {}
+				render()
+			})
+		)
 		let disposeRenderer = () => {}
 		const initialize = () => {
 			if (initialized || !this.root.isConnected) return
@@ -89,7 +118,9 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 					const material = new MeshLambertMaterial({ color: partColors.get(part.id) })
 					for (const geometry of createPartGeometries(part.data)) {
 						geometry.applyMatrix4(transformMatrix(instance.transform))
-						group.add(new Mesh(geometry, material))
+						const mesh = new Mesh(geometry, material)
+						mesh.userData.instanceId = instance.id
+						group.add(mesh)
 					}
 				} catch (error) {
 					errors.push(`${part.name}: ${error instanceof Error ? error.message : error}`)
@@ -128,6 +159,8 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 			let zoom = 1
 			const camera = new OrthographicCamera(-size, size, size, -size, 0.01, size * 20)
 			camera.up.set(0, 0, 1)
+			const perspective = new PerspectiveCamera((2 * Math.atan(0.55 / 3) * 180) / Math.PI, 1, size * 0.01, size * 20)
+			const activeCamera = () => (projection === "perspective" ? perspective : camera)
 			const renderer = new WebGLRenderer({ antialias: true })
 			renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
 			renderer.domElement.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block"
@@ -155,7 +188,45 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 				camera.lookAt(center)
 				camera.updateProjectionMatrix()
 				renderer.setSize(width, height)
-				renderer.render(scene, camera)
+				perspective.position.copy(camera.position)
+				perspective.quaternion.copy(camera.quaternion)
+				perspective.aspect = aspect
+				perspective.zoom = zoom
+				perspective.updateProjectionMatrix()
+				perspective.updateMatrixWorld()
+				renderer.render(scene, activeCamera())
+			}
+			fitView = (selected) => {
+				const fitBounds = selected ? new Box3() : bounds.clone()
+				if (selected) for (const child of group.children) if (child.userData.instanceId === selectedInstance) fitBounds.expandByObject(child)
+				if (fitBounds.isEmpty()) return
+				render()
+				const halfHeight = assemblyFitHalfHeight(camera, fitBounds, (viewport.clientWidth || 800) / (viewport.clientHeight || 500)) * (projection === "perspective" ? 1.25 : 1)
+				center.copy(fitBounds.getCenter(new Vector3()))
+				pivot.copy(center)
+				zoom = Math.max(1e-5, Math.min(1e5, (size * 0.55) / halfHeight))
+				render()
+			}
+			selectPreviewInstance = (id) => {
+				selectedInstance = id
+				fitSelected.disabled = !id
+				for (const child of group.children) {
+					if (child instanceof Mesh) (child.material as MeshLambertMaterial).emissive.setHex(child.userData.instanceId === id ? 0x2459a0 : 0)
+				}
+				properties.selectInstance(id)
+				render()
+			}
+			viewport.onclick = (event) => {
+				if (event.button !== 0) return
+				const rect = viewport.getBoundingClientRect()
+				const pointer = new Vector2(((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1, 1 - ((event.clientY - rect.top) / Math.max(1, rect.height)) * 2)
+				const raycaster = new Raycaster()
+				camera.updateMatrixWorld()
+				group.updateWorldMatrix(true, true)
+				raycaster.setFromCamera(pointer, activeCamera())
+				const hit = raycaster.intersectObjects(group.children, true)[0]
+				selectPreviewInstance(hit?.object.userData.instanceId ?? null)
+				viewport.focus({ preventScroll: true })
 			}
 			bindAssemblyOrbit(
 				viewport,
@@ -174,26 +245,41 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 				(clientX, clientY) => {
 					const rect = viewport.getBoundingClientRect()
 					const pointer = new Vector2(((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1, 1 - ((clientY - rect.top) / Math.max(1, rect.height)) * 2)
-					pivot = pickOrbitPivot(camera, pointer, [group], size * 3)
+					pivot = pickOrbitPivot(activeCamera(), pointer, [group], size * 3)
 				}
 			)
 			viewport.onwheel = (event) => {
 				event.preventDefault()
-				zoom = Math.max(0.2, Math.min(10, zoom * Math.exp(-event.deltaY * 0.001)))
+				const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight || 500 : 1)
+				const nextZoom = assemblyZoom(zoom, pixels)
+				const rect = viewport.getBoundingClientRect()
+				const pointer = new Vector2(((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1, 1 - ((event.clientY - rect.top) / Math.max(1, rect.height)) * 2)
+				anchorAssemblyZoom(camera, center, pointer, nextZoom / zoom)
+				zoom = nextZoom
 				render()
 			}
 			viewport.onkeydown = (event) => {
+				if (event.key.toLowerCase() === "f") {
+					event.preventDefault()
+					fitView(event.shiftKey)
+					return
+				}
+				if (event.key === "Escape") {
+					selectPreviewInstance(null)
+					return
+				}
 				if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "-"].includes(event.key)) return
 				event.preventDefault()
 				if (event.key === "ArrowLeft") yaw -= 0.1
 				if (event.key === "ArrowRight") yaw += 0.1
 				if (event.key === "ArrowUp") pitch = Math.min(1.5, pitch + 0.1)
 				if (event.key === "ArrowDown") pitch = Math.max(-1.5, pitch - 0.1)
-				if (event.key === "+") zoom = Math.min(10, zoom * 1.1)
-				if (event.key === "-") zoom = Math.max(0.2, zoom / 1.1)
+				if (event.key === "+") zoom = assemblyZoom(zoom, -Math.log(1.1) / 0.001)
+				if (event.key === "-") zoom = assemblyZoom(zoom, Math.log(1.1) / 0.001)
 				render()
 			}
-			render()
+			selectPreviewInstance(selectedInstance)
+			fitView(false)
 		}
 		this.refreshPreview = () => {
 			disposeRenderer()
