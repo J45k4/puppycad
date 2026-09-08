@@ -169,11 +169,14 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 			const center = bounds.isEmpty() ? new Vector3() : bounds.getCenter(new Vector3())
 			const size = bounds.isEmpty() ? 100 : Math.max(bounds.getSize(new Vector3()).length(), 1)
 			let pivot = center.clone()
-			let yaw = -Math.PI / 4
-			let pitch = Math.PI / 5
+			const yaw = -Math.PI / 4
+			const pitch = Math.PI / 5
 			let zoom = 1
 			const camera = new OrthographicCamera(-size, size, size, -size, 0.01, size * 20)
 			camera.up.set(0, 0, 1)
+			camera.position.set(Math.cos(yaw) * Math.cos(pitch), Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch))
+			camera.lookAt(new Vector3())
+			const orientation = camera.quaternion.clone()
 			const perspective = new PerspectiveCamera((2 * Math.atan(0.55 / 3) * 180) / Math.PI, 1, size * 0.01, size * 20)
 			const activeCamera = () => (projection === "perspective" ? perspective : camera)
 			const renderer = new WebGLRenderer({ antialias: true })
@@ -199,8 +202,11 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 				camera.right = halfHeight * aspect
 				camera.top = halfHeight
 				camera.bottom = -halfHeight
-				camera.position.set(center.x + Math.cos(yaw) * Math.cos(pitch) * size * 3, center.y + Math.sin(yaw) * Math.cos(pitch) * size * 3, center.z + Math.sin(pitch) * size * 3)
-				camera.lookAt(center)
+				camera.position
+					.set(0, 0, size * 3)
+					.applyQuaternion(orientation)
+					.add(center)
+				camera.quaternion.copy(orientation)
 				camera.updateProjectionMatrix()
 				renderer.setSize(width, height)
 				perspective.position.copy(camera.position)
@@ -246,11 +252,7 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 			bindAssemblyOrbit(
 				viewport,
 				(dx, dy) => {
-					const nextYaw = yaw - dx * 0.01
-					const nextPitch = Math.max(-1.5, Math.min(1.5, pitch + dy * 0.01))
-					orbitAssemblyTarget(center, pivot, yaw, pitch, nextYaw, nextPitch)
-					yaw = nextYaw
-					pitch = nextPitch
+					orbitAssemblyTarget(center, pivot, orientation, dx * 0.01, dy * 0.01)
 					render()
 				},
 				(dx, dy) => {
@@ -285,10 +287,11 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 				}
 				if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "-"].includes(event.key)) return
 				event.preventDefault()
-				if (event.key === "ArrowLeft") yaw -= 0.1
-				if (event.key === "ArrowRight") yaw += 0.1
-				if (event.key === "ArrowUp") pitch = Math.min(1.5, pitch + 0.1)
-				if (event.key === "ArrowDown") pitch = Math.max(-1.5, pitch - 0.1)
+				if (event.key.startsWith("Arrow")) {
+					const horizontal = event.key === "ArrowLeft" ? 0.1 : event.key === "ArrowRight" ? -0.1 : 0
+					const vertical = event.key === "ArrowUp" ? 0.1 : event.key === "ArrowDown" ? -0.1 : 0
+					orbitAssemblyTarget(center, pivot, orientation, horizontal, vertical)
+				}
 				if (event.key === "+") zoom = assemblyZoom(zoom, -Math.log(1.1) / 0.001)
 				if (event.key === "-") zoom = assemblyZoom(zoom, Math.log(1.1) / 0.001)
 				render()

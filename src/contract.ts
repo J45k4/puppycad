@@ -526,6 +526,7 @@ export type SchemanticProjectItemData = {
 export type PartProjectPreviewRotation = {
 	yaw: number
 	pitch: number
+	roll?: number
 }
 
 export type PartProjectReferencePlaneVisibility = {

@@ -1,3 +1,4 @@
+import { screenRotation } from "../src/ui/orbit-pivot"
 import { PartBuilder, v2 } from "../src/sdk"
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Window as HappyDOMWindow } from "happy-dom"
@@ -745,8 +746,15 @@ describe("PartEditor", () => {
 				expect(draws).toBe(beforeDraws)
 				expect(frames).toHaveLength(1)
 				expect(saved).toHaveLength(0)
-				if (button === 2) expect(editor.getViewState().previewRotation.yaw).toBeCloseTo(before.previewRotation.yaw + 0.2)
-				else expect(editor.getViewState().previewPan).not.toEqual(before.previewPan)
+				if (button === 2) {
+					const rotation = editor.getViewState().previewRotation
+					const actual = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation.pitch, rotation.yaw, rotation.roll ?? 0))
+					const expected = new THREE.Quaternion().setFromEuler(
+						new THREE.Euler(before.previewRotation.pitch, before.previewRotation.yaw, before.previewRotation.roll ?? 0)
+					)
+					expected.premultiply(screenRotation(0.2, 0.2))
+					expect(actual.angleTo(expected)).toBeLessThan(1e-7)
+				} else expect(editor.getViewState().previewPan).not.toEqual(before.previewPan)
 				frames.shift()?.(0)
 				expect(draws).toBe(beforeDraws + 1)
 				dispatchPreviewPointer(domWindow, canvas, "pointerup", 200, 200, button)
@@ -790,6 +798,31 @@ describe("PartEditor", () => {
 			editor.dispose()
 			globalThis.requestAnimationFrame = original
 		}
+	})
+
+	it("orbits through the poles in current screen axes and restores roll", () => {
+		const editor = new PartEditor({ createPreviewRenderer: () => new FakePreviewRenderer() })
+		const canvas = getPreviewCanvas(editor.root)
+		setCanvasRect(canvas)
+		editor.applyViewState({ ...editor.getViewState(), previewRotation: { yaw: 0, pitch: 0 } })
+		rotatePreview(domWindow, canvas, 180, 180, 180, 180 + Math.PI * 100)
+		const quaternion = (state: ReturnType<PartEditor["getViewState"]>) => {
+			const r = state.previewRotation
+			return new THREE.Quaternion().setFromEuler(new THREE.Euler(r.pitch, r.yaw, r.roll ?? 0))
+		}
+		const upsideDown = quaternion(editor.getViewState())
+		expect(new THREE.Vector3(0, 1, 0).applyQuaternion(upsideDown).y).toBeCloseTo(-1)
+		rotatePreview(domWindow, canvas, 180, 180, 210, 180)
+		const state = editor.getViewState()
+		expect(quaternion(state).angleTo(screenRotation(0.3, 0).multiply(upsideDown))).toBeLessThan(1e-7)
+		rotatePreview(domWindow, canvas, 180, 180, 180, 220)
+		rotatePreview(domWindow, canvas, 180, 180, 210, 180)
+		const rolled = editor.getViewState()
+		expect(Math.abs(rolled.previewRotation.roll ?? 0)).toBeGreaterThan(0.01)
+		const reopened = new PartEditor({ createPreviewRenderer: () => new FakePreviewRenderer(), initialViewState: rolled })
+		expect(quaternion(reopened.getViewState()).angleTo(quaternion(rolled))).toBeLessThan(1e-7)
+		editor.dispose()
+		reopened.dispose()
 	})
 
 	it("applies solid UI changes through the document callback with an intact undo snapshot", () => {

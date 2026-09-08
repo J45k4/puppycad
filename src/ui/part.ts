@@ -1,3 +1,4 @@
+import { screenRotation } from "./orbit-pivot"
 import { extrusionFor, stepLoops } from "../solid-edit"
 import { extrusionTranslation } from "../solid-model"
 import type { ModelNavigationNode } from "./model-navigation"
@@ -788,7 +789,8 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			},
 			previewRotation: {
 				yaw: this.previewRotation.yaw,
-				pitch: this.previewRotation.pitch
+				pitch: this.previewRotation.pitch,
+				roll: this.previewRotation.roll ?? 0
 			},
 			previewPan: {
 				x: this.previewPan.x,
@@ -819,6 +821,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		}
 		this.previewRotation.yaw = state.previewRotation.yaw
 		this.previewRotation.pitch = state.previewRotation.pitch
+		this.previewRotation.roll = state.previewRotation.roll ?? 0
 		this.previewPan.set(state.previewPan.x, state.previewPan.y, state.previewPan.z)
 		this.previewOrbitPivot.set(state.previewOrbitPivot.x, state.previewOrbitPivot.y, state.previewOrbitPivot.z)
 		this.previewBaseDistance = THREE.MathUtils.clamp(state.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
@@ -2402,10 +2405,12 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.lastRotationPointer = { x: event.clientX, y: event.clientY }
 		if (this.isRotatingPreview) {
 			const direction = this.reverseRotatePreview ? -1 : 1
-			this.previewRotation.yaw -= dx * 0.01 * direction
-			this.previewRotation.pitch -= dy * 0.01 * direction
-			const limit = Math.PI / 2 - 0.1
-			this.previewRotation.pitch = Math.min(limit, Math.max(-limit, this.previewRotation.pitch))
+			const orientation = new THREE.Quaternion().setFromEuler(this.previewEuler())
+			orientation.premultiply(screenRotation(-dx * 0.01 * direction, -dy * 0.01 * direction)).normalize()
+			const rotation = new THREE.Euler().setFromQuaternion(orientation)
+			this.previewRotation.pitch = rotation.x
+			this.previewRotation.yaw = rotation.y
+			this.previewRotation.roll = rotation.z
 		} else if (this.isPanningPreview) {
 			const panScale = this.getPreviewPanUnitsPerPixel()
 			this.previewPan.x += dx * panScale.x
@@ -3914,7 +3919,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (this.previewOrbitPivot.distanceToSquared(targetPivot) <= 1e-12) {
 			return
 		}
-		const rotation = new THREE.Euler(this.previewRotation.pitch, this.previewRotation.yaw, 0, this.previewRootGroup.rotation.order)
+		const rotation = this.previewEuler()
 		const currentRotatedPivot = this.previewOrbitPivot.clone().applyEuler(rotation)
 		const nextRotatedPivot = targetPivot.clone().applyEuler(rotation)
 		this.previewPan.add(this.previewOrbitPivot).sub(currentRotatedPivot).sub(targetPivot).add(nextRotatedPivot)
@@ -4018,6 +4023,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!planeName) {
 			return
 		}
+		this.previewRotation.roll = 0
 		switch (planeName) {
 			case "Top":
 				this.previewRotation.yaw = 0
@@ -4811,11 +4817,15 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		return this.previewSolids.find((solid) => solid.extrudeId === extrudeId)?.corners.find((corner) => corner.cornerId === cornerId)?.label ?? null
 	}
 
+	private previewEuler(): THREE.Euler {
+		return new THREE.Euler(this.previewRotation.pitch, this.previewRotation.yaw, this.previewRotation.roll ?? 0)
+	}
+
 	private syncPreviewView(): void {
 		this.previewCamera.position.z = THREE.MathUtils.clamp(this.previewBaseDistance, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
 		matchOrthographic(this.previewCamera, this.orthographicCamera, this.previewCamera.position.z)
 		this.previewRootGroup.position.copy(this.previewPan).add(this.previewOrbitPivot)
-		this.previewRootGroup.rotation.set(this.previewRotation.pitch, this.previewRotation.yaw, 0)
+		this.previewRootGroup.rotation.copy(this.previewEuler())
 		this.previewContentGroup.position.copy(this.previewOrbitPivot).multiplyScalar(-1)
 		if (this.projection === "orthographic") {
 			this.previewRootGroup.updateWorldMatrix(true, true)

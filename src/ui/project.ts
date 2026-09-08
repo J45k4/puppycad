@@ -2530,10 +2530,11 @@ function normalizePartViewRotation(input: unknown): PartEditorViewState["preview
 			pitch: PART_PROJECT_DEFAULT_ROTATION.pitch
 		}
 	}
-	const value = input as { yaw?: unknown; pitch?: unknown }
+	const value = input as { yaw?: unknown; pitch?: unknown; roll?: unknown }
 	return {
 		yaw: typeof value.yaw === "number" && Number.isFinite(value.yaw) ? value.yaw : PART_PROJECT_DEFAULT_ROTATION.yaw,
-		pitch: typeof value.pitch === "number" && Number.isFinite(value.pitch) ? value.pitch : PART_PROJECT_DEFAULT_ROTATION.pitch
+		pitch: typeof value.pitch === "number" && Number.isFinite(value.pitch) ? value.pitch : PART_PROJECT_DEFAULT_ROTATION.pitch,
+		roll: typeof value.roll === "number" && Number.isFinite(value.roll) ? value.roll : 0
 	}
 }
 
