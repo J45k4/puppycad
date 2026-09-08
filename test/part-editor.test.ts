@@ -720,6 +720,78 @@ describe("PartEditor", () => {
 		}) as typeof globalThis.requestAnimationFrame
 	})
 
+	it("batches orbit and pan draws, keeps every delta, and saves once at drag end", () => {
+		for (const button of [2, 1]) {
+			let draws = 0
+			const saved: { state: ReturnType<PartEditor["getViewState"]>; cameraOnly?: boolean }[] = []
+			const renderer = new FakePreviewRenderer()
+			renderer.render = () => {
+				draws++
+			}
+			const editor = new PartEditor({
+				createPreviewRenderer: () => renderer,
+				onViewStateChange: (state, cameraOnly) => saved.push({ state, cameraOnly })
+			})
+			const canvas = getPreviewCanvas(editor.root)
+			setCanvasRect(canvas)
+			const frames: FrameRequestCallback[] = []
+			const original = globalThis.requestAnimationFrame
+			globalThis.requestAnimationFrame = (callback) => frames.push(callback)
+			try {
+				dispatchPreviewPointer(domWindow, canvas, "pointerdown", 180, 180, button)
+				const before = editor.getViewState()
+				const beforeDraws = draws
+				for (let i = 1; i <= 20; i++) dispatchPreviewPointer(domWindow, canvas, "pointermove", 180 + i, 180 + i, button)
+				expect(draws).toBe(beforeDraws)
+				expect(frames).toHaveLength(1)
+				expect(saved).toHaveLength(0)
+				if (button === 2) expect(editor.getViewState().previewRotation.yaw).toBeCloseTo(before.previewRotation.yaw + 0.2)
+				else expect(editor.getViewState().previewPan).not.toEqual(before.previewPan)
+				frames.shift()?.(0)
+				expect(draws).toBe(beforeDraws + 1)
+				dispatchPreviewPointer(domWindow, canvas, "pointerup", 200, 200, button)
+				expect(saved).toEqual([{ state: editor.getViewState(), cameraOnly: true }])
+			} finally {
+				editor.dispose()
+				globalThis.requestAnimationFrame = original
+			}
+		}
+	})
+
+	it("debounces wheel state and flushes the final camera before disposal without rendering afterward", async () => {
+		let draws = 0
+		const saved: ReturnType<PartEditor["getViewState"]>[] = []
+		const renderer = new FakePreviewRenderer()
+		renderer.render = () => {
+			draws++
+		}
+		const editor = new PartEditor({ createPreviewRenderer: () => renderer, onViewStateChange: (state) => saved.push(state) })
+		const canvas = getPreviewCanvas(editor.root)
+		setCanvasRect(canvas)
+		for (let i = 0; i < 10; i++) dispatchPreviewWheel(domWindow, canvas, 180, 180, 1)
+		expect(saved).toHaveLength(0)
+		await new Promise((resolve) => setTimeout(resolve, 180))
+		expect(saved).toEqual([editor.getViewState()])
+		const frames: FrameRequestCallback[] = []
+		const original = globalThis.requestAnimationFrame
+		globalThis.requestAnimationFrame = (callback) => frames.push(callback)
+		try {
+			dispatchPreviewWheel(domWindow, canvas, 180, 180, 10)
+			const final = editor.getViewState()
+			editor.dispose()
+			expect(saved).toHaveLength(2)
+			expect(saved[1]).toEqual(final)
+			const before = draws
+			frames.shift()?.(0)
+			expect(draws).toBe(before)
+			await new Promise((resolve) => setTimeout(resolve, 180))
+			expect(saved).toHaveLength(2)
+		} finally {
+			editor.dispose()
+			globalThis.requestAnimationFrame = original
+		}
+	})
+
 	it("applies solid UI changes through the document callback with an intact undo snapshot", () => {
 		const builder = new PartBuilder()
 		builder.extrude("base", { outline: [v2(0, 0), v2(20, 0), v2(20, 20), v2(0, 20)], depth: 5 })

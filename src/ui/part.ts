@@ -138,7 +138,7 @@ type PartEditorOptions = {
 	initialViewState?: PartEditorViewState
 	onStateChange?: () => void
 	onSolidDocumentChange?: (next: PartEditorState, previous: PartEditorState) => void
-	onViewStateChange?: (state: PartEditorViewState) => void
+	onViewStateChange?: (state: PartEditorViewState, cameraOnly?: boolean) => void
 	onCadCommand?: (command: CadCommand, previousState: PartEditorState) => void
 	createPreviewRenderer?: (canvas: HTMLCanvasElement) => PreviewRendererLike
 }
@@ -253,7 +253,9 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	private readonly quickActionsHeightSection: HTMLDivElement
 	private readonly quickActionsStatusSection: HTMLDivElement
 	private readonly onStateChange?: () => void
-	private readonly onViewStateChange?: (state: PartEditorViewState) => void
+	private readonly onViewStateChange?: (state: PartEditorViewState, cameraOnly?: boolean) => void
+	private previewFramePending = false
+	private cameraSaveTimer: ReturnType<typeof setTimeout> | undefined
 	private readonly onCadCommand?: (command: CadCommand, previousState: PartEditorState) => void
 	private readonly previewRotation: PartProjectPreviewRotation = {
 		yaw: PART_PROJECT_DEFAULT_ROTATION.yaw,
@@ -605,7 +607,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.projectionSelect = projectionControl(this.projection, (mode) => {
 			this.projection = mode
 			this.drawPreview()
-			this.onViewStateChange?.(this.getViewState())
+			this.emitViewStateChange(true)
 		})
 		this.projectionSelect.style.position = "absolute"
 		this.projectionSelect.style.right = "12px"
@@ -618,7 +620,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			fit.style.cssText = "position:absolute;left:12px;top:12px;z-index:5"
 			fit.onclick = () => {
 				this.fitSolidPreview()
-				this.onViewStateChange?.(this.getViewState())
+				this.emitViewStateChange(true)
 			}
 			this.previewContainer.append(fit)
 		}
@@ -705,6 +707,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	public dispose(): void {
 		clearTimeout(this.sourceHoverTimer)
 		if (this.disposed) return
+		this.flushCameraViewState()
 		this.disposed = true
 		this.resizeObserver?.disconnect()
 		window.removeEventListener("resize", this.handleWindowResize)
@@ -2408,8 +2411,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			this.previewPan.x += dx * panScale.x
 			this.previewPan.y -= dy * panScale.y
 		}
-		this.drawPreview()
-		this.emitViewStateChange()
+		this.scheduleCameraPreview()
 	}
 
 	private selectSolidSourceAt(clientX: number, clientY: number, hover = false): void {
@@ -2493,6 +2495,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				}
 			}
 		}
+		this.flushCameraViewState()
 		this.isRotatingPreview = false
 		this.isPanningPreview = false
 		this.reverseRotatePreview = false
@@ -2525,8 +2528,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.pendingPreviewSelectionClick = null
 		const zoomFactor = Math.exp(event.deltaY * PREVIEW_ZOOM_SENSITIVITY)
 		this.previewBaseDistance = THREE.MathUtils.clamp(this.previewBaseDistance * zoomFactor, PREVIEW_MIN_CAMERA_DISTANCE, this.maxPreviewDistance)
-		this.drawPreview()
-		this.emitViewStateChange()
+		this.scheduleCameraPreview()
 	}
 
 	private handleDocumentKeyDown = (event: KeyboardEvent): void => {
@@ -4847,8 +4849,27 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.onStateChange?.()
 	}
 
-	private emitViewStateChange(): void {
-		this.onViewStateChange?.(this.getViewState())
+	private scheduleCameraPreview(): void {
+		if (!this.previewFramePending) {
+			this.previewFramePending = true
+			queueFrame(() => {
+				this.previewFramePending = false
+				this.drawPreview()
+			})
+		}
+		clearTimeout(this.cameraSaveTimer)
+		this.cameraSaveTimer = setTimeout(() => this.flushCameraViewState(), 150)
+	}
+
+	private flushCameraViewState(): void {
+		if (this.cameraSaveTimer === undefined) return
+		this.emitViewStateChange(true)
+	}
+
+	private emitViewStateChange(cameraOnly = false): void {
+		clearTimeout(this.cameraSaveTimer)
+		this.cameraSaveTimer = undefined
+		this.onViewStateChange?.(this.getViewState(), cameraOnly)
 	}
 }
 

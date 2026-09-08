@@ -1624,9 +1624,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 						if (!partState?.solidSteps || !this.serverBacked) this.schedulePersist()
 						this.renderItems()
 					},
-					onViewStateChange: (state) => {
+					onViewStateChange: (state, cameraOnly) => {
 						this.savePartViewState(id, state)
-						this.renderItems()
+						if (!cameraOnly) this.renderItems()
 					},
 					onSolidDocumentChange: (next, previous) => {
 						this.recordPartUndoSnapshot(id, previous)
