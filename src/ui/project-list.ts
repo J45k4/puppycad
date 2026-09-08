@@ -116,6 +116,7 @@ abstract class ProjectItemView<T extends ProjectListEntry> {
 
 	public setSelected(isSelected: boolean) {
 		this.root.classList.toggle("project-item--selected", isSelected)
+		;(this.root.querySelector(":scope > .project-folder__title") ?? this.root).setAttribute("aria-selected", String(isSelected))
 	}
 }
 
@@ -125,11 +126,19 @@ class ProjectFileView extends ProjectItemView<ProjectListFileEntry> {
 		root.classList.add("project-file")
 		root.draggable = isEntryDraggable(this.entry)
 		const name = this.list.doc.createElement("span")
+		root.tabIndex = 0
+		root.setAttribute("role", "treeitem")
+		root.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault()
+				this.list.handleItemLeftClick(this)
+			}
+		})
 		name.textContent = this.entry.name
 		name.style.flexGrow = "1"
 		name.style.userSelect = "none"
 		root.appendChild(name)
-		if (this.list.canToggleVisibility()) {
+		if (this.list.canToggleVisibility() && !(this.entry.metadata as { synthetic?: boolean } | undefined)?.synthetic) {
 			root.appendChild(
 				createVisibilityToggleButton(this.list.doc, isEntryVisible(this.entry), () => {
 					this.list.toggleEntryVisibility(this.entry.id)
@@ -188,13 +197,30 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 		titleText.style.flexGrow = "1"
 		titleText.style.userSelect = "none"
 
-		const visibilityToggle = this.list.canToggleVisibility()
-			? createVisibilityToggleButton(this.list.doc, isEntryVisible(this.entry), () => {
-					this.list.toggleEntryVisibility(this.entry.id)
-				})
-			: null
+		const visibilityToggle =
+			this.list.canToggleVisibility() && !(this.entry.metadata as { synthetic?: boolean } | undefined)?.synthetic
+				? createVisibilityToggleButton(this.list.doc, isEntryVisible(this.entry), () => {
+						this.list.toggleEntryVisibility(this.entry.id)
+					})
+				: null
 
-		this.titleElement.draggable = true
+		this.titleElement.tabIndex = 0
+		this.titleElement.setAttribute("role", "treeitem")
+		this.titleElement.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault()
+				this.list.handleItemLeftClick(this)
+			}
+			if (event.key === "ArrowRight") {
+				event.preventDefault()
+				this.expand()
+			}
+			if (event.key === "ArrowLeft") {
+				event.preventDefault()
+				this.collapse()
+			}
+		})
+		this.titleElement.draggable = isEntryDraggable(this.entry)
 		this.titleElement.addEventListener("dragstart", (event) => {
 			this.list.beginDrag(this, event)
 		})
@@ -211,6 +237,7 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 		})
 		this.itemsContainer = this.list.doc.createElement("div")
 		this.itemsContainer.classList.add("project-folder__children")
+		this.itemsContainer.setAttribute("role", "group")
 
 		this.titleElement.appendChild(this.expandIcon)
 		this.titleElement.appendChild(titleText)
@@ -311,6 +338,7 @@ class ProjectFolderView extends ProjectItemView<ProjectListFolderEntry> {
 	}
 
 	private updateExpandState() {
+		this.titleElement?.setAttribute("aria-expanded", String(this.expanded))
 		this.itemsContainer.style.display = this.expanded ? "" : "none"
 		if (this.expandIcon) {
 			this.expandIcon.textContent = this.expanded ? "▾" : "▸"
@@ -376,6 +404,8 @@ export class ProjectList {
 		this.options = options
 		this.root = doc.createElement("div")
 		this.root.classList.add("project-tree")
+		this.root.setAttribute("role", "tree")
+		this.root.setAttribute("aria-label", "Project hierarchy")
 		this.root.addEventListener("dragover", (event) => this.onRootDragOver(event))
 		this.root.addEventListener("dragleave", (event) => this.onRootDragLeave(event))
 		this.root.addEventListener("drop", (event) => this.onRootDrop(event))
@@ -419,10 +449,10 @@ export class ProjectList {
 			this.views.set(item.id, view)
 			this.root.appendChild(view.root)
 		}
-		this.selectById(selectedId)
+		this.selectById(selectedId, false)
 	}
 
-	public selectById(id: string | null) {
+	public selectById(id: string | null, notify = true) {
 		if (!id) {
 			this.clearSelection()
 			return
@@ -432,12 +462,13 @@ export class ProjectList {
 			this.clearSelection()
 			return
 		}
-		this.selectItem(view)
+		this.selectItem(view, notify)
 	}
 
 	private createView(entry: ProjectListEntry): ProjectItemView<ProjectListEntry> {
 		if (entry.kind === "folder") {
 			const folderView = new ProjectFolderView(this, entry)
+			folderView.expand()
 			for (const child of entry.items) {
 				const childView = this.createView(child)
 				this.views.set(child.id, childView)
@@ -489,7 +520,7 @@ export class ProjectList {
 		this.finishDrag()
 	}
 
-	public selectItem(view: ProjectItemView<ProjectListEntry>) {
+	public selectItem(view: ProjectItemView<ProjectListEntry>, notify = true) {
 		if (this.selectedView === view) {
 			return
 		}
@@ -498,7 +529,7 @@ export class ProjectList {
 		}
 		this.selectedView = view
 		this.selectedView.setSelected(true)
-		this.options.onSelect?.({ id: view.entry.id })
+		if (notify) this.options.onSelect?.({ id: view.entry.id })
 		if (view instanceof ProjectFolderView) {
 			view.expand()
 		}
@@ -652,6 +683,12 @@ export class ProjectList {
 		}
 	}
 
+	public revealSelected(focus = false): void {
+		const root = this.selectedView?.root
+		const row = root?.querySelector<HTMLElement>(":scope > .project-folder__title") ?? root
+		row?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+		if (focus) row?.focus({ preventScroll: true })
+	}
 	public expandToId(id: string | null) {
 		if (!id) {
 			return

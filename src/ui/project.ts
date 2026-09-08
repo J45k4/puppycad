@@ -1,3 +1,4 @@
+import type { ModelNavigationNode } from "./model-navigation"
 import { AssemblyEditor } from "./assembly"
 import { createDiagramEditor } from "./diagram"
 import { PartEditor } from "./part"
@@ -102,6 +103,39 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private idNodeMap: Map<string, ProjectNode> = new Map()
 	private readonly syntheticSelectionTargets = new Map<string, ProjectItem>()
 	private readonly syntheticEntries = new Map<string, SyntheticProjectEntry>()
+	private readonly modelEntries = new Map<string, { item: PartProjectItem | AssemblyProjectItem; key: string }>()
+	private readonly configuredModelEditors = new WeakSet<object>()
+	private navigationRenderPending = false
+	private knownModelFolders = new Set<string>()
+	private scheduleNavigationRender = () => {
+		if (this.navigationRenderPending) return
+		this.navigationRenderPending = true
+		queueMicrotask(() => {
+			this.navigationRenderPending = false
+			this.renderItems()
+		})
+	}
+	private modelListEntries(item: PartProjectItem | AssemblyProjectItem): ProjectListEntry[] {
+		if (!this.configuredModelEditors.has(item.editor)) {
+			this.configuredModelEditors.add(item.editor)
+			item.editor.useProjectNavigation((key) => {
+				this.selectedSyntheticId = `${item.id}:model:${key}`
+				const path = this.nodePaths.get(item)
+				if (path) this.selectedPath = path.slice()
+				this.scheduleNavigationRender()
+			}, this.scheduleNavigationRender)
+			const prefix = `${item.id}:model:`
+			if (this.selectedSyntheticId?.startsWith(prefix)) item.editor.selectNavigation(this.selectedSyntheticId.slice(prefix.length))
+		}
+		const convert = (nodes: ModelNavigationNode[]): ProjectListEntry[] =>
+			nodes.map((node) => {
+				const id = `${item.id}:model:${node.key}`
+				this.modelEntries.set(id, { item, key: node.key })
+				const metadata = { draggable: false, synthetic: true, navigation: true }
+				return node.children?.length ? { kind: "folder", id, name: node.label, items: convert(node.children), metadata } : { kind: "file", id, name: node.label, metadata }
+			})
+		return convert(item.editor.getNavigation())
+	}
 	private readonly clientId = this.createClientId()
 	private readonly client: PuppyCadClient
 	private readonly pcadProject: PCadProject
@@ -351,18 +385,49 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private renderItems() {
+		const restoreTreeFocus = this.projectList.root.contains(document.activeElement)
 		this.log("renderItems:start", { totalNodes: this.items.length })
 		this.nodePaths.clear()
 		this.nodeElements.clear()
 		this.idNodeMap.clear()
 		this.syntheticSelectionTargets.clear()
 		this.syntheticEntries.clear()
+		this.modelEntries.clear()
 		const collapsedIds = this.projectList.getCollapsedFolderIds()
 		const treeItems = this.buildTreeNodes(this.items)
 		this.itemsListContainer.setItems(treeItems)
-		const listEntries = this.buildProjectListEntries(this.items)
+		const rootEntries = this.buildProjectListEntries(this.items)
+		const looseParts = rootEntries.filter((entry) => {
+			const node = this.idNodeMap.get(entry.id)
+			return node && isProjectItem(node) && node.type === "part"
+		})
+		const looseAssemblies = rootEntries.filter((entry) => {
+			const node = this.idNodeMap.get(entry.id)
+			return node && isProjectItem(node) && node.type === "assembly"
+		})
+		const grouped = new Set([...looseParts, ...looseAssemblies].map((entry) => entry.id))
+		const listEntries: ProjectListEntry[] = [
+			...(looseAssemblies.length
+				? [{ kind: "folder" as const, id: "project-category:assemblies", name: "Assemblies", items: looseAssemblies, metadata: { synthetic: true, draggable: false } }]
+				: []),
+			...(looseParts.length ? [{ kind: "folder" as const, id: "project-category:parts", name: "Parts", items: looseParts, metadata: { synthetic: true, draggable: false } }] : []),
+			...rootEntries.filter((entry) => !grouped.has(entry.id))
+		]
+		const collapseNew = (entries: ProjectListEntry[]) => {
+			for (const entry of entries)
+				if (entry.kind === "folder") {
+					if ((entry.metadata as { navigation?: boolean } | undefined)?.navigation && !this.knownModelFolders.has(entry.id)) {
+						collapsedIds.add(entry.id)
+						this.knownModelFolders.add(entry.id)
+					}
+					collapseNew(entry.items)
+				}
+		}
+		collapseNew(listEntries)
 		let selectedId: string | null = null
-		if (this.selectedSyntheticId) {
+		if (this.selectedSyntheticId && this.modelEntries.has(this.selectedSyntheticId)) {
+			selectedId = this.selectedSyntheticId
+		} else if (this.selectedSyntheticId) {
 			const syntheticEntry = this.syntheticEntries.get(this.selectedSyntheticId)
 			if (syntheticEntry) {
 				const path = this.nodePaths.get(syntheticEntry.part)
@@ -395,6 +460,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		this.projectList.setItems(listEntries, selectedId)
 		this.projectList.applyCollapsedState(collapsedIds)
 		this.projectList.expandToId(selectedId)
+		if (this.selectedSyntheticId) this.projectList.revealSelected(restoreTreeFocus)
 		this.log("renderItems:complete", {
 			registeredNodes: this.nodePaths.size,
 			selectedPath: this.describePath(this.selectedPath)
@@ -478,6 +544,9 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 					items: this.buildProjectListEntries(node.children, path),
 					visible: node.visible
 				}
+			}
+			if (node.type === "assembly" || (node.type === "part" && node.editor.getPropertiesPanel())) {
+				return { kind: "folder" as const, id, name: node.name, items: this.modelListEntries(node), visible: node.visible, metadata: { navigation: true } }
 			}
 			if (node.type === "part") {
 				const viewState = node.getViewState()
@@ -568,9 +637,25 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleSelectionById(id: string) {
+		const model = this.modelEntries.get(id)
+		if (model) {
+			const target = JSON.parse(model.key) as string[]
+			if (target[0] === "definition" && target[1]) {
+				this.handleSelectionById(target[1])
+				return
+			}
+			this.selectedSyntheticId = id
+			const path = this.nodePaths.get(model.item)
+			if (path) this.selectedPath = path.slice()
+			model.item.editor.selectNavigation(model.key)
+			this.onItemSelected?.(model.item)
+			this.scheduleNavigationRender()
+			return
+		}
 		const node = this.idNodeMap.get(id)
 		if (node) {
 			this.selectedSyntheticId = null
+			if (isProjectItem(node) && (node.type === "part" || node.type === "assembly")) node.editor.selectNavigation(JSON.stringify([node.type]))
 			this.handleNodeSelection(node)
 			return
 		}
@@ -2466,6 +2551,7 @@ function normalizePartViewVector(input: unknown): PartEditorViewState["previewPa
 
 export class ProjectView extends UiComponent<HTMLDivElement> {
 	private treeView: ProjectTreeView
+	private readonly propertiesHost = document.createElement("aside")
 	private content: HTMLDivElement
 	private toolbarContainer: HTMLDivElement
 	private dockLayout: DockLayout
@@ -2565,6 +2651,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		main.style.flexDirection = "row"
 		main.style.flexGrow = "1"
 		main.style.minHeight = "0"
+		main.style.overflow = "hidden"
 
 		this.treeView = new ProjectTreeView({
 			projectId: args.projectId,
@@ -2582,6 +2669,7 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		this.content.style.flexDirection = "column"
 		this.content.style.flexGrow = "1"
 		this.content.style.minHeight = "0"
+		this.content.style.minWidth = "0"
 
 		this.dockLayout = new DockLayout()
 		this.dockLayout.onActivePaneChange = (paneId) => {
@@ -2630,6 +2718,10 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 
 		this.content.appendChild(this.dockLayout.root)
 		main.appendChild(this.content)
+		this.propertiesHost.setAttribute("aria-label", "Selection properties")
+		this.propertiesHost.style.cssText = "width:340px;min-width:280px;max-width:40vw;flex:0 0 340px;border-left:1px solid #cbd5e1;background:#f8fafc;overflow:hidden"
+		main.appendChild(this.propertiesHost)
+		this.updatePropertiesForPane(this.dockLayout.getActivePaneId())
 
 		this.root.appendChild(main)
 	}
@@ -3072,7 +3164,17 @@ export class ProjectView extends UiComponent<HTMLDivElement> {
 		return svg
 	}
 
+	private updatePropertiesForPane(paneId: string | null): void {
+		const item = paneId ? this.paneItems.get(paneId) : null
+		const panel = item && (item.type === "part" || item.type === "assembly") ? item.editor.getPropertiesPanel() : null
+		if (panel) {
+			if (this.propertiesHost.firstElementChild !== panel) this.propertiesHost.replaceChildren(panel)
+		} else {
+			this.propertiesHost.textContent = "Select a part, feature, or assembly item to see its properties."
+		}
+	}
 	private updateToolbarForPane(paneId: string | null) {
+		this.updatePropertiesForPane(paneId)
 		if (!paneId) {
 			this.setToolbar(null)
 			return

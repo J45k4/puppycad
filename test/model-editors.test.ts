@@ -250,3 +250,48 @@ it("opens the picked sketch entity and preserves pending solid edits", () => {
 	click(panel.root, "Apply changes")
 	expect(applied?.features.find((f) => f.type === "extrude")?.depth).toBe(8)
 })
+
+it("uses the project hierarchy for feature, profile and entity properties without losing drafts", () => {
+	const panel = new SolidFeaturePanel(part(), () => {})
+	const selections: string[] = []
+	panel.useProjectNavigation(
+		(key) => selections.push(key),
+		() => {}
+	)
+	const nodes = panel.getNavigation()
+	expect(nodes[0]?.label).toBe("Body")
+	expect(nodes[0]?.children?.[0]?.children?.[1]?.label).toBe("Hole 1")
+	expect(panel.root.querySelector("button[aria-pressed]")).toBeNull()
+	panel.selectNavigation(JSON.stringify(["feature", "body"]))
+	edit(panel.root, "Extrusion depth (mm)", "8")
+	panel.selectNavigation(JSON.stringify(["entity", "body", 1, 0]))
+	expect(panel.root.querySelector('input[aria-label="Start X"]')).not.toBeNull()
+	panel.selectNavigation(JSON.stringify(["feature", "body"]))
+	expect(panel.root.querySelector<HTMLInputElement>('input[aria-label="Extrusion depth (mm)"]')?.value).toBe("8")
+	panel.selectSource({ stepId: "body", sketchId: "body/sketch", loopIndex: 1, edgeIndex: 0, distance: 0, border: [] })
+	expect(selections).toEqual([JSON.stringify(["entity", "body", 1, 0])])
+})
+
+it("shows only the selected assembly instance in project properties", () => {
+	const input: Assembly = {
+		id: "a",
+		name: "Assembly",
+		instances: [
+			{ id: "first", partId: "p" },
+			{ id: "second", partId: "p" }
+		]
+	}
+	const panel = new AssemblyProperties(
+		input,
+		() => [{ id: "p", type: "part", name: "Part", data: part() }],
+		() => {}
+	)
+	panel.useProjectNavigation(
+		() => {},
+		() => {}
+	)
+	panel.selectNavigation(JSON.stringify(["instance", "second"]))
+	const rows = Array.from(panel.root.querySelectorAll<HTMLElement>("[data-navigation-key]"))
+	expect(rows.filter((row) => !row.hidden).map((row) => row.dataset.navigationKey)).toEqual([JSON.stringify(["instance", "second"])])
+	expect(panel.getNavigation()[0]?.children?.[0]?.children?.[0]?.label).toBe("Part: Part")
+})

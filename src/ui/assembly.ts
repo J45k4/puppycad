@@ -1,3 +1,4 @@
+import type { ModelNavigationNode } from "./model-navigation"
 import { projectionControl, type Projection } from "./projection"
 import { assemblyZoom, anchorAssemblyZoom, assemblyFitHalfHeight } from "./assembly-zoom"
 import { button } from "./model-fields"
@@ -12,6 +13,19 @@ import { transformMatrix, solveFixedAssembly } from "../assembly-solver"
 import { UiComponent } from "./ui"
 const colors = [0x65b5a4, 0xe3b365, 0x8b9fe0, 0xd38d9e, 0xa2c27d]
 export class AssemblyEditor extends UiComponent<HTMLDivElement> {
+	private properties?: AssemblyProperties
+	public getPropertiesPanel(): HTMLElement | null {
+		return this.properties?.root ?? null
+	}
+	public getNavigation(): ModelNavigationNode[] {
+		return this.properties?.getNavigation() ?? []
+	}
+	public selectNavigation(key: string): void {
+		this.properties?.selectNavigation(key)
+	}
+	public useProjectNavigation(select: (key: string) => void, change: () => void): void {
+		this.properties?.useProjectNavigation(select, change)
+	}
 	private assembly: Assembly
 	private refreshPreview = () => {}
 	public refreshParts(): void {
@@ -64,6 +78,7 @@ export class AssemblyEditor extends UiComponent<HTMLDivElement> {
 			args?.onOpenPart,
 			(id) => selectPreviewInstance(id)
 		)
+		this.properties = properties
 		workspace.append(properties.root, viewport)
 		this.root.append(workspace)
 		const footer = document.createElement("div")

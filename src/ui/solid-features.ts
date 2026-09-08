@@ -1,3 +1,4 @@
+import { navigationKey, readableName, type ModelNavigationNode } from "./model-navigation"
 import type { SketchSource } from "./solid-source"
 import type { PartDocument } from "../schema"
 import type { Point2D } from "../types"
@@ -14,16 +15,59 @@ export class SolidFeaturePanel {
 	private draft: PartDocument
 	private loops = new Map<string, Point2D[][]>()
 	private selected = 0
+	private navigation?: { select: (key: string) => void; change: () => void }
+	private navigationSelection: (string | number)[] = ["part"]
+	public useProjectNavigation(select: (key: string) => void, change: () => void): void {
+		this.navigation = { select, change }
+		this.root.style.cssText = "height:100%;overflow:auto;padding:12px;box-sizing:border-box;min-width:0;background:#f8fafc"
+		this.render()
+	}
+	public getNavigation(): ModelNavigationNode[] {
+		return (this.draft.solidSteps ?? []).map((step) => {
+			const loops = this.loops.get(step.id) ?? stepLoops(this.draft, step)
+			return {
+				key: navigationKey("feature", step.id),
+				label: readableName(step.id),
+				children: [
+					{
+						key: navigationKey("sketch", step.id),
+						label: step.type === "revolve" ? "Revolve profile" : "Sketch",
+						children: loops.map((points, loop) => ({
+							key: navigationKey("profile", step.id, loop),
+							label: loop === 0 ? "Outline" : `Hole ${loop}`,
+							children: points.map((_, edge) => ({ key: navigationKey("entity", step.id, loop, edge), label: `Line ${edge + 1}` }))
+						}))
+					}
+				]
+			}
+		})
+	}
+	public selectNavigation(key: string): void {
+		const target = JSON.parse(key) as (string | number)[]
+		const index = this.draft.solidSteps?.findIndex((step) => step.id === target[1]) ?? -1
+		if (index >= 0) this.selected = index
+		this.navigationSelection = target
+		this.source = null
+		this.render()
+	}
+
 	private source: SketchSource | null = null
+	public clearSelection(): void {
+		this.selectNavigation(navigationKey("part"))
+		this.navigation?.select(navigationKey("part"))
+	}
 	public selectSource(source: SketchSource): void {
 		const index = this.draft.solidSteps?.findIndex((step) => step.id === source.stepId) ?? -1
 		if (index < 0) return
 		this.selected = index
 		this.source = source
+		this.navigationSelection = ["entity", source.stepId, source.loopIndex, source.edgeIndex]
+		this.navigation?.select(navigationKey(...this.navigationSelection))
 		this.render()
 		this.root.querySelector("[data-selected-source]")?.scrollIntoView?.({ block: "nearest" })
 	}
 	private status = document.createElement("p")
+	private dirty = false
 	constructor(
 		private accepted: PartDocument,
 		private readonly apply: (next: PartDocument) => void
@@ -34,7 +78,9 @@ export class SolidFeaturePanel {
 		this.render()
 	}
 	private changed = () => {
+		this.dirty = true
 		this.status.textContent = "Unsaved changes — Apply to rebuild the part."
+		this.navigation?.change()
 	}
 	private attempt(action: () => void) {
 		try {
@@ -47,7 +93,7 @@ export class SolidFeaturePanel {
 	private render() {
 		this.root.replaceChildren()
 		const title = document.createElement("h2")
-		title.textContent = "Solid features"
+		title.textContent = this.navigation ? "Properties" : "Solid features"
 		title.style.margin = "0 0 8px"
 		this.root.append(title)
 		note(this.root, "Edit dimensions in mm. Select a feature, change its profile or operation, then Apply. Orbit and zoom the preview to inspect the result.")
@@ -66,6 +112,7 @@ export class SolidFeaturePanel {
 					candidate.tree = undefined
 					validateSolidEdit(candidate)
 					this.apply(candidate)
+					this.dirty = false
 					this.accepted = structuredClone(candidate)
 					this.draft = structuredClone(candidate)
 					this.loops.clear()
@@ -74,21 +121,24 @@ export class SolidFeaturePanel {
 				})
 			),
 			button("Discard changes", () => {
+				this.dirty = false
 				this.draft = structuredClone(this.accepted)
 				this.loops.clear()
 				this.render()
 			})
 		)
 		this.root.append(actions)
+		if (this.navigation) actions.style.cssText += ";position:sticky;top:0;z-index:2;background:#f8fafc;padding:8px 0"
 		this.status = document.createElement("p")
 		this.status.setAttribute("role", "status")
+		if (this.dirty) this.status.textContent = "Unsaved changes — Apply or Discard."
 		this.status.style.cssText = "font-size:13px;color:#a04115"
 		this.root.append(this.status)
 		this.draft.solidSteps ??= []
 		const steps = this.draft.solidSteps
 		const list = document.createElement("div")
 		list.style.cssText = "display:flex;flex-direction:column;gap:4px;margin:12px 0;max-height:220px;overflow:auto"
-		this.root.append(list)
+		if (!this.navigation) this.root.append(list)
 		steps.forEach((step, i) => {
 			const entry = button(`${i + 1}. ${step.id} · ${step.operation}`, () => {
 				this.selected = i
@@ -103,6 +153,7 @@ export class SolidFeaturePanel {
 		const add = document.createElement("div")
 		add.style.cssText = "display:flex;gap:6px"
 		this.root.append(add)
+		if (this.navigation) add.hidden = this.navigationSelection[0] !== "part"
 		for (const type of ["extrusion", "revolve"] as const)
 			add.append(
 				button(`Add ${type}`, () =>
@@ -115,6 +166,10 @@ export class SolidFeaturePanel {
 						this.draft.features.push(...builder.document.features)
 						steps.push(...requireValue(builder.document.solidSteps))
 						this.selected = steps.length - 1
+						if (this.navigation) {
+							this.navigationSelection = ["feature", id]
+							this.navigation.select(navigationKey(...this.navigationSelection))
+						}
 						this.render()
 						this.changed()
 					})
@@ -122,6 +177,21 @@ export class SolidFeaturePanel {
 			)
 		const step = steps[this.selected]
 		if (!step) return
+		if (this.navigation) {
+			const kind = this.navigationSelection[0]
+			const parts = [readableName(step.id)]
+			if (kind === "sketch" || kind === "profile" || kind === "entity") parts.push("Sketch")
+			if (kind === "profile" || kind === "entity") parts.push(this.navigationSelection[2] === 0 ? "Outline" : `Hole ${this.navigationSelection[2]}`)
+			if (kind === "entity") parts.push(`Line ${Number(this.navigationSelection[3]) + 1}`)
+			const path = kind === "part" ? "Part" : parts.join(" › ")
+			note(this.root, path)
+			this.root.setAttribute("data-property-selection", navigationKey(...this.navigationSelection))
+			if (this.navigationSelection[0] === "part") {
+				note(this.root, "Choose a feature or sketch in the project tree, or click a border in the viewer.")
+				this.navigation.change()
+				return
+			}
+		}
 		const props = section(this.root, `Edit ${step.id}`, true)
 		field(props, "Feature name", step.id, (value) => {
 			if (!value.trim() || steps.some((s) => s !== step && s.id === value)) {
@@ -131,6 +201,10 @@ export class SolidFeaturePanel {
 			const loops = this.loops.get(step.id)
 			this.loops.delete(step.id)
 			step.id = value
+			if (this.navigation) {
+				this.navigationSelection[1] = value
+				this.navigation.select(navigationKey(...this.navigationSelection))
+			}
 			if (loops) this.loops.set(value, loops)
 			this.changed()
 		})
@@ -210,17 +284,29 @@ export class SolidFeaturePanel {
 				steps.splice(this.selected, 1)
 				this.loops.delete(step.id)
 				this.selected = Math.max(0, this.selected - 1)
+				if (this.navigation) {
+					this.navigationSelection = steps[this.selected] ? ["feature", requireValue(steps[this.selected]).id] : ["part"]
+					this.navigation.select(navigationKey(...this.navigationSelection))
+				}
 				this.render()
 				this.changed()
 			})
 		)
 		this.attempt(() => this.renderProfiles(step))
-		this.renderFinishes(step)
+		if (!this.navigation || this.navigationSelection[0] === "feature") this.renderFinishes(step)
+		if (this.navigation) {
+			props.hidden = this.navigationSelection[0] !== "feature"
+			this.navigation.change()
+		}
 	}
 	private renderProfiles(step: SolidStep) {
 		const loops = this.loops.get(step.id) ?? stepLoops(this.draft, step)
 		this.loops.set(step.id, loops)
 		const profiles = section(this.root, step.type === "revolve" ? "Revolve profile (radius / height)" : "Sketch profile and holes", true)
+		if (this.navigation) {
+			profiles.hidden = this.navigationSelection[0] === "feature"
+			profiles.querySelector("summary")?.setAttribute("style", "display:none")
+		}
 		loops.forEach((points, index) => {
 			const picked = this.source?.stepId === step.id && this.source.loopIndex === index
 			const group = section(profiles, index === 0 ? "Outline" : `Hole ${index}`, index === 0 || picked)
@@ -232,6 +318,34 @@ export class SolidFeaturePanel {
 					group,
 					`Selected sketch: ${this.source.sketchId}. Entity: ${this.source.entityId ?? `profile segment ${this.source.edgeIndex}`}. Feature: ${step.id} (${step.operation}).`
 				)
+			}
+			if (this.navigation) {
+				group.hidden = (this.navigationSelection[0] === "profile" || this.navigationSelection[0] === "entity") && this.navigationSelection[2] !== index
+				group.open = true
+				group.querySelector("summary")?.setAttribute("style", "display:none")
+				if (this.navigationSelection[0] === "entity" && !group.hidden) {
+					const edge = Number(this.navigationSelection[3])
+					const a = points[edge]
+					const b = points[(edge + 1) % points.length]
+					if (a && b) {
+						note(group, `Line ${edge + 1} · ${index === 0 ? "Outline" : `Hole ${index}`}`)
+						for (const [label, point] of [
+							["Start", a],
+							["End", b]
+						] as const) {
+							numberField(group, `${label} X`, point.x, (n) => {
+								point.x = n
+								this.changed()
+							})
+							numberField(group, `${label} Y`, point.y, (n) => {
+								point.y = n
+								this.changed()
+							})
+						}
+						this.profileSvg(group, points, edge)
+					}
+					return
+				}
 			}
 			const minX = Math.min(...points.map((p) => p.x))
 			const maxX = Math.max(...points.map((p) => p.x))
@@ -300,6 +414,7 @@ export class SolidFeaturePanel {
 				})
 			)
 			const vertices = section(group, `Vertices (${points.length}) — exact coordinates`)
+			if (this.navigation) vertices.hidden = true
 			points.forEach((p, i) => {
 				const row = section(vertices, `Vertex ${i}`)
 				numberField(row, `Vertex ${i} X`, p.x, (n) => {
@@ -337,7 +452,7 @@ export class SolidFeaturePanel {
 					})
 				)
 		})
-		if (step.type === "extrusion")
+		if (step.type === "extrusion" && (!this.navigation || this.navigationSelection[0] === "sketch" || this.navigationSelection[0] === "profile"))
 			profiles.append(
 				button("Add circular hole", () => {
 					loops.push(circle(v2(0, 0), 2, 32))

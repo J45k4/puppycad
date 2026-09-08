@@ -1,3 +1,6 @@
+import { extrusionFor, stepLoops } from "../solid-edit"
+import { extrusionTranslation } from "../solid-model"
+import type { ModelNavigationNode } from "./model-navigation"
 import { pickSolidSketchSource, sourceRimSegments } from "./solid-source"
 import { projectionControl, matchOrthographic, fitOrthographicDepth, type Projection } from "./projection"
 import { partContentBounds, partFitDistance } from "./part-fit"
@@ -723,6 +726,40 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		this.previewBaseDistance = partFitDistance(bounds, PREVIEW_FIELD_OF_VIEW, aspect)
 		this.drawPreview()
 	}
+	public getPropertiesPanel(): HTMLElement | null {
+		return this.solidPanel?.root ?? null
+	}
+	public getNavigation(): ModelNavigationNode[] {
+		return this.solidPanel?.getNavigation() ?? []
+	}
+	public selectNavigation(key: string): void {
+		this.solidPanel?.selectNavigation(key)
+		const target = JSON.parse(key) as (string | number)[]
+		const document = this.getState()
+		const step = document.solidSteps?.find((step) => step.id === target[1])
+		this.selectedSource = null
+		if (step?.type === "extrusion") {
+			const feature = extrusionFor(document, step)
+			const extrusion = extrudeSolidFeature(document, feature)
+			const points = stepLoops(document, step)[Number(target[2] ?? 0)]
+			const a = points?.[Number(target[3] ?? 0)]
+			if (a) {
+				const f = extrusion.frame
+				const offset = extrusionTranslation(document, feature.id)
+				const point = new THREE.Vector3(f.origin.x + offset.x, f.origin.y + offset.y, f.origin.z + offset.z)
+				point.addScaledVector(new THREE.Vector3(f.xAxis.x, f.xAxis.y, f.xAxis.z), a.x)
+					.addScaledVector(new THREE.Vector3(f.yAxis.x, f.yAxis.y, f.yAxis.z), a.y)
+					.addScaledVector(new THREE.Vector3(f.normal.x, f.normal.y, f.normal.z), extrusion.depth)
+				this.selectedSource = pickSolidSketchSource(document, point, 0.01, step.id)
+			}
+		}
+		this.previewContentGroup.updateWorldMatrix(true, true)
+		this.drawSourceHighlight(this.selectedSource)
+	}
+	public useProjectNavigation(select: (key: string) => void, change: () => void): void {
+		this.solidPanel?.useProjectNavigation(select, change)
+	}
+
 	public getState(): PartEditorState {
 		if (this.solidDocument) return structuredClone(this.solidDocument)
 		return {
@@ -2401,6 +2438,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (!hover) {
 			this.selectedSource = chosen
 			if (chosen) this.solidPanel?.selectSource(chosen)
+			else this.solidPanel?.clearSelection()
 		}
 		this.previewCanvas.style.cursor = chosen ? "pointer" : "grab"
 		this.drawSourceHighlight(chosen ?? (hover ? this.selectedSource : null))

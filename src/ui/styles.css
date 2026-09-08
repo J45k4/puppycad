@@ -608,3 +608,58 @@ textarea:focus-visible {
 		justify-content: flex-start;
 	}
 }
+
+/* Dense model hierarchy; properties live in the shared right-hand inspector. */
+.project-tree-panel {
+	flex: 0 0 280px;
+	width: 280px;
+	gap: 6px;
+	padding: 10px;
+}
+.project-tree-panel > button {
+	padding: 7px 10px;
+}
+.project-tree {
+	gap: 2px;
+}
+.project-tree .project-item {
+	padding: 0;
+}
+.project-tree .project-file,
+.project-tree .project-folder__title {
+	min-height: 30px;
+	padding: 4px 6px;
+	font-size: 13px;
+	gap: 5px;
+}
+.project-tree .project-folder {
+	gap: 1px;
+}
+.project-tree .project-folder__children {
+	margin-left: 10px;
+	padding-left: 7px;
+}
+.project-tree .project-folder.project-item--selected {
+	background: transparent;
+	outline: none;
+}
+.project-tree .project-folder.project-item--selected > .project-folder__title {
+	background: #dce9ff;
+	outline: 1px solid #9bbcff;
+}
+.project-tree [tabindex]:focus-visible {
+	outline: 2px solid #2563eb;
+	outline-offset: -2px;
+}
+.project-tree-panel {
+	min-height: 0;
+	overflow: hidden;
+}
+.project-tree-panel > .project-tree {
+	flex: 1 1 0;
+	min-height: 0;
+	overflow: auto;
+}
+.project-tree-panel > button {
+	flex-shrink: 0;
+}

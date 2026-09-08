@@ -1,3 +1,4 @@
+import { navigationKey, readableName, type ModelNavigationNode } from "./model-navigation"
 import type { Assembly, AssemblyConnector, ProjectNode } from "../contract"
 import { solveFixedAssembly, transformMatrix } from "../assembly-solver"
 import { button, field, note, panelStyle, section, select, vector, validateFields } from "./model-fields"
@@ -36,7 +37,65 @@ export class AssemblyProperties {
 	readonly root = document.createElement("aside")
 	private draft: Assembly
 	private status = document.createElement("p")
+	private dirty = false
 	private selectedInstance: string | null = null
+	private navigation?: { select: (key: string) => void; change: () => void }
+	private navigationSelection = ["assembly"]
+	public useProjectNavigation(select: (key: string) => void, change: () => void): void {
+		this.navigation = { select, change }
+		this.root.style.cssText = "height:100%;overflow:auto;padding:12px;box-sizing:border-box;min-width:0;background:#f8fafc"
+		this.render()
+	}
+	public getNavigation(): ModelNavigationNode[] {
+		return [
+			{
+				key: navigationKey("instances"),
+				label: "Instances",
+				children: this.draft.instances.map((i) => ({
+					key: navigationKey("instance", i.id),
+					label: readableName(i.id),
+					children: [
+						{
+							key: navigationKey("definition", i.partId, i.id),
+							label: `Part: ${partChoices(this.getParts()).find((p) => p.value === i.partId)?.label ?? i.partId}`
+						}
+					]
+				}))
+			},
+			{
+				key: navigationKey("connectors"),
+				label: "Connectors",
+				children: (this.draft.connectors ?? []).map((c) => ({ key: navigationKey("connector", c.id), label: c.name ?? readableName(c.id) }))
+			},
+			{
+				key: navigationKey("connections"),
+				label: "Connections",
+				children: (this.draft.mates ?? []).map((m) => ({ key: navigationKey("connection", m.id), label: m.name ?? readableName(m.id) }))
+			}
+		]
+	}
+	public selectNavigation(key: string): void {
+		this.navigationSelection = JSON.parse(key)
+		if (this.navigationSelection[0] === "definition") {
+			this.openPart?.(this.navigationSelection[1] ?? "")
+			return
+		}
+		this.render()
+		this.onSelectInstance?.(this.navigationSelection[0] === "instance" ? (this.navigationSelection[1] ?? null) : null)
+	}
+	private filterProperties(): void {
+		if (!this.navigation) return
+		this.root.setAttribute("data-property-selection", navigationKey(...this.navigationSelection))
+		for (const group of Array.from(this.root.querySelectorAll<HTMLElement>("[data-navigation-group]"))) {
+			const kind = this.navigationSelection[0]
+			group.hidden = kind !== "assembly" && kind !== group.dataset.navigationGroup && kind !== `${group.dataset.navigationGroup}s`
+			for (const action of Array.from(group.children)) if (action.tagName === "BUTTON") (action as HTMLElement).hidden = kind === group.dataset.navigationGroup
+		}
+		const breadcrumb = this.root.querySelector("[data-property-path]")
+		if (breadcrumb) breadcrumb.textContent = this.navigationSelection.map(readableName).join(" › ")
+		for (const row of Array.from(this.root.querySelectorAll<HTMLElement>("[data-navigation-key]"))) row.hidden = row.dataset.navigationKey !== navigationKey(...this.navigationSelection)
+	}
+
 	private instanceRows = new Map<string, HTMLDetailsElement>()
 	constructor(
 		private accepted: Assembly,
@@ -55,11 +114,21 @@ export class AssemblyProperties {
 	}
 	public selectInstance(id: string | null): void {
 		this.selectedInstance = id
+		if (!id && this.navigation && this.navigationSelection[0] === "instance") {
+			this.navigationSelection = ["assembly"]
+			this.filterProperties()
+			this.navigation.select(navigationKey("assembly"))
+		}
+		if (id && this.navigation) {
+			this.navigationSelection = ["instance", id]
+			this.filterProperties()
+			this.navigation.select(navigationKey("instance", id))
+		}
 		for (const [instanceId, row] of this.instanceRows) {
 			const selected = instanceId === id
 			row.style.borderColor = selected ? "#246bd1" : "#cbd5e1"
 			row.style.background = selected ? "#e8f0ff" : "transparent"
-			row.querySelector("button")?.setAttribute("aria-pressed", String(selected))
+			if (!this.navigation) row.querySelector("button")?.setAttribute("aria-pressed", String(selected))
 			if (selected) {
 				row.open = true
 				if (row.parentElement?.tagName === "DETAILS") (row.parentElement as HTMLDetailsElement).open = true
@@ -68,15 +137,22 @@ export class AssemblyProperties {
 		}
 	}
 	private changed = () => {
+		this.dirty = true
 		this.status.textContent = "Unsaved assembly changes."
+		this.navigation?.change()
 	}
 	private render() {
 		this.root.replaceChildren()
 		this.instanceRows.clear()
 		const title = document.createElement("h2")
-		title.textContent = "Assembly"
+		title.textContent = this.navigation ? "Properties" : "Assembly"
 		title.style.margin = "0"
 		this.root.append(title)
+		if (this.navigation) {
+			const path = document.createElement("p")
+			path.setAttribute("data-property-path", "")
+			this.root.append(path)
+		}
 		note(
 			this.root,
 			"Positions are millimetres; rotations are degrees. Fixed connections control connected parts: edit connector frames to change their relative positions. Edit all affected connections together, then Apply."
@@ -87,6 +163,7 @@ export class AssemblyProperties {
 					validateFields(this.root)
 					const next = validateAssemblyEdit(this.draft, this.getParts())
 					this.apply(next)
+					this.dirty = false
 					this.accepted = structuredClone(next)
 					this.draft = structuredClone(next)
 					this.render()
@@ -97,25 +174,29 @@ export class AssemblyProperties {
 				}
 			}),
 			button("Discard assembly changes", () => {
+				this.dirty = false
 				this.draft = structuredClone(this.accepted)
 				this.render()
 			})
 		)
 		this.status = document.createElement("p")
 		this.status.setAttribute("role", "status")
+		if (this.dirty) this.status.textContent = "Unsaved changes — Apply or Discard."
 		this.status.style.cssText = "font-size:13px;color:#a04115"
 		this.root.append(this.status)
 		const parts = partChoices(this.getParts())
 		const instances = section(this.root, `Instances (${this.draft.instances.length})`, true)
+		instances.dataset.navigationGroup = "instance"
 		for (const instance of this.draft.instances) {
 			const row = section(instances, instance.id)
+			row.dataset.navigationKey = navigationKey("instance", instance.id)
 			this.instanceRows.set(instance.id, row)
 			const pick = button(`Select ${instance.id}`, () => {
 				this.selectInstance(instance.id)
 				this.onSelectInstance?.(instance.id)
 			})
 			pick.setAttribute("aria-pressed", String(this.selectedInstance === instance.id))
-			row.append(pick)
+			if (!this.navigation) row.append(pick)
 			field(row, "Instance name", instance.id, (v) => {
 				if (!v.trim() || this.draft.instances.some((i) => i !== instance && i.id === v)) {
 					this.status.textContent = "Instance names must be unique and nonempty."
@@ -123,6 +204,11 @@ export class AssemblyProperties {
 				}
 				const old = instance.id
 				instance.id = v
+				if (this.navigation) {
+					this.navigationSelection = ["instance", v]
+					row.dataset.navigationKey = navigationKey("instance", v)
+					this.navigation.select(navigationKey("instance", v))
+				}
 				for (const c of this.draft.connectors ?? []) if (c.instanceId === old) c.instanceId = v
 				for (const m of this.draft.mates ?? []) for (const ref of [m.a, m.b]) if (ref.instanceId === old) ref.instanceId = v
 				this.changed()
@@ -166,8 +252,10 @@ export class AssemblyProperties {
 			})
 		)
 		const connectors = section(this.root, `Connectors (${this.draft.connectors?.length ?? 0})`)
+		connectors.dataset.navigationGroup = "connector"
 		for (const connector of this.draft.connectors ?? []) {
 			const row = section(connectors, connector.name ?? connector.id)
+			row.dataset.navigationKey = navigationKey("connector", connector.id)
 			field(row, "Connector name", connector.id, (v) => {
 				if (!v.trim() || this.draft.connectors?.some((c) => c !== connector && c.id === v)) {
 					this.status.textContent = "Connector names must be unique and nonempty."
@@ -175,6 +263,11 @@ export class AssemblyProperties {
 				}
 				const old = connector.id
 				connector.id = v
+				if (this.navigation) {
+					this.navigationSelection = ["connector", v]
+					row.dataset.navigationKey = navigationKey("connector", v)
+					this.navigation.select(navigationKey("connector", v))
+				}
 				for (const m of this.draft.mates ?? []) for (const ref of [m.a, m.b]) if (ref.connectorId === old) ref.connectorId = v
 				this.changed()
 			})
@@ -204,9 +297,11 @@ export class AssemblyProperties {
 			})
 		)
 		const mates = section(this.root, `Fixed connections (${this.draft.mates?.length ?? 0})`)
+		mates.dataset.navigationGroup = "connection"
 		const refs = (this.draft.connectors ?? []).map((c) => ({ value: c.id, label: `${c.instanceId ?? "World"} / ${c.id}` }))
 		for (const mate of this.draft.mates ?? []) {
 			const row = section(mates, mate.name ?? mate.id)
+			row.dataset.navigationKey = navigationKey("connection", mate.id)
 			field(row, "Connection name", mate.id, (v) => {
 				if (!v.trim() || this.draft.mates?.some((m) => m !== mate && m.id === v)) {
 					this.status.textContent = "Connection names must be unique and nonempty."
@@ -214,6 +309,11 @@ export class AssemblyProperties {
 				}
 				const old = mate.id
 				mate.id = v
+				if (this.navigation) {
+					this.navigationSelection = ["connection", v]
+					row.dataset.navigationKey = navigationKey("connection", v)
+					this.navigation.select(navigationKey("connection", v))
+				}
 				for (const actuator of this.draft.actuators ?? []) if (actuator.mateId === old) actuator.mateId = v
 				this.changed()
 			})
@@ -249,7 +349,27 @@ export class AssemblyProperties {
 				this.changed()
 			})
 		)
-		this.selectInstance(this.selectedInstance)
+		if (this.navigation) {
+			const actions = Array.from(this.root.children)
+				.filter((node) => node.tagName === "BUTTON")
+				.slice(0, 2)
+			if (actions.length) {
+				const bar = document.createElement("div")
+				bar.style.cssText = "position:sticky;top:0;z-index:2;background:#f8fafc;padding:8px 0;display:flex;gap:6px;flex-wrap:wrap"
+				this.root.insertBefore(bar, actions[0] ?? null)
+				bar.append(...actions)
+			}
+			for (const group of [instances, connectors, mates]) {
+				group.open = true
+				group.querySelector("summary")?.setAttribute("style", "display:none")
+				for (const row of Array.from(group.querySelectorAll<HTMLDetailsElement>("[data-navigation-key]"))) {
+					row.open = true
+					row.querySelector("summary")?.setAttribute("style", "display:none")
+				}
+			}
+			this.filterProperties()
+			this.navigation.change()
+		} else this.selectInstance(this.selectedInstance)
 	}
 	private unique(prefix: string, values: { id: string }[]): string {
 		let id = `${prefix}-${values.length + 1}`

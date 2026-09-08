@@ -5,9 +5,10 @@ import { extrusionTranslation } from "../solid-model"
 import { extrudeSolidFeature } from "../cad/extrude"
 export type SketchSource = { stepId: string; sketchId: string; loopIndex: number; edgeIndex: number; entityId?: string; distance: number; border: Vector3[] }
 /** Match an evaluated surface point to a source extrusion's profile boundary. */
-export function pickSolidSketchSource(document: PartDocument, point: Vector3, tolerance: number): SketchSource | null {
+export function pickSolidSketchSource(document: PartDocument, point: Vector3, tolerance: number, stepId?: string): SketchSource | null {
 	let best: SketchSource | null = null
 	for (const step of document.solidSteps ?? []) {
+		if (stepId && step.id !== stepId) continue
 		if (step.type !== "extrusion" || (step.topScale && step.topScale !== 1) || step.finishes?.length || step.edgeFinishes?.length) continue
 		const feature = extrusionFor(document, step)
 		const extrusion = extrudeSolidFeature(document, feature)
