@@ -10,7 +10,7 @@ it("picks the cutting sketch at an intermediate-depth hole rim", () => {
 	const source = pickSolidSketchSource(builder.document, new Vector3(5, 0, 5), 0.01)
 	expect(source?.stepId).toBe("socket")
 	expect(source?.sketchId).toBe("socket/sketch")
-	expect(source?.entityId).toStartWith("socket/sketch/0/")
+	expect(source?.entityId).toBe("socket/sketch/0")
 	expect(source?.loopIndex).toBe(0)
 	expect(source?.border.every((p) => Math.abs(p.z - 5) < 1e-8)).toBe(true)
 	expect(pickSolidSketchSource(builder.document, new Vector3(0, 0, 5), 0.01)).toBeNull()

@@ -42,6 +42,7 @@ export interface ReferencePlaneNode extends PCadNode {
 }
 
 export type Line = {
+	construction?: boolean
 	id: string
 	type: "line"
 	p0: Point2D
@@ -49,15 +50,28 @@ export type Line = {
 }
 
 export type CornerRectangle = {
+	construction?: boolean
 	id: string
 	type: "cornerRectangle"
 	p0: Point2D
 	p1: Point2D
 }
 
-export type SketchEntity = Line | CornerRectangle
+export type Circle = { construction?: boolean; id: string; type: "circle"; center: Point2D; radius: number; segments: number }
+export type Capsule = { construction?: boolean; id: string; type: "capsule"; from: Point2D; to: Point2D; width: number; arcSegments: number }
+export type Rectangle = { construction?: boolean; id: string; type: "rectangle"; center: Point2D; width: number; height: number; rotation: number }
+export type SketchPoint = { construction?: boolean; id: string; type: "point"; center: Point2D }
+export type Polygon = { construction?: boolean; id: string; type: "polygon"; center: Point2D; radius: number; rotation: number; sides: number }
+export type SketchAnchorName = "p0" | "p1" | "p2" | "p3" | "center" | "from" | "to" | `vertex${number}` | `point${number}`
+export type Ellipse = { construction?: boolean; id: string; type: "ellipse"; center: Point2D; width: number; height: number; rotation: number; segments: number }
+export type SketchPrimitive = Ellipse | Circle | Capsule | Rectangle | SketchPoint | Polygon
+export type Arc = { construction?: boolean; id: string; type: "arc"; center: Point2D; radius: number; startAngle: number; sweep: number; segments: number }
+/** Native open fit or cubic control spline. */
+export type Spline = { id: string; type: "spline"; construction?: boolean; closed?: boolean; mode: "fit" | "control"; points: Point2D[] }
+export type SketchEntity = Line | CornerRectangle | SketchPrimitive | Arc | Spline | import("./sketch-elliptic-arc").EllipticArc
 
 export type SketchLineNode = PCadNode & {
+	readonly construction?: boolean
 	readonly type: "sketchLine"
 	readonly sketchId: string
 	readonly p0: Point2D
@@ -65,13 +79,17 @@ export type SketchLineNode = PCadNode & {
 }
 
 export type SketchCornerRectangleNode = PCadNode & {
+	readonly construction?: boolean
 	readonly type: "sketchCornerRectangle"
 	readonly sketchId: string
 	readonly p0: Point2D
 	readonly p1: Point2D
 }
 
-export type SketchEntityNode = SketchLineNode | SketchCornerRectangleNode
+export type SketchPrimitiveNode = PCadNode & { readonly type: "sketchPrimitive"; readonly sketchId: string; readonly primitive: SketchPrimitive }
+export type SketchArcNode = PCadNode & { readonly type: "sketchArc"; readonly sketchId: string; readonly arc: Arc | import("./sketch-elliptic-arc").EllipticArc }
+export type SketchSplineNode = PCadNode & { readonly type: "sketchSpline"; readonly sketchId: string; readonly spline: Spline }
+export type SketchEntityNode = SketchLineNode | SketchCornerRectangleNode | SketchPrimitiveNode | SketchArcNode | SketchSplineNode
 
 export type SketchPointRef = {
 	readonly type: "point"
@@ -112,6 +130,8 @@ export type SketchDimension =
 	  }
 
 export interface SketchNode extends PCadNode {
+	readonly variables?: readonly import("./sketch-variables").SketchVariable[]
+	readonly relations?: readonly import("./sketch-solver").SketchRelation[]
 	readonly type: "sketch"
 	readonly targetId: string
 	readonly dimensions: readonly SketchDimension[]
@@ -300,6 +320,8 @@ export type SketchTarget =
 	  }
 
 export type Sketch = {
+	variables?: import("./sketch-variables").SketchVariable[]
+	relations?: import("./sketch-solver").SketchRelation[]
 	type: "sketch"
 	id: string
 	name?: string

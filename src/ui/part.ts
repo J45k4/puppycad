@@ -1,3 +1,7 @@
+import { sampleEllipticArc } from "../sketch-elliptic-arc"
+import { sampleSpline } from "../sketch-spline"
+import { arcPoints } from "../sketch-curves"
+import { isSketchPrimitive, primitivePoints } from "../sketch-primitives"
 import { screenRotation } from "./orbit-pivot"
 import { extrusionFor, stepLoops } from "../solid-edit"
 import { extrusionTranslation } from "../solid-model"
@@ -678,6 +682,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				this.onStateChange?.()
 			})
 			this.solidPanel = panel
+			panel.useSketchViewport(this.previewContainer)
 			this.quickActionsRail.remove()
 			const workspace = document.createElement("div")
 			workspace.style.cssText = "display:flex;flex:1;min-height:0;min-width:0"
@@ -710,6 +715,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		if (this.disposed) return
 		this.flushCameraViewState()
 		this.disposed = true
+		this.solidPanel?.dispose()
 		this.resizeObserver?.disconnect()
 		window.removeEventListener("resize", this.handleWindowResize)
 		document.removeEventListener("keydown", this.handleDocumentKeyDown, true)
@@ -2537,6 +2543,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 	}
 
 	private handleDocumentKeyDown = (event: KeyboardEvent): void => {
+		if ((event.target as Element | null)?.closest?.("[data-sketch-workspace]")) return
 		if (!this.root.isConnected) {
 			document.removeEventListener("keydown", this.handleDocumentKeyDown, true)
 			return
@@ -2820,7 +2827,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				points.push(entity.p0, entity.p1)
 				continue
 			}
-			points.push(entity.p0, { x: entity.p1.x, y: entity.p0.y }, entity.p1, { x: entity.p0.x, y: entity.p1.y })
+			points.push(...rectangleCorners(entity))
 		}
 		return points.map(clonePoint)
 	}
@@ -2916,6 +2923,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 			}
 
 			const corners = rectangleCorners(entity)
+			if (entity.type !== "cornerRectangle") continue
 			const sides: RectangleSide[] = ["bottom", "right", "top", "left"]
 			for (let index = 0; index < corners.length; index += 1) {
 				const start = this.sketchPointToCanvasPoint(corners[index] ?? corners[0] ?? { x: 0, y: 0 })
@@ -3024,6 +3032,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 			const sides: RectangleSide[] = ["bottom", "right", "top", "left"]
 			for (const side of sides) {
+				if (entity.type !== "cornerRectangle") continue
 				const segment = getRectangleSideSegment(entity, side)
 				const start = this.projectSketchPointToPreviewPoint(segment.start, frame)
 				const end = this.projectSketchPointToPreviewPoint(segment.end, frame)
@@ -3372,7 +3381,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 		for (const point of corners.slice(1)) {
 			this.sketchCtx.lineTo(point.x, point.y)
 		}
-		this.sketchCtx.closePath()
+		if (entity.type !== "arc" && entity.type !== "spline" && entity.type !== "ellipticArc") this.sketchCtx.closePath()
 		this.sketchCtx.stroke()
 	}
 
@@ -4225,6 +4234,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 
 		const segments: number[] = []
 		for (const entity of sketch.entities) {
+			if (entity.type === "point") continue
 			if (entity.type === "line") {
 				const start = this.sketchPointToPreviewWorld(entity.p0, frame)
 				const end = this.sketchPointToPreviewWorld(entity.p1, frame)
@@ -4232,13 +4242,13 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				continue
 			}
 			const corners = rectangleCorners(entity)
-			for (let index = 0; index < corners.length; index += 1) {
+			for (let index = 0; index < corners.length - (entity.type === "arc" || entity.type === "spline" || entity.type === "ellipticArc" ? 1 : 0); index += 1) {
 				const start = this.sketchPointToPreviewWorld(corners[index] ?? corners[0] ?? { x: 0, y: 0 }, frame)
 				const end = this.sketchPointToPreviewWorld(corners[(index + 1) % corners.length] ?? corners[0] ?? { x: 0, y: 0 }, frame)
 				segments.push(start.x, start.y, start.z, end.x, end.y, end.z)
 			}
 		}
-		if (segments.length === 0) {
+		if (segments.length === 0 && !sketch.entities.some((entity) => entity.type === "point")) {
 			return null
 		}
 
@@ -4261,6 +4271,7 @@ export class PartEditor extends UiComponent<HTMLDivElement> {
 				group.add(this.createSketchPointMarker(point, frame, markerColor))
 			}
 		}
+		if (!isSelected) for (const entity of sketch.entities) if (entity.type === "point") group.add(this.createSketchPointMarker(entity.center, frame, markerColor))
 		if (this.hoveredSketchTarget?.sketchId === sketch.id) {
 			const hoveredTarget = this.createHoveredSketchTargetVisual(sketch, this.hoveredSketchTarget, frame)
 			if (hoveredTarget) {
@@ -5444,7 +5455,11 @@ function addScaledVector(origin: Vector3D, axis: Vector3D, scalar: number): Vect
 	}
 }
 
-function rectangleCorners(entity: Extract<SketchEntity, { type: "cornerRectangle" }>): Point2D[] {
+function rectangleCorners(entity: Exclude<SketchEntity, { type: "line" }>): Point2D[] {
+	if (entity.type === "spline") return sampleSpline(entity, 0.01).map((s) => s.point)
+	if (entity.type === "ellipticArc") return sampleEllipticArc(entity)
+	if (entity.type === "arc") return arcPoints(entity)
+	if (isSketchPrimitive(entity)) return primitivePoints(entity)
 	const minX = Math.min(entity.p0.x, entity.p1.x)
 	const maxX = Math.max(entity.p0.x, entity.p1.x)
 	const minY = Math.min(entity.p0.y, entity.p1.y)

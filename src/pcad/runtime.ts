@@ -1,3 +1,7 @@
+import { normalizeEllipticArc } from "../sketch-elliptic-arc"
+import { normalizeSpline } from "../sketch-spline"
+import { normalizeArc } from "../sketch-curves"
+import { normalizePrimitive } from "../sketch-primitives"
 import { EXTRUDE_OPERATIONS } from "../schema"
 import { findSketchDimensionConstraintNode, getSketchConstraintEntityIds, getSketchConstraintNodesForEntity, sketchDimensionToConstraintNode } from "./sketch-constraints"
 import { getSketchEntityNodes, sketchEntityNodeToEntity, sketchEntityToNode } from "./sketch-entities"
@@ -104,6 +108,9 @@ export function getNodeDependencies(node: PCadGraphNode): readonly string[] {
 			return []
 		case "sketch":
 			return [node.targetId]
+		case "sketchSpline":
+		case "sketchArc":
+		case "sketchPrimitive":
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return [node.sketchId]
@@ -475,7 +482,11 @@ export class CadEditor {
 
 	private getSketchEntityOrThrow(sketchId: string, entityId: string): SketchEntityNode {
 		const node = this.present.nodes.get(entityId)
-		if (!node || (node.type !== "sketchLine" && node.type !== "sketchCornerRectangle") || node.sketchId !== sketchId) {
+		if (
+			!node ||
+			(node.type !== "sketchSpline" && node.type !== "sketchArc" && node.type !== "sketchPrimitive" && node.type !== "sketchLine" && node.type !== "sketchCornerRectangle") ||
+			node.sketchId !== sketchId
+		) {
 			throw new Error(`Sketch entity "${entityId}" does not exist.`)
 		}
 		return node
@@ -557,6 +568,18 @@ function validateNode(state: PCadState, node: PCadGraphNode): void {
 		case "sketch":
 			requireNodeType(state, node.targetId, ["referencePlane", "face"], `Sketch "${node.id}" target`)
 			validateSketchDimensions(state, node)
+			return
+		case "sketchSpline":
+			requireNodeType(state, node.sketchId, ["sketch"], `Spline "${node.id}" sketch`)
+			if (normalizeSpline(node.spline).id !== node.id) throw Error("Invalid sketch spline")
+			return
+		case "sketchArc":
+			requireNodeType(state, node.sketchId, ["sketch"], `Arc "${node.id}" sketch`)
+			if (node.arc.id !== node.id || !(node.arc.type === "ellipticArc" ? normalizeEllipticArc(node.arc) : normalizeArc(node.arc, node.id))) throw Error("Invalid sketch arc")
+			return
+		case "sketchPrimitive":
+			requireNodeType(state, node.sketchId, ["sketch"], `Primitive "${node.id}" sketch`)
+			if (node.primitive.id !== node.id || !normalizePrimitive(node.primitive, node.id)) throw Error("Invalid sketch primitive")
 			return
 		case "sketchLine":
 			requireNodeType(state, node.sketchId, ["sketch"], `Sketch line "${node.id}" sketch`)

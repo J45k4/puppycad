@@ -2,7 +2,7 @@ import { extrudeSolidFeature, resolveSketchTargetFrame } from "./cad/extrude"
 import { materializeSketch } from "./cad/sketch"
 import type { EdgeReference, FaceReference, PartDocument, PartFeature, Sketch, SketchDimension, SketchEntity, SketchPlane, SolidChamfer, SolidExtrude } from "./schema"
 
-type PartSketchEntity = Extract<SketchEntity, { type: "line" | "cornerRectangle" }>
+type PartSketchEntity = SketchEntity
 
 export type PartAction =
 	| {

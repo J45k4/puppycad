@@ -1,3 +1,5 @@
+import { outlineEntities, primitivePoints, type SketchOutline, type PrimitiveOutline } from "./sketch-primitives"
+export { ellipse, polygon, sketchPoint, circle, capsule, rectangle } from "./sketch-primitives"
 import { evaluateSolid, type SolidCombine, type SolidStep, type ProfileFinish } from "./solid-model"
 import { requireValue } from "./required"
 import { solveFixedAssembly, transformMatrix } from "./assembly-solver"
@@ -11,13 +13,11 @@ import { createProjectFile } from "./project-file"
 import type { PartDocument, SketchTarget } from "./schema"
 import { exportPartStl } from "./part-mesh"
 import type { SyncedProjectCommand } from "./project-commands"
-export { capsule, circle, component, defineModel, rectangle, roundedRectangle, v2 } from "./model-dsl"
+export { component, defineModel, roundedRectangle, v2 } from "./model-dsl"
 export type { BodySpec, ModelDefinition } from "./model-dsl"
-export type ExtrusionSpec = Pick<BodySpec, "name" | "outline" | "depth"> & {
-	holes?: readonly (readonly {
-		x: number
-		y: number
-	}[])[]
+export type ExtrusionSpec = Pick<BodySpec, "name" | "depth"> & {
+	outline: SketchOutline
+	holes?: readonly SketchOutline[]
 	operation?: SolidCombine
 	topScale?: number
 	translation?: Vector3D
@@ -84,7 +84,8 @@ export class PartBuilder {
 		if (!id.trim() || this.document.features.some((feature) => feature.id === id || feature.id === `${id}/sketch`)) throw new Error(`Duplicate or empty feature id: ${id}`)
 		if (!Number.isFinite(spec.depth) || spec.depth <= 0) throw new Error("Extrusion depth must be positive.")
 		const loops = [spec.outline, ...(spec.holes ?? [])]
-		for (const loop of loops) {
+		for (const outline of loops) {
+			const loop = Array.isArray(outline) ? outline : primitivePoints(outline as PrimitiveOutline)
 			if (loop.length < 3 || loop.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) throw new Error("An outline must contain at least three finite points.")
 		}
 		const sketchId = `${id}/sketch`
@@ -94,14 +95,7 @@ export class PartBuilder {
 			name: spec.name ?? id,
 			dirty: false,
 			target: spec.on ?? { type: "plane", plane: "XY" },
-			entities: loops.flatMap((loop, loopIndex) =>
-				loop.map((point, index) => ({
-					id: `${sketchId}/${loopIndex}/${index}`,
-					type: "line" as const,
-					p0: { ...point },
-					p1: { ...requireValue(loop[(index + 1) % loop.length]) }
-				}))
-			),
+			entities: loops.flatMap((loop, loopIndex) => outlineEntities(loop, `${sketchId}/${loopIndex}`)),
 			dimensions: [],
 			vertices: [],
 			loops: [],

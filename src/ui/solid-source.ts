@@ -1,6 +1,6 @@
 import { Vector3 } from "three"
 import type { PartDocument } from "../schema"
-import { extrusionFor, sketchFor } from "../solid-edit"
+import { extrusionFor, sketchFor, primitiveForLoop } from "../solid-edit"
 import { extrusionTranslation } from "../solid-model"
 import { extrudeSolidFeature } from "../cad/extrude"
 export type SketchSource = { stepId: string; sketchId: string; loopIndex: number; edgeIndex: number; entityId?: string; distance: number; border: Vector3[] }
@@ -34,7 +34,9 @@ export function pickSolidSketchSource(document: PartDocument, point: Vector3, to
 				const distance = Math.hypot(px - a.x - t * dx, py - a.y - t * dy)
 				if (distance > tolerance || (best && distance > best.distance + 1e-7)) return
 				const same = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-6
-				const entity = sketch.entities.find((e) => e.type === "line" && ((same(e.p0, a) && same(e.p1, b)) || (same(e.p1, a) && same(e.p0, b))))
+				const entity =
+					primitiveForLoop(document, step, loop) ??
+					sketch.entities.find((e) => e.type === "line" && ((same(e.p0, a) && same(e.p1, b)) || (same(e.p1, a) && same(e.p0, b))))
 				best = {
 					stepId: step.id,
 					sketchId: sketch.id,

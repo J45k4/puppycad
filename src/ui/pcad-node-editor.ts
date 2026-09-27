@@ -853,6 +853,16 @@ function getGeneratedSolidFaceNodeId(solidId: string, faceId: string): string {
 
 function getSketchEntityLabel(entity: SketchEntity): string {
 	switch (entity.type) {
+		case "spline":
+		case "ellipticArc":
+		case "arc":
+		case "point":
+		case "ellipse":
+		case "polygon":
+		case "circle":
+		case "capsule":
+		case "rectangle":
+			return entity.type
 		case "line":
 			return entity.id || "Line"
 		case "cornerRectangle":
@@ -862,6 +872,16 @@ function getSketchEntityLabel(entity: SketchEntity): string {
 
 function getSketchEntityDetail(entity: SketchEntity): string {
 	switch (entity.type) {
+		case "spline":
+		case "ellipticArc":
+		case "arc":
+		case "point":
+		case "ellipse":
+		case "polygon":
+		case "circle":
+		case "capsule":
+		case "rectangle":
+			return JSON.stringify(entity)
 		case "line":
 			return `${formatPoint2D(entity.p0)} -> ${formatPoint2D(entity.p1)}`
 		case "cornerRectangle":
@@ -882,6 +902,19 @@ function getSketchDimensionLabel(dimension: SketchDimension): string {
 
 function sketchEntityRows(entity: SketchEntity): readonly { label: string; value: string }[] {
 	switch (entity.type) {
+		case "spline":
+		case "ellipticArc":
+		case "arc":
+		case "point":
+		case "ellipse":
+		case "polygon":
+		case "circle":
+		case "capsule":
+		case "rectangle":
+			return [
+				{ label: "Primitive", value: entity.type },
+				{ label: "Parameters", value: JSON.stringify(entity) }
+			]
 		case "line":
 			return [
 				{ label: "Entity ID", value: entity.id },
@@ -935,6 +968,9 @@ function getTypeOrder(type: PCadGraphNode["type"]): number {
 			return 0
 		case "sketch":
 			return 1
+		case "sketchSpline":
+		case "sketchArc":
+		case "sketchPrimitive":
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return 2
@@ -961,6 +997,9 @@ function getNodeDetail(node: PCadGraphNode): string {
 			return node.plane
 		case "sketch":
 			return `${node.dimensions.length} dimensions`
+		case "sketchSpline":
+		case "sketchArc":
+		case "sketchPrimitive":
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return getSketchEntityDetail(sketchEntityNodeToEntity(node))
@@ -1075,6 +1114,9 @@ function getNodePalette(type?: PCadGraphNode["type"] | GeneratedNodeType): { fil
 			return { fill: "#e0f2fe", border: "#38bdf8", text: "#075985" }
 		case "sketch":
 			return { fill: "#dcfce7", border: "#22c55e", text: "#166534" }
+		case "sketchSpline":
+		case "sketchArc":
+		case "sketchPrimitive":
 		case "sketchLine":
 		case "sketchCornerRectangle":
 			return { fill: "#ecfccb", border: "#84cc16", text: "#3f6212" }

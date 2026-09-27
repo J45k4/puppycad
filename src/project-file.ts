@@ -1,3 +1,9 @@
+import { normalizeEllipticArc } from "./sketch-elliptic-arc"
+import { normalizeSketchVariables } from "./sketch-variables"
+import { normalizeSpline } from "./sketch-spline"
+import { normalizeArc } from "./sketch-curves"
+import { normalizeSketchRelations } from "./sketch-solver"
+import { normalizePrimitive } from "./sketch-primitives"
 import { solveFixedAssembly } from "./assembly-solver"
 import type {
 	Assembly,
@@ -863,20 +869,37 @@ function normalizePCadGraphNode(input: unknown): PCadGraphNode | undefined {
 			id,
 			name,
 			targetId,
+			relations: normalizeSketchRelations(value.relations, normalizeSketchVariables(value.variables)),
+			variables: normalizeSketchVariables(value.variables),
 			dimensions: normalizeSerializedSketchDimensions((value as { dimensions?: unknown }).dimensions)
 		}
+	}
+	if (value.type === "sketchSpline") {
+		const spline = normalizeSpline(value.spline)
+		if (spline.id !== id || typeof value.sketchId !== "string" || !value.sketchId.trim()) throw Error("Invalid sketch spline")
+		return { id, name, type: "sketchSpline", sketchId: value.sketchId, spline }
+	}
+	if (value.type === "sketchArc") {
+		const arc = value.arc && typeof value.arc === "object" && (value.arc as { type?: unknown }).type === "ellipticArc" ? normalizeEllipticArc(value.arc) : normalizeArc(value.arc, id)
+		if (!arc || typeof value.sketchId !== "string" || !value.sketchId.trim()) throw Error("Invalid sketch arc")
+		return { id, name, type: "sketchArc", sketchId: value.sketchId, arc }
+	}
+	if (value.type === "sketchPrimitive") {
+		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
+		const primitive = normalizePrimitive(value.primitive, id)
+		return sketchId && primitive ? { type: "sketchPrimitive", id, name, sketchId, primitive } : undefined
 	}
 	if (value.type === "sketchLine") {
 		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
 		const p0 = normalizePoint2D(value.p0)
 		const p1 = normalizePoint2D(value.p1)
-		return sketchId && p0 && p1 ? { type: "sketchLine", id, name, sketchId, p0, p1 } : undefined
+		return sketchId && p0 && p1 ? { type: "sketchLine", id, name, sketchId, p0, p1, ...(value.construction === true ? { construction: true } : {}) } : undefined
 	}
 	if (value.type === "sketchCornerRectangle") {
 		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
 		const p0 = normalizePoint2D(value.p0)
 		const p1 = normalizePoint2D(value.p1)
-		return sketchId && p0 && p1 ? { type: "sketchCornerRectangle", id, name, sketchId, p0, p1 } : undefined
+		return sketchId && p0 && p1 ? { type: "sketchCornerRectangle", id, name, sketchId, p0, p1, ...(value.construction === true ? { construction: true } : {}) } : undefined
 	}
 	if (value.type === "sketchConstraint") {
 		const sketchId = typeof value.sketchId === "string" && value.sketchId.trim() ? value.sketchId.trim() : null
@@ -1014,7 +1037,7 @@ function normalizeSketchConstraintRef(input: unknown): { type: "point"; entityId
 }
 
 function isSketchDimensionEntityNode(node: PCadGraphNode | undefined): node is SketchEntityNode {
-	return node?.type === "sketchLine" || node?.type === "sketchCornerRectangle"
+	return node?.type === "sketchSpline" || node?.type === "sketchArc" || node?.type === "sketchPrimitive" || node?.type === "sketchLine" || node?.type === "sketchCornerRectangle"
 }
 
 function canApplySerializedSketchDimension(entity: SketchEntityNode, dimension: SketchDimension): boolean {
@@ -1047,6 +1070,8 @@ function normalizePartFeature(input: unknown, index: number): PartFeature | unde
 			dirty: value.dirty === true,
 			target,
 			entities,
+			relations: normalizeSketchRelations(value.relations, normalizeSketchVariables(value.variables)),
+			variables: normalizeSketchVariables(value.variables),
 			dimensions,
 			vertices: [],
 			loops: [],
@@ -1216,13 +1241,33 @@ function normalizeSketchEntities(input: unknown): SketchEntity[] {
 		}
 
 		const id = typeof entity.id === "string" && entity.id.trim() ? entity.id.trim() : `entity-${index + 1}`
+		if (entity.type === "ellipticArc") {
+			entities.push(normalizeEllipticArc({ ...entity, id }))
+			continue
+		}
+		if (entity.type === "spline") {
+			entities.push(normalizeSpline({ ...entity, id }))
+			continue
+		}
+		if (entity.type === "arc") {
+			const arc = normalizeArc(entity, id)
+			if (!arc) throw Error("Invalid sketch arc")
+			entities.push(arc)
+			continue
+		}
+		const primitive = normalizePrimitive(entity, id)
+		if ((entity.type === "ellipse" || entity.type === "point" || entity.type === "polygon") && !primitive) throw Error(`Invalid sketch ${entity.type}`)
+		if (primitive) {
+			entities.push(primitive)
+			continue
+		}
 		if (entity.type === "line") {
 			const p0 = normalizePoint2D(entity.p0)
 			const p1 = normalizePoint2D(entity.p1)
 			if (!p0 || !p1) {
 				continue
 			}
-			entities.push({ id, type: "line", p0, p1 })
+			entities.push({ id, type: "line", p0, p1, ...(entity.construction === true ? { construction: true } : {}) })
 			continue
 		}
 
@@ -1232,7 +1277,7 @@ function normalizeSketchEntities(input: unknown): SketchEntity[] {
 			if (!p0 || !p1) {
 				continue
 			}
-			entities.push({ id, type: "cornerRectangle", p0, p1 })
+			entities.push({ id, type: "cornerRectangle", p0, p1, ...(entity.construction === true ? { construction: true } : {}) })
 		}
 	}
 

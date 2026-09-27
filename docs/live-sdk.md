@@ -149,3 +149,11 @@ await project.model(model)
 ```
 
 This compiles the model and sends all its part/assembly definitions as one atomic batch. It preserves the existing compiler's flattened body coordinates. For reusable parts with independent print coordinates and separate assembly placement, use `project.part` and `project.assembly` as above.
+
+## Native sketch primitives
+
+The SDK's `circle(center, radius, segments)`, `capsule(from, to, width, arcSegments)`, and `rectangle(center, width, height, rotation)` return primitive definitions. `PartBuilder.extrude` accepts these for its outline and holes, alongside legacy arrays of points. The project stores the primitive parameters and stable entity IDs; evaluating the sketch creates polygon topology without replacing its source entities. Graph serialization stores them as `sketchPrimitive` nodes. Circle segments and capsule arc segments control evaluation resolution.
+
+The older `model-dsl` polygon helpers still return point arrays. Use the SDK exports for editable primitives. Explicit polygon arrays remain appropriate for irregular profiles such as the flower holder's asymmetric bridges and the bowl/stem revolve sections. Revolve and finish operations retain their existing parameters.
+
+Existing flower-holder projects can be converted with `bun examples/migrate-flower-holder-primitives.ts PROJECT_ID` (preview) and the same command with `--apply`. The converter matches existing outlines against the authored primitives, checks evaluated bounds and volume, backs up the project in `workdir`, and saves a single revision-checked command batch with undo support. It refuses outlines that differ from the authored dimensions and leaves assembly placement, visibility, feature depths, and unrelated documents intact.

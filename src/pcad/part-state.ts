@@ -1,3 +1,5 @@
+import { normalizeSketchVariables } from "../sketch-variables"
+import { remapSketchRelations, resolveSketchDimensionExpressions } from "../sketch-solver"
 import { materializeSketch } from "../cad/sketch"
 import { getSketchDimensions, sketchDimensionToConstraintNode } from "./sketch-constraints"
 import { getSketchEntities, sketchEntityToNode } from "./sketch-entities"
@@ -84,7 +86,7 @@ export function createPartRuntimeStateFromFeatures(features: readonly PartFeatur
 			}
 			const entityIdMap = new Map<string, string>()
 			const entityNodes: PCadGraphNode[] = []
-			const reservedEntityNodeIds = new Set<string>()
+			const reservedEntityNodeIds = new Set(features.map((feature) => feature.id))
 			for (const entity of feature.entities) {
 				const entityNodeId = getAvailableSketchEntityNodeId(feature.id, entity.id, nodes, reservedEntityNodeIds)
 				const entityNode = sketchEntityToNode(feature.id, entityNodeId === entity.id ? entity : { ...entity, id: entityNodeId })
@@ -101,6 +103,8 @@ export function createPartRuntimeStateFromFeatures(features: readonly PartFeatur
 				type: "sketch",
 				name: feature.name,
 				targetId,
+				relations: remapSketchRelations(resolveSketchDimensionExpressions(feature.relations, feature.variables), entityIdMap),
+				variables: normalizeSketchVariables(feature.variables),
 				dimensions
 			}
 			nodes.set(sketchNode.id, sketchNode)
@@ -337,6 +341,8 @@ function materializeSketchNode(state: PCadState, node: SketchNode, dirty: boolea
 		dirty,
 		target: sketchTarget,
 		entities: getSketchEntities(state, node.id),
+		relations: node.relations ? structuredClone([...node.relations]) : undefined,
+		variables: normalizeSketchVariables(node.variables),
 		dimensions: getSketchDimensions(state, node.id, node.dimensions),
 		vertices: [],
 		loops: [],

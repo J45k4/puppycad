@@ -1,3 +1,5 @@
+import { isSketchPrimitive, primitivePoints, outlineEntities, type SketchOutline } from "./sketch-primitives"
+import type { SketchPrimitive } from "./schema"
 import type { PartDocument, Sketch, SolidExtrude } from "./schema"
 import type { Point2D } from "./types"
 import type { SolidStep } from "./solid-model"
@@ -17,6 +19,7 @@ export function sketchFor(document: PartDocument, step: SolidStep): Sketch {
 	return sketch
 }
 export function stepLoops(document: PartDocument, step: SolidStep): Point2D[][] {
+	if (step.type === "loft" || step.type === "shell") return []
 	return step.type === "revolve" ? [structuredClone(requireValue(step.outline))] : extrudeSolidFeature(document, extrusionFor(document, step)).profileLoops
 }
 export function replaceStepLoops(document: PartDocument, step: SolidStep, loops: Point2D[][]): void {
@@ -32,7 +35,10 @@ export function replaceStepLoops(document: PartDocument, step: SolidStep, loops:
 		vertices: [],
 		loops: [],
 		profiles: [],
-		entities: loops.flatMap((loop, l) => loop.map((p, i) => ({ type: "line" as const, id: `${old.id}/${l}/${i}`, p0: { ...p }, p1: { ...requireValue(loop[(i + 1) % loop.length]) } })))
+		entities: loops.flatMap((loop, l) => {
+			const primitive = primitiveForLoop(document, step, loop)
+			return primitive ? [structuredClone(primitive)] : outlineEntities(loop, `${old.id}/${l}`)
+		})
 	})
 	const profile = sketch.profiles.find((p) => p.holeLoopIds.length === loops.length - 1)
 	if (!profile) throw Error("The outline and holes must form one closed profile.")
@@ -53,4 +59,32 @@ export function validateSolidEdit(document: PartDocument): void {
 	} finally {
 		for (const geometry of geometries) geometry.dispose()
 	}
+}
+
+export function primitiveForLoop(document: PartDocument, step: SolidStep, points: readonly Point2D[]): SketchPrimitive | undefined {
+	if (step.type !== "extrusion") return
+	return sketchFor(document, step).entities.find((entity): entity is SketchPrimitive => isSketchPrimitive(entity) && sameLoop(primitivePoints(entity), points))
+}
+export function sameLoop(a: readonly Point2D[], b: readonly Point2D[]): boolean {
+	if (a.length !== b.length || !a[0]) return false
+	const same = (p: Point2D | undefined, q: Point2D | undefined) => p && q && Math.hypot(p.x - q.x, p.y - q.y) < 1e-6
+	const start = b.findIndex((p) => same(a[0], p))
+	return start >= 0 && [1, -1].some((direction) => a.every((p, i) => same(p, b[(start + direction * i + b.length) % b.length])))
+}
+export function replaceStepOutline(document: PartDocument, step: SolidStep, loops: Point2D[][], index: number, outline: SketchOutline): void {
+	replaceStepLoops(document, step, loops)
+	if (step.type === "revolve") throw Error("Primitive replacement requires an extrusion sketch")
+	const old = sketchFor(document, step)
+	const entities = loops.flatMap((points, i) =>
+		i === index
+			? outlineEntities(outline, `${old.id}/${i}`)
+			: primitiveForLoop(document, step, points)
+				? [structuredClone(requireValue(primitiveForLoop(document, step, points)))]
+				: outlineEntities(points, `${old.id}/${i}`)
+	)
+	const next = materializeSketch({ ...old, entities })
+	const profile = next.profiles.find((p) => p.holeLoopIds.length === loops.length - 1)
+	if (!profile) throw Error("The outline and holes must form one closed profile.")
+	document.features[document.features.indexOf(old)] = next
+	extrusionFor(document, step).target.profileId = profile.id
 }

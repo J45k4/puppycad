@@ -389,6 +389,7 @@ function getOccludedSketchSidePreviewPoint(editor: PartEditor, previewCanvas: HT
 	const rect = previewCanvas.getBoundingClientRect()
 	const raycaster = new THREE.Raycaster()
 	for (const entity of sketch.entities) {
+		if (entity.type !== "line" && entity.type !== "cornerRectangle") continue
 		const sides =
 			entity.type === "line"
 				? [{ side: "line", start: entity.p0, end: entity.p1 }]
@@ -2960,5 +2961,17 @@ describe("PartEditor", () => {
 		clickButton(domWindow, editor.root, "Extrude")
 
 		expect(editor.listExtrudes()).toHaveLength(2)
+	})
+	it("disposes its open sketch workspace with the owning part editor", () => {
+		const editor = new PartEditor({ initialState: { features: [], solidSteps: [] }, createPreviewRenderer: () => new FakePreviewRenderer() })
+		document.body.append(editor.root)
+		clickButton(domWindow, editor.root, "New sketch")
+		const workspace = document.querySelector<HTMLElement>('[aria-label="Sketch workspace"]')
+		expect(workspace).not.toBeNull()
+		editor.dispose()
+		expect(document.querySelector("[data-sketch-workspace]")).toBeNull()
+		if (workspace) clickButton(domWindow, workspace, "Finish sketch")
+		expect(editor.getState().features).toHaveLength(0)
+		editor.dispose()
 	})
 })

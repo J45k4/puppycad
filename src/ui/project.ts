@@ -139,6 +139,11 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	private readonly clientId = this.createClientId()
 	private readonly client: PuppyCadClient
 	private readonly pcadProject: PCadProject
+	private recoveryProject: Project | null = null
+	private readonly recoveryButton = document.createElement("button")
+	private readonly syncStatus = document.createElement("p")
+	private readonly serverSaveButton = document.createElement("button")
+	private savingToServer = false
 	private serverBacked = false
 	private serverRevision = 0
 	private commandQueue = Promise.resolve()
@@ -258,13 +263,26 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		saveButton.onclick = () => this.saveProjectToFile()
 		this.root.appendChild(saveButton)
 
-		const serverSaveButton = document.createElement("button")
+		const serverSaveButton = this.serverSaveButton
 		serverSaveButton.textContent = "Save to Server"
 		serverSaveButton.classList.add("button", "button--ghost")
 		serverSaveButton.onclick = () => {
 			void this.saveProjectToServer()
 		}
 		this.root.appendChild(serverSaveButton)
+		this.syncStatus.setAttribute("role", "status")
+		this.root.appendChild(this.syncStatus)
+		this.recoveryButton.textContent = "Restore browser copy"
+		this.recoveryButton.hidden = true
+		this.recoveryButton.style.display = "none"
+		this.recoveryButton.onclick = () => {
+			if (!this.recoveryProject) return
+			this.serverBacked = false
+			this.pcadProject.disconnectEvents()
+			this.restoreFromProjectFile(this.recoveryProject)
+			this.syncStatus.textContent = "Browser copy restored locally. Review it, then use Save to Server."
+		}
+		this.root.appendChild(this.recoveryButton)
 
 		this.itemsListContainer = new TreeList<ProjectNode>({
 			items: [],
@@ -1617,11 +1635,12 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			case "pcb":
 				return { id, type, name: resolvedName, editor: new PCBEditor(), visible }
 			case "part": {
+				const initialPartState = !partState?.features.length && !partState?.solidSteps ? { ...partState, features: [], solidSteps: [] } : partState
 				const editor = new PartEditor({
-					initialState: partState,
+					initialState: initialPartState,
 					initialViewState: partViewState ?? this.loadPartViewState(id),
 					onStateChange: () => {
-						if (!partState?.solidSteps || !this.serverBacked) this.schedulePersist()
+						if (!initialPartState?.solidSteps || !this.serverBacked) this.schedulePersist()
 						this.renderItems()
 					},
 					onViewStateChange: (state, cameraOnly) => {
@@ -1955,6 +1974,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private readonly handleProjectHistoryKeyDown = (event: KeyboardEvent): void => {
+		if ((event.target as Element | null)?.closest?.("[data-sketch-workspace]")) return
 		if (!(event.metaKey || event.ctrlKey) || event.altKey || ProjectTreeView.isEditableKeyboardTarget(event.target)) {
 			return
 		}
@@ -2011,6 +2031,7 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 				})
 				.catch((error) => {
 					console.error("Failed to persist project snapshot to server", error)
+					this.syncStatus.textContent = "Changes have not reached the server. Keep this page open and use Save to Server to retry."
 				})
 			await this.saveSnapshotQueue
 		}
@@ -2021,9 +2042,13 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 			return
 		}
 		this.commandQueue = this.commandQueue
-			.then(() => this.postCommand(command))
+			.then(async () => {
+				if (this.persistenceEnabled) await this.saveToIndexedDB()
+				await this.postCommand(command)
+			})
 			.catch((error) => {
 				console.error("Failed to sync project command", error)
+				this.syncStatus.textContent = "Changes have not reached the server. Keep this page open and use Save to Server to retry."
 			})
 	}
 
@@ -2079,12 +2104,51 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 		}
 	}
 
+	private async readBrowserCopy(): Promise<Project | null> {
+		if (!this.persistenceEnabled) return null
+		try {
+			const db = await this.getDatabase()
+			const store = db.transaction(ProjectTreeView.STORE_NAME, "readonly").objectStore(ProjectTreeView.STORE_NAME)
+			const backup = await this.promisifyRequest<Project | undefined>(store.get(`${this.getStoreKey()}:recovery`))
+			if (backup) return normalizeProjectFile(backup)
+			const current = db.transaction(ProjectTreeView.STORE_NAME, "readonly").objectStore(ProjectTreeView.STORE_NAME)
+			return normalizeProjectFile(await this.promisifyRequest<Project | undefined>(current.get(this.getStoreKey())))
+		} catch {
+			return null
+		}
+	}
+
+	private async storeBrowserRecovery(project: Project | null): Promise<void> {
+		if (!this.persistenceEnabled) return
+		try {
+			const db = await this.getDatabase()
+			const tx = db.transaction(ProjectTreeView.STORE_NAME, "readwrite")
+			if (project) tx.objectStore(ProjectTreeView.STORE_NAME).put(project, `${this.getStoreKey()}:recovery`)
+			else tx.objectStore(ProjectTreeView.STORE_NAME).delete(`${this.getStoreKey()}:recovery`)
+			await new Promise<void>((resolve, reject) => {
+				tx.oncomplete = () => resolve()
+				tx.onerror = () => reject(tx.error)
+				tx.onabort = () => reject(tx.error)
+			})
+		} catch (error) {
+			console.error("Failed to preserve browser recovery copy", error)
+		}
+	}
+
 	private async loadFromServer(): Promise<"loaded" | "missing" | "offline"> {
 		if (typeof fetch !== "function") {
 			return "offline"
 		}
 		try {
+			const localCopy = await this.readBrowserCopy()
 			const result = await this.pcadProject.load()
+			if (localCopy && JSON.stringify(localCopy.items) !== JSON.stringify(result.project.items)) {
+				this.recoveryProject = localCopy
+				this.recoveryButton.hidden = false
+				this.recoveryButton.style.display = ""
+				this.syncStatus.textContent = "A different browser copy is available. Restore it to review any unsynced edits."
+				await this.storeBrowserRecovery(localCopy)
+			}
 			this.serverBacked = true
 			this.applyProjectSyncResult(result)
 			this.connectProjectEvents()
@@ -2373,21 +2437,30 @@ class ProjectTreeView extends UiComponent<HTMLDivElement> {
 	}
 
 	private async saveProjectToServer() {
+		if (this.savingToServer) return
+		this.savingToServer = true
+		this.serverSaveButton.disabled = true
+		this.syncStatus.setAttribute("role", "status")
+		this.syncStatus.textContent = "Saving project to server…"
 		try {
 			await this.saveProjectSnapshotToServer()
 			const message = "Project saved on server."
+			this.syncStatus.textContent = message
+			this.recoveryProject = null
+			this.recoveryButton.hidden = true
+			this.recoveryButton.style.display = "none"
+			await this.storeBrowserRecovery(null)
 			this.connectProjectEvents()
 
 			console.log(message)
-			if (typeof window !== "undefined" && typeof window.alert === "function") {
-				window.alert(message)
-			}
 		} catch (error) {
 			console.error("Failed to save project to server", error)
-			if (typeof window !== "undefined" && typeof window.alert === "function") {
-				const description = error instanceof Error ? error.message : "Unknown error"
-				window.alert(`Failed to save project to server: ${description}`)
-			}
+			const description = error instanceof Error ? error.message : "Unknown error"
+			this.syncStatus.textContent = `Failed to save project to server: ${description}. Use Save to Server to retry.`
+			this.syncStatus.setAttribute("role", "alert")
+		} finally {
+			this.savingToServer = false
+			this.serverSaveButton.disabled = false
 		}
 	}
 

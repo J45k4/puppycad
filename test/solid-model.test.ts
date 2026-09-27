@@ -118,3 +118,39 @@ it("inherits translation for face-attached additions", () => {
 	expect(bounds[0][2]).toBe(20)
 	expect(bounds[1][2]).toBe(30)
 })
+
+it("through-all follows changed body depth and translated transverse sketch supports", () => {
+	const b = new PartBuilder()
+	b.extrude("body", { outline: rectangle(v2(0, 0), 20, 20), depth: 10 })
+	b.extrude("hole", { outline: rectangle(v2(0, 0), 4, 4), depth: 1, operation: "cut" })
+	const cut = requireValue(b.document.solidSteps?.[1])
+	cut.endCondition = "through-all"
+	expect(verifyMesh(b)).toBeCloseTo(3840, 2)
+	const body = b.document.features.find((f) => f.type === "extrude" && f.id === b.document.solidSteps?.[0]?.featureId)
+	if (!body || body.type !== "extrude") throw Error("Missing body")
+	body.depth = 40
+	expect(verifyMesh(b)).toBeCloseTo(15360, 2)
+	const hole = b.document.features.find((f) => f.type === "extrude" && f.id === cut.featureId)
+	if (!hole || hole.type !== "extrude") throw Error("Missing hole")
+	const sketch = b.document.features.find((f) => f.id === hole.target.sketchId)
+	if (!sketch || sketch.type !== "sketch") throw Error("Missing sketch")
+	sketch.target = { type: "plane", plane: "XZ" }
+	cut.translation = { x: 0, y: 90, z: 20 }
+	expect(verifyMesh(b)).toBeCloseTo(16000 - 320, 2)
+	const saved = requireValue(normalizeProjectFile(createProjectFile({ items: [{ id: "part", type: "part", name: "Part", data: b.document }], selectedPath: null })))
+	const node = saved.items[0]
+	if (!node || "kind" in node || node.type !== "part") throw Error("Missing saved part")
+	expect(node.data?.solidSteps?.[1]?.endCondition).toBe("through-all")
+})
+
+it("unites overlapping sketch regions before extruding and cuts separate regions together", () => {
+	const b = new PartBuilder()
+	b.extrude("arms", { outline: rectangle(v2(0, 0), 20, 10), depth: 8 })
+	const arms = requireValue(b.document.solidSteps?.[0])
+	arms.regions = [{ id: "second", type: "rectangle", center: v2(0, 0), width: 10, height: 20, rotation: 0 }]
+	expect(verifyMesh(b)).toBeCloseTo(2400, 1)
+	b.extrude("holes", { outline: rectangle(v2(-6, 0), 2, 2), depth: 8, operation: "cut" })
+	const holes = requireValue(b.document.solidSteps?.[1])
+	holes.regions = [{ id: "other-hole", type: "rectangle", center: v2(6, 0), width: 2, height: 2, rotation: 0 }]
+	expect(verifyMesh(b)).toBeCloseTo(2336, 1)
+})

@@ -1,3 +1,11 @@
+import { sampleEllipticArc } from "../sketch-elliptic-arc"
+import { normalizeSketchVariables } from "../sketch-variables"
+import { sampleSpline } from "../sketch-spline"
+import { measureSketchDimension } from "../sketch-dimensions"
+import { requireValue } from "../required"
+import { arcPoints } from "../sketch-curves"
+import { solveSketch, resolveSketchDimensionExpressions } from "../sketch-solver"
+import { primitivePoints } from "../sketch-primitives"
 import type { CornerRectangle, Loop, Profile, Sketch } from "../schema"
 import type { Point2D } from "../types"
 
@@ -26,16 +34,38 @@ export interface MaterializeSketchOptions {
 
 export function materializeSketch(sketch: Sketch, options: MaterializeSketchOptions = {}): Sketch {
 	const tolerance = options.tolerance ?? DEFAULT_TOLERANCE
+	const variables = normalizeSketchVariables(sketch.variables)
 	const directLoops: Point2D[][] = []
 	const segments: Segment[] = []
 
-	for (const entity of sketch.entities) {
+	const relations = resolveSketchDimensionExpressions(sketch.relations, variables)
+	const solved = relations?.length ? solveSketch(sketch.entities, relations) : undefined
+	if (solved?.status === "conflicting") throw Error(`Conflicting sketch constraints: ${solved.conflicts.join(", ")}`)
+	const entities = solved?.entities ?? sketch.entities
+	for (const entity of entities) {
+		if (entity.construction) continue
 		switch (entity.type) {
+			case "point":
+				break
+			case "ellipticArc":
+			case "spline":
+			case "arc": {
+				const points = entity.type === "ellipticArc" ? sampleEllipticArc(entity) : entity.type === "spline" ? sampleSpline(entity, 0.01).map((s) => s.point) : arcPoints(entity)
+				for (let i = 1; i < points.length; i++) segments.push({ start: requireValue(points[i - 1]), end: requireValue(points[i]) })
+				break
+			}
 			case "line":
 				segments.push({
 					start: clonePoint(entity.p0),
 					end: clonePoint(entity.p1)
 				})
+				break
+			case "ellipse":
+			case "polygon":
+			case "circle":
+			case "capsule":
+			case "rectangle":
+				directLoops.push(primitivePoints(entity))
 				break
 			case "cornerRectangle":
 				directLoops.push(cornerRectangleToLoop(entity))
@@ -50,6 +80,9 @@ export function materializeSketch(sketch: Sketch, options: MaterializeSketchOpti
 
 	return {
 		...sketch,
+		variables,
+		entities,
+		relations: relations?.map((r) => (r.reference && "value" in r ? { ...r, value: measureSketchDimension(entities, r) } : r)),
 		vertices: topology.vertices,
 		loops: topology.loops,
 		profiles: topology.profiles

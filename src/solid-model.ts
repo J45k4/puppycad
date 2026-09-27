@@ -1,10 +1,12 @@
+import { primitivePoints, normalizePrimitive } from "./sketch-primitives"
+import { circularLoft, circularLoftInterior, type CircularLoft } from "./loft"
 import { finishSolidEdge, type EdgeFinish } from "./edge-finish"
 import modeling from "@jscad/modeling"
 import type { Geom2, Geom3 } from "@jscad/modeling/src/geometries/types"
 import type { Mat4 } from "@jscad/modeling/src/maths/types"
 import { Matrix4, Vector3 } from "three"
 import { extrudeSolidFeature } from "./cad/extrude"
-import type { PartDocument } from "./schema"
+import type { PartDocument, SketchPrimitive } from "./schema"
 import type { Point2D } from "./types"
 import { requireValue } from "./required"
 
@@ -12,14 +14,21 @@ export type SolidCombine = "join" | "cut" | "intersect"
 export type ProfileFinish = { kind: "fillet" | "chamfer"; radius: number; vertices?: number[]; segments?: number }
 export type SolidStep = {
 	id: string
-	type: "extrusion" | "revolve"
+	type: "extrusion" | "revolve" | "loft" | "shell"
+	loft?: CircularLoft
+	sourceId?: string
+	thickness?: number
 	operation: SolidCombine
 	/** Existing sketch/extrusion feature, for extrusion steps. */
 	featureId?: string
+	/** Additional filled sketch regions, united before extruding. */
+	regions?: SketchPrimitive[]
 	/** Revolve profile coordinates are radius (x), height (y), in millimetres. */
 	outline?: Point2D[]
 	angle?: number
 	segments?: number
+	/** Through-all spans the existing body in both sketch-normal directions. */
+	endCondition?: "blind" | "through-all"
 	topScale?: number
 	translation?: { x: number; y: number; z: number }
 	finishes?: ProfileFinish[]
@@ -92,9 +101,16 @@ function profile(outline: readonly Point2D[], holes: readonly Point2D[][] = []):
 function finished(outline: Point2D[], step: SolidStep): Point2D[] {
 	return (step.finishes ?? []).reduce((points, finish) => finishProfile(points, finish), outline)
 }
-function primitive(document: PartDocument, step: SolidStep): Geom3 {
+function primitive(document: PartDocument, step: SolidStep, previous?: Geom3): Geom3 {
 	let solid: Geom3
-	if (step.type === "revolve") {
+	if (step.type === "loft") {
+		solid = circularLoft(requireValue(step.loft))
+	} else if (step.type === "shell") {
+		const source = document.solidSteps?.find((s) => s.id === step.sourceId && s.type === "loft")
+		if (!source?.loft) throw Error("Shell requires a circular loft source.")
+		solid = circularLoftInterior(source.loft, requireValue(step.thickness))
+		if (source.translation) solid = transforms.translate([source.translation.x, source.translation.y, source.translation.z], solid)
+	} else if (step.type === "revolve") {
 		const outline = finished(requireValue(step.outline), step)
 		if (outline.some((p) => p.x < -1e-8)) throw new Error("Revolve profile radii cannot be negative.")
 		const angle = step.angle ?? 360
@@ -106,10 +122,37 @@ function primitive(document: PartDocument, step: SolidStep): Geom3 {
 		const feature = document.features.find((f) => f.id === step.featureId && f.type === "extrude")
 		if (!feature || feature.type !== "extrude") throw new Error(`Unknown extrusion: ${step.featureId}`)
 		const extrusion = extrudeSolidFeature(document, feature)
-		const section = profile(finished(requireValue(extrusion.profileLoops[0]), step), extrusion.profileLoops.slice(1))
+		let section = profile(finished(requireValue(extrusion.profileLoops[0]), step), extrusion.profileLoops.slice(1))
+		if (step.regions?.length) {
+			if (step.edgeFinishes?.length) throw Error("Edge finishes are not supported on multi-region extrusions.")
+			const regions = step.regions.map((region) => {
+				if (!normalizePrimitive(region, region.id)) throw Error("Invalid sketch region dimensions.")
+				return profile(primitivePoints(region))
+			})
+			section = booleans.union(section, ...regions)
+		}
+		let depth = extrusion.depth
+		let start = 0
+		if (step.endCondition === "through-all") {
+			if (!previous || step.operation === "join") throw new Error("Through-all requires a preceding solid and a cut or intersection.")
+			if ((step.topScale ?? 1) !== 1 || step.edgeFinishes?.length) throw new Error("Through-all does not support taper or edge finishes.")
+			const offset = extrusionTranslation(document, requireValue(step.featureId))
+			const { origin, normal } = extrusion.frame
+			const [low, high] = modeling.measurements.measureBoundingBox(previous)
+			const distances: number[] = []
+			for (const x of [low[0], high[0]])
+				for (const y of [low[1], high[1]])
+					for (const z of [low[2], high[2]])
+						distances.push((x - origin.x - offset.x) * normal.x + (y - origin.y - offset.y) * normal.y + (z - origin.z - offset.z) * normal.z)
+			const min = Math.min(...distances)
+			const max = Math.max(...distances)
+			const margin = Math.max(0.01, (max - min) * 1e-6)
+			start = min - margin
+			depth = max - min + 2 * margin
+		}
 		const scale = step.topScale ?? 1
 		if (!Number.isFinite(scale) || scale <= 0) throw new Error("Top scale must be positive.")
-		if (scale === 1) solid = extrusions.extrudeLinear({ height: extrusion.depth }, section)
+		if (scale === 1) solid = extrusions.extrudeLinear({ height: depth }, section)
 		else {
 			const base = extrusions.slice.fromSides(geometries.geom2.toSides(section))
 			solid = extrusions.extrudeFromSlices(
@@ -117,14 +160,14 @@ function primitive(document: PartDocument, step: SolidStep): Geom3 {
 					numberOfSlices: 2,
 					callback: (progress) =>
 						extrusions.slice.transform(
-							new Matrix4().makeScale(1 + progress * (scale - 1), 1 + progress * (scale - 1), 1).setPosition(0, 0, progress * extrusion.depth)
-								.elements as Mat4,
+							new Matrix4().makeScale(1 + progress * (scale - 1), 1 + progress * (scale - 1), 1).setPosition(0, 0, progress * depth).elements as Mat4,
 							base
 						)
 				},
 				base
 			)
 		}
+		if (start) solid = transforms.translate([0, 0, start], solid)
 		const { origin, xAxis, yAxis, normal } = extrusion.frame
 		const matrix = new Matrix4()
 			.makeBasis(new Vector3(xAxis.x, xAxis.y, xAxis.z), new Vector3(yAxis.x, yAxis.y, yAxis.z), new Vector3(normal.x, normal.y, normal.z))
@@ -154,8 +197,11 @@ export function evaluateSolid(document: PartDocument): Geom3 {
 	for (const step of steps) {
 		if (!step.id?.trim() || ids.has(step.id)) throw new Error("Solid feature ids must be unique and nonempty.")
 		ids.add(step.id)
-		if (!["extrusion", "revolve"].includes(step.type) || !["join", "cut", "intersect"].includes(step.operation)) throw new Error("Invalid solid operation.")
-		const tool = primitive(document, step)
+		if (!["extrusion", "revolve", "loft", "shell"].includes(step.type) || !["join", "cut", "intersect"].includes(step.operation)) throw new Error("Invalid solid operation.")
+		if (step.endCondition !== undefined && !["blind", "through-all"].includes(step.endCondition)) throw new Error("Invalid extrusion end condition.")
+		if (step.type !== "extrusion" && step.endCondition) throw new Error("End conditions require an extrusion.")
+		if (step.type === "shell" && (step.operation !== "cut" || !step.sourceId || !ids.has(step.sourceId) || step.sourceId === step.id)) throw Error("Shell must cut a preceding loft.")
+		const tool = primitive(document, step, result)
 		if (!result) {
 			if (step.operation !== "join") throw new Error("The first solid operation must be a join.")
 			result = tool

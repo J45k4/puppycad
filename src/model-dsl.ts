@@ -1,3 +1,4 @@
+import { primitivePoints, outlineEntities, type PrimitiveOutline, type SketchOutline } from "./sketch-primitives"
 import { materializeSketch } from "./cad/sketch"
 import type { Assembly, AssemblyMate, Project, ProjectNode, Variables } from "./contract"
 import { createProjectFile } from "./project-file"
@@ -33,6 +34,7 @@ export type BodyNode = {
 	name: string
 	componentId: string
 	outline: Point2D[]
+	primitive?: PrimitiveOutline
 	depth: number
 	appearance?: BodyAppearance
 	metadata?: ModelMetadata
@@ -137,7 +139,7 @@ export type ServoRef = {
 
 export type BodySpec = {
 	name?: string
-	outline: readonly Point2D[]
+	outline: SketchOutline
 	depth: number
 	appearance?: BodyAppearance
 	metadata?: ModelMetadata
@@ -239,19 +241,31 @@ export class ModelScope {
 		if (!Number.isFinite(spec.depth) || spec.depth <= 0) {
 			throw new Error(`Body "${nodeId}" depth must be a positive finite number.`)
 		}
-		if (spec.outline.length < 3) {
+		const source = Array.isArray(spec.outline) ? spec.outline : primitivePoints(spec.outline as PrimitiveOutline)
+		if (source.length < 3) {
 			throw new Error(`Body "${nodeId}" outline must contain at least three points.`)
 		}
 
-		const outline = spec.outline.map((point, index) => {
+		const outline = source.map((point, index) => {
 			assertFinitePoint(point, `Body "${nodeId}" outline point ${index + 1}`)
 			return transformPoint(point, this.worldTransform)
 		})
+		const primitive = Array.isArray(spec.outline) ? undefined : structuredClone(spec.outline as PrimitiveOutline)
+		if (primitive) {
+			if (primitive.type === "capsule") {
+				primitive.from = transformPoint(primitive.from, this.worldTransform)
+				primitive.to = transformPoint(primitive.to, this.worldTransform)
+			} else {
+				primitive.center = transformPoint(primitive.center, this.worldTransform)
+				if (primitive.type === "ellipse" || primitive.type === "rectangle" || primitive.type === "polygon") primitive.rotation += this.worldTransform.rotateDeg
+			}
+		}
 		this.state.bodies.push({
 			id: nodeId,
 			name: spec.name?.trim() || humanizeId(id),
 			componentId: this.path,
 			outline,
+			...(primitive ? { primitive } : {}),
 			depth: spec.depth,
 			...(spec.appearance ? { appearance: { ...spec.appearance } } : {}),
 			...(spec.metadata ? { metadata: { ...spec.metadata } } : {})
@@ -681,12 +695,14 @@ function bodyToProjectNode(body: BodyNode): ProjectNode {
 		name: `${body.name} outline`,
 		dirty: false,
 		target: { type: "plane", plane: "XY" },
-		entities: body.outline.map((p0, index) => ({
-			id: `${sketchId}/edge-${index + 1}`,
-			type: "line" as const,
-			p0: { ...p0 },
-			p1: { ...(body.outline[(index + 1) % body.outline.length] as Point2D) }
-		})),
+		entities: body.primitive
+			? outlineEntities(body.primitive, `${sketchId}/primitive`)
+			: body.outline.map((p0, index) => ({
+					id: `${sketchId}/edge-${index + 1}`,
+					type: "line" as const,
+					p0: { ...p0 },
+					p1: { ...(body.outline[(index + 1) % body.outline.length] as Point2D) }
+				})),
 		dimensions: [],
 		vertices: [],
 		loops: [],

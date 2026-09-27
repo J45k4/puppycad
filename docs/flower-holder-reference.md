@@ -46,3 +46,7 @@ The regression limit is 0.13 mm. The original glTF's coarse tessellation of larg
 Tests additionally check closed edge incidence, positive signed volume, volume agreement within 0.6%, and assembly translations within 0.001 mm. The SDK integration test verifies persistence, separate closed STLs and deterministic reruns. Matched-camera reference/DSL renders are saved under `workdir/reference-analysis/`.
 
 These are digital fidelity checks. Physical fit, material strength and watertight printing have not been tested. No new fit dimensions were substituted for the source design.
+
+## Stored design intent
+
+Circular ring outlines, holes, pins, legs, and the hub are native circle entities. The three arms are capsule entities; access-opening cuts use rectangles. Asymmetric bridge outlines and the bowl/stem revolve sections remain explicit profiles because their geometry is not a circle or rectangle. The regression checks still apply after primitive conversion; evaluated geometry retains the reference dimensions.

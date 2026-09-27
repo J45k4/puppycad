@@ -50,8 +50,7 @@ describe("Solid feature UI", () => {
 			saved = next
 		})
 		edit(panel.root, "Extrusion depth (mm)", "12")
-		edit(panel.root, "Profile width (mm)", "6", 1)
-		edit(panel.root, "Profile height (mm)", "6", 1)
+		edit(panel.root, "Diameter (mm)", "6")
 		click(panel.root, "Apply changes")
 		const next = requireValue(saved)
 		expect(bounds(next).max.z).toBe(12)
@@ -80,8 +79,8 @@ describe("Solid feature UI", () => {
 			accepted = next
 		})
 		click(panel.root, "Add extrusion")
-		edit(panel.root, "Profile width (mm)", "4")
-		edit(panel.root, "Profile height (mm)", "4")
+		edit(panel.root, "Rectangle width (mm)", "4")
+		edit(panel.root, "Rectangle height (mm)", "4")
 		choose(panel.root, "Operation", "cut")
 		click(panel.root, "Apply changes")
 		expect(accepted.solidSteps).toHaveLength(2)
@@ -259,13 +258,13 @@ it("uses the project hierarchy for feature, profile and entity properties withou
 		() => {}
 	)
 	const nodes = panel.getNavigation()
-	expect(nodes[0]?.label).toBe("Body")
-	expect(nodes[0]?.children?.[0]?.children?.[1]?.label).toBe("Hole 1")
+	expect(nodes.find((node) => node.key === JSON.stringify(["feature", "body"]))?.label).toBe("Body")
+	expect(nodes.find((node) => node.key === JSON.stringify(["feature", "body"]))?.children?.[0]?.children?.[1]?.label).toBe("Hole 1")
 	expect(panel.root.querySelector("button[aria-pressed]")).toBeNull()
 	panel.selectNavigation(JSON.stringify(["feature", "body"]))
 	edit(panel.root, "Extrusion depth (mm)", "8")
 	panel.selectNavigation(JSON.stringify(["entity", "body", 1, 0]))
-	expect(panel.root.querySelector('input[aria-label="Start X"]')).not.toBeNull()
+	expect(panel.root.querySelector('input[aria-label="Diameter (mm)"]')).not.toBeNull()
 	panel.selectNavigation(JSON.stringify(["feature", "body"]))
 	expect(panel.root.querySelector<HTMLInputElement>('input[aria-label="Extrusion depth (mm)"]')?.value).toBe("8")
 	panel.selectSource({ stepId: "body", sketchId: "body/sketch", loopIndex: 1, edgeIndex: 0, distance: 0, border: [] })
@@ -294,4 +293,105 @@ it("shows only the selected assembly instance in project properties", () => {
 	const rows = Array.from(panel.root.querySelectorAll<HTMLElement>("[data-navigation-key]"))
 	expect(rows.filter((row) => !row.hidden).map((row) => row.dataset.navigationKey)).toEqual([JSON.stringify(["instance", "second"])])
 	expect(panel.getNavigation()[0]?.children?.[0]?.children?.[0]?.label).toBe("Part: Part")
+})
+
+it("edits circle parameters as one entity and preserves primitives through navigation and Apply", () => {
+	let applied: PartDocument | undefined
+	const panel = new SolidFeaturePanel(part(), (next) => {
+		applied = next
+	})
+	panel.useProjectNavigation(
+		() => {},
+		() => {}
+	)
+	panel.selectNavigation(JSON.stringify(["entity", "body", 1, 0]))
+	expect(panel.getNavigation().find((node) => node.key === JSON.stringify(["feature", "body"]))?.children?.[0]?.children?.[1]?.children).toHaveLength(1)
+	expect(panel.getNavigation().find((node) => node.key === JSON.stringify(["feature", "body"]))?.children?.[0]?.children?.[1]?.children?.[0]?.label).toBe("Circle")
+	edit(panel.root, "Diameter (mm)", "6")
+	edit(panel.root, "Center X", "1", 1)
+	panel.selectNavigation(JSON.stringify(["feature", "body"]))
+	edit(panel.root, "Extrusion depth (mm)", "8")
+	click(panel.root, "Apply changes")
+	const sketch = applied?.features.find((f) => f.type === "sketch")
+	expect(sketch?.entities).toHaveLength(2)
+	expect(sketch?.entities[1]).toMatchObject({ type: "circle", center: { x: 1, y: 0 }, radius: 3 })
+	expect(applied?.features.find((f) => f.type === "extrude")?.depth).toBe(8)
+})
+
+it("authors primitive extrusions and exact revolve vertices from a blank part in project navigation", () => {
+	let saved: PartDocument = { features: [], solidSteps: [] }
+	const panel = new SolidFeaturePanel(saved, (next) => {
+		saved = next
+	})
+	panel.useProjectNavigation(
+		() => {},
+		() => {}
+	)
+	click(panel.root, "Add extrusion")
+	panel.selectNavigation(JSON.stringify(["sketch", "extrusion-1"]))
+	choose(panel.root, "Profile shape", "circle")
+	edit(panel.root, "Diameter (mm)", "32")
+	edit(panel.root, "Circle segments", "96")
+	click(panel.root, "Apply changes")
+	expect(bounds(saved).max.x).toBeCloseTo(16)
+	panel.selectNavigation(JSON.stringify(["part"]))
+	click(panel.root, "Add extrusion")
+	panel.selectNavigation(JSON.stringify(["sketch", "extrusion-2"]))
+	choose(panel.root, "Profile shape", "capsule")
+	edit(panel.root, "End center X", "40")
+	edit(panel.root, "Capsule arc segments", "16")
+	click(panel.root, "Apply changes")
+	expect(bounds(saved).max.x).toBeCloseTo(50)
+	choose(panel.root, "Profile shape", "polygon")
+	const vertices = panel.root.querySelector('input[aria-label="Vertex 0 X"]')?.closest("details")?.parentElement
+	expect(vertices?.hidden).toBe(false)
+	edit(panel.root, "Vertex 0 X", "-12")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps).toHaveLength(2)
+	panel.selectNavigation(JSON.stringify(["part"]))
+	click(panel.root, "Add revolve")
+	panel.selectNavigation(JSON.stringify(["sketch", "revolve-3"]))
+	edit(panel.root, "Vertex 2 Y", "25")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps).toHaveLength(3)
+	expect(bounds(saved).max.z).toBeCloseTo(25)
+})
+
+it("creates a bowl using loft then shell controls in an empty part", () => {
+	let saved: PartDocument = { features: [], solidSteps: [] }
+	const panel = new SolidFeaturePanel(saved, (next) => {
+		saved = next
+	})
+	click(panel.root, "Add loft")
+	edit(panel.root, "Bottom sketch diameter (mm)", "170")
+	edit(panel.root, "Top sketch diameter (mm)", "225")
+	edit(panel.root, "Plane offset (mm)", "100")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps?.[0]?.type).toBe("loft")
+	click(panel.root, "Add shell")
+	edit(panel.root, "Shell thickness (mm)", "2.5")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps?.[1]?.thickness).toBe(2.5)
+	expect(bounds(saved).max.z).toBeCloseTo(100)
+	edit(panel.root, "Shell thickness (mm)", "150")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps?.[1]?.thickness).toBe(2.5)
+	expect(panel.root.querySelector('[role="alert"]')).not.toBeNull()
+})
+
+it("adds and edits filled sketch regions without changing extrusion depth", () => {
+	let saved = part()
+	const panel = new SolidFeaturePanel(saved, (next) => {
+		saved = next
+	})
+	click(panel.root, "Add capsule region")
+	edit(panel.root, "End center Y", "40")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps?.[0]?.regions?.[0]?.type).toBe("capsule")
+	expect(bounds(saved).max.y).toBeCloseTo(50)
+	expect(bounds(saved).max.z).toBeCloseTo(5)
+	click(panel.root, "Remove region")
+	click(panel.root, "Apply changes")
+	expect(saved.solidSteps?.[0]?.regions).toHaveLength(0)
+	expect(bounds(saved).max.y).toBeCloseTo(10)
 })

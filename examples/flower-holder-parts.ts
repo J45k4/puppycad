@@ -1,4 +1,4 @@
-import { capsule, circle, v2, type PartBuilder } from "../src/sdk"
+import { capsule, circle, rectangle, v2, type PartBuilder } from "../src/sdk"
 import type { Vector3D } from "../src/contract"
 
 /** Dimensions recovered from the Onshape glTF, in mm. All exported parts start at z=0. */
@@ -22,7 +22,7 @@ export const holderPinLocations = [
 export const holderHub = v2(FLOWER_HOLDER.hubOffset, FLOWER_HOLDER.hubOffset)
 export type FlowerHolderPart = { id: string; name: string; referenceMesh: number; localZOffset: number; build: (part: PartBuilder) => void }
 function cutOpening(part: PartBuilder, edge: { x: number; y: number }, depth: number) {
-	part.extrude("access-opening", { outline: [v2(-150, -150), v2(edge.x, -150), v2(edge.x, edge.y), v2(-150, edge.y)], depth, operation: "cut" })
+	part.extrude("access-opening", { outline: rectangle(v2((edge.x - 150) / 2, (edge.y - 150) / 2), edge.x + 150, edge.y + 150), depth, operation: "cut" })
 }
 function ring(part: PartBuilder, id: string, outer: number, inner: number, depth: number, z = 0) {
 	part.extrude(id, { outline: circle(origin, outer, segments), holes: [circle(origin, inner, segments)], depth, translation: { x: 0, y: 0, z } })
