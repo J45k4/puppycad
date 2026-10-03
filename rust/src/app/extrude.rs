@@ -122,7 +122,7 @@ impl App {
             _ => None,
         };
         let mut text =
-            format!("{kind} preview \u{2014} not created yet  |  Enter commit  |  Esc cancel");
+            format!("{kind} preview - not created yet  |  Enter commit  |  Esc cancel");
         if let Some(error) = error.filter(|error| !error.is_empty()) {
             text.push_str("  |  ");
             text.push_str(&error);

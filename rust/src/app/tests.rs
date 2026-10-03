@@ -1493,7 +1493,7 @@ fn extrude_draft_reads_as_a_preview_until_enter() {
     app.document.draft_start = Some(Point { x: 0.0, y: 0.0 });
     assert!(app.document.finish_draft(Point { x: 40.0, y: 20.0 }));
     let layout = Layout::new(1280.0, 800.0);
-    let preview = "Extrusion preview \u{2014} not created yet  |  Enter commit  |  Esc cancel";
+    let preview = "Extrusion preview - not created yet  |  Enter commit  |  Esc cancel";
 
     // First extrusion: a placeholder row with no features yet.
     app.begin_extrude("newBody");

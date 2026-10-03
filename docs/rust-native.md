@@ -421,7 +421,7 @@ its sketch.
 
 **Preview state.** While an extrude, revolve or edge finish prompt is open
 nothing exists yet, and the UI says so: the status bar reads "Extrusion
-preview — not created yet | Enter commit | Esc cancel" (Revolve / Chamfer /
+preview - not created yet | Enter commit | Esc cancel" (Revolve / Chamfer /
 Fillet likewise, plus the reason when the ghost cannot be built), the last
 breadcrumb is "New extrusion (preview)", a "PREVIEW" tag in the ghost color
 sits right of the DEPTH / ANGLE prompt, the ghost's sharp edges (same 20°
