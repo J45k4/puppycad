@@ -3036,3 +3036,42 @@ cp /tmp/native-fillet.pcad /out/rust-native-fillet.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Offset an L-shaped line chain (Shift+U, 20 mm): both lines get mitered
+# offset copies, the rows show [OFS], and the project saves a web
+# "offsetChain" relation.
+./target/debug/puppycad /tmp/native-offset.pcad >/tmp/puppycad-offset.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-offset.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-offset.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+for segment in "400 250 400 450" "400 450 700 450"; do
+    set -- $segment
+    xdotool key --window "$window_id" l
+    xdotool mousemove "$1" "$2" click 1
+    xdotool mousemove "$3" "$4" click 1
+done
+xdotool key --window "$window_id" v
+xdotool mousemove 550 450 click 1
+xdotool key --window "$window_id" shift+u
+xdotool type --clearmodifiers '20'
+xdotool key Return
+sleep 0.5
+import -window root /out/rust-native-offset.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test -s /tmp/native-offset.pcad
+grep -q '"type": "offsetChain"' /tmp/native-offset.pcad
+cp /tmp/native-offset.pcad /out/rust-native-offset.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
