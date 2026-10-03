@@ -882,6 +882,50 @@ pub(super) const MORE_MENU: [(Cmd, &str); 21] = [
     (Cmd::SketchOnFace, "SKETCH ON FACE [4]"),
 ];
 
+/// The registry as Markdown tables, one per category (`--print-shortcuts`).
+pub(crate) fn shortcuts_markdown() -> String {
+    let mut out = String::new();
+    for category in Category::ALL {
+        out.push_str(&format!(
+            "### {}\n\n| Shortcut | Command | When |\n| --- | --- | --- |\n",
+            category.name()
+        ));
+        for command in COMMANDS
+            .iter()
+            .filter(|command| command.category == category)
+        {
+            let keys = if command.shortcut.is_empty() {
+                "palette / MORE".to_string()
+            } else {
+                command
+                    .shortcut
+                    .split(" / ")
+                    .map(|chord| format!("`{chord}`"))
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            };
+            let mut when = match command.scope {
+                Scope::Any => "any view",
+                Scope::Sketch => "sketch",
+                Scope::Solid => "3D preview",
+                Scope::CenterArcTool => "center-arc tool",
+                Scope::SplineTool => "placing a spline",
+                Scope::DimensionSelected => "dimension selected",
+            }
+            .to_string();
+            if command.edits {
+                when.push_str(", editable");
+            }
+            if command.needs_selection {
+                when.push_str(", selection");
+            }
+            out.push_str(&format!("| {keys} | {} | {when} |\n", command.label));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 pub(super) fn command(id: Cmd) -> &'static Command {
     COMMANDS
         .iter()

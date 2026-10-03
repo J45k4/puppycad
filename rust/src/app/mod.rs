@@ -13,6 +13,7 @@ mod view_sketch;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use commands::shortcuts_markdown;
 use commands::*;
 use corner::*;
 use palette::*;
