@@ -9,6 +9,9 @@ mod dimensions;
 mod drag;
 mod edit;
 mod geometry;
+#[cfg(test)]
+mod glyph_tests;
+mod glyphs;
 mod offset;
 mod pattern;
 mod relations;
@@ -26,6 +29,7 @@ pub use annotations::{
 };
 pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
+pub use glyphs::{GLYPH_PAD, Inference, InferenceKind, PlacedGlyph, RelationGlyph};
 pub use offset::{OffsetChain, offset_chain_segments, offset_shape};
 pub use pattern::{PatternKind, SketchPattern};
 pub use selection::SelectionFilter;
