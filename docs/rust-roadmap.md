@@ -65,6 +65,9 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
    before commit.
 2. Sketch on a planar face: face picking in the 3D view, with the plane frame
    derived as `src/solid-model.ts` does so files stay web-compatible.
+   (**done**: `rust/src/project/face.rs`; hover a face and press **4** or
+   MORE → SKETCH ON FACE, **5** toggles the supporting-body context, X /
+   Shift+X / Shift+J extrude along the face normal.)
 3. Revolve, loft (`loft.ts`), edge fillet and chamfer (`edge-finish.ts`), all
    through `manifold-rust`.
 4. Feature tree with reorder, suppress and rollback; re-evaluation when an
