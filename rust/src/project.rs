@@ -15,6 +15,9 @@ use crate::model::{
 };
 use crate::spline::{self, SplineMode};
 
+mod face;
+pub use face::{FaceDescriptor, FaceRef, Frame};
+
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
     let (Shape::Line { a: a0, b: a1, .. }, Shape::Line { a: b0, b: b1, .. }) = (source, target)
     else {
@@ -382,6 +385,8 @@ struct SketchWorkspace {
     id: String,
     name: String,
     plane: Option<SketchPlane>,
+    /// Target face for face sketches (`plane` is then `None`).
+    face: Option<FaceRef>,
     document: Document,
     entity_ids: HashMap<u32, String>,
     original_entities: HashMap<u32, Value>,
@@ -392,24 +397,17 @@ pub struct SolidPreview {
     pub profile: Vec<Point>,
     pub holes: Vec<Vec<Point>>,
     pub depth: f32,
-    pub plane: SketchPlane,
+    /// Sketch frame the profile is extruded from, along `frame.normal`.
+    pub frame: Frame,
 }
 
 impl SolidPreview {
     pub fn world_point(&self, point: Point, offset: f32) -> [f32; 3] {
-        match self.plane {
-            SketchPlane::Top => [point.x, point.y, offset],
-            SketchPlane::Front => [point.x, offset, -point.y],
-            SketchPlane::Right => [offset, point.x, point.y],
-        }
+        self.frame.world(point, offset)
     }
 
     pub fn normal(&self) -> [f32; 3] {
-        match self.plane {
-            SketchPlane::Top => [0.0, 0.0, 1.0],
-            SketchPlane::Front => [0.0, 1.0, 0.0],
-            SketchPlane::Right => [1.0, 0.0, 0.0],
-        }
+        self.frame.normal
     }
 
     pub fn loops(&self) -> impl Iterator<Item = &[Point]> {
@@ -1034,16 +1032,15 @@ impl ProjectFile {
             return None;
         }
         let sketch_id = extrude.get("sketchId")?.as_str()?;
-        let profile_index = extrude
-            .get("profileId")?
-            .as_str()?
-            .strip_prefix(&format!("{sketch_id}-profile-"))?
-            .parse::<usize>()
-            .ok()?
-            .checked_sub(1)?;
+        let profile_index = face::profile_index(extrude, sketch_id)?;
         let depth = positive(extrude.get("depth")?)?;
         let workspace = self.sketches.iter().find(|sketch| sketch.id == sketch_id)?;
-        let plane = workspace.plane?;
+        let mut frame = self.sketch_frame(sketch_id)?;
+        // A cut from a face sketch runs into the body (against the face normal);
+        // new bodies and joins grow outward along it.
+        if workspace.face.is_some() && extrude["operation"] == "cut" {
+            frame.origin = frame.world(Point { x: 0.0, y: 0.0 }, -depth);
+        }
         let loops = profiles_from_document(&workspace.document)?
             .into_iter()
             .nth(profile_index)?;
@@ -1056,7 +1053,7 @@ impl ProjectFile {
             profile: loops.outer,
             holes: loops.holes,
             depth,
-            plane,
+            frame,
         };
         crate::stl::manifold_from_solid(&solid).ok()?;
         Some(solid)
@@ -1280,12 +1277,12 @@ impl ProjectFile {
             return Err("project graph or tree is invalid".into());
         }
         let workspace = &mut self.sketches[self.active_sketch];
-        if workspace.plane.is_none()
+        if (workspace.plane.is_none() && workspace.face.is_none())
             || profiles_from_document(current)
                 .and_then(|profiles| profiles.get(profile_index).map(|_| ()))
                 .is_none()
         {
-            return Err("select a valid closed profile on a reference-plane sketch".into());
+            return Err("select a valid closed profile on a plane or face sketch".into());
         }
         workspace.document = current.clone();
         let sketch_id = workspace.id.clone();
@@ -1460,9 +1457,26 @@ impl ProjectFile {
                         .find(|node| node.get("id").and_then(Value::as_str) == Some(target_id))
                 })
                 .and_then(SketchPlane::from_graph_node);
-            if plane.is_none() {
-                read_only_reason =
-                    Some("face-based or unsupported sketch plane needs native 3D support".into());
+            let face = target_id
+                .and_then(|target_id| {
+                    nodes
+                        .iter()
+                        .find(|node| node.get("id").and_then(Value::as_str) == Some(target_id))
+                })
+                .filter(|node| node["type"] == "face")
+                .and_then(|node| {
+                    let source = node["sourceId"].as_str()?;
+                    nodes
+                        .iter()
+                        .any(|n| n["type"] == "extrude" && n["id"].as_str() == Some(source))
+                        .then_some(())?;
+                    Some(FaceRef {
+                        extrude_id: source.to_string(),
+                        face_id: node["faceId"].as_str()?.to_string(),
+                    })
+                });
+            if plane.is_none() && face.is_none() {
+                read_only_reason = Some("unsupported sketch plane needs native 3D support".into());
             }
             if sketch
                 .get("dimensions")
@@ -2744,6 +2758,7 @@ impl ProjectFile {
                 id: sketch_id.to_string(),
                 name: sketch_name.to_string(),
                 plane,
+                face,
                 document,
                 entity_ids,
                 original_entities,
@@ -2765,6 +2780,7 @@ impl ProjectFile {
         };
         if project.read_only_reason.as_deref() == Some("solid features need native support")
             && project.evaluated_solids().is_some()
+            && project.face_sketches_resolve()
             && project.all_extrusions_registered()
             && ["features", "solidSteps", "solids"].iter().all(|key| {
                 project.value["items"][project.part_index]["data"]
@@ -3003,6 +3019,7 @@ impl ProjectFile {
             id,
             name,
             plane: Some(plane),
+            face: None,
             document: document.clone(),
             entity_ids: HashMap::new(),
             original_entities: HashMap::new(),
@@ -8586,9 +8603,9 @@ mod tests {
         let solids = reopened.extrusion_previews().unwrap();
         assert_eq!(solids.len(), 2);
         assert_eq!(solids[0].depth, 15.0);
-        assert_eq!(solids[0].plane, SketchPlane::Top);
+        assert_eq!(solids[0].frame, SketchPlane::Top.frame());
         assert_eq!(solids[1].depth, 35.0);
-        assert_eq!(solids[1].plane, SketchPlane::Front);
+        assert_eq!(solids[1].frame, SketchPlane::Front.frame());
         assert_eq!(reopened.read_only_reason(), None);
         reopened
             .create_sketch_on_plane(&loaded, SketchPlane::Right)
@@ -8856,7 +8873,7 @@ mod tests {
             profile: profile_from_document(&concave).unwrap().outer,
             holes: Vec::new(),
             depth: 15.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         };
         assert!(concave_solid.cap_mesh().is_some());
         let crossed = Document::from_shapes(vec![
@@ -9180,7 +9197,7 @@ mod tests {
             project.save(&document).unwrap();
             let (reopened, _) = ProjectFile::open(&path).unwrap();
             let solid = reopened.extrusion_preview().unwrap();
-            assert_eq!(solid.plane, plane);
+            assert_eq!(solid.frame, plane.frame());
             let mapped = solid.world_point(Point { x: 10.0, y: 20.0 }, 30.0);
             assert_eq!(
                 mapped,
@@ -9653,3 +9670,7 @@ mod tests {
 #[cfg(test)]
 #[path = "project/dimension_tests.rs"]
 mod dimension_tests;
+
+#[cfg(test)]
+#[path = "project/face_tests.rs"]
+mod face_tests;
