@@ -709,6 +709,64 @@ sketch runs into the body by default and new bodies/joins grow outward; flip
 inverts that default. Through all and up to body measure the target's extent
 from the face plane. Fixture: `rust/fixtures/extrude-options.pcad`.
 
+### Status bar, tooltips and toolbar glyphs
+
+The status bar keeps the message on the left (truncated with `...` before
+the info block) and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
+the right. Between them a two-line block shows the cursor's world
+coordinates in display units (`X - Y -` outside the sketch viewport), the
+current tool, the DOF label (also still in the header) and the snap state
+(`SNAP GEOM+GRID`, `GEOM`, `GRID` or `OFF`, toggled with N and Shift+G).
+The text is rebuilt only when one of those values changes (`StatusCache`);
+it adds no repaints of its own.
+
+Hovering a toolbar button or an open MORE row for 400 ms shows a one-line
+tooltip with the command name and shortcut. The table lives in
+`app/status.rs` (`TOOL_TIPS`, `MORE_TIPS`); there is no shared command
+registry yet. The event loop waits until the tooltip is due and repaints
+once. Every toolbar label is preceded by a 16x16 pixel-art glyph painted as
+rects (select arrow, rectangle, circle, line, ellipse, three planes, arc,
+`...`); button geometry is unchanged.
+
+### Settings
+
+Ctrl+, (or MORE > SETTINGS, the 22nd MORE row) toggles the SETTINGS panel;
+Esc or CLOSE closes it. Clicking a row cycles its value; every change is
+applied live and saved to `settings.json` in `$PUPPYCAD_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/puppycad`, else `~/.config/puppycad`:
+
+```json
+{ "units": "mm", "grid_mm": 1.0, "theme": "dark", "ui_scale": null,
+  "window": { "width": 1280, "height": 800, "x": 0, "y": 0 } }
+```
+
+- `units` (mm, cm, in): Properties values, viewport dimension labels,
+  numeric prompts and the status bar show this unit; the model and files
+  stay in millimeters. A plain number typed into a length field is read in
+  the display unit; dimension text gets the unit appended (`2` becomes
+  `2in`) while expressions with their own units are kept as typed.
+  Pattern prompts and status messages still say mm.
+- `grid_mm` (0.5, 1, 2, 5, 10, 25.4): grid snap step. Grid lines are drawn
+  on the multiple of the step nearest 25 mm.
+- `theme` (dark, light): all colors come from a `Palette` with `DARK` and
+  `LIGHT` variants (`app/settings.rs`); the `const` colors are the `DARK`
+  fields and the painter substitutes the active palette.
+- `ui_scale` (`null` = monitor scale factor rounded to 1.0/1.5/2.0, or 1.0,
+  1.5, 2.0): see below.
+- `window`: logical size and position, saved when the window closes.
+
+Unknown or invalid fields fall back to the defaults.
+
+### UI scale
+
+`Layout::scaled` divides the physical surface by the UI scale, so all fixed
+layout coordinates are logical units and every rect grows linearly with the
+scale. The pointer is divided by the scale on input; the painter maps the
+logical canvas onto the surface and snaps font pixels to whole physical
+pixels. The default window is 1280x800 logical, so it also scales with the
+monitor. The UI smoke test runs with an empty `PUPPYCAD_CONFIG_DIR` and
+`ui_scale` 1.0, so its click positions match the 1280x800 layout.
+
 ## Code layout
 
 Library crate (`rust/src/lib.rs`):
@@ -754,7 +812,10 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   preview projection, dragging, face and body picking and painting), `extrude.rs`
   (extrude prompt with ghost preview, end condition/flip/target edits and
   their undo), `view_sketch.rs` (sketch grid
-  and shape painting, dimension labels), `tests.rs`.
+  and shape painting, dimension labels), `settings.rs` (settings file,
+  units, theme palettes, SETTINGS panel, UI scale), `status.rs` (status bar
+  fields, tooltips, toolbar glyphs), `tests.rs`, `settings_tests.rs`,
+  `status_tests.rs`.
 - `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
 
 ## Cross-loader round-trip
@@ -792,7 +853,7 @@ Two tests guard against format drift between the apps:
 The UI smoke test uses a rootless Docker container, Xvfb, and software Vulkan.
 It runs Rust unit tests, opens the native app in a virtual display, draws a
 rectangle, center rectangle, both three-point rectangle modes, circle, line, ellipse, three-point arc, center arc, point, polygon, and slot with simulated clicks, edits dimensions, polygon sides, and slot width,
-copies, moves, scales, and rotates selected shapes, adds Front and Right sketches and switches between them, saves a v4 project, opens a single-extrusion fixture and toggles its view, then authors and saves an extrusion. It writes
+copies, moves, scales, and rotates selected shapes, switches units to inches and the theme to light in the SETTINGS panel, adds Front and Right sketches and switches between them, saves a v4 project, opens a single-extrusion fixture and toggles its view, then authors and saves an extrusion. It writes
 screenshots and a project file to `workdir/`. It also extrudes a concave line
 loop, line-drawn through-hole, slot, arc-and-line profile, and rectangle with two circular through-holes,
 and exports their STLs (ASCII via Ctrl+Shift+E so facet counts can be grepped).
