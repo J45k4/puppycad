@@ -88,7 +88,10 @@ impl App {
     }
 
     /// Run a feature tree edit as one undo step.
-    fn tree_edit(&mut self, edit: impl FnOnce(&mut ProjectFile) -> Result<String, String>) -> bool {
+    pub(super) fn tree_edit(
+        &mut self,
+        edit: impl FnOnce(&mut ProjectFile) -> Result<String, String>,
+    ) -> bool {
         let Some(project) = self.project.as_mut() else {
             return false;
         };

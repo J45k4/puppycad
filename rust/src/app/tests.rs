@@ -1351,6 +1351,20 @@ fn edge_pick_chamfers_the_clicked_edge() {
             .extension_features()
             .is_empty()
     );
+    app.solid_undo_step(false);
+    assert_eq!(
+        app.project.as_ref().unwrap().extension_features().len(),
+        1,
+        "deleting a feature is undoable"
+    );
+    app.solid_undo_step(true);
+    assert!(
+        app.project
+            .as_ref()
+            .unwrap()
+            .extension_features()
+            .is_empty()
+    );
     let _ = std::fs::remove_file(path);
 }
 

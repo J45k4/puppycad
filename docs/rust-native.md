@@ -805,7 +805,7 @@ that has its edges. They appear as feature tree rows (`REVOLVE NEWBODY`,
 `LOFT JOIN`, `CHAMFER`, ...); selecting one shows its value (ANGLE,
 DISTANCE or RADIUS) in Properties, where clicking the value edits it (one
 undo step, **Ctrl+Z** / **Ctrl+Shift+Z** in the solid view), and **Delete**
-removes it unless a later feature depends on it.
+removes it unless a later feature depends on it (also one undo step).
 
 - **Revolve** — key **8** or **MORE → REVOLVE** in a sketch with a closed
   profile selected (**[ ]** cycle profiles as for extrude). Click a sketch

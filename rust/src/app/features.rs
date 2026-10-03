@@ -450,17 +450,25 @@ impl App {
         Ok(())
     }
 
+    /// Deletes the selected revolve/loft/edge finish as one undo step.
     pub(super) fn delete_selected_feature(&mut self) {
-        let (Some(id), Some(project)) = (self.selected_feature_id(), self.project.as_mut()) else {
+        let Some(id) = self.selected_feature_id() else {
             return;
         };
-        self.status_message = match project.delete_feature(&id) {
-            Ok(()) => {
-                self.solid_preview = project.evaluated_solids().is_some();
-                "Feature removed  |  Ctrl+S to save".into()
-            }
-            Err(error) => format!("Delete feature: {error}"),
-        };
+        if self.tree_edit(|project| {
+            project
+                .delete_feature(&id)
+                .map(|()| "Feature removed".to_string())
+        }) {
+            self.solid_preview = self
+                .project
+                .as_ref()
+                .is_some_and(|project| project.evaluated_solids().is_some());
+        } else if self.status_message.starts_with("Feature tree: ") {
+            self.status_message =
+                self.status_message
+                    .replacen("Feature tree: ", "Delete feature: ", 1);
+        }
     }
 
     /// Translucent ghost triangles over the current bodies, plus a prompt.
