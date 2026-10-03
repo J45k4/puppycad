@@ -42,7 +42,7 @@ constraints, and conflicts are diagnosed.
 
 Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 
-1. Dimensions drawn in the viewport with click-to-edit labels; point
+1. (Done) Dimensions drawn in the viewport with click-to-edit labels; point
    distance / X / Y dimensions; driving vs. reference; expressions and sketch
    variables (`sketch-value.ts`, `sketch-variables.ts`).
 2. Fillet and chamfer.
