@@ -585,8 +585,8 @@ impl App {
         if let Some(project) = &self.project {
             for (index, part_index) in part_rows.iter().enumerate() {
                 let row = layout.part_row(index);
-                if row.y + row.h >= layout.bottom.y {
-                    break;
+                if !Self::panel_row_shown(layout, row) {
+                    continue;
                 }
                 let active = *part_index == project.active_part_index();
                 if active {
@@ -609,8 +609,8 @@ impl App {
         }
         for index in 0..self.sketch_count() {
             let row = layout.sketch_row(index, part_rows.len());
-            if row.y + row.h >= layout.bottom.y {
-                break;
+            if !Self::panel_row_shown(layout, row) {
+                continue;
             }
             let active = self
                 .project
@@ -641,7 +641,11 @@ impl App {
             painter.text(
                 row.x + 9.0,
                 row.y + 9.0,
-                &format!("{} {name} / {plane}", if active { ">" } else { "v" }),
+                &clip_text(
+                    &format!("{} {name} / {plane}", if active { ">" } else { "v" }),
+                    ((row.w - 18.0) / 8.8) as usize,
+                    false,
+                ),
                 1.1,
                 if active { TEXT } else { MUTED },
             );
@@ -650,15 +654,13 @@ impl App {
         let tree_rows = self.tree_row_count();
         let selected_ids = self.document.selected_ids();
         for (index, shape) in self.document.shapes.iter().enumerate() {
-            if layout
-                .row(index + tree_rows, part_rows.len(), self.sketch_count())
-                .y
-                + 31.0
-                >= layout.bottom.y
-            {
+            let row = layout.row(index + tree_rows, part_rows.len(), self.sketch_count());
+            if row.y + row.h >= layout.bottom.y {
                 break;
             }
-            let row = layout.row(index + tree_rows, part_rows.len(), self.sketch_count());
+            if !Self::panel_row_shown(layout, row) {
+                continue;
+            }
             if selected_ids.contains(&shape.id()) {
                 painter.rect(row, ACTIVE_ROW);
             }
@@ -1797,8 +1799,15 @@ impl App {
         } else {
             &self.status_message
         };
-        // Keep the message left of the status fields (cursor, tool, snap).
-        let room = ((layout.status_info().x - 25.0) / 9.6).max(0.0) as usize;
+        // Keep the message left of the status fields (cursor, tool, snap);
+        // a long message narrows the fields to get more room.
+        let info = layout.status_info_for(status.chars().count(), self.solid_preview);
+        let toggles = if self.solid_preview {
+            0.0
+        } else {
+            STATUS_TOGGLES
+        };
+        let room = ((info.x - toggles - 25.0) / 9.6).max(0.0) as usize;
         let status: String = if status.chars().count() > room {
             status
                 .chars()
@@ -1809,7 +1818,7 @@ impl App {
             status.to_string()
         };
         painter.text(15.0, layout.bottom.y + 10.0, &status, 1.2, MUTED);
-        self.paint_status_info(painter, layout);
+        self.paint_status_info(painter, layout, info);
         if !self.solid_preview {
             let filter = self.selection_filter;
             for (index, (label, on)) in [
@@ -1834,7 +1843,7 @@ impl App {
         }
         if !self.solid_preview {
             painter.text(
-                layout.top.w - 520.0,
+                info.x - 96.0,
                 layout.bottom.y + 10.0,
                 if self.auto_constraints {
                     "AUTO"
@@ -1845,7 +1854,7 @@ impl App {
                 if self.auto_constraints { ACCENT } else { MUTED },
             );
             painter.text(
-                layout.top.w - 474.0,
+                info.x - 50.0,
                 layout.bottom.y + 10.0,
                 if self.show_glyphs { "GLY" } else { "gly" },
                 1.1,

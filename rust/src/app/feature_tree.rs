@@ -88,7 +88,7 @@ impl App {
     }
 
     /// Run a feature tree edit as one undo step.
-    fn tree_edit(
+    pub(super) fn tree_edit(
         &mut self,
         label: String,
         edit: impl FnOnce(&mut ProjectFile) -> Result<String, String>,
@@ -232,7 +232,7 @@ impl App {
         let statuses = project.feature_statuses();
         for index in 0..total {
             let row = self.feature_row(layout, index);
-            if row.y + row.h >= layout.bottom.y {
+            if !Self::panel_row_shown(layout, row) {
                 continue;
             }
             let active = self.solid_preview && self.selected_solid == index;
@@ -255,17 +255,21 @@ impl App {
             painter.text(
                 row.x + 9.0,
                 row.y + 9.0,
-                &format!(
-                    "{} {} / {name}{glyph}",
-                    if active { ">" } else { "v" },
-                    project.feature_label(index).to_uppercase(),
+                &clip_text(
+                    &format!(
+                        "{} {} / {name}{glyph}",
+                        if active { ">" } else { "v" },
+                        project.feature_label(index).to_uppercase(),
+                    ),
+                    ((row.w - 18.0) / 8.0) as usize,
+                    false,
                 ),
                 1.0,
                 color,
             );
         }
         let row = self.rollback_row(layout);
-        if row.y + row.h < layout.bottom.y {
+        if Self::panel_row_shown(layout, row) || self.rollback_drag {
             let y = if self.rollback_drag {
                 self.cursor.y.clamp(row.y - 200.0, row.y + 200.0) - row.h * 0.5
             } else {

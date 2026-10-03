@@ -12,7 +12,9 @@ cargo run
 The current implementation establishes the project tree, sketch viewport, and
 properties layout. The header shows a clickable breadcrumb trail:
 Projects / project (file name) / part / sketch, then the selected shape; in the
-solid preview the trail ends at the selected extrusion instead of the sketch.
+solid preview the trail ends at the selected feature (extrusion, revolve,
+loft or edge finish) instead of the sketch. Project panel rows too long for
+the panel are clipped with `...`.
 Click the project to clear the selection, the part to open its solid preview (or
 clear the selection when it has no extrusions), or the sketch to return to sketch
 view. The last crumb is the current item and is not a link.
@@ -661,6 +663,12 @@ preview shows supported bodies together. Press **Shift+X** on a later closed
 reference-plane sketch to cut its 50 mm extrusion from the most recent body.
 Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion with
 that body. The shaded preview and STL export use the evaluated Boolean mesh.
+Every body (plain extrusions, cut/join results, revolve, loft and edge
+finish results) is drawn the same way: each triangle is lit per face normal
+by a key light from the upper right plus ambient and a weak head-on fill, and
+sharp edges (adjacent face normals more than 20° apart, the same edges an
+edge finish picks) are drawn as dark lines, with pieces hidden behind the
+mesh left out, so holes and chamfer bevels read clearly.
 The Project panel lists each solid feature in tree order (see Feature
 tree); select the cut or join feature to edit its depth or delete it. Earlier features with dependent cuts or
 joins cannot be deleted in isolation. Revolve, loft and edge chamfer/fillet
@@ -784,7 +792,10 @@ Each part's solid features (`FeatureKind`: extrusions — new body, cut, join
 ordered list. The Project panel shows one row per feature in that order, then a
 **ROLLBACK** row. Row glyphs: `[S]` and dim text for suppressed features, red
 `[!]` for features in error (clicking the row shows the reason in the status
-bar), dim text for features after the rollback bar.
+bar), dim text for features after the rollback bar. When the rows do not
+fit, the mouse wheel over the Project panel scrolls them (one row per notch);
+after a key changes the selected feature (or the active sketch) its row is
+scrolled into view.
 
 With a feature row selected in the 3D view:
 
@@ -854,7 +865,7 @@ features are undo steps too ("Revolve 360°", "Loft", "Chamfer 2 mm",
   it.
 - **Loft** — key **9** (or **MORE → LOFT**) remembers the selected profile of
   the current sketch; open another sketch, select its profile and press **9**
-  again for a new body or **Shift+9** to join the last body (**Esc** clears the
+  again for a new body or **Shift+9** (or **MORE → LOFT JOIN**) to join the last body (**Esc** clears the
   first pick). Both outer loops are resampled at the union of their
   arc-length parameters (every original vertex is kept) after aligning the
   second loop's start to the point nearest the first loop's start and
@@ -869,8 +880,8 @@ features are undo steps too ("Revolve 360°", "Loft", "Chamfer 2 mm",
   facets of tessellated curves are shown grey and rejected. Convex edges are
   cut with a prism along the edge whose cross-section is the material outside
   the chamfer line or the fillet arc (16 segments per 90°); concave edges get
-  the same prism added. Hover ignores occlusion (the nearest projected edge
-  wins).
+  the same prism added. Hover skips edges hidden behind the bodies (the
+  point of the edge nearest the cursor is ray-cast against the mesh).
 
 File format: none of these exist as web graph nodes (the web `chamfer` node
 references web topology `edge` nodes the native app cannot resolve), so they
@@ -1108,7 +1119,10 @@ or dimension):
 ### Status bar, tooltips and toolbar glyphs
 
 The status bar keeps the message on the left (truncated with `...` before
-the info block) and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
+the info block). A message too long for the default layout gets more room:
+in the sketch view the info block narrows by 110 px (its text scaled down)
+with the AUTO / GLY toggles kept just left of it; in the 3D view, which has
+no filter toggles, the block moves right next to the zoom and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
 the right. Between them a two-line block shows the cursor's world
 coordinates in display units (`X - Y -` outside the sketch viewport), the
 current tool, the DOF label (also still in the header) and the snap state
@@ -1390,7 +1404,11 @@ A revolve scenario draws a rectangle and a vertical line beside it, presses
 (`rust-native-revolve.png`). An edge chamfer scenario extrudes a block,
 presses 0, hovers a top edge (`rust-native-edge-chamfer-hover.png`), clicks
 it, types 10 and commits (`rust-native-edge-chamfer.png`); both check the
-saved `revolve` / `edgeFinish` nodes.
+saved `revolve` / `edgeFinish` nodes. A loft scenario extrudes a block,
+starts a loft (9) from a wider rectangle on a new Top sketch, sketches a
+circle on the block's top face and picks MORE → LOFT JOIN
+(`rust-native-loft-more.png`, `rust-native-loft.png`), checking the saved
+join `loft` node.
 It does not open a host desktop
 window.
 

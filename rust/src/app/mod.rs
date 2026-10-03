@@ -104,6 +104,8 @@ struct Layout {
     /// UI scale: physical pixels per layout unit. Every rect is in logical
     /// units; `physical` multiplies by this.
     scale: f32,
+    /// Pixels the Project panel rows are scrolled up by.
+    panel_scroll: f32,
 }
 
 const MORE_COLUMN_ROWS: usize = 18;
@@ -167,6 +169,7 @@ impl Layout {
                 h: bottom_height,
             },
             scale: 1.0,
+            panel_scroll: 0.0,
         }
     }
 
@@ -208,8 +211,10 @@ impl Layout {
         } else {
             (1.0, index - MORE_COLUMN_ROWS)
         };
-        // The second column is wider so its longer labels stay inside.
-        let width = button.w + column * 90.0;
+        // Both columns are wider than the MORE button so labels such as
+        // "CHAMFER [SHIFT H]" stay inside; the first column keeps the
+        // button's x origin and grows to the right.
+        let width = button.w + if column == 0.0 { 30.0 } else { 90.0 };
         Rect {
             x: button.x - column * (width + 4.0),
             y: 96.0 + row as f32 * 36.0,
@@ -221,7 +226,7 @@ impl Layout {
     fn part_row(self, index: usize) -> Rect {
         Rect {
             x: 12.0,
-            y: self.left.y + 43.0 + index as f32 * 35.0,
+            y: self.left.y + 43.0 + index as f32 * 35.0 - self.panel_scroll,
             w: self.left.w - 24.0,
             h: 31.0,
         }
@@ -236,7 +241,8 @@ impl Layout {
             x: 12.0,
             y: self.left.y
                 + 87.0
-                + (part_count + sketch_count.saturating_sub(1) + index) as f32 * 35.0,
+                + (part_count + sketch_count.saturating_sub(1) + index) as f32 * 35.0
+                - self.panel_scroll,
             w: self.left.w - 24.0,
             h: 31.0,
         }
@@ -332,6 +338,10 @@ pub(crate) struct App {
     settings_open: bool,
     /// Active UI scale and the monitor's rounded scale factor.
     ui_scale: f32,
+    /// Project panel scroll in pixels (clamped in `layout`).
+    panel_scroll: f32,
+    /// Row last scrolled into view: (3D view, feature, sketch).
+    panel_followed: (bool, usize, usize),
     monitor_scale: f32,
     status_cache: std::cell::RefCell<StatusCache>,
     /// Hovered toolbar button / MORE row and when the hover began.
@@ -482,6 +492,8 @@ impl Default for App {
             settings: Settings::default(),
             settings_open: false,
             ui_scale: 1.0,
+            panel_scroll: 0.0,
+            panel_followed: (false, 0, 0),
             monitor_scale: 1.0,
             status_cache: Default::default(),
             tip_hover: None,
@@ -939,12 +951,17 @@ impl App {
 
     fn layout(&self) -> Layout {
         // Headless (tests): the default window size.
-        self.window
+        let base = self
+            .window
             .as_ref()
             .map_or(Layout::new(1280.0, 800.0), |window| {
                 let size = window.inner_size();
                 Layout::scaled(size.width as f32, size.height as f32, self.ui_scale)
-            })
+            });
+        Layout {
+            panel_scroll: self.panel_scroll.clamp(0.0, self.max_panel_scroll(base)),
+            ..base
+        }
     }
 
     fn redraw(&self) {
@@ -1014,30 +1031,16 @@ impl App {
         {
             self.paint_revolve_draft(&mut painter, layout);
         } else if self.solid_preview {
-            if let Some(solids) = self
+            if self
                 .project
                 .as_ref()
                 .and_then(ProjectFile::active_extrusion_previews)
+                .is_some()
                 && let Some((scene, projector)) = self.solid_projector(layout)
             {
-                if scene.bodies < solids.len()
-                    || self
-                        .project
-                        .as_ref()
-                        .is_some_and(ProjectFile::has_extension_features)
-                {
-                    self.paint_boolean_preview(
-                        &mut painter,
-                        layout,
-                        &scene,
-                        &projector,
-                        scene.bodies,
-                    );
-                } else {
-                    self.paint_solid_preview(&mut painter, layout, &solids, &projector);
-                }
+                self.paint_boolean_preview(&mut painter, layout, &scene, &projector, scene.bodies);
                 if self.edge_pick.is_some() {
-                    self.paint_edge_pick(&mut painter, layout, &projector);
+                    self.paint_edge_pick(&mut painter, layout, &scene, &projector);
                 } else {
                     self.paint_face_hover(&mut painter, layout, &projector);
                 }
@@ -1067,7 +1070,7 @@ impl App {
             let row = layout.more_item(index);
             painter.rect(row, PANEL_LIGHT);
             painter.outline(row, 1.0, ACCENT);
-            painter.text(row.x + 9.0, row.y + 9.0, label, 1.0, TEXT);
+            painter.text(row.x + 6.0, row.y + 9.0, label, 1.0, TEXT);
         }
     }
 }

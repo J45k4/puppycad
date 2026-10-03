@@ -1027,7 +1027,7 @@ pub(super) static COMMANDS: &[Command] = &[
 ];
 
 /// MORE menu rows (index = `Layout::more_item` slot) and their labels.
-pub(super) const MORE_MENU: [(Cmd, &str); 26] = [
+pub(super) const MORE_MENU: [(Cmd, &str); 27] = [
     (Cmd::Point, "POINT [P]"),
     (Cmd::Polygon, "POLYGON [G]"),
     (Cmd::Slot, "SLOT [S]"),
@@ -1054,6 +1054,7 @@ pub(super) const MORE_MENU: [(Cmd, &str); 26] = [
     (Cmd::Loft, "LOFT [9]"),
     (Cmd::EdgeChamfer, "EDGE CHAMFER [0]"),
     (Cmd::EdgeFillet, "EDGE FILLET [SHIFT 0]"),
+    (Cmd::LoftJoin, "LOFT JOIN [SHIFT 9]"),
 ];
 
 /// Toolbar buttons 0..=9 (`Layout::tool_button` slot) and their commands.

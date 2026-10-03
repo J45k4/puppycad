@@ -18,6 +18,9 @@ pub(super) struct SolidScene {
     pub(super) triangles: Vec<[[f32; 3]; 3]>,
     /// Body index of each triangle.
     pub(super) triangle_body: Vec<usize>,
+    /// Sharp edges (face normals more than 20 degrees apart) of every body,
+    /// as (body index, edge); the same edges edge finishes pick.
+    pub(super) edges: Vec<(usize, project::SolidEdge)>,
 }
 
 impl SolidScene {
@@ -25,6 +28,15 @@ impl SolidScene {
         let mut vertices = Vec::new();
         let mut triangles = Vec::new();
         let mut triangle_body = Vec::new();
+        let edges = solids
+            .iter()
+            .enumerate()
+            .flat_map(|(body, solid)| {
+                project::sharp_edges(solid)
+                    .into_iter()
+                    .map(move |edge| (body, edge))
+            })
+            .collect();
         for (body, mesh) in solids.iter().map(|solid| solid.get_mesh_gl(0)).enumerate() {
             let points: Vec<[f32; 3]> = mesh
                 .vert_properties
@@ -44,9 +56,18 @@ impl SolidScene {
             vertices,
             triangles,
             triangle_body,
+            edges,
         }
     }
 }
+
+/// Base body color before lighting.
+const BODY_COLOR: [f32; 3] = [0.38, 0.68, 0.84];
+/// Sharp edge lines drawn over the shaded bodies.
+pub(super) const BODY_EDGE: Color = [0.025, 0.06, 0.09, 1.0];
+const AMBIENT: f32 = 0.24;
+const KEY_LIGHT: f32 = 0.70;
+const FILL_LIGHT: f32 = 0.08;
 
 /// Projects the orbit view using a scene-fitted scale and optional perspective.
 pub(super) struct SolidProjector {
@@ -191,6 +212,24 @@ impl SolidProjector {
             }
         }
         nearest
+    }
+
+    /// Key light from the upper left in front, plus ambient and a weak
+    /// head-on fill so faces turned away from the key stay distinct.
+    pub(super) fn shade(&self, normal: [f32; 3]) -> Color {
+        let n = unit(self.view.rotate(view3d::cad_to_model(normal)));
+        let key = unit([0.35, 0.85, 0.40]);
+        let light = AMBIENT + KEY_LIGHT * dot3(n, key).max(0.0) + FILL_LIGHT * n[2].max(0.0);
+        let [r, g, b] = BODY_COLOR.map(|c| (c * light).min(1.0));
+        [r, g, b, 1.0]
+    }
+
+    /// False when a scene triangle lies in front of the world point.
+    pub(super) fn visible(&self, scene: &SolidScene, world: [f32; 3]) -> bool {
+        let [x, y] = self.screen(world);
+        let tolerance = self.camera_distance * 2e-3;
+        self.pick_triangle(scene, Point { x, y })
+            .is_none_or(|(_, depth, _)| depth <= self.depth(world) + tolerance)
     }
 
     /// Body under screen `point`.
@@ -535,6 +574,8 @@ impl App {
         );
     }
 
+    /// Shaded solid bodies with their sharp edges (every body, whether a
+    /// plain extrusion, a boolean result or an extension feature).
     pub(super) fn paint_boolean_preview(
         &self,
         painter: &mut Painter,
@@ -549,134 +590,43 @@ impl App {
             let Some(normal) = triangle_normal(a, b, c) else {
                 continue;
             };
-            let facing = projector.facing_at(normal, a);
-            if facing <= 0.001 {
+            if projector.facing_at(normal, a) <= 0.001 {
                 continue;
             }
-            let shade = (0.35 + facing * 0.16).clamp(0.22, 0.55);
-            let color = [shade * 0.48, shade * 0.82, shade, 1.0];
             let mid = std::array::from_fn(|axis| (a[axis] + b[axis] + c[axis]) / 3.0);
             faces.push((
                 projector.depth(mid),
                 [a, b, c].map(|p| projector.screen(p)),
-                color,
+                projector.shade(normal),
             ));
         }
         faces.sort_by(|a, b| a.0.total_cmp(&b.0));
         for (_, points, color) in faces {
             painter.triangle(points[0], points[1], points[2], color);
         }
+        paint_visible_edges(painter, scene, projector);
         self.paint_solid_labels(painter, layout, count);
     }
+}
 
-    pub(super) fn paint_solid_preview(
-        &self,
-        painter: &mut Painter,
-        layout: Layout,
-        solids: &[SolidPreview],
-        projector: &SolidProjector,
-    ) {
-        painter.rect(layout.viewport, [0.065, 0.085, 0.115, 1.0]);
-        let screen = |solid: &SolidPreview, point: Point, offset: f32| {
-            projector.screen(solid.world_point(point, offset))
-        };
-        let mut faces: Vec<(f32, Vec<[f32; 2]>, Color, bool)> = Vec::new();
-        for solid in solids {
-            for (loop_index, loop_points) in solid.loops().enumerate() {
-                for index in 0..loop_points.len() {
-                    let a = loop_points[index];
-                    let b = loop_points[(index + 1) % loop_points.len()];
-                    let a0 = solid.world_point(a, 0.0);
-                    let b0 = solid.world_point(b, 0.0);
-                    let b1 = solid.world_point(b, solid.depth);
-                    let Some(normal) = triangle_normal(a0, b0, b1) else {
-                        continue;
-                    };
-                    let facing = projector.facing_at(normal, a0);
-                    if facing <= 0.001 {
-                        continue;
-                    }
-                    let shade = (0.35 + facing * 0.16).clamp(0.22, 0.55);
-                    let color = [shade * 0.48, shade * 0.82, shade, 1.0];
-                    let mid = std::array::from_fn(|axis| (a0[axis] + b1[axis]) * 0.5);
-                    faces.push((
-                        projector.depth(mid),
-                        vec![
-                            screen(solid, a, 0.0),
-                            screen(solid, b, 0.0),
-                            screen(solid, b, solid.depth),
-                            screen(solid, a, solid.depth),
-                        ],
-                        color,
-                        loop_index == 0,
-                    ));
-                }
+/// Sharp edges in a darker tone, split into pieces so the parts hidden
+/// behind the bodies are left out.
+fn paint_visible_edges(painter: &mut Painter, scene: &SolidScene, projector: &SolidProjector) {
+    for (_, edge) in &scene.edges {
+        let (sa, sb) = (projector.screen(edge.a), projector.screen(edge.b));
+        let pixels = ((sb[0] - sa[0]).powi(2) + (sb[1] - sa[1]).powi(2)).sqrt();
+        let pieces = ((pixels / 10.0).ceil() as usize).clamp(1, 24);
+        let at = |t: f32| std::array::from_fn(|i| edge.a[i] + (edge.b[i] - edge.a[i]) * t);
+        for piece in 0..pieces {
+            let (t0, t1) = (
+                piece as f32 / pieces as f32,
+                (piece + 1) as f32 / pieces as f32,
+            );
+            if !projector.visible(scene, at((t0 + t1) * 0.5)) {
+                continue;
             }
-            let cap_offset = if projector.facing_at(
-                solid.normal(),
-                solid.world_point(Point { x: 0.0, y: 0.0 }, solid.depth),
-            ) >= 0.0
-            {
-                solid.depth
-            } else {
-                0.0
-            };
-            if let Some((cap_points, cap_triangles)) = solid.cap_mesh() {
-                for [i, j, k] in cap_triangles {
-                    let vertices = [cap_points[i], cap_points[j], cap_points[k]];
-                    let mut mid = [0.0; 3];
-                    for point in vertices {
-                        let world = solid.world_point(point, cap_offset);
-                        for axis in 0..3 {
-                            mid[axis] += world[axis] / 3.0;
-                        }
-                    }
-                    faces.push((
-                        projector.depth(mid),
-                        vertices
-                            .map(|point| screen(solid, point, cap_offset))
-                            .to_vec(),
-                        [0.28, 0.60, 0.72, 1.0],
-                        false,
-                    ));
-                }
-            }
+            let (p, q) = (projector.screen(at(t0)), projector.screen(at(t1)));
+            painter.line(p[0], p[1], q[0], q[1], 1.4, BODY_EDGE);
         }
-        faces.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for (_, points, color, outline) in faces {
-            for index in 1..points.len() - 1 {
-                painter.triangle(points[0], points[index], points[index + 1], color);
-            }
-            if outline {
-                for index in 0..points.len() {
-                    let a = points[index];
-                    let b = points[(index + 1) % points.len()];
-                    painter.line(a[0], a[1], b[0], b[1], 1.2, ACCENT);
-                }
-            }
-        }
-        for solid in solids {
-            let cap_offset = if projector.facing_at(
-                solid.normal(),
-                solid.world_point(Point { x: 0.0, y: 0.0 }, solid.depth),
-            ) >= 0.0
-            {
-                solid.depth
-            } else {
-                0.0
-            };
-            for loop_points in solid.loops() {
-                for index in 0..loop_points.len() {
-                    let a = screen(solid, loop_points[index], cap_offset);
-                    let b = screen(
-                        solid,
-                        loop_points[(index + 1) % loop_points.len()],
-                        cap_offset,
-                    );
-                    painter.line(a[0], a[1], b[0], b[1], 1.2, ACCENT);
-                }
-            }
-        }
-        self.paint_solid_labels(painter, layout, solids.len());
     }
 }
