@@ -29,7 +29,7 @@ constraints, and conflicts are diagnosed.
 2. (Done for solver-backed relations) Edits become mutate → solve → commit as one undo step. Keep the current
    "anchor the first endpoint" behavior as soft weights so solved results stay
    intuitive.
-3. Port `src/sketch-redundancy.ts`: DOF count, over-constrained and conflicting
+3. (Done) Port `src/sketch-redundancy.ts`: DOF count, over-constrained and conflicting
    relation diagnostics, shown in the header and as per-entity colors.
 4. Dragging under constraints: a temporary target for the dragged anchor,
    solved every frame.

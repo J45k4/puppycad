@@ -81,6 +81,8 @@ xdotool type --clearmodifiers '150'
 xdotool key Return
 mkdir -p /out
 import -window root /out/rust-native-ellipse.png
+# The sketch header shows the solver DOF count (unconstrained shapes here).
+import -window root -crop 1280x60+0+0 /out/rust-native-dof-header.png
 xdotool key --clearmodifiers ctrl+d
 import -window root /out/rust-native-dimension-copy.png
 # Keep unsaved geometry in the first sketch while adding Front and Right sketches.

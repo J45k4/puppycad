@@ -175,6 +175,29 @@ the solve, so an edit that would need them to move is rejected. Rotating a
 direction target and rotating axis-constrained lines by other than quarter turns
 stay blocked; dragging still moves whole shapes rather than single anchors.
 
+#### Degrees of freedom and diagnostics
+
+`Problem::analyze` ports `src/sketch-redundancy.ts`: it builds the numeric
+Jacobian of the relation residuals over the free parameters, orthonormalizes
+it relation by relation (two-pass Gram–Schmidt), and reports the rank, the
+remaining degrees of freedom, which parameters are fully determined, and for
+each relation whether it is satisfied, conflicting (residual above tolerance at
+the current geometry) or redundant (adds no rank after earlier relations).
+`Document::analyze_constraints` runs it over every line, sketch point, circle
+and arc in the sketch (other shape kinds, and shapes held constant by
+hand-propagated relations, are not counted; an arc's sweep is not a solver
+parameter). A free line has 4 DOF, a point 2, a circle 3.
+
+In the sketch view the header's right edge shows **DOF n** (green at 0),
+**OVER-CONSTRAINED** (purple) when a relation is redundant, or **CONFLICT**
+(red) when a relation is unmet. Project rows of shapes in a conflicting
+relation get **[!]** and red text, shapes in a redundant relation **[R]** and
+purple text; the viewport tints those shapes the same way and draws fully
+constrained shapes green. The analysis is cached by `Document::revision()` and
+recomputed once per committed edit, undo or redo, never during a drag. Because
+edits that cannot be solved are rolled back, a conflict normally appears only
+in documents loaded that way.
+
 Press **K** with a shape selected to toggle construction geometry. Its tree row
 and viewport outline dim, the flag persists in the web project graph, and
 construction geometry cannot be used as the native extrusion profile. Copies

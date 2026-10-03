@@ -10,7 +10,8 @@ use std::{
 
 use manifold_rust::manifold::Manifold;
 use model::{
-    AxisConstraint, DimensionField, Document, LineRelationKind, Point, Shape, SnapKind, Tool,
+    AxisConstraint, DimensionField, Document, LineRelationKind, Point, Shape, SketchAnalysis,
+    SnapKind, Tool,
 };
 use project::{
     EntryKind, ProjectFile, ProjectSummary, SketchPlane, SolidPreview, list_projects,
@@ -35,6 +36,11 @@ const TEXT: Color = [0.88, 0.91, 0.94, 1.0];
 const MUTED: Color = [0.50, 0.58, 0.65, 1.0];
 const ACCENT: Color = [0.32, 0.78, 0.93, 1.0];
 const SHAPE: Color = [0.96, 0.72, 0.38, 1.0];
+/// Constraint-state colors (web intent: fully constrained reads as settled,
+/// conflicts as errors, redundancy as a warning).
+const FULLY_CONSTRAINED: Color = [0.46, 0.84, 0.52, 1.0];
+const CONFLICT: Color = [0.96, 0.36, 0.36, 1.0];
+const REDUNDANT: Color = [0.78, 0.56, 0.96, 1.0];
 
 #[derive(Clone, Copy, Debug)]
 struct Layout {
@@ -461,6 +467,9 @@ struct App {
     split_circle_start: Option<(u32, Point)>,
     spline_points: Vec<Point>,
     projects_page: Option<ProjectsPage>,
+    /// Constraint analysis keyed by `Document::revision`; refreshed once per
+    /// committed edit, never during a drag.
+    analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
 }
 
 struct DimensionEdit {
@@ -528,6 +537,7 @@ impl Default for App {
             split_circle_start: None,
             spline_points: Vec::new(),
             projects_page: None,
+            analysis: Default::default(),
         }
     }
 }
@@ -2352,13 +2362,22 @@ impl App {
     }
 
     fn paint_shape(&self, painter: &mut Painter, shape: &Shape, origin: Point, selected: bool) {
+        let analysis = self.sketch_analysis();
+        let id = shape.id();
         let color = if selected {
             ACCENT
-        } else if self.document.construction.contains(&shape.id()) {
+        } else if analysis.conflicting.contains(&id) {
+            CONFLICT
+        } else if analysis.redundant.contains(&id) {
+            REDUNDANT
+        } else if self.document.construction.contains(&id) {
             MUTED
+        } else if analysis.fully_constrained.contains(&id) {
+            FULLY_CONSTRAINED
         } else {
             SHAPE
         };
+        drop(analysis);
         match shape {
             Shape::Line { a, b, .. } => {
                 let a = self.document.world_to_screen(*a, origin);
@@ -2967,6 +2986,22 @@ impl App {
         );
     }
 
+    /// Current constraint diagnostics, recomputed only when the document
+    /// revision changed and no drag is in progress.
+    fn sketch_analysis(&self) -> std::cell::Ref<'_, SketchAnalysis> {
+        {
+            let mut cache = self.analysis.borrow_mut();
+            let revision = self.document.revision();
+            let stale = cache.as_ref().is_none_or(|(at, _)| *at != revision);
+            if stale && (!self.document.dragging() || cache.is_none()) {
+                *cache = Some((revision, self.document.analyze_constraints()));
+            }
+        }
+        std::cell::Ref::map(self.analysis.borrow(), |cache| {
+            &cache.as_ref().expect("analysis cached above").1
+        })
+    }
+
     fn paint_panels(&self, painter: &mut Painter, layout: Layout) {
         painter.rect(layout.top, PANEL);
         painter.rect(layout.left, PANEL);
@@ -2991,6 +3026,26 @@ impl App {
         );
         painter.text(20.0, 13.0, "PUPPYCAD", 2.0, TEXT);
         self.paint_breadcrumbs(painter, layout);
+        let analysis = (!self.solid_preview).then(|| self.sketch_analysis().clone());
+        if let Some(analysis) = &analysis {
+            let label = analysis.label();
+            let color = if !analysis.conflicting.is_empty() {
+                CONFLICT
+            } else if !analysis.redundant.is_empty() {
+                REDUNDANT
+            } else if analysis.dof == 0 {
+                FULLY_CONSTRAINED
+            } else {
+                MUTED
+            };
+            painter.text(
+                layout.top.w - 20.0 - label.chars().count() as f32 * 8.0 * 1.6,
+                15.0,
+                &label,
+                1.6,
+                color,
+            );
+        }
         if self.solid_preview {
             for (perspective, label) in [(true, "PERSPECTIVE"), (false, "ORTHO")] {
                 let button = layout.projection_button(perspective);
@@ -3186,7 +3241,7 @@ impl App {
                 row.x + 10.0,
                 row.y + 9.0,
                 &format!(
-                    "{} {}{}{}{}{}{}",
+                    "{} {}{}{}{}{}{}{}",
                     shape.name(),
                     shape.id(),
                     if self.document.construction.contains(&shape.id()) {
@@ -3308,13 +3363,23 @@ impl App {
                                 LineRelationKind::Angle(_) => " [A]",
                             })
                         ))
-                        .unwrap_or("")
+                        .unwrap_or(""),
+                    analysis.as_ref().map_or("", |analysis| {
+                        if analysis.conflicting.contains(&shape.id()) {
+                            " [!]"
+                        } else if analysis.redundant.contains(&shape.id()) {
+                            " [R]"
+                        } else {
+                            ""
+                        }
+                    })
                 ),
                 1.3,
-                if self.document.construction.contains(&shape.id()) {
-                    MUTED
-                } else {
-                    TEXT
+                match analysis.as_ref() {
+                    Some(analysis) if analysis.conflicting.contains(&shape.id()) => CONFLICT,
+                    Some(analysis) if analysis.redundant.contains(&shape.id()) => REDUNDANT,
+                    _ if self.document.construction.contains(&shape.id()) => MUTED,
+                    _ => TEXT,
                 },
             );
         }

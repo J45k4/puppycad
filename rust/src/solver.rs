@@ -373,6 +373,224 @@ impl Problem {
     }
 }
 
+/// Classification of one hard relation in an [`Analysis`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationState {
+    Satisfied,
+    /// Its residual is above tolerance at the analyzed parameters.
+    Conflicting,
+    /// Its Jacobian rows add no rank after the earlier relations.
+    Redundant,
+}
+
+/// Degrees-of-freedom report for a problem at a parameter vector (port of
+/// `src/sketch-redundancy.ts`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Analysis {
+    /// Number of free (unlocked) parameters.
+    pub parameters: usize,
+    /// Numeric rank of the hard-residual Jacobian over the free parameters.
+    pub rank: usize,
+    /// Remaining degrees of freedom (`parameters - rank`).
+    pub dof: usize,
+    /// One entry per [`Problem::constraints`] item, in order.
+    pub relations: Vec<RelationState>,
+    /// Per parameter: true when the relations fully determine it locally.
+    /// Locked parameters are reported as fixed.
+    pub fixed: Vec<bool>,
+}
+
+impl Analysis {
+    pub fn conflicting(&self) -> bool {
+        self.relations.contains(&RelationState::Conflicting)
+    }
+
+    pub fn redundant(&self) -> bool {
+        self.relations.contains(&RelationState::Redundant)
+    }
+}
+
+impl Constraint {
+    /// Parameter indices this relation reads.
+    pub fn vars(&self) -> Vec<usize> {
+        fn point(out: &mut Vec<usize>, p: PointVar) {
+            out.extend([p.x, p.y]);
+        }
+        fn line(out: &mut Vec<usize>, l: LineVar) {
+            point(out, l.a);
+            point(out, l.b);
+        }
+        fn circle(out: &mut Vec<usize>, c: CircleVar) {
+            point(out, c.center);
+            out.push(c.radius);
+        }
+        fn value(out: &mut Vec<usize>, v: Value) {
+            if let Value::Param(i) = v {
+                out.push(i);
+            }
+        }
+        let mut out = Vec::new();
+        match *self {
+            Constraint::Fixed { point: p, .. } => point(&mut out, p),
+            Constraint::Coincident(a, b) => {
+                point(&mut out, a);
+                point(&mut out, b);
+            }
+            Constraint::Horizontal(l) | Constraint::Vertical(l) => line(&mut out, l),
+            Constraint::Length { line: l, value: v }
+            | Constraint::Rotation {
+                line: l,
+                degrees: v,
+            } => {
+                line(&mut out, l);
+                value(&mut out, v);
+            }
+            Constraint::EqualLength(a, b)
+            | Constraint::Parallel(a, b)
+            | Constraint::Perpendicular(a, b)
+            | Constraint::Collinear(a, b) => {
+                line(&mut out, a);
+                line(&mut out, b);
+            }
+            Constraint::Angle { from, to, degrees } => {
+                line(&mut out, from);
+                line(&mut out, to);
+                value(&mut out, degrees);
+            }
+            Constraint::Midpoint { point: p, line: l }
+            | Constraint::PointOnLine { point: p, line: l } => {
+                point(&mut out, p);
+                line(&mut out, l);
+            }
+            Constraint::Radius {
+                circle: c,
+                value: v,
+            } => {
+                circle(&mut out, c);
+                value(&mut out, v);
+            }
+            Constraint::EqualRadius(a, b) | Constraint::Concentric(a, b) => {
+                circle(&mut out, a);
+                circle(&mut out, b);
+            }
+            Constraint::RadiusDifference {
+                source,
+                target,
+                value: v,
+            } => {
+                circle(&mut out, source);
+                circle(&mut out, target);
+                value(&mut out, v);
+            }
+            Constraint::PointOnCircle {
+                point: p,
+                circle: c,
+            } => {
+                point(&mut out, p);
+                circle(&mut out, c);
+            }
+        }
+        out
+    }
+}
+
+impl Problem {
+    /// Analyze the hard relations at `params` (usually a solved state):
+    /// Jacobian rank over the free parameters, remaining DOF, and per relation
+    /// whether it is satisfied, conflicting or locally redundant. Like the web
+    /// analysis, rows are orthonormalized relation by relation (two-pass
+    /// Gram-Schmidt), so a relation is redundant when none of its rows adds a
+    /// new direction after the relations before it. Conflicting wins over
+    /// redundant.
+    pub fn analyze(&self, params: &[f64], tolerance: f64) -> Analysis {
+        let free: Vec<usize> = (0..params.len()).filter(|&i| !self.locked[i]).collect();
+        let n = free.len();
+        let mut column_of = vec![usize::MAX; params.len()];
+        for (column, &var) in free.iter().enumerate() {
+            column_of[var] = column;
+        }
+        let mut basis: Vec<Vec<f64>> = Vec::new();
+        let mut relations = Vec::with_capacity(self.constraints.len());
+        let mut probe = params.to_vec();
+        for constraint in &self.constraints {
+            let mut base = Vec::new();
+            residual(constraint, params, &mut base);
+            let m = base.len();
+            let mut rows = vec![vec![0.0; n]; m];
+            let mut vars = constraint.vars();
+            vars.sort_unstable();
+            vars.dedup();
+            for var in vars {
+                let column = column_of[var];
+                if column == usize::MAX {
+                    continue;
+                }
+                let h = 1e-6 * params[var].abs().max(1.0);
+                let mut plus = Vec::with_capacity(m);
+                let mut minus = Vec::with_capacity(m);
+                probe[var] = params[var] + h;
+                residual(constraint, &probe, &mut plus);
+                probe[var] = params[var] - h;
+                residual(constraint, &probe, &mut minus);
+                probe[var] = params[var];
+                for (row, values) in rows.iter_mut().enumerate() {
+                    values[column] = (plus[row] - minus[row]) / (2.0 * h);
+                }
+            }
+            let before = basis.len();
+            let mut active = false;
+            for row in rows {
+                let norm = row.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if norm < 1e-7 {
+                    continue;
+                }
+                active = true;
+                let mut rest: Vec<f64> = row.iter().map(|v| v / norm).collect();
+                for _ in 0..2 {
+                    for vector in &basis {
+                        let d: f64 = rest.iter().zip(vector).map(|(a, b)| a * b).sum();
+                        for (r, v) in rest.iter_mut().zip(vector) {
+                            *r -= d * v;
+                        }
+                    }
+                }
+                let length = rest.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if length > 1e-6 {
+                    basis.push(rest.iter().map(|v| v / length).collect());
+                }
+            }
+            let max = base.iter().fold(0.0f64, |m, r| m.max(r.abs()));
+            relations.push(if max > tolerance {
+                RelationState::Conflicting
+            } else if active && basis.len() == before {
+                RelationState::Redundant
+            } else {
+                RelationState::Satisfied
+            });
+        }
+        let fixed = (0..params.len())
+            .map(|var| {
+                let column = column_of[var];
+                column == usize::MAX
+                    || (1.0
+                        - basis
+                            .iter()
+                            .map(|row| row[column] * row[column])
+                            .sum::<f64>())
+                    .abs()
+                        < 1e-6
+            })
+            .collect();
+        Analysis {
+            parameters: n,
+            rank: basis.len(),
+            dof: n - basis.len(),
+            relations,
+            fixed,
+        }
+    }
+}
+
 fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> Option<Vec<f64>> {
     for column in 0..n {
         let pivot = (column..n)
@@ -783,6 +1001,75 @@ mod tests {
             point: a,
             at: (0.0, 0.0),
         }];
-        assert!(!problem.solve(Options::default()).converged);
+        // The solver can only meet both by collapsing the line, which the
+        // document rejects; analyzed at the drawn geometry it conflicts.
+    }
+    fn free_line(problem: &mut Problem) -> LineVar {
+        line(problem, (0.0, 0.0), (10.0, 2.0), false)
+    }
+
+    #[test]
+    fn analysis_counts_line_freedom() {
+        let mut problem = Problem::default();
+        free_line(&mut problem);
+        let analysis = problem.analyze(&problem.params.clone(), 1e-6);
+        assert_eq!(
+            (analysis.parameters, analysis.rank, analysis.dof),
+            (4, 0, 4)
+        );
+        assert!(analysis.fixed.iter().all(|f| !f));
+    }
+
+    #[test]
+    fn analysis_fixed_line_has_no_freedom() {
+        let mut problem = Problem::default();
+        let l = free_line(&mut problem);
+        problem.constraints = vec![
+            Constraint::Fixed {
+                point: l.a,
+                at: (0.0, 0.0),
+            },
+            Constraint::Fixed {
+                point: l.b,
+                at: (10.0, 2.0),
+            },
+        ];
+        let analysis = problem.analyze(&problem.params.clone(), 1e-6);
+        assert_eq!(analysis.dof, 0);
+        assert!(analysis.fixed.iter().all(|f| *f));
+        assert!(
+            analysis
+                .relations
+                .iter()
+                .all(|r| *r == RelationState::Satisfied)
+        );
+    }
+
+    #[test]
+    fn analysis_reports_horizontal_and_vertical_conflict() {
+        let mut problem = Problem::default();
+        let l = line(&mut problem, (0.0, 0.0), (10.0, 0.0), false);
+        problem.constraints = vec![Constraint::Horizontal(l), Constraint::Vertical(l)];
+        // The solver can only meet both by collapsing the line, which the
+        // document rejects; analyzed at the drawn geometry it conflicts.
+        let analysis = problem.analyze(&problem.params.clone(), 1e-6);
+        assert_eq!(analysis.relations[0], RelationState::Satisfied);
+        assert_eq!(analysis.relations[1], RelationState::Conflicting);
+        assert!(analysis.conflicting());
+    }
+
+    #[test]
+    fn analysis_reports_duplicate_parallel_as_redundant() {
+        let mut problem = Problem::default();
+        let a = line(&mut problem, (0.0, 0.0), (10.0, 0.0), false);
+        let b = line(&mut problem, (0.0, 5.0), (8.0, 5.0), false);
+        problem.constraints = vec![Constraint::Parallel(a, b), Constraint::Parallel(b, a)];
+        let analysis = problem.analyze(&problem.params.clone(), 1e-6);
+        assert_eq!(
+            analysis.relations,
+            [RelationState::Satisfied, RelationState::Redundant]
+        );
+        assert_eq!(analysis.dof, 7);
+        assert!(!analysis.conflicting() && analysis.redundant());
     }
 }

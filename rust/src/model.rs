@@ -1437,6 +1437,13 @@ pub struct Document {
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
     drag: Option<DragState>,
+    /// Bumped whenever an edit is committed or undone; see [`Document::revision`].
+    revision: std::cell::Cell<u64>,
+}
+
+fn next_revision() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Default for Document {
@@ -1473,6 +1480,7 @@ impl Default for Document {
             history: Vec::new(),
             future: Vec::new(),
             drag: None,
+            revision: std::cell::Cell::new(next_revision()),
         }
     }
 }
@@ -1865,7 +1873,15 @@ impl Document {
         true
     }
 
+    /// Changes (globally uniquely) whenever an edit is about to be
+    /// committed, is finished by a drag, or is undone/redone, so callers can
+    /// cache per-edit analysis such as [`Document::analyze_constraints`].
+    pub fn revision(&self) -> u64 {
+        self.revision.get()
+    }
+
     fn snapshot(&self) -> DocumentState {
+        self.revision.set(next_revision());
         DocumentState {
             shapes: self.shapes.clone(),
             driving_dimensions: self.driving_dimensions.clone(),
@@ -1890,6 +1906,7 @@ impl Document {
     }
 
     fn restore(&mut self, state: DocumentState) {
+        self.revision.set(next_revision());
         self.shapes = state.shapes;
         self.driving_dimensions = state.driving_dimensions;
         self.construction = state.construction;
@@ -2306,6 +2323,7 @@ impl Document {
             self.history.push(drag.before);
             self.future.clear();
         }
+        self.revision.set(next_revision());
         changed
     }
 
@@ -6883,11 +6901,48 @@ pub enum Pin {
     Anchor(u32, usize),
 }
 
+/// Result of [`Document::analyze_constraints`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SketchAnalysis {
+    pub parameters: usize,
+    pub rank: usize,
+    pub dof: usize,
+    /// Shapes in a relation whose residual is not met.
+    pub conflicting: HashSet<u32>,
+    /// Shapes in a locally redundant relation.
+    pub redundant: HashSet<u32>,
+    /// Shapes whose solver parameters are all determined.
+    pub fully_constrained: HashSet<u32>,
+}
+
+impl SketchAnalysis {
+    /// Header label in the web app's spirit.
+    pub fn label(&self) -> String {
+        if !self.conflicting.is_empty() {
+            "CONFLICT".into()
+        } else if !self.redundant.is_empty() {
+            "OVER-CONSTRAINED".into()
+        } else {
+            format!("DOF {}", self.dof)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum SolverEntity {
     Line(solver::LineVar),
     Point(solver::PointVar),
     Circle(solver::CircleVar),
+}
+
+impl SolverEntity {
+    fn vars(&self) -> Vec<usize> {
+        match *self {
+            SolverEntity::Line(l) => vec![l.a.x, l.a.y, l.b.x, l.b.y],
+            SolverEntity::Point(p) => vec![p.x, p.y],
+            SolverEntity::Circle(c) => vec![c.center.x, c.center.y, c.radius],
+        }
+    }
 }
 
 impl Document {
@@ -7005,8 +7060,15 @@ impl Document {
         Err(error)
     }
 
-    fn solve_once(&mut self, pins: &HashSet<Pin>) -> Result<(), String> {
-        use solver::{CircleVar, Constraint, LineVar, PointVar, Problem, Soft, Value};
+    /// Build the solver problem for the current document. With `everything`,
+    /// every line, point, circle and arc becomes an entity (for DOF
+    /// analysis) instead of only those that take part in a relation.
+    fn build_problem(
+        &self,
+        pins: &HashSet<Pin>,
+        everything: bool,
+    ) -> (solver::Problem, HashMap<u32, SolverEntity>) {
+        use solver::{CircleVar, Constraint, LineVar, Problem, Soft, Value};
         let locked_shapes = self.solver_locked_shapes();
         let dependents: HashSet<u32> = self
             .equal_lines
@@ -7109,6 +7171,11 @@ impl Document {
                 .iter()
                 .any(|shape| shape.id() == id && matches!(shape, Shape::Line { .. }))
         };
+        if everything {
+            for shape in shapes {
+                entity(&mut problem, &mut entities, shape.id());
+            }
+        }
         for (&id, &axis) in &self.axis_constraints {
             if let Some(line) = line!(id) {
                 keep_length.insert(id);
@@ -7244,9 +7311,6 @@ impl Document {
                 });
             }
         }
-        if constraints.is_empty() {
-            return Ok(());
-        }
         // Lines whose length is decided by Equal or a length dimension do not
         // get a keep-length preference, which would fight that relation.
         keep_length.retain(|id| {
@@ -7268,6 +7332,51 @@ impl Document {
             }
         }
         problem.constraints = constraints;
+        (problem, entities)
+    }
+
+    /// Degrees-of-freedom and relation diagnostics for the current geometry.
+    /// Covers lines, points, circles and arcs (arc sweep is not a solver
+    /// parameter); shapes in hand-propagated relations are treated as fixed
+    /// and excluded from the count. Run once per committed edit.
+    pub fn analyze_constraints(&self) -> SketchAnalysis {
+        let (problem, entities) = self.build_problem(&HashSet::new(), true);
+        let analysis = problem.analyze(&problem.params, 1e-3);
+        let mut owner = vec![0u32; problem.params.len()];
+        for (&id, found) in &entities {
+            for var in found.vars() {
+                owner[var] = id;
+            }
+        }
+        let mut result = SketchAnalysis {
+            parameters: analysis.parameters,
+            rank: analysis.rank,
+            dof: analysis.dof,
+            ..SketchAnalysis::default()
+        };
+        for (constraint, state) in problem.constraints.iter().zip(&analysis.relations) {
+            let target = match state {
+                solver::RelationState::Satisfied => continue,
+                solver::RelationState::Conflicting => &mut result.conflicting,
+                solver::RelationState::Redundant => &mut result.redundant,
+            };
+            target.extend(constraint.vars().into_iter().map(|var| owner[var]));
+        }
+        let locked = self.solver_locked_shapes();
+        for (&id, found) in &entities {
+            let vars = found.vars();
+            if !locked.contains(&id) && vars.iter().all(|&var| analysis.fixed[var]) {
+                result.fully_constrained.insert(id);
+            }
+        }
+        result
+    }
+
+    fn solve_once(&mut self, pins: &HashSet<Pin>) -> Result<(), String> {
+        let (problem, entities) = self.build_problem(pins, false);
+        if problem.constraints.is_empty() {
+            return Ok(());
+        }
         // Stored geometry is f32, so pinned input carries ~1e-6 relative
         // round-off; accept residuals at that scale.
         let result = problem.solve(solver::Options {
@@ -7299,7 +7408,7 @@ impl Document {
                 _ => {}
             }
         }
-        let read = |var: PointVar| Point {
+        let read = |var: solver::PointVar| Point {
             x: p[var.x] as f32,
             y: p[var.y] as f32,
         };
@@ -12528,5 +12637,66 @@ mod tests {
         let (a, b) = line_ends(&doc, 0);
         assert_eq!(a, Point { x: 0.0, y: 0.0 });
         assert!(b.distance(Point { x: 10.0, y: 6.0 }) < 1e-4);
+    }
+    fn line_doc(lines: &[(Point, Point)]) -> Document {
+        let shapes = lines
+            .iter()
+            .enumerate()
+            .map(|(index, &(a, b))| Shape::Line {
+                id: index as u32 + 1,
+                a,
+                b,
+            })
+            .collect();
+        Document::from_shapes(shapes)
+    }
+
+    fn pt(x: f32, y: f32) -> Point {
+        Point { x, y }
+    }
+
+    #[test]
+    fn constraint_analysis_counts_dof_and_flags_relations() {
+        let mut doc = line_doc(&[(pt(0.0, 0.0), pt(10.0, 2.0))]);
+        let analysis = doc.analyze_constraints();
+        assert_eq!(analysis.dof, 4);
+        assert_eq!(analysis.label(), "DOF 4");
+        doc.fixed_anchors.insert((1, 0), pt(0.0, 0.0));
+        doc.fixed_anchors.insert((1, 1), pt(10.0, 2.0));
+        let analysis = doc.analyze_constraints();
+        assert_eq!(analysis.dof, 0);
+        assert!(analysis.fully_constrained.contains(&1));
+
+        let mut doc = line_doc(&[(pt(0.0, 0.0), pt(10.0, 0.0))]);
+        doc.axis_constraints.insert(1, AxisConstraint::Horizontal);
+        assert_eq!(doc.analyze_constraints().dof, 3);
+        // A stored conflicting state (e.g. from a file) is diagnosed.
+        doc.driving_dimensions
+            .insert((1, DimensionField::Rotation), 90.0);
+        let analysis = doc.analyze_constraints();
+        assert!(analysis.conflicting.contains(&1));
+        assert_eq!(analysis.label(), "CONFLICT");
+
+        let mut doc = line_doc(&[(pt(0.0, 0.0), pt(10.0, 0.0)), (pt(0.0, 5.0), pt(8.0, 5.0))]);
+        doc.axis_constraints.insert(1, AxisConstraint::Horizontal);
+        doc.axis_constraints.insert(2, AxisConstraint::Horizontal);
+        doc.line_relations
+            .insert(2, (1, LineRelationKind::Parallel));
+        let analysis = doc.analyze_constraints();
+        assert_eq!(analysis.label(), "OVER-CONSTRAINED");
+        assert!(!analysis.redundant.is_empty());
+        assert!(analysis.conflicting.is_empty());
+    }
+
+    #[test]
+    fn revision_changes_on_commit_and_undo() {
+        let mut doc = Document::default();
+        let start = doc.revision();
+        assert!(doc.add_point(pt(1.0, 1.0)));
+        let added = doc.revision();
+        assert_ne!(start, added);
+        assert_eq!(doc.revision(), added);
+        doc.undo();
+        assert_ne!(doc.revision(), added);
     }
 }
