@@ -85,8 +85,16 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 
 ## Phase 4 — Assembly
 
-Instances, frames, mates and the `assembly-solver.ts` port; assembly view with
-per-instance selection and export.
+(Done: `rust/src/assembly.rs`, `rust/src/assembly/solver.rs`,
+`rust/src/app/assembly.rs`; see Assemblies in `rust-native.md`.) Instances,
+connector frames, all five web mate kinds (fasten solved exactly like
+`assembly-solver.ts`; revolute, slider, planar and ball by least squares,
+servos driving revolute angles), the assembly view with per-instance
+selection, Properties, insert/delete, a face-to-face mate gesture, undo, and
+per-instance STL / one-object-per-instance 3MF export. Partial: connectors
+and mates cannot be edited after creation, edge axes and world connectors
+cannot be picked in the UI, servo angles are not editable, and `--export`
+does not export assemblies.
 
 ## Phase 5 — Editor UX
 
