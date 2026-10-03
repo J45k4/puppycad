@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Constrained line",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Constrained sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchLine", "sketchId": "native-sketch-1", "p0": { "x": -50, "y": 20 }, "p1": { "x": 50, "y": 20 } },
+            { "id": "horizontal-1", "type": "sketchConstraint", "sketchId": "native-sketch-1", "constraint": { "type": "horizontal", "entityId": "native-entity-1" } },
+            { "id": "length-1", "type": "sketchConstraint", "sketchId": "native-sketch-1", "constraint": { "type": "lineLength", "entityId": "native-entity-1", "value": 100 } }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}

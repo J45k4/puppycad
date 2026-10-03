@@ -1,0 +1,27 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Segmented slot",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Slot sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchPrimitive", "sketchId": "native-sketch-1", "primitive": { "id": "native-entity-1", "type": "capsule", "from": { "x": -50, "y": 0 }, "to": { "x": 50, "y": 0 }, "width": 40, "arcSegments": 12 } },
+            { "id": "extrude-1", "type": "extrude", "name": "Slot extrusion", "sketchId": "native-sketch-1", "profileId": "native-sketch-1-profile-1", "operation": "newBody", "depth": 40 }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1", "extrude-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1", "extrude-1"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}

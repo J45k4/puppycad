@@ -1,0 +1,31 @@
+FROM rust:1.98-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    imagemagick \
+    libxcursor1 \
+    libxi6 \
+    libxkbcommon0 \
+    libxkbcommon-x11-0 \
+    libxrandr2 \
+    libvulkan1 \
+    mesa-vulkan-drivers \
+    xdotool \
+    xvfb \
+    x11-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && printf 'fn main() {}\n' > src/main.rs && cargo build --workspace
+COPY src ./src
+RUN touch src/*.rs && cargo build --workspace
+
+COPY ui-smoke.sh ./ui-smoke.sh
+COPY fixtures ./fixtures
+RUN chmod +x ./ui-smoke.sh
+
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV WGPU_BACKEND=vulkan
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+
+CMD ["./ui-smoke.sh"]

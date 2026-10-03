@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Segmented primitives",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Segmented sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchPrimitive", "sketchId": "native-sketch-1", "primitive": { "id": "native-entity-1", "type": "ellipse", "center": { "x": 0, "y": 0 }, "width": 160, "height": 100, "rotation": 0, "segments": 16 } },
+            { "id": "native-entity-2", "type": "sketchPrimitive", "sketchId": "native-sketch-1", "primitive": { "id": "native-entity-2", "type": "circle", "center": { "x": 0, "y": 0 }, "radius": 20, "segments": 12 } },
+            { "id": "extrude-1", "type": "extrude", "name": "Segmented extrusion", "sketchId": "native-sketch-1", "profileId": "native-sketch-1-profile-1", "operation": "newBody", "depth": 40 }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1", "extrude-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1", "extrude-1"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}

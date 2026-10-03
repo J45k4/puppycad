@@ -1,0 +1,27 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Extrusion preview",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Block sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchCornerRectangle", "sketchId": "native-sketch-1", "p0": { "x": -80, "y": -50 }, "p1": { "x": 80, "y": 50 } },
+            { "id": "extrude-1", "type": "extrude", "name": "Block", "sketchId": "native-sketch-1", "profileId": "native-sketch-1-profile-1", "operation": "newBody", "depth": 60 }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1", "extrude-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1", "extrude-1"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}

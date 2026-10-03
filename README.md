@@ -5,6 +5,9 @@
 Install dependencies with `bun install`, then run `bun dev` to start PuppyCAD at
 http://localhost:5337 in development mode with hot reloading.
 
+The native Rust rewrite is under [`rust/`](rust/). Run it with `cd rust && cargo
+run`; its current scope and controls are described in [the native app guide](docs/rust-native.md).
+
 ## Live TypeScript SDK
 
 Design server-backed projects with reusable parts and an assembly that positions and connects them. The viewer updates after each SDK operation, and the assembly view offers separate STL downloads for supported parts.

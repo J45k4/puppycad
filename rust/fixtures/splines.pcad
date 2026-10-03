@@ -1,0 +1,27 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Native splines",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Spline sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "fit-spline", "type": "sketchSpline", "sketchId": "native-sketch-1", "spline": { "id": "fit-spline", "type": "spline", "mode": "fit", "closed": true, "points": [{"x":-120,"y":-40},{"x":-40,"y":-40},{"x":-40,"y":40},{"x":-120,"y":40}] } },
+            { "id": "control-spline", "type": "sketchSpline", "sketchId": "native-sketch-1", "spline": { "id": "control-spline", "type": "spline", "mode": "control", "closed": false, "points": [{"x":30,"y":0},{"x":60,"y":-90},{"x":90,"y":90},{"x":120,"y":0}] } }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}

@@ -1,0 +1,39 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "part-one",
+      "type": "part",
+      "name": "Part One",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "sketch-one", "type": "sketch", "name": "Sketch One", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] }
+          ],
+          "rootNodeIds": ["plane-top", "sketch-one"]
+        },
+        "tree": { "orderedNodeIds": ["sketch-one"], "dirtySketchIds": [] }
+      }
+    },
+    {
+      "id": "part-two",
+      "type": "part",
+      "name": "Part Two",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "sketch-two", "type": "sketch", "name": "Sketch Two", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] }
+          ],
+          "rootNodeIds": ["plane-top", "sketch-two"]
+        },
+        "tree": { "orderedNodeIds": ["sketch-two"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}
