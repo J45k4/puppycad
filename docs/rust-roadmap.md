@@ -46,7 +46,8 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
    distance / X / Y dimensions; driving vs. reference; expressions and sketch
    variables (`sketch-value.ts`, `sketch-variables.ts`).
 2. Fillet and chamfer.
-3. Mirror and the symmetry constraint.
+3. Mirror and the symmetry constraint (**done**: `rust/src/model/symmetry.rs`;
+   Shift+S symmetry gesture, Shift+I / MORE → MIRROR).
 4. Offset, single and chain.
 5. Linear and circular patterns.
 6. Tangent arc and smooth join.

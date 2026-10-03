@@ -181,7 +181,13 @@ dimensions, Equal radius, radial distance, shared and Equal ellipses, ellipse
 axis, rotation and sweep dimensions of related curves, and Concentric between
 any circular or elliptic curves. Point-on-curve keeps the point on the finite
 segment, sweep, or spline span, and tangency keeps the contact inside an arc's
-sweep. No relation is hand-propagated any more.
+sweep. Point symmetry (the axis line is the perpendicular bisector of
+the two anchors) and whole-shape mirror relations of lines, points, circles,
+arcs, ellipses, elliptic arcs and splines (anchor pairs, equal radii or axes,
+mirrored arc start and ellipse rotation, negated sweeps) are solver residuals
+too. The only hand-propagated relation is a mirror copy of a rectangle,
+polygon or slot, which is regenerated from its source and axis after every
+solve.
 
 Rotating a direction target now turns its source with it; Equal ellipses can
 be scaled; splines with linked end points can be moved, scaled, rotated, and
@@ -311,6 +317,20 @@ press **Shift+O** to make their centers concentric. The selected curve moves to
 the hovered curve's center. Moving or dragging either curve then moves both
 centers in one undo step. Shift+O over the same source removes the relation;
 the Project rows show `[O]`. A fixed anchor blocks moves that would displace it.
+**Symmetry.** Select a mirror line (usually a construction line) and press
+**Shift+S**, then click the first shape and its mirror. Two shapes of the same
+kind (other than sketch points) become whole-shape symmetric: the second one
+jumps to the mirror image of the first (web `mirror` relation). Otherwise the
+anchors nearest to the two clicks (line ends, points, centers, spline points)
+become symmetric about the line (web `symmetric` relation). Esc cancels; the
+same gesture over the same pair removes the relation. Project rows show
+`[SYM]`. Editing either side, or the mirror line, updates the other side in
+one undo step; the mirror line stays put while a side is edited when it can.
+**Shift+I** or **MORE → MIRROR** mirrors the selected shape across the next
+clicked line: it adds a mirror copy linked by a `mirror` relation, as one
+undo step (a corner rectangle's copy is a rotated rectangle, as in the web
+app). The mirror line must be an existing line. Deleting the line, the source
+or the copy removes the relation.
 Rotating a constrained line is supported in 90-degree increments, which swaps
 horizontal and vertical when appropriate.
 Web projects that store line length, rectangle width or height, horizontal, or
@@ -420,6 +440,7 @@ Library crate (`rust/src/lib.rs`):
 - `model/` — the sketch `Document`: `mod.rs` (document state, snapping,
   selection, drafting, undo), `shapes.rs` (`Point`, `Shape` and per-shape
   geometry), `relations.rs` (fixed anchors and relation toggles),
+  `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
   `dimensions.rs` (`set_dimension`), `edit.rs` (delete, split, trim, extend,
   copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
@@ -472,6 +493,9 @@ open line and point beside its closed profile. A web-compatible fixture checks
 an ellipse with 16 segments and a circular hole with 12 segments, plus a slot
 with 12 segments per end cap. Another scenario extrudes both disconnected
 regions from one sketch and checks their saved profile IDs.
+A mirror scenario draws a line and a circle, mirrors the circle across the line
+with Shift+I (`rust-native-mirror.png`: both circle rows show `[SYM]`), and
+checks that the saved project holds a web `mirror` relation.
 It also creates and renames a second part, switches between parts, renames a
 sketch, and saves geometry in both parts. A two-body scenario creates extrusions
 on Top and Front sketches, saves their graph, and exports both STLs.
