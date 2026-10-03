@@ -1059,7 +1059,7 @@ pub(super) static COMMANDS: &[Command] = &[
     ),
     cmd(
         Cmd::DeleteInstance,
-        "Delete instance",
+        "Delete instance / selected mate",
         "Delete / Backspace",
         C::Assembly,
         S::Assembly,
@@ -1067,7 +1067,7 @@ pub(super) static COMMANDS: &[Command] = &[
     ),
     cmd(
         Cmd::MateInstances,
-        "Mate selected face to hovered face",
+        "Mate selected face/edge to hovered face/edge (empty space: fasten to world)",
         "J",
         C::Assembly,
         S::Assembly,

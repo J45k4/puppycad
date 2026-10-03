@@ -273,3 +273,34 @@ fn removing_an_instance_drops_its_mates_and_servos() {
     assert!(asm.mates.is_empty() && asm.actuators.is_empty());
     assert_eq!(asm.connectors.len(), 1);
 }
+
+#[test]
+fn remove_mate_drops_its_servo_and_unused_connectors() {
+    let mut asm = pair(
+        MateKind::Revolute,
+        ([0.0; 3], [0.0; 3]),
+        ([0.0; 3], [0.0; 3]),
+        away(),
+    );
+    asm.set_servo_angle("m", 30.0);
+    // A second mate sharing both connectors keeps them alive.
+    asm.add_mate(
+        MateKind::Ball,
+        MateRef {
+            instance_id: Some("a".into()),
+            connector_id: "ca".into(),
+        },
+        MateRef {
+            instance_id: Some("b".into()),
+            connector_id: "cb".into(),
+        },
+    );
+    assert!(asm.remove_mate("missing").is_none());
+    assert_eq!(asm.remove_mate("m").unwrap().kind, MateKind::Revolute);
+    assert!(asm.actuators.is_empty());
+    assert_eq!(asm.connectors.len(), 2, "still used by the ball mate");
+    let ball = asm.mates[0].id.clone();
+    asm.remove_mate(&ball);
+    assert!(asm.mates.is_empty());
+    assert!(asm.connectors.is_empty());
+}

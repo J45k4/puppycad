@@ -91,6 +91,53 @@ impl ProjectFile {
         Ok(items.len() - 1)
     }
 
+    /// The project's selected top-level item when it is an assembly.
+    pub fn selected_assembly(&self) -> Option<usize> {
+        let index =
+            usize::try_from(self.value["selectedPath"].as_array()?.first()?.as_u64()?).ok()?;
+        self.assembly_indices().contains(&index).then_some(index)
+    }
+
+    /// The assembly item whose name (or id) is `name`.
+    pub fn assembly_named(&self, name: &str) -> Option<usize> {
+        self.assembly_indices().into_iter().find(|&index| {
+            let item = &self.value["items"][index];
+            item.get("name").and_then(Value::as_str) == Some(name)
+                || item.get("id").and_then(Value::as_str) == Some(name)
+        })
+    }
+
+    /// Every instance of `assembly` as one world-space body named after it.
+    /// The assembly is expected to be solved already.
+    pub fn assembly_world_bodies(
+        &self,
+        assembly: &Assembly,
+        document: &Document,
+    ) -> Result<Vec<Body>, String> {
+        let mut parts = std::collections::HashMap::new();
+        let mut out = Vec::new();
+        for instance in &assembly.instances {
+            let bodies = parts
+                .entry(instance.part_id.clone())
+                .or_insert_with(|| self.part_bodies(&instance.part_id, document))
+                .as_ref()
+                .map_err(|error| format!("{}: {error}", instance.label()))?;
+            let transform = instance.transform();
+            let triangles = bodies
+                .iter()
+                .flat_map(|body| &body.triangles)
+                .map(|triangle| {
+                    triangle.map(|p| transform.apply(p.map(f64::from)).map(|c| c as f32))
+                })
+                .collect();
+            out.push(Body::new(instance.label(), triangles));
+        }
+        if out.is_empty() {
+            return Err("Assembly has no instances to export".into());
+        }
+        Ok(out)
+    }
+
     /// Evaluated bodies of the part with item id `part_id`, including unsaved
     /// edits of the open sketch `document`.
     pub fn part_bodies(&self, part_id: &str, document: &Document) -> Result<Vec<Body>, String> {

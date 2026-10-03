@@ -3821,6 +3821,24 @@ xdotool key --window "$window_id" ctrl+alt+e
 sleep 0.5
 test "$(ls /tmp/native-asm/robot-*.stl | wc -l)" -eq 3
 unzip -p /tmp/native-asm/robot.3mf 3D/3dmodel.model | grep -c '<object ' | grep -qx 3
+# Select the Forearm instance row, then its revolute mate row in
+# Properties; click the mate's DEG value, type 60 and re-solve.
+xdotool mousemove 100 362 click 1
+sleep 0.3
+xdotool mousemove 1060 448 click 1
+sleep 0.5
+import -window root /out/rust-native-assembly-mate-selected.png
+xdotool mousemove 1220 448 click 1
+sleep 0.2
+xdotool type --window "$window_id" 60
+xdotool key --window "$window_id" Return
+sleep 0.5
+import -window root /out/rust-native-assembly-servo-60.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -Eq '"homeDeg": ?60' /tmp/native-asm/robot.pcad
+xdotool mousemove 623 431 click 1
+sleep 0.3
 xdotool key --window "$window_id" Delete
 sleep 0.3
 xdotool key --window "$window_id" ctrl+s

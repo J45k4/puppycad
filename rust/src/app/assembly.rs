@@ -7,7 +7,9 @@
 use super::*;
 
 use puppycad::assembly::{self as asm, Assembly, MateKind, MateRef, Pose, Transform, V3, solver};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Instance colors (cycled); selected and hovered instances are tinted.
 const INSTANCE_COLORS: [[f32; 3]; 6] = [
@@ -74,13 +76,15 @@ impl AsmField {
     }
 }
 
-/// A local face pick on an instance: point and outward normal in part
-/// coordinates.
+/// A local face or edge pick on an instance, in part coordinates: for a
+/// face the hit point and outward normal, for a sharp edge its midpoint and
+/// direction (the axis of a revolute or slider mate).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct FacePick {
     pub(super) instance: usize,
     pub(super) point: V3,
     pub(super) normal: V3,
+    pub(super) edge: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +95,8 @@ pub(super) enum AsmPrompt {
     MateKind { a: FacePick, b: FacePick },
     /// Typing a value for a Properties field.
     Field { field: AsmField, buffer: String },
+    /// Typing the servo angle (degrees) of a revolute mate.
+    Servo { mate_id: String, buffer: String },
 }
 
 pub(super) struct AssemblyView {
@@ -99,21 +105,56 @@ pub(super) struct AssemblyView {
     pub(super) asm: Assembly,
     /// Part-local bodies by part id.
     bodies: HashMap<String, Result<Vec<stl::Body>, String>>,
+    /// Part-local sharp edges by part id (the part view's edge overlay).
+    edges: HashMap<String, Vec<project::SolidEdge>>,
     pub(super) selected: Option<usize>,
     pub(super) hovered: Option<usize>,
+    /// Sharp edge under the cursor (world space), highlighted and used as
+    /// the mate axis by J.
+    pub(super) hovered_edge: Option<project::SolidEdge>,
     /// Face clicked on the selected instance (mate side A).
     pub(super) pick_a: Option<FacePick>,
+    /// Mate id selected in the Properties mate list (Delete removes it).
+    pub(super) selected_mate: Option<String>,
     pub(super) prompt: Option<AsmPrompt>,
     undo: Vec<Assembly>,
     redo: Vec<Assembly>,
+    /// Bumped whenever `asm` or `bodies` change; keys `scene_cache`.
+    pub(super) revision: u64,
+    /// The built scene of `revision`: hover and paint only re-pick.
+    scene_cache: RefCell<Option<(u64, Rc<SolidScene>)>>,
+}
+
+/// The scene of the view's current revision, built once and shared.
+pub(super) fn assembly_scene(view: &AssemblyView) -> Rc<SolidScene> {
+    let mut cache = view.scene_cache.borrow_mut();
+    match &*cache {
+        Some((revision, scene)) if *revision == view.revision => scene.clone(),
+        _ => {
+            let scene = Rc::new(build_assembly_scene(view));
+            *cache = Some((view.revision, scene.clone()));
+            scene
+        }
+    }
 }
 
 /// Instance-colored scene: `triangle_body` holds the instance index.
-pub(super) fn assembly_scene(view: &AssemblyView) -> SolidScene {
+fn build_assembly_scene(view: &AssemblyView) -> SolidScene {
     let mut triangles = Vec::new();
     let mut triangle_body = Vec::new();
+    let mut edges = Vec::new();
     for (index, instance) in view.asm.instances.iter().enumerate() {
         let transform = instance.transform();
+        let pose = transform.pose();
+        for edge in view.edges.get(&instance.part_id).into_iter().flatten() {
+            edges.push((
+                index,
+                edge.transformed(
+                    |p| transform.apply(p.map(f64::from)).map(|c| c as f32),
+                    |v| pose.vector(v.map(f64::from)).map(|c| c as f32),
+                ),
+            ));
+        }
         let Some(Ok(bodies)) = view.bodies.get(&instance.part_id) else {
             continue;
         };
@@ -130,30 +171,18 @@ pub(super) fn assembly_scene(view: &AssemblyView) -> SolidScene {
         vertices: triangles.iter().flatten().copied().collect(),
         triangles,
         triangle_body,
-        // Instance meshes are transformed `Body` triangles, not manifolds, so
-        // the sharp-edge overlay is not computed for assemblies yet.
-        edges: Vec::new(),
+        edges,
     }
 }
 
-/// File-name-safe form of an instance name.
-pub(super) fn file_stem_part(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = cleaned.trim_matches('-');
-    if trimmed.is_empty() {
-        "instance".into()
-    } else {
-        trimmed.to_string()
-    }
+/// Sharp edges of a part's evaluated bodies (rebuilt as manifolds).
+fn part_edges(bodies: &Result<Vec<stl::Body>, String>) -> Vec<project::SolidEdge> {
+    bodies
+        .iter()
+        .flatten()
+        .filter_map(|body| stl::manifold_from_triangles(&body.triangles, &body.name).ok())
+        .flat_map(|solid| project::sharp_edges(&solid))
+        .collect()
 }
 
 impl AssemblyView {
@@ -203,6 +232,10 @@ impl App {
                 .entry(instance.part_id.clone())
                 .or_insert_with(|| project.part_bodies(&instance.part_id, &self.document));
         }
+        let edges = bodies
+            .iter()
+            .map(|(id, bodies)| (id.clone(), part_edges(bodies)))
+            .collect();
         let solve = if assembly.read_only_reason.is_none() {
             solver::apply(&mut assembly).err()
         } else {
@@ -220,12 +253,17 @@ impl App {
             item,
             asm: assembly,
             bodies,
+            edges,
             selected: None,
             hovered: None,
+            hovered_edge: None,
             pick_a: None,
+            selected_mate: None,
             prompt: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            revision: 0,
+            scene_cache: RefCell::new(None),
         });
         self.solid_drag = None;
     }
@@ -278,6 +316,7 @@ impl App {
             return false;
         }
         let before = view.asm.clone();
+        view.revision += 1;
         let result = edit(&mut view.asm).and_then(|()| solver::apply(&mut view.asm).map(|_| ()));
         let result = result.and_then(|()| match &mut self.project {
             Some(project) => project.set_assembly(view.item, &view.asm),
@@ -317,6 +356,7 @@ impl App {
             return;
         };
         to.push(std::mem::replace(&mut view.asm, state));
+        view.revision += 1;
         if view
             .selected
             .is_some_and(|index| index >= view.asm.instances.len())
@@ -324,6 +364,11 @@ impl App {
             view.selected = None;
         }
         view.pick_a = None;
+        if let Some(id) = &view.selected_mate
+            && !view.asm.mates.iter().any(|m| &m.id == id)
+        {
+            view.selected_mate = None;
+        }
         if let Some(project) = &mut self.project {
             let _ = project.set_assembly(view.item, &view.asm);
         }
@@ -334,7 +379,7 @@ impl App {
     pub(super) fn assembly_projector(
         &self,
         layout: Layout,
-    ) -> Option<(SolidScene, SolidProjector)> {
+    ) -> Option<(Rc<SolidScene>, SolidProjector)> {
         let scene = assembly_scene(self.assembly.as_ref()?);
         let projector = SolidProjector::new(self.solid_view, &scene.vertices, layout.viewport)?;
         Some((scene, projector))
@@ -358,18 +403,66 @@ impl App {
             instance,
             point: std::array::from_fn(|i| local[i] / transform.scale[i]),
             normal: asm::v_unit(pose.vector(normal.map(f64::from)))?,
+            edge: false,
         })
+    }
+
+    /// The visible sharp edge near `point` as a local pick, with the world
+    /// edge for highlighting.
+    pub(super) fn assembly_edge_at(
+        &self,
+        layout: Layout,
+        point: Point,
+    ) -> Option<(FacePick, project::SolidEdge)> {
+        if !layout.viewport.contains(point.x, point.y) {
+            return None;
+        }
+        let view = self.assembly.as_ref()?;
+        let (scene, projector) = self.assembly_projector(layout)?;
+        let edge = self.edge_near(&projector, &scene, point)?;
+        let instance = scene
+            .edges
+            .iter()
+            .find(|(_, e)| e.a == edge.a && e.b == edge.b)?
+            .0;
+        let transform = view.asm.instances[instance].transform();
+        let pose = transform.pose().inverse();
+        let mid: V3 = std::array::from_fn(|i| f64::from(edge.a[i] + edge.b[i]) * 0.5);
+        let local = pose.point(mid);
+        let direction = asm::v_sub(edge.b.map(f64::from), edge.a.map(f64::from));
+        Some((
+            FacePick {
+                instance,
+                point: std::array::from_fn(|i| local[i] / transform.scale[i]),
+                normal: asm::v_unit(pose.vector(direction))?,
+                edge: true,
+            },
+            edge,
+        ))
+    }
+
+    /// A sharp edge under the cursor wins over the face behind it.
+    pub(super) fn assembly_pick_at(&self, layout: Layout, point: Point) -> Option<FacePick> {
+        self.assembly_edge_at(layout, point)
+            .map(|(pick, _)| pick)
+            .or_else(|| self.assembly_face_at(layout, point))
     }
 
     /// Recompute the hovered instance; true when it changed.
     pub(super) fn update_assembly_hover(&mut self) -> bool {
         let layout = self.layout();
-        let hovered = self
-            .assembly_face_at(layout, self.cursor)
-            .map(|pick| pick.instance);
+        let edge = self.assembly_edge_at(layout, self.cursor);
+        let hovered = match &edge {
+            Some((pick, _)) => Some(pick.instance),
+            None => self
+                .assembly_face_at(layout, self.cursor)
+                .map(|pick| pick.instance),
+        };
+        let edge = edge.map(|(_, edge)| edge);
         match &mut self.assembly {
-            Some(view) if view.hovered != hovered => {
+            Some(view) if view.hovered != hovered || view.hovered_edge != edge => {
                 view.hovered = hovered;
+                view.hovered_edge = edge;
                 true
             }
             _ => false,
@@ -395,11 +488,15 @@ impl App {
                 if let Some(view) = &mut self.assembly {
                     view.selected = Some(index);
                     view.pick_a = None;
+                    view.selected_mate = None;
                     view.prompt = None;
                 }
                 self.describe_selection();
                 return;
             }
+        }
+        if self.assembly_mate_row_click(layout, point) {
+            return;
         }
         for (index, field) in AsmField::ALL.into_iter().enumerate() {
             if assembly_property_row(layout, index + 2).contains(point.x, point.y) {
@@ -410,11 +507,12 @@ impl App {
         if !layout.viewport.contains(point.x, point.y) {
             return;
         }
-        let pick = self.assembly_face_at(layout, point);
+        let pick = self.assembly_pick_at(layout, point);
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
             view.selected = pick.map(|pick| pick.instance);
             view.pick_a = pick;
+            view.selected_mate = None;
         }
         self.describe_selection();
     }
@@ -512,7 +610,9 @@ impl App {
         };
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
+            view.edges.insert(part_id.clone(), part_edges(&bodies));
             view.bodies.insert(part_id.clone(), bodies);
+            view.revision += 1;
         }
         let count = self.assembly.as_ref().map_or(0, |v| {
             v.asm
@@ -542,6 +642,10 @@ impl App {
 
     /// Delete: remove the selected instance and its mates.
     pub(super) fn delete_selected_instance(&mut self) {
+        if let Some(mate_id) = self.assembly.as_ref().and_then(|v| v.selected_mate.clone()) {
+            self.delete_mate(&mate_id);
+            return;
+        }
         let Some(index) = self.assembly.as_ref().and_then(|view| view.selected) else {
             self.status_message = "Select an instance to delete".into();
             return;
@@ -566,10 +670,16 @@ impl App {
     /// the cursor on another instance; a prompt then asks for the kind.
     pub(super) fn begin_mate(&mut self) {
         let layout = self.layout();
-        let b = self.assembly_face_at(layout, self.cursor);
+        let b = self.assembly_pick_at(layout, self.cursor);
         let Some(view) = &mut self.assembly else {
             return;
         };
+        if b.is_none()
+            && let Some(selected) = view.selected
+        {
+            self.fasten_to_world(selected);
+            return;
+        }
         let Some(a) = view.pick_a.filter(|a| Some(a.instance) == view.selected) else {
             self.status_message = "Mate: click a face of the first instance".into();
             return;
@@ -588,21 +698,33 @@ impl App {
             return;
         };
         let ids = [a.instance, b.instance].map(|i| view.asm.instances[i].id.clone());
+        let poses = [a.instance, b.instance].map(|i| view.asm.instances[i].transform().pose());
         let names = [a.instance, b.instance].map(|i| view.asm.instances[i].label().to_string());
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
         }
         // Frame A's Z is A's outward face normal; frame B's Z points into B,
-        // so coinciding frames put the faces against each other.
+        // so coinciding frames put the faces against each other. An edge
+        // pick uses the edge direction instead, turned to agree with the
+        // other side's axis so the mate does not flip the instance.
+        let mut za = a.normal;
+        let mut zb = if b.edge {
+            b.normal
+        } else {
+            asm::v_scale(b.normal, -1.0)
+        };
+        if asm::v_dot(poses[0].vector(za), poses[1].vector(zb)) < 0.0 {
+            if b.edge {
+                zb = asm::v_scale(zb, -1.0);
+            } else if a.edge {
+                za = asm::v_scale(za, -1.0);
+            }
+        }
         self.assembly_edit(
             &format!("{} mate {} - {}", kind.label(), names[0], names[1]),
             |assembly| {
-                let ca =
-                    assembly.add_connector(Some(&ids[0]), &Pose::from_normal(a.point, a.normal));
-                let cb = assembly.add_connector(
-                    Some(&ids[1]),
-                    &Pose::from_normal(b.point, asm::v_scale(b.normal, -1.0)),
-                );
+                let ca = assembly.add_connector(Some(&ids[0]), &Pose::from_normal(a.point, za));
+                let cb = assembly.add_connector(Some(&ids[1]), &Pose::from_normal(b.point, zb));
                 assembly.add_mate(
                     kind,
                     MateRef {
@@ -675,35 +797,137 @@ impl App {
                 }
             }
             AsmPrompt::Field { field, mut buffer } => {
-                match code {
-                    KeyCode::Enter | KeyCode::NumpadEnter => {
-                        if let Some(view) = &mut self.assembly {
-                            view.prompt = None;
-                        }
-                        self.finish_assembly_field(field, &buffer);
-                        return true;
+                if edit_number(&mut buffer, code, text) {
+                    if let Some(view) = &mut self.assembly {
+                        view.prompt = None;
                     }
-                    KeyCode::Backspace => {
-                        buffer.pop();
-                    }
-                    _ => {
-                        for ch in text.unwrap_or("").chars() {
-                            if (ch.is_ascii_digit()
-                                || ch == '.'
-                                || (ch == '-' && buffer.is_empty()))
-                                && buffer.len() < 24
-                            {
-                                buffer.push(ch);
-                            }
-                        }
-                    }
-                }
-                if let Some(view) = &mut self.assembly {
+                    self.finish_assembly_field(field, &buffer);
+                } else if let Some(view) = &mut self.assembly {
                     view.prompt = Some(AsmPrompt::Field { field, buffer });
+                }
+            }
+            AsmPrompt::Servo {
+                mate_id,
+                mut buffer,
+            } => {
+                if edit_number(&mut buffer, code, text) {
+                    if let Some(view) = &mut self.assembly {
+                        view.prompt = None;
+                    }
+                    self.finish_servo(&mate_id, &buffer);
+                } else if let Some(view) = &mut self.assembly {
+                    view.prompt = Some(AsmPrompt::Servo { mate_id, buffer });
                 }
             }
         }
         true
+    }
+
+    /// Click on a Properties mate row: the DEG value of a revolute mate
+    /// starts a servo edit, anywhere else selects the mate. True when hit.
+    fn assembly_mate_row_click(&mut self, layout: Layout, point: Point) -> bool {
+        let Some(view) = &mut self.assembly else {
+            return false;
+        };
+        let Some(selected) = view.selected else {
+            return false;
+        };
+        let rows: Vec<(String, MateKind)> = view
+            .asm
+            .mates_of(selected)
+            .into_iter()
+            .map(|m| (m.id.clone(), m.kind))
+            .collect();
+        for (index, (id, kind)) in rows.into_iter().enumerate() {
+            let row = assembly_mate_row(layout, index);
+            if !row.contains(point.x, point.y) {
+                continue;
+            }
+            view.selected_mate = Some(id.clone());
+            view.pick_a = None;
+            if kind == MateKind::Revolute && servo_value_rect(row).contains(point.x, point.y) {
+                view.prompt = Some(AsmPrompt::Servo {
+                    mate_id: id,
+                    buffer: String::new(),
+                });
+                self.status_message =
+                    "Servo angle: type degrees, Enter applies and re-solves  |  Esc cancels".into();
+            } else {
+                view.prompt = None;
+                self.status_message = format!(
+                    "Selected {} mate  |  Delete removes it{}",
+                    kind.label(),
+                    if kind == MateKind::Revolute {
+                        "  |  click its DEG value to drive it"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            return true;
+        }
+        false
+    }
+
+    fn finish_servo(&mut self, mate_id: &str, buffer: &str) {
+        let Some(value) = buffer.trim().parse::<f64>().ok().filter(|v| v.is_finite()) else {
+            self.status_message = "Servo angle: enter a number".into();
+            return;
+        };
+        self.assembly_edit(&format!("Servo angle {value} deg"), |asm| {
+            asm.set_servo_angle(mate_id, value);
+            Ok(())
+        });
+    }
+
+    /// Delete with a mate selected: remove it, its servo and its now-unused
+    /// connectors.
+    fn delete_mate(&mut self, mate_id: &str) {
+        let label = self
+            .assembly
+            .as_ref()
+            .and_then(|v| v.asm.mates.iter().find(|m| m.id == mate_id))
+            .map_or("mate", |m| m.kind.label())
+            .to_string();
+        if self.assembly_edit(&format!("Deleted {label} mate"), |asm| {
+            asm.remove_mate(mate_id)
+                .map(|_| ())
+                .ok_or_else(|| "mate does not exist".to_string())
+        }) && let Some(view) = &mut self.assembly
+        {
+            view.selected_mate = None;
+        }
+    }
+
+    /// J with nothing hovered: fasten the selected instance to the world at
+    /// its current placement.
+    fn fasten_to_world(&mut self, index: usize) {
+        let Some(view) = &mut self.assembly else {
+            return;
+        };
+        view.prompt = None;
+        let instance = &view.asm.instances[index];
+        let (id, name, pose) = (
+            instance.id.clone(),
+            instance.label().to_string(),
+            instance.transform().pose(),
+        );
+        self.assembly_edit(&format!("FASTENED {name} to the world"), |asm| {
+            let ground = asm.add_connector(None, &pose);
+            let local = asm.add_connector(Some(&id), &Pose::IDENTITY);
+            asm.add_mate(
+                MateKind::Fasten,
+                MateRef {
+                    instance_id: None,
+                    connector_id: ground,
+                },
+                MateRef {
+                    instance_id: Some(id.clone()),
+                    connector_id: local,
+                },
+            );
+            Ok(())
+        });
     }
 
     /// Esc without a prompt: clear the selection, then close the view.
@@ -735,7 +959,7 @@ impl App {
                 .map(|body| {
                     let path = project
                         .path()
-                        .with_file_name(format!("{stem}-{}.stl", file_stem_part(&body.name)));
+                        .with_file_name(format!("{stem}-{}.stl", asm::file_stem_part(&body.name)));
                     let bytes = match format {
                         stl::StlFormat::Ascii => stl::ascii_stl(&body.triangles).into_bytes(),
                         stl::StlFormat::Binary => stl::binary_stl(
@@ -837,6 +1061,11 @@ impl App {
             for (_, points, color) in faces {
                 painter.triangle(points[0], points[1], points[2], color);
             }
+            paint_visible_edges(painter, &scene, &projector);
+            if let Some(edge) = &view.hovered_edge {
+                let (s, e) = (projector.screen(edge.a), projector.screen(edge.b));
+                painter.line(s[0], s[1], e[0], e[1], 3.0, FACE_HOVER);
+            }
             if let Some(pick) = view.pick_a {
                 let transform = view.asm.instances[pick.instance].transform();
                 let p = transform.apply(pick.point).map(|c| c as f32);
@@ -867,7 +1096,7 @@ impl App {
         painter.text(
             viewport.x + 18.0,
             viewport.y + 43.0,
-            "CLICK SELECT / I INSERT / J MATE / DEL DELETE / CTRL+B PART",
+            "CLICK SELECT / I INSERT / J MATE (EMPTY: GROUND) / DEL DELETE / CTRL+B PART",
             1.0,
             MUTED,
         );
@@ -1109,9 +1338,14 @@ impl App {
             );
             let servos: HashMap<String, f64> = view.asm.servo_angles().into_iter().collect();
             for (index, mate) in mates.iter().enumerate() {
-                let row = assembly_property_row(layout, 9 + index);
+                let row = assembly_mate_row(layout, index);
                 if !fits(row) {
                     break;
+                }
+                let chosen = view.selected_mate.as_deref() == Some(mate.id.as_str());
+                if chosen {
+                    painter.rect(row, ACTIVE_ROW);
+                    painter.outline(row, 1.0, ACCENT);
                 }
                 let other = [&mate.a, &mate.b]
                     .into_iter()
@@ -1123,20 +1357,37 @@ impl App {
                             .map_or("WORLD", |i| i.label())
                     })
                     .unwrap_or("?");
-                let servo = servos
-                    .get(&mate.id)
-                    .map_or_else(String::new, |deg| format!(" {deg:.0}DEG"));
                 painter.text(
-                    row.x,
+                    row.x + 6.0,
                     row.y + 9.0,
-                    &clip_text(
-                        &format!("{} - {other}{servo}", mate.kind.label()),
-                        28,
-                        false,
-                    ),
+                    &clip_text(&format!("{} - {other}", mate.kind.label()), 20, false),
                     1.0,
                     TEXT,
                 );
+                if mate.kind == MateKind::Revolute {
+                    let value = servo_value_rect(row);
+                    let editing = match &view.prompt {
+                        Some(AsmPrompt::Servo { mate_id, buffer }) if *mate_id == mate.id => {
+                            Some(buffer)
+                        }
+                        _ => None,
+                    };
+                    painter.rect(
+                        value,
+                        if editing.is_some() {
+                            ACTIVE
+                        } else {
+                            PANEL_LIGHT
+                        },
+                    );
+                    painter.outline(value, 1.0, if editing.is_some() { ACCENT } else { BORDER });
+                    let text = match (editing, servos.get(&mate.id)) {
+                        (Some(buffer), _) => format!("{buffer}_"),
+                        (None, Some(deg)) => format!("{deg:.0}DEG"),
+                        (None, None) => "-- DEG".into(),
+                    };
+                    painter.text(value.x + 6.0, value.y + 7.0, &text, 1.0, TEXT);
+                }
             }
         } else {
             let row = assembly_property_row(layout, 0);
@@ -1168,6 +1419,41 @@ impl App {
         }
         Some(segments)
     }
+}
+
+/// Row of the `index`th mate in the Properties mate list.
+pub(super) fn assembly_mate_row(layout: Layout, index: usize) -> Rect {
+    assembly_property_row(layout, 9 + index)
+}
+
+/// The clickable servo DEG value at the right of a revolute mate row.
+pub(super) fn servo_value_rect(row: Rect) -> Rect {
+    Rect {
+        x: row.x + row.w - 74.0,
+        y: row.y + 3.0,
+        w: 70.0,
+        h: row.h - 6.0,
+    }
+}
+
+/// Number-entry key handling; true on Enter.
+fn edit_number(buffer: &mut String, code: KeyCode, text: Option<&str>) -> bool {
+    match code {
+        KeyCode::Enter | KeyCode::NumpadEnter => return true,
+        KeyCode::Backspace => {
+            buffer.pop();
+        }
+        _ => {
+            for ch in text.unwrap_or("").chars() {
+                if (ch.is_ascii_digit() || ch == '.' || (ch == '-' && buffer.is_empty()))
+                    && buffer.len() < 24
+                {
+                    buffer.push(ch);
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Row `index` of the assembly Properties panel.
