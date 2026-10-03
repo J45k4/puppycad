@@ -397,22 +397,141 @@ impl App {
         }
     }
 
+    /// Height of the NEXT band: fixed by the column height (header plus
+    /// 4 or 7 rows), so Properties can reserve the space.
+    pub(super) fn quick_band_height(layout: Layout) -> f32 {
+        QUICK_HEADER + Self::quick_row_cap(layout) as f32 * QUICK_ROW + 6.0
+    }
+
+    fn quick_shown(&self) -> bool {
+        self.settings.quick_actions && self.projects_page.is_none()
+    }
+
+    /// Bottom of the Properties area for a base layout (NEXT band top when
+    /// the band is shown).
+    pub(super) fn props_bottom(&self, layout: Layout) -> f32 {
+        let column_bottom = layout.right.y + layout.right.h;
+        if self.quick_shown() {
+            column_bottom - Self::quick_band_height(layout)
+        } else {
+            column_bottom
+        }
+    }
+
+    /// How far the lower part of Properties can scroll: until the lowest
+    /// drawn row (or the open edit field) sits above the band.
+    pub(super) fn max_props_scroll(&self, layout: Layout) -> f32 {
+        let field = self
+            .editing
+            .as_ref()
+            .and_then(|edit| self.edit_field_top(layout, edit.field))
+            .map_or(0.0, |top| top + 25.0);
+        let content = self.props_extent.get().max(field);
+        (content + 8.0 - layout.props_bottom).max(0.0)
+    }
+
+    /// The scrolled part of the Properties column for the painter.
+    pub(super) fn props_region(layout: Layout) -> Option<ScrollRegion> {
+        Some(ScrollRegion {
+            left: layout.right.x,
+            from: layout.right.y + PROPS_SCROLL_TOP,
+            until: layout.right.y + layout.right.h,
+            offset: layout.props_scroll,
+            bottom: layout.props_bottom,
+        })
+    }
+
+    /// True when `point` is over the Properties rows (not the NEXT band).
+    pub(super) fn props_hit(&self, layout: Layout, point: Point) -> bool {
+        layout.right.contains(point.x, point.y) && point.y < layout.props_bottom
+    }
+
+    /// Screen point to unscrolled Properties coordinates (identity outside
+    /// the scrolled part).
+    pub(super) fn props_point(layout: Layout, point: Point) -> Point {
+        if point.x >= layout.right.x
+            && point.y >= layout.right.y + PROPS_SCROLL_TOP
+            && point.y < layout.props_bottom
+        {
+            Point {
+                x: point.x,
+                y: point.y + layout.props_scroll,
+            }
+        } else {
+            point
+        }
+    }
+
+    /// Wheel over Properties: `rows` positive scrolls down (30 px rows).
+    pub(super) fn scroll_props(&mut self, rows: f32) {
+        let layout = self.layout();
+        self.props_scroll =
+            (layout.props_scroll + rows * 30.0).clamp(0.0, self.max_props_scroll(layout));
+    }
+
+    /// Unscrolled top of an edit field drawn in the scrollable part.
+    pub(super) fn edit_field_top(&self, layout: Layout, field: EditField) -> Option<f32> {
+        let offset = match field {
+            EditField::MoveX => 365.0,
+            EditField::MoveY => 395.0,
+            EditField::CenterX | EditField::CenterY => 550.0,
+            EditField::ScaleFactor | EditField::RotateAngle => 580.0,
+            EditField::Variable(index) => {
+                175.0 + index.unwrap_or(self.document.dims.variables.len()) as f32 * 30.0
+            }
+            _ => return None,
+        };
+        Some(layout.right.y + offset)
+    }
+
+    /// Keep the field being edited inside the visible Properties area.
+    pub(super) fn follow_props_edit(&mut self) {
+        let key = (
+            self.document.selected,
+            self.solid_preview,
+            self.selected_solid,
+            self.selected_dimension.is_some(),
+        );
+        if key != self.props_followed {
+            self.props_followed = key;
+            self.props_scroll = 0.0;
+        }
+        let layout = self.layout();
+        let Some(top) = self
+            .editing
+            .as_ref()
+            .and_then(|edit| self.edit_field_top(layout, edit.field))
+        else {
+            return;
+        };
+        let from = layout.right.y + PROPS_SCROLL_TOP;
+        if top < from {
+            return;
+        }
+        let max = self.max_props_scroll(layout);
+        let shown = top - layout.props_scroll;
+        if shown < from {
+            self.props_scroll = (top - from).clamp(0.0, max);
+        } else if shown + 25.0 > layout.props_bottom - 4.0 {
+            self.props_scroll = (top + 29.0 - layout.props_bottom).clamp(0.0, max);
+        }
+    }
+
     /// NEXT band at the bottom of the Properties column, if shown.
     pub(super) fn quick_band(&self, layout: Layout) -> Option<(Rect, usize)> {
-        if !self.settings.quick_actions || self.projects_page.is_some() {
+        if !self.quick_shown() {
             return None;
         }
         let rows = self
             .quick_suggestions()
             .len()
             .min(Self::quick_row_cap(layout));
-        let h = QUICK_HEADER + rows as f32 * QUICK_ROW + 6.0;
         Some((
             Rect {
                 x: layout.right.x + 1.0,
-                y: layout.right.y + layout.right.h - h,
+                y: layout.props_bottom,
                 w: layout.right.w - 1.0,
-                h,
+                h: layout.right.y + layout.right.h - layout.props_bottom,
             },
             rows,
         ))

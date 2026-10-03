@@ -68,7 +68,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::renderer::{Color, Painter, Rect, Renderer};
+use crate::renderer::{Color, Painter, Rect, Renderer, ScrollRegion};
 use crate::view3d::{self, OrbitView};
 use manifold_rust::manifold::Manifold;
 use model::{
@@ -126,7 +126,15 @@ struct Layout {
     scale: f32,
     /// Pixels the Project panel rows are scrolled up by.
     panel_scroll: f32,
+    /// Pixels the lower (scrollable) part of Properties is scrolled up by.
+    props_scroll: f32,
+    /// Bottom of the Properties area: the top of the NEXT band when it is
+    /// shown, else the bottom of the right column.
+    props_bottom: f32,
 }
+
+/// Properties rows above this offset from the column top never scroll.
+const PROPS_SCROLL_TOP: f32 = 340.0;
 
 /// Cached `profiles_from_document` result.
 type SketchProfiles = std::rc::Rc<Option<Vec<ProfileLoops>>>;
@@ -193,6 +201,8 @@ impl Layout {
             },
             scale: 1.0,
             panel_scroll: 0.0,
+            props_scroll: 0.0,
+            props_bottom: height - bottom_height,
         }
     }
 
@@ -381,6 +391,12 @@ pub(crate) struct App {
     ui_scale: f32,
     /// Project panel scroll in pixels (clamped in `layout`).
     panel_scroll: f32,
+    /// Properties scroll offset (see `Layout::props_scroll`).
+    props_scroll: f32,
+    /// Lowest unscrolled y the last paint drew in the Properties scroll area.
+    props_extent: std::cell::Cell<f32>,
+    /// Selection the Properties scroll belongs to; a new one scrolls to top.
+    props_followed: (Option<u32>, bool, usize, bool),
     /// Row last scrolled into view: (3D view, feature, sketch).
     panel_followed: (bool, usize, usize),
     monitor_scale: f32,
@@ -546,6 +562,9 @@ impl Default for App {
             settings_open: false,
             ui_scale: 1.0,
             panel_scroll: 0.0,
+            props_scroll: 0.0,
+            props_extent: Default::default(),
+            props_followed: (None, false, 0, false),
             panel_followed: (false, 0, 0),
             monitor_scale: 1.0,
             status_cache: Default::default(),
@@ -1022,8 +1041,13 @@ impl App {
                 let size = window.inner_size();
                 Layout::scaled(size.width as f32, size.height as f32, self.ui_scale)
             });
-        Layout {
+        let base = Layout {
             panel_scroll: self.panel_scroll.clamp(0.0, self.max_panel_scroll(base)),
+            props_bottom: self.props_bottom(base),
+            ..base
+        };
+        Layout {
+            props_scroll: self.props_scroll.clamp(0.0, self.max_props_scroll(base)),
             ..base
         }
     }
@@ -1128,7 +1152,10 @@ impl App {
             self.paint_profile_choice(&mut painter, layout);
             self.paint_revolve_axis_prompt(&mut painter, layout);
         }
+        painter.set_scroll_region(Self::props_region(layout));
         self.paint_panels(&mut painter, layout);
+        self.props_extent.set(painter.scroll_extent());
+        painter.set_scroll_region(None);
         self.paint_quick_actions(&mut painter, layout);
         self.paint_history_panel(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);

@@ -268,6 +268,90 @@ fn assembly_and_dimension_states_offer_their_commands() {
     let _ = std::fs::remove_file(path);
 }
 
+/// Small primitives (rows, glyph pixels) drawn inside the Properties column
+/// whose bottom reaches below `bottom`.
+fn props_rows_below(app: &App, layout: Layout, bottom: f32) -> usize {
+    let mut painter = Painter::new(layout.top.w, layout.bottom.y + layout.bottom.h);
+    painter.set_scroll_region(App::props_region(layout));
+    app.paint_panels(&mut painter, layout);
+    app.props_extent.set(painter.scroll_extent());
+    painter
+        .logical_triangles()
+        .iter()
+        .filter(|tri| {
+            let min_x = tri.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+            let min_y = tri.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+            let max_y = tri.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+            min_x > layout.right.x + 2.0
+                && max_y - min_y < 40.0
+                && max_y > bottom + 0.5
+                && min_y < layout.right.y + layout.right.h
+        })
+        .count()
+}
+
+fn selected_rectangle_app(name: &str) -> (App, PathBuf) {
+    let path = temp_path(name);
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(&mut app);
+    let id = app.document.shapes[0].id();
+    app.document.selected = Some(id);
+    (app, path)
+}
+
+#[test]
+fn next_band_never_overlaps_a_visible_properties_row() {
+    let (mut app, path) = selected_rectangle_app("overlap");
+    let layout = app.layout();
+    let (band, _) = app.quick_band(layout).unwrap();
+    assert_eq!(band.y, layout.props_bottom);
+    // Fixed height: header + 4 rows on the 800 px window.
+    assert_eq!(band.h, App::quick_band_height(layout));
+    assert_eq!(props_rows_below(&app, layout, band.y), 0);
+    // The transform rows below the band are reachable by scrolling.
+    let max = app.max_props_scroll(app.layout());
+    assert!(max > 100.0, "{max}");
+    app.scroll_props(100.0);
+    let scrolled = app.layout();
+    assert_eq!(scrolled.props_scroll, max);
+    assert_eq!(props_rows_below(&app, scrolled, band.y), 0);
+    // Top rows stay put; a click on the scrolled part maps to its row.
+    let top = Point {
+        x: layout.right.x + 50.0,
+        y: layout.right.y + 120.0,
+    };
+    assert_eq!(App::props_point(scrolled, top), top);
+    let lower = Point {
+        x: top.x,
+        y: layout.right.y + 400.0,
+    };
+    assert_eq!(App::props_point(scrolled, lower).y, lower.y + max);
+    // Hidden NEXT: Properties gets the whole column again.
+    app.settings.quick_actions = false;
+    let hidden = app.layout();
+    assert_eq!(hidden.props_bottom, hidden.right.y + hidden.right.h);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn properties_scroll_keeps_the_edited_row_visible() {
+    let (mut app, path) = selected_rectangle_app("follow");
+    let layout = app.layout();
+    props_rows_below(&app, layout, layout.props_bottom);
+    for field in [EditField::ScaleFactor, EditField::MoveX, EditField::CenterY] {
+        app.editing = Some(DimensionEdit {
+            field,
+            buffer: String::new(),
+        });
+        app.follow_props_edit();
+        let layout = app.layout();
+        let top = app.edit_field_top(layout, field).unwrap() - layout.props_scroll;
+        assert!(top >= layout.right.y + PROPS_SCROLL_TOP);
+        assert!(top + 25.0 <= layout.props_bottom, "{top}");
+    }
+    let _ = std::fs::remove_file(path);
+}
+
 fn click_at(app: &mut App, x: f32, y: f32) {
     app.pointer_moved(Point { x, y });
     app.handle_left_press();

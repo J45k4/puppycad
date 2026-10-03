@@ -84,6 +84,11 @@ impl App {
     }
 
     pub(super) fn handle_left_press(&mut self) {
+        self.handle_left_press_at();
+        self.follow_props_edit();
+    }
+
+    fn handle_left_press_at(&mut self) {
         self.name_edit = None;
         let layout = self.layout();
         let point = self.cursor;
@@ -141,6 +146,8 @@ impl App {
             self.redraw();
             return;
         }
+        // The lower part of Properties scrolls: map to unscrolled rows.
+        let point = Self::props_point(layout, point);
         if self.assembly.is_some() {
             self.assembly_click(layout, point);
             self.redraw();
@@ -879,6 +886,13 @@ impl App {
                     };
                     self.scroll_panel(rows);
                     self.redraw();
+                } else if self.props_hit(self.layout(), self.cursor) {
+                    let rows = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => -y,
+                        MouseScrollDelta::PixelDelta(position) => -position.y as f32 / 30.0,
+                    };
+                    self.scroll_props(rows);
+                    self.redraw();
                 } else if (self.solid_preview || self.assembly.is_some())
                     && self
                         .layout()
@@ -932,6 +946,7 @@ impl App {
     pub(super) fn handle_key(&mut self, event: KeyPress) {
         self.handle_key_press(event);
         self.follow_panel_selection();
+        self.follow_props_edit();
     }
 
     fn handle_key_press(&mut self, event: KeyPress) {

@@ -24,10 +24,10 @@ export DISPLAY=:99
 export PUPPYCAD_CONFIG_DIR=/tmp/puppycad-config
 rm -rf "$PUPPYCAD_CONFIG_DIR"
 mkdir -p "$PUPPYCAD_CONFIG_DIR"
-# Quick actions (NEXT) start hidden: the band covers the bottom of the
-# Properties column, where the older steps click; the NEXT scenario at the
-# end turns it on with Ctrl+Shift+N.
-printf '{"ui_scale": 1.0, "quick_actions": false}\n' > "$PUPPYCAD_CONFIG_DIR/settings.json"
+# Quick actions (NEXT) are shown: Properties reserves the band's space and
+# its lower part (Move / Scale / Rotate) scrolls; the transform steps wheel
+# it to the bottom (148 px at 1280x800) before clicking those rows.
+printf '{"ui_scale": 1.0, "quick_actions": true}\n' > "$PUPPYCAD_CONFIG_DIR/settings.json"
 tries=0
 until xdpyinfo >/dev/null 2>&1; do
     tries=$((tries + 1))
@@ -142,28 +142,33 @@ xdotool key Return
 xdotool mousemove 1100 535 click 1
 xdotool mousemove 1100 575 click 1
 import -window root /out/rust-native-copy.png
-xdotool mousemove 1100 655 click 1
+xdotool mousemove 1100 500 click --repeat 6 --delay 30 5
+sleep 0.2
+xdotool mousemove 1100 507 click 1
 xdotool type --clearmodifiers --delay 50 -- '-50'
 xdotool key Return
-xdotool mousemove 1100 685 click 1
+xdotool mousemove 1100 537 click 1
 xdotool type --clearmodifiers '0.5'
 xdotool key Return
-xdotool mousemove 1100 745 click 1
+xdotool mousemove 1100 597 click 1
 import -window root /out/rust-native-scale.png
 xdotool key --window "$window_id" ctrl+z
 xdotool key --window "$window_id" ctrl+y
 xdotool mousemove 80 264 click 1
-xdotool mousemove 1190 626 click 1
-xdotool mousemove 1100 655 click 1
+sleep 0.2
+xdotool mousemove 1100 500 click --repeat 6 --delay 30 5
+sleep 0.2
+xdotool mousemove 1190 478 click 1
+xdotool mousemove 1100 507 click 1
 xdotool type --clearmodifiers '100'
 xdotool key Return
-xdotool mousemove 1190 655 click 1
+xdotool mousemove 1190 507 click 1
 xdotool type --clearmodifiers '100'
 xdotool key Return
-xdotool mousemove 1100 685 click 1
+xdotool mousemove 1100 537 click 1
 xdotool type --clearmodifiers '30'
 xdotool key Return
-xdotool mousemove 1100 715 click 1
+xdotool mousemove 1100 567 click 1
 import -window root /out/rust-native-rotate.png
 xdotool mousemove 100 153 click 1
 xdotool key --window "$window_id" ctrl+s
@@ -3967,7 +3972,7 @@ kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
 
-# Quick actions: Ctrl+Shift+N shows NEXT; a closed rectangle leads with
+# Quick actions: NEXT is on from settings.json; a closed rectangle leads with
 # Finish sketch, Ctrl+Enter opens the extrude prompt (Commit / Flip /
 # Cancel), Enter commits and NEXT shows the 3D suggestions.
 rm -f /tmp/native-next.pcad
@@ -3985,7 +3990,6 @@ xdotool windowmove "$window_id" 0 0
 xdotool windowsize "$window_id" 1280 800
 xdotool windowfocus --sync "$window_id"
 sleep 1
-xdotool key --window "$window_id" ctrl+shift+n
 xdotool key --window "$window_id" r
 xdotool mousemove 500 300 click 1
 xdotool mousemove 700 450 click 1
@@ -4002,7 +4006,6 @@ import -window root /out/rust-native-next-3d.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.5
 test "$(grep -c '"type": "extrude"' /tmp/native-next.pcad)" -eq 1
-xdotool key --window "$window_id" ctrl+shift+n
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
