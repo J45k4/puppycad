@@ -67,6 +67,7 @@ everything after it. Each item shows its final status.
 4. Toolbar icons, tooltips, status bar. **Done.**
 5. Settings: units, grid, theme, window layout. **Done.**
 6. Pixel font kept, UI scale for HiDPI. **Done.**
+7. Quick actions (NEXT band, Ctrl+1..7) and Finish sketch (Ctrl+Enter). **Done.**
 
 ## Phase 6 — Code health (continuous)
 
