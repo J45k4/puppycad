@@ -9,7 +9,9 @@ use std::{
 use manifold_rust::{manifold::Manifold, types::Error as ManifoldError};
 use serde_json::{Value, json};
 
-use crate::model::{AxisConstraint, DimensionField, Document, LineRelationKind, Point, Shape};
+use crate::model::{
+    AxisConstraint, DimensionField, DimensionKey, Document, LineRelationKind, Point, Shape,
+};
 use crate::spline::{self, SplineMode};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
@@ -2169,6 +2171,16 @@ impl ProjectFile {
                     read_only_reason = Some("invalid sketch relations".into());
                 }
             }
+            if let Some(relations) = sketch.get("relations").and_then(Value::as_array) {
+                let graph_shape_ids: HashMap<&str, u32> = entity_ids
+                    .iter()
+                    .map(|(shape_id, graph_id)| (graph_id.as_str(), *shape_id))
+                    .collect();
+                if let Err(error) = load_dimension_meta(&mut document, relations, &graph_shape_ids)
+                {
+                    read_only_reason = Some(error);
+                }
+            }
             let mut seen_graph_constraints = HashSet::new();
             for node in nodes.iter().filter(|node| {
                 node.get("type").and_then(Value::as_str) == Some("sketchConstraint")
@@ -2803,7 +2815,13 @@ fn serialize_sketches(
                 }
                 (Some(kind), Some(shape_id)) if graph_constraint_field(kind).is_some() => {
                     let field = graph_constraint_field(kind).unwrap();
-                    if let Some(value) = document.driving_dimensions.get(&(shape_id, field)) {
+                    // Annotated dimensions move to a sketch relation, which
+                    // can carry the annotation.
+                    if let Some(value) = document.driving_dimensions.get(&(shape_id, field))
+                        && !document
+                            .dims
+                            .has_annotation(DimensionKey::Field(shape_id, field))
+                    {
                         graph_backed.insert((shape_id, kind.to_string()));
                         if let Some(new_id) = next_ids.get(&shape_id) {
                             node["constraint"]["entityId"] = json!(new_id);
@@ -3686,6 +3704,7 @@ fn serialize_sketches(
                 "anchor":{"entityId":graph_id,"point":anchor},
                 "position":{"x":position.x,"y":position.y},"fixation":graph_id}));
         }
+        save_dimension_meta(document, relations, &graph_shape_ids);
         workspace.entity_ids = next_ids;
         workspace.original_entities = next_originals;
     }
@@ -3704,6 +3723,72 @@ fn serialize_sketches(
         }
     }
     Ok(())
+}
+
+/// Dimension a web relation describes, if the document has it.
+fn relation_dimension_key(
+    document: &Document,
+    relation: &Value,
+    graph_shape_ids: &HashMap<&str, u32>,
+) -> Option<DimensionKey> {
+    let kind = relation.get("type").and_then(Value::as_str)?;
+    let shape = |field: &str| {
+        relation
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|id| graph_shape_ids.get(id))
+            .copied()
+    };
+    let key = if kind == "angle" {
+        DimensionKey::Angle(shape("b")?)
+    } else {
+        DimensionKey::Field(shape("entityId")?, relation_field(kind)?)
+    };
+    document.dimension_keys().contains(&key).then_some(key)
+}
+
+/// Reads `labelPosition` of dimension relations.
+fn load_dimension_meta(
+    document: &mut Document,
+    relations: &[Value],
+    graph_shape_ids: &HashMap<&str, u32>,
+) -> Result<(), String> {
+    for relation in relations {
+        let Some(key) = relation_dimension_key(document, relation, graph_shape_ids) else {
+            continue;
+        };
+        if let Some(position) = relation.get("labelPosition") {
+            let at = read_point(position)
+                .filter(|at| at.x.is_finite() && at.y.is_finite())
+                .ok_or("invalid dimension label position")?;
+            document.dims.label_positions.insert(key, at);
+        }
+    }
+    Ok(())
+}
+
+/// Writes `labelPosition` of dimension relations.
+fn save_dimension_meta(
+    document: &Document,
+    relations: &mut [Value],
+    graph_shape_ids: &HashMap<&str, u32>,
+) {
+    for relation in relations.iter_mut() {
+        let Some(key) = relation_dimension_key(document, relation, graph_shape_ids) else {
+            continue;
+        };
+        let Some(object) = relation.as_object_mut() else {
+            continue;
+        };
+        match document.dims.label_positions.get(&key) {
+            Some(at) => {
+                object.insert("labelPosition".into(), json!({"x": at.x, "y": at.y}));
+            }
+            None => {
+                object.remove("labelPosition");
+            }
+        }
+    }
 }
 
 fn is_construction_node(node: &Value) -> bool {
@@ -7900,3 +7985,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "project/dimension_tests.rs"]
+mod dimension_tests;

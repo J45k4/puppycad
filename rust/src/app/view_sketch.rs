@@ -101,6 +101,7 @@ impl App {
             );
         }
         self.paint_anchor_handles(painter, layout);
+        self.paint_dimension_labels(painter, layout);
         if let Some(start) = self.document.draft_start
             && layout.viewport.contains(self.cursor.x, self.cursor.y)
         {
@@ -665,5 +666,57 @@ impl App {
         std::cell::Ref::map(self.analysis.borrow(), |cache| {
             &cache.as_ref().expect("analysis cached above").1
         })
+    }
+
+    /// Dimension labels with their dimension lines; the label being edited
+    /// shows its input buffer in place.
+    pub(super) fn paint_dimension_labels(&self, painter: &mut Painter, layout: Layout) {
+        let origin = self.viewport_origin();
+        let editing = self.editing.as_ref().and_then(|edit| match edit.field {
+            EditField::Label(key) => Some((key, edit.buffer.as_str())),
+            _ => None,
+        });
+        for label in self.document.dimension_labels() {
+            let dragged = self
+                .label_drag
+                .filter(|drag| drag.key == label.key && drag.moved)
+                .map(|_| self.cursor);
+            let at = dragged.unwrap_or_else(|| self.document.world_to_screen(label.at, origin));
+            let selected = self.selected_dimension == Some(label.key);
+            let color = if selected { ACCENT } else { DIMENSION };
+            for (p, q) in &label.lines {
+                let p = self.document.world_to_screen(*p, origin);
+                let q = self.document.world_to_screen(*q, origin);
+                painter.line(p.x, p.y, q.x, q.y, 1.0, color);
+            }
+            let attach = self.document.world_to_screen(label.attach, origin);
+            if dragged.is_some() || self.document.dims.label_positions.contains_key(&label.key) {
+                painter.line(attach.x, attach.y, at.x, at.y, 1.0, color);
+            }
+            let text = match editing {
+                Some((key, buffer)) if key == label.key => format!("{buffer}_"),
+                _ => label.text.clone(),
+            };
+            let (w, h) = model::label_size(&text);
+            let rect = Rect {
+                x: at.x - w * 0.5,
+                y: at.y - h * 0.5,
+                w,
+                h,
+            };
+            if !layout.viewport.contains(at.x, at.y) {
+                continue;
+            }
+            let edited = editing.is_some_and(|(key, _)| key == label.key);
+            painter.rect(rect, if edited { [0.13, 0.29, 0.37, 1.0] } else { BG });
+            painter.outline(rect, 1.0, if edited || selected { ACCENT } else { BORDER });
+            painter.text(
+                rect.x + 4.0,
+                rect.y + 4.0,
+                &text,
+                model::LABEL_SCALE,
+                if edited { TEXT } else { color },
+            );
+        }
     }
 }

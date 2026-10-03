@@ -1,6 +1,9 @@
 use crate::solver;
 use crate::spline::{self, SplineMode};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+mod annotations;
+#[cfg(test)]
+mod dimension_tests;
 mod dimensions;
 mod drag;
 mod edit;
@@ -11,6 +14,9 @@ mod solve;
 #[cfg(test)]
 mod tests;
 
+pub use annotations::{
+    DimensionKey, DimensionLabel, DimensionMeta, LABEL_SCALE, format_value, label_size,
+};
 use geometry::*;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
@@ -50,7 +56,7 @@ pub struct SnapResult {
     pub kind: SnapKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DimensionField {
     LineLength,
     RectangleWidth,
@@ -124,6 +130,7 @@ struct DocumentState {
     concentric: HashMap<u32, u32>,
     line_relations: HashMap<u32, (u32, LineRelationKind)>,
     fixed_anchors: HashMap<(u32, usize), Point>,
+    dims: DimensionMeta,
 }
 
 #[derive(Clone, Debug)]
@@ -166,6 +173,9 @@ pub struct Document {
     pub concentric: HashMap<u32, u32>,
     pub line_relations: HashMap<u32, (u32, LineRelationKind)>,
     pub fixed_anchors: HashMap<(u32, usize), Point>,
+    /// Dimension annotations: label positions, point dimensions, reference
+    /// dimensions, expressions and sketch variables.
+    pub dims: DimensionMeta,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -209,6 +219,7 @@ impl Default for Document {
             concentric: HashMap::new(),
             line_relations: HashMap::new(),
             fixed_anchors: HashMap::new(),
+            dims: DimensionMeta::default(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -333,6 +344,7 @@ impl Document {
             concentric: self.concentric.clone(),
             line_relations: self.line_relations.clone(),
             fixed_anchors: self.fixed_anchors.clone(),
+            dims: self.dims.clone(),
         }
     }
 
@@ -357,6 +369,7 @@ impl Document {
         self.concentric = state.concentric;
         self.line_relations = state.line_relations;
         self.fixed_anchors = state.fixed_anchors;
+        self.dims = state.dims;
         self.selected = None;
         self.selected_spline_point = None;
         self.draft_start = None;

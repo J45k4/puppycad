@@ -21,8 +21,8 @@ use crate::renderer::{Color, Painter, Rect, Renderer};
 use crate::view3d::{self, OrbitView};
 use manifold_rust::manifold::Manifold;
 use model::{
-    AxisConstraint, DimensionField, Document, LineRelationKind, Point, Shape, SketchAnalysis,
-    SnapKind, Tool,
+    AxisConstraint, DimensionField, DimensionKey, Document, LineRelationKind, Point, Shape,
+    SketchAnalysis, SnapKind, Tool,
 };
 use project::{
     EntryKind, ProjectFile, ProjectSummary, SketchPlane, SolidPreview, list_projects,
@@ -50,6 +50,8 @@ const SHAPE: Color = [0.96, 0.72, 0.38, 1.0];
 const FULLY_CONSTRAINED: Color = [0.46, 0.84, 0.52, 1.0];
 const CONFLICT: Color = [0.96, 0.36, 0.36, 1.0];
 const REDUNDANT: Color = [0.78, 0.56, 0.96, 1.0];
+/// Driving dimension labels and their dimension lines.
+const DIMENSION: Color = [0.62, 0.80, 0.98, 1.0];
 
 #[derive(Clone, Copy, Debug)]
 struct Layout {
@@ -187,6 +189,17 @@ pub(crate) struct App {
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
+    /// Dimension picked by clicking its label.
+    selected_dimension: Option<DimensionKey>,
+    /// Label press in progress: a click edits it, a drag moves it.
+    label_drag: Option<LabelDrag>,
+}
+
+#[derive(Clone, Copy)]
+struct LabelDrag {
+    key: DimensionKey,
+    start: Point,
+    moved: bool,
 }
 
 struct DimensionEdit {
@@ -223,6 +236,8 @@ enum EditField {
     PointY,
     RelationAngle,
     RadialDifference,
+    /// Inline edit of a dimension label in the viewport.
+    Label(DimensionKey),
 }
 
 impl Default for App {
@@ -255,6 +270,8 @@ impl Default for App {
             spline_points: Vec::new(),
             projects_page: None,
             analysis: Default::default(),
+            selected_dimension: None,
+            label_drag: None,
         }
     }
 }

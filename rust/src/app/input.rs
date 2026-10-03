@@ -316,6 +316,20 @@ impl App {
         match self.document.tool {
             Tool::Select => {
                 self.split_circle_start = None;
+                if let Some(key) = self
+                    .document
+                    .dimension_label_at(point, self.viewport_origin())
+                {
+                    self.selected_dimension = Some(key);
+                    self.label_drag = Some(LabelDrag {
+                        key,
+                        start: point,
+                        moved: false,
+                    });
+                    self.redraw();
+                    return;
+                }
+                self.selected_dimension = None;
                 self.document.select_at(world);
                 if !self.read_only() {
                     self.document.begin_drag(world);
@@ -401,6 +415,44 @@ impl App {
     }
 }
 
+/// Characters accepted while typing a dimension expression.
+pub(super) fn expression_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || " .+-*/()#_".contains(ch)
+}
+
+impl App {
+    /// A label click opens the inline editor; a drag moves the label.
+    fn release_label(&mut self, drag: LabelDrag) {
+        if self.read_only() {
+            self.status_message = "READ ONLY: this sketch has unsupported native features".into();
+            return;
+        }
+        if drag.moved {
+            let at = self
+                .document
+                .screen_to_world(self.cursor, self.viewport_origin());
+            self.status_message = match self
+                .document
+                .set_dimension_label_position(drag.key, Some(at))
+            {
+                Ok(()) => "Moved dimension label  |  Ctrl+S to save".into(),
+                Err(error) => format!("Label: {error}"),
+            };
+        } else {
+            self.begin_label_edit(drag.key);
+        }
+    }
+
+    pub(super) fn begin_label_edit(&mut self, key: DimensionKey) {
+        self.selected_dimension = Some(key);
+        self.editing = Some(DimensionEdit {
+            field: EditField::Label(key),
+            buffer: String::new(),
+        });
+        self.status_message = "Type a value, then Enter  |  Esc to cancel".into();
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -459,6 +511,11 @@ impl ApplicationHandler for App {
                     None => {}
                 }
                 self.cursor = next;
+                if let Some(drag) = &mut self.label_drag
+                    && drag.start.distance(next) > 3.0
+                {
+                    drag.moved = true;
+                }
                 if self.document.dragging() && !self.pan_drag && self.solid_drag.is_none() {
                     let world = self.document.screen_to_world(next, self.viewport_origin());
                     self.document.drag_to(world);
@@ -468,6 +525,9 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
                 (ElementState::Pressed, MouseButton::Left) => self.handle_left_press(),
                 (ElementState::Released, MouseButton::Left) => {
+                    if let Some(drag) = self.label_drag.take() {
+                        self.release_label(drag);
+                    }
                     if self.document.finish_drag() {
                         self.status_message = "Moved geometry  |  Ctrl+S to save".into();
                     }
@@ -614,6 +674,12 @@ impl ApplicationHandler for App {
                                     (&mut self.editing, &event.text)
                                 {
                                     for ch in text.chars() {
+                                        if matches!(editing.field, EditField::Label(_)) {
+                                            if expression_char(ch) && editing.buffer.len() < 64 {
+                                                editing.buffer.push(ch);
+                                            }
+                                            continue;
+                                        }
                                         if (ch.is_ascii_digit()
                                             || ch == '.'
                                             || ((ch == '-' || ch == '+')

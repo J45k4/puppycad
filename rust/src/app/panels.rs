@@ -134,6 +134,16 @@ impl App {
                 },
                 Err(_) => "Dimension error: enter a number in millimeters".into(),
             },
+            EditField::Label(key) => match edit.buffer.trim().parse::<f32>() {
+                Ok(value) => match self.document.set_dimension_value(key, value) {
+                    Ok(()) => format!(
+                        "Dimension set to {}  |  Ctrl+S to save",
+                        model::format_value(value)
+                    ),
+                    Err(error) => format!("Dimension error: {error}"),
+                },
+                Err(_) => "Dimension error: enter a number".into(),
+            },
             EditField::RelationAngle => match edit.buffer.parse::<f32>() {
                 Ok(value) => match self.document.set_line_relation_angle(value) {
                     Ok(()) => format!("Line angle set to {value:.1} deg  |  Ctrl+S to save"),
@@ -1313,7 +1323,9 @@ impl App {
                 MUTED,
             );
         }
-        if let Some(edit) = &self.editing {
+        if let Some(edit) = &self.editing
+            && !matches!(edit.field, EditField::Label(_))
+        {
             let row = match edit.field {
                 EditField::ExtrusionDepth => 0,
                 EditField::Dimension(
@@ -1360,7 +1372,8 @@ impl App {
                 | EditField::PointX
                 | EditField::PointY
                 | EditField::RelationAngle
-                | EditField::RadialDifference => 0,
+                | EditField::RadialDifference
+                | EditField::Label(_) => 0,
             };
             let field_y = match edit.field {
                 EditField::MoveX => layout.right.y + 365.0,
