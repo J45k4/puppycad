@@ -450,7 +450,7 @@ pub fn beziers_f64(
         return None;
     }
     if control {
-        if closed || count < 4 || (count - 1) % 3 != 0 {
+        if closed || count < 4 || !(count - 1).is_multiple_of(3) {
             return None;
         }
         return Some(
@@ -466,6 +466,8 @@ pub fn beziers_f64(
     }
     let coordinate = |i: usize, axis: usize| if axis == 0 { points[i].0 } else { points[i].1 };
     let mut second = vec![[0.0_f64; 2]; count];
+    // `axis` picks the x/y component of every `second[i]`, not one element.
+    #[allow(clippy::needless_range_loop)]
     for axis in 0..2 {
         if closed {
             let values = (0..count)
@@ -534,7 +536,7 @@ pub fn beziers(mode: SplineMode, points: &[Point], closed: bool) -> Result<Vec<C
         return Err("spline requires 2–4096 finite points".into());
     }
     if mode == SplineMode::Control {
-        if closed || points.len() < 4 || (points.len() - 1) % 3 != 0 {
+        if closed || points.len() < 4 || !(points.len() - 1).is_multiple_of(3) {
             return Err("control spline requires 3n + 1 points and cannot be closed".into());
         }
         return Ok(points
@@ -551,6 +553,8 @@ pub fn beziers(mode: SplineMode, points: &[Point], closed: bool) -> Result<Vec<C
         return Err("adjacent fit points must be distinct".into());
     }
     let mut second = vec![[0.0_f64; 2]; count];
+    // `axis` picks the x/y component of every `second[i]`, not one element.
+    #[allow(clippy::needless_range_loop)]
     for axis in 0..2 {
         let coordinate = |i: usize| {
             if axis == 0 {
@@ -710,6 +714,8 @@ pub fn nearest(curves: &[Cubic], target: Point) -> Result<Nearest, String> {
             .max(target.x - max_x)
             .hypot((min_y - target.y).max(0.0).max(target.y - max_y))
     }
+    // Recursive helper; the bisection state is clearer as plain arguments.
+    #[allow(clippy::too_many_arguments)]
     fn visit(
         curve: &Cubic,
         original: &Cubic,

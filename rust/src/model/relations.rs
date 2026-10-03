@@ -1,5 +1,8 @@
 use super::*;
 
+/// Center, radius and, for arcs, `(start, sweep)` of a circle or arc.
+pub(super) type CircularData = (Point, f32, Option<(f64, f64)>);
+
 impl Document {
     pub fn fixed_anchor_position(&self, id: u32, index: usize) -> Option<Point> {
         self.shapes
@@ -387,10 +390,9 @@ impl Document {
         self.future.clear();
         if !self.fixed_anchors.contains_key(&(target_id, 1))
             && !self.point_links.contains_key(&(target_id, 1))
+            && let Shape::Line { b, .. } = &mut self.shapes[target_index]
         {
-            if let Shape::Line { b, .. } = &mut self.shapes[target_index] {
-                *b = next_b;
-            }
+            *b = next_b;
         }
         self.equal_lines.insert(target_id, source_id);
         self.solve_or_rollback(&[Pin::Shape(source_id)])?;
@@ -772,7 +774,7 @@ impl Document {
         Ok(())
     }
 
-    pub(super) fn circular_data(shape: &Shape) -> Option<(Point, f32, Option<(f64, f64)>)> {
+    pub(super) fn circular_data(shape: &Shape) -> Option<CircularData> {
         match shape {
             Shape::Circle { center, radius, .. } => Some((*center, *radius, None)),
             Shape::Arc {

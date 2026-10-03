@@ -408,16 +408,14 @@ impl Document {
         if let Some(Shape::Spline { points, .. }) = self
             .selected
             .and_then(|id| self.shapes.iter().find(|shape| shape.id() == id))
-        {
-            if let Some((index, _)) = points
+            && let Some((index, _)) = points
                 .iter()
                 .enumerate()
                 .filter(|(_, handle)| handle.distance(point) <= tolerance)
                 .min_by(|left, right| left.1.distance(point).total_cmp(&right.1.distance(point)))
-            {
-                self.selected_spline_point = Some(index);
-                return;
-            }
+        {
+            self.selected_spline_point = Some(index);
+            return;
         }
         self.selected = self
             .shapes
@@ -600,10 +598,10 @@ impl Document {
                 else {
                     return false;
                 };
-                if let Shape::Circle { radius, .. } = shape {
-                    if radius <= 2.0 / self.zoom {
-                        return false;
-                    }
+                if let Shape::Circle { radius, .. } = shape
+                    && radius <= 2.0 / self.zoom
+                {
+                    return false;
                 }
                 self.history.push(self.snapshot());
                 self.future.clear();
@@ -628,10 +626,10 @@ impl Document {
                 else {
                     return false;
                 };
-                if let Shape::Capsule { width, .. } = &shape {
-                    if *width <= 2.0 / self.zoom {
-                        return false;
-                    }
+                if let Shape::Capsule { width, .. } = &shape
+                    && *width <= 2.0 / self.zoom
+                {
+                    return false;
                 }
                 self.history.push(self.snapshot());
                 self.future.clear();

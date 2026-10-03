@@ -399,11 +399,10 @@ impl Document {
                 }
                 let source = self.shapes.iter().find(|shape| shape.id() == source);
                 let index = self.shapes.iter().position(|shape| shape.id() == target);
-                if let (Some(source), Some(index)) = (source, index) {
-                    if let Some(next) = Self::line_relation_shape(source, &self.shapes[index], kind)
-                    {
-                        self.shapes[index] = next;
-                    }
+                if let (Some(source), Some(index)) = (source, index)
+                    && let Some(next) = Self::line_relation_shape(source, &self.shapes[index], kind)
+                {
+                    self.shapes[index] = next;
                 }
             }
         }
@@ -849,7 +848,9 @@ impl Document {
             ));
         }
         let p = &result.params;
-        if p.iter().any(|value| !(value.abs() < f32::MAX as f64)) {
+        if p.iter()
+            .any(|value| !value.is_finite() || value.abs() >= f32::MAX as f64)
+        {
             return Err("Solved geometry is out of range".into());
         }
         // Round-off below the solve tolerance around zero is stored as zero.

@@ -1436,11 +1436,10 @@ impl ApplicationHandler for App {
                             }
                         }
                         KeyCode::KeyY
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
+                            if (self.modifiers.control_key() || self.modifiers.super_key())
+                                && !self.read_only() =>
                         {
-                            if !self.read_only() {
-                                self.document.redo();
-                            }
+                            self.document.redo();
                         }
                         _ => {}
                     }

@@ -588,12 +588,7 @@ impl Document {
             .collect();
         cuts.sort_by(f32::total_cmp);
         cuts.dedup_by(|left, right| (*left - *right).abs() < 1e-5);
-        let lower = cuts
-            .iter()
-            .copied()
-            .filter(|cut| *cut < t)
-            .next_back()
-            .unwrap_or(0.0);
+        let lower = cuts.iter().copied().rfind(|cut| *cut < t).unwrap_or(0.0);
         let upper = cuts.iter().copied().find(|cut| *cut > t).unwrap_or(1.0);
         let intervals: Vec<(f32, f32)> = [(0.0, lower), (upper, 1.0)]
             .into_iter()
@@ -739,8 +734,7 @@ impl Document {
                 let lower = cuts
                     .iter()
                     .copied()
-                    .filter(|cut| *cut <= position)
-                    .next_back()
+                    .rfind(|cut| *cut <= position)
                     .unwrap_or(cuts[cuts.len() - 1] - length);
                 let upper = cuts
                     .iter()
@@ -753,8 +747,7 @@ impl Document {
             let lower = cuts
                 .iter()
                 .copied()
-                .filter(|cut| *cut < position)
-                .next_back()
+                .rfind(|cut| *cut < position)
                 .unwrap_or(0.0);
             let upper = cuts
                 .iter()
@@ -794,15 +787,15 @@ impl Document {
         let start_link = self.point_links.remove(&(id, 0));
         let end_link = self.point_links.remove(&(id, 1));
         for (piece, &(start, end)) in pieces.iter().zip(intervals.iter()) {
-            if start == 0.0 {
-                if let Some(point_id) = start_link {
-                    self.point_links.insert((piece.id(), 0), point_id);
-                }
+            if start == 0.0
+                && let Some(point_id) = start_link
+            {
+                self.point_links.insert((piece.id(), 0), point_id);
             }
-            if end == length {
-                if let Some(point_id) = end_link {
-                    self.point_links.insert((piece.id(), 1), point_id);
-                }
+            if end == length
+                && let Some(point_id) = end_link
+            {
+                self.point_links.insert((piece.id(), 1), point_id);
             }
         }
         self.shapes.splice(index..=index, pieces);
@@ -865,8 +858,7 @@ impl Document {
         let lower = cuts
             .iter()
             .copied()
-            .filter(|value| *value <= clicked)
-            .next_back()
+            .rfind(|value| *value <= clicked)
             .unwrap_or(cuts[cuts.len() - 1] - tau);
         let upper = cuts
             .iter()
@@ -959,12 +951,7 @@ impl Document {
             .collect();
         cuts.sort_by(f64::total_cmp);
         cuts.dedup_by(|left, right| (*left - *right).abs() < 1e-8);
-        let lower = cuts
-            .iter()
-            .copied()
-            .filter(|cut| *cut < t)
-            .next_back()
-            .unwrap_or(0.0);
+        let lower = cuts.iter().copied().rfind(|cut| *cut < t).unwrap_or(0.0);
         let upper = cuts.iter().copied().find(|cut| *cut > t).unwrap_or(1.0);
         let intervals: Vec<(f64, f64)> = [(0.0, lower), (upper, 1.0)]
             .into_iter()
@@ -997,15 +984,15 @@ impl Document {
                 sweep: sweep * (end - start),
                 segments,
             });
-            if start == 0.0 {
-                if let Some(position) = start_fixed {
-                    self.fixed_anchors.insert((piece_id, 1), position);
-                }
+            if start == 0.0
+                && let Some(position) = start_fixed
+            {
+                self.fixed_anchors.insert((piece_id, 1), position);
             }
-            if end == 1.0 {
-                if let Some(position) = end_fixed {
-                    self.fixed_anchors.insert((piece_id, 2), position);
-                }
+            if end == 1.0
+                && let Some(position) = end_fixed
+            {
+                self.fixed_anchors.insert((piece_id, 2), position);
             }
             if construction {
                 self.construction.insert(piece_id);
@@ -1066,8 +1053,7 @@ impl Document {
         let lower = cuts
             .iter()
             .copied()
-            .filter(|value| *value <= clicked)
-            .next_back()
+            .rfind(|value| *value <= clicked)
             .unwrap_or(cuts[cuts.len() - 1] - tau);
         let upper = cuts
             .iter()
@@ -1140,12 +1126,7 @@ impl Document {
             .collect();
         cuts.sort_by(f64::total_cmp);
         cuts.dedup_by(|left, right| (*left - *right).abs() < 1e-8);
-        let lower = cuts
-            .iter()
-            .copied()
-            .filter(|cut| *cut < t)
-            .next_back()
-            .unwrap_or(0.0);
+        let lower = cuts.iter().copied().rfind(|cut| *cut < t).unwrap_or(0.0);
         let upper = cuts.iter().copied().find(|cut| *cut > t).unwrap_or(1.0);
         let intervals: Vec<(f64, f64)> = [(0.0, lower), (upper, 1.0)]
             .into_iter()
@@ -1176,15 +1157,15 @@ impl Document {
                 sweep: sweep * (end - start),
                 segments,
             });
-            if start == 0.0 {
-                if let Some(position) = start_fixed {
-                    self.fixed_anchors.insert((piece_id, 1), position);
-                }
+            if start == 0.0
+                && let Some(position) = start_fixed
+            {
+                self.fixed_anchors.insert((piece_id, 1), position);
             }
-            if end == 1.0 {
-                if let Some(position) = end_fixed {
-                    self.fixed_anchors.insert((piece_id, 2), position);
-                }
+            if end == 1.0
+                && let Some(position) = end_fixed
+            {
+                self.fixed_anchors.insert((piece_id, 2), position);
             }
             if construction {
                 self.construction.insert(piece_id);
@@ -1596,16 +1577,16 @@ impl Document {
             return false;
         }
         let mut next = self.shapes[index].translated(delta);
-        if let Some(&(source_id, kind)) = self.line_relations.get(&next.id()) {
-            if kind == LineRelationKind::Collinear {
-                let Some(source) = self.shapes.iter().find(|shape| shape.id() == source_id) else {
-                    return false;
-                };
-                let Some(projected) = Self::line_relation_shape(source, &next, kind) else {
-                    return false;
-                };
-                next = projected;
-            }
+        if let Some(&(source_id, kind)) = self.line_relations.get(&next.id())
+            && kind == LineRelationKind::Collinear
+        {
+            let Some(source) = self.shapes.iter().find(|shape| shape.id() == source_id) else {
+                return false;
+            };
+            let Some(projected) = Self::line_relation_shape(source, &next, kind) else {
+                return false;
+            };
+            next = projected;
         }
         self.history.push(self.snapshot());
         self.future.clear();
@@ -1661,21 +1642,18 @@ impl Document {
         let Some(mut scaled) = source.scaled_about(factor, center) else {
             return false;
         };
-        if !copy {
-            if let Some(&(source_id, kind)) = self.line_relations.get(&source.id()) {
-                if kind == LineRelationKind::Collinear {
-                    let Some(relation_source) =
-                        self.shapes.iter().find(|shape| shape.id() == source_id)
-                    else {
-                        return false;
-                    };
-                    let Some(projected) = Self::line_relation_shape(relation_source, &scaled, kind)
-                    else {
-                        return false;
-                    };
-                    scaled = projected;
-                }
-            }
+        if !copy
+            && let Some(&(source_id, kind)) = self.line_relations.get(&source.id())
+            && kind == LineRelationKind::Collinear
+        {
+            let Some(relation_source) = self.shapes.iter().find(|shape| shape.id() == source_id)
+            else {
+                return false;
+            };
+            let Some(projected) = Self::line_relation_shape(relation_source, &scaled, kind) else {
+                return false;
+            };
+            scaled = projected;
         }
         if scaled == *source {
             return false;

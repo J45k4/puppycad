@@ -869,35 +869,35 @@ impl App {
                             TEXT,
                         );
                     }
-                    if let Some(index) = self.document.selected_spline_point {
-                        if let Some(point) = points.get(index) {
-                            let fixed = self
-                                .document
-                                .fixed_anchors
-                                .contains_key(&(shape.id(), index));
+                    if let Some(index) = self.document.selected_spline_point
+                        && let Some(point) = points.get(index)
+                    {
+                        let fixed = self
+                            .document
+                            .fixed_anchors
+                            .contains_key(&(shape.id(), index));
+                        painter.text(
+                            layout.right.x + 18.0,
+                            layout.right.y + 193.0,
+                            &format!("POINT {} X {:.1} mm", index + 1, point.x),
+                            1.1,
+                            if fixed { MUTED } else { ACCENT },
+                        );
+                        painter.text(
+                            layout.right.x + 18.0,
+                            layout.right.y + 223.0,
+                            &format!("POINT {} Y {:.1} mm", index + 1, point.y),
+                            1.1,
+                            if fixed { MUTED } else { ACCENT },
+                        );
+                        if fixed {
                             painter.text(
                                 layout.right.x + 18.0,
-                                layout.right.y + 193.0,
-                                &format!("POINT {} X {:.1} mm", index + 1, point.x),
-                                1.1,
-                                if fixed { MUTED } else { ACCENT },
+                                layout.right.y + 253.0,
+                                "FIXED  SHIFT+K TO RELEASE",
+                                1.0,
+                                ACCENT,
                             );
-                            painter.text(
-                                layout.right.x + 18.0,
-                                layout.right.y + 223.0,
-                                &format!("POINT {} Y {:.1} mm", index + 1, point.y),
-                                1.1,
-                                if fixed { MUTED } else { ACCENT },
-                            );
-                            if fixed {
-                                painter.text(
-                                    layout.right.x + 18.0,
-                                    layout.right.y + 253.0,
-                                    "FIXED  SHIFT+K TO RELEASE",
-                                    1.0,
-                                    ACCENT,
-                                );
-                            }
                         }
                     }
                 }

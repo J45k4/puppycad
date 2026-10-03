@@ -411,14 +411,14 @@ impl Problem {
             }
             let mut jtj = vec![0.0; n * n];
             let mut jtr = vec![0.0; n];
-            for row in 0..m {
+            for (row, &residual) in r.iter().enumerate().take(m) {
                 let base = row * n;
                 for i in 0..n {
                     let ji = jacobian[base + i];
                     if ji == 0.0 {
                         continue;
                     }
-                    jtr[i] += ji * r[row];
+                    jtr[i] += ji * residual;
                     for j in 0..n {
                         jtj[i * n + j] += ji * jacobian[base + j];
                     }

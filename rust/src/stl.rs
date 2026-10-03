@@ -156,7 +156,7 @@ pub fn write_mesh_export(project_path: &Path, solid: &Manifold) -> Result<PathBu
         .map(|point| [point[0], point[1], point[2]])
         .collect();
     let mut lines = vec!["solid puppycad".into()];
-    for indices in mesh.tri_verts.chunks_exact(3) {
+    for indices in mesh.tri_verts.as_chunks::<3>().0 {
         triangle(
             &mut lines,
             points[indices[0] as usize],
@@ -334,7 +334,7 @@ mod tests {
             .collect();
         let mut edges: HashMap<(String, String), usize> = HashMap::new();
         let mut volume = 0.0;
-        for triangle in vertices.chunks_exact(3) {
+        for triangle in vertices.as_chunks::<3>().0 {
             let [a, b, c] = [&triangle[0], &triangle[1], &triangle[2]];
             volume += (a[0] * (b[1] * c[2] - b[2] * c[1])
                 + a[1] * (b[2] * c[0] - b[0] * c[2])
@@ -387,7 +387,7 @@ mod tests {
             .collect();
         let mut edges: HashMap<(String, String), usize> = HashMap::new();
         let mut volume = 0.0;
-        for triangle in vertices.chunks_exact(3) {
+        for triangle in vertices.as_chunks::<3>().0 {
             let [a, b, c] = [&triangle[0], &triangle[1], &triangle[2]];
             volume += (a[0] * (b[1] * c[2] - b[2] * c[1])
                 + a[1] * (b[2] * c[0] - b[0] * c[2])

@@ -434,7 +434,9 @@ impl SolidPreview {
             return None;
         }
         let triangles: Vec<[usize; 3]> = indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|chunk| [chunk[0], chunk[1], chunk[2]])
             .collect();
         let triangles = split_cap_t_junctions(&mut points, &triangles);
@@ -1545,15 +1547,12 @@ impl ProjectFile {
                                 read_only_reason = Some("unsupported fixed point relation".into());
                             } else if let Some(((id, index), position)) =
                                 shape_id.zip(index).zip(position)
-                            {
-                                if document
+                                && document
                                     .fixed_anchors
                                     .insert((id, index), position)
                                     .is_some()
-                                {
-                                    read_only_reason =
-                                        Some("duplicate fixed point relation".into());
-                                }
+                            {
+                                read_only_reason = Some("duplicate fixed point relation".into());
                             }
                             continue;
                         }
@@ -1604,10 +1603,9 @@ impl ProjectFile {
                                     };
                                     if let (Some((endpoint, position)), Shape::Point { at, .. }) =
                                         (endpoint_position, point_shape)
+                                        && position.distance(*at) < 1e-3
                                     {
-                                        if position.distance(*at) < 1e-3 {
-                                            return Some(((line.0, endpoint), point.0));
-                                        }
+                                        return Some(((line.0, endpoint), point.0));
                                     }
                                 }
                                 None
@@ -1619,11 +1617,11 @@ impl ProjectFile {
                             {
                                 read_only_reason =
                                     Some("unsupported sketch coincidence relation".into());
-                            } else if let Some((key, point_id)) = link {
-                                if document.point_links.insert(key, point_id).is_some() {
-                                    read_only_reason =
-                                        Some("duplicate sketch coincidence relation".into());
-                                }
+                            } else if let Some((key, point_id)) = link
+                                && document.point_links.insert(key, point_id).is_some()
+                            {
+                                read_only_reason =
+                                    Some("duplicate sketch coincidence relation".into());
                             }
                             continue;
                         }
@@ -2628,16 +2626,15 @@ impl ProjectFile {
     }
 
     pub fn save(&mut self, document: &Document) -> Result<(), String> {
-        if let Some(reason) = &self.read_only_reason {
-            if !self.metadata_dirty
-                && self.extrusion_preview().is_none()
-                && !self
-                    .parked_parts
-                    .values()
-                    .any(|part| part.read_only_reason.is_none())
-            {
-                return Err(format!("project is read-only: {reason}"));
-            }
+        if let Some(reason) = &self.read_only_reason
+            && !self.metadata_dirty
+            && self.extrusion_preview().is_none()
+            && !self
+                .parked_parts
+                .values()
+                .any(|part| part.read_only_reason.is_none())
+        {
+            return Err(format!("project is read-only: {reason}"));
         }
         let current = match fs::read(&self.path) {
             Ok(bytes) => Some(bytes),
@@ -2762,13 +2759,13 @@ fn serialize_sketches(
         }
         let originals = std::mem::take(nodes);
         for original in originals {
-            if let Some(id) = original.get("id").and_then(Value::as_str) {
-                if old_ids.contains(id) {
-                    if let Some(replacement) = replacements.remove(id) {
-                        nodes.push(replacement);
-                    }
-                    continue;
+            if let Some(id) = original.get("id").and_then(Value::as_str)
+                && old_ids.contains(id)
+            {
+                if let Some(replacement) = replacements.remove(id) {
+                    nodes.push(replacement);
                 }
+                continue;
             }
             nodes.push(original);
         }
@@ -2819,10 +2816,8 @@ fn serialize_sketches(
                 }
                 _ => false,
             };
-            if !keep {
-                if let Some(id) = node.get("id").and_then(Value::as_str) {
-                    removed_constraint_ids.insert(id.to_string());
-                }
+            if !keep && let Some(id) = node.get("id").and_then(Value::as_str) {
+                removed_constraint_ids.insert(id.to_string());
             }
             keep
         });
@@ -2910,16 +2905,15 @@ fn serialize_sketches(
                         _ => None,
                     }
                 });
-                if let Some((shape_id, index)) = shape_id.zip(index) {
-                    if document.fixed_anchors.contains_key(&(shape_id, index)) {
-                        if let Some(new_id) = next_ids.get(&shape_id) {
-                            relation["anchor"]["entityId"] = json!(new_id);
-                            if relation.get("fixation").is_some() {
-                                relation["fixation"] = json!(new_id);
-                            }
-                            return true;
-                        }
+                if let Some((shape_id, index)) = shape_id.zip(index)
+                    && document.fixed_anchors.contains_key(&(shape_id, index))
+                    && let Some(new_id) = next_ids.get(&shape_id)
+                {
+                    relation["anchor"]["entityId"] = json!(new_id);
+                    if relation.get("fixation").is_some() {
+                        relation["fixation"] = json!(new_id);
                     }
+                    return true;
                 }
                 return false;
             }
@@ -2952,16 +2946,14 @@ fn serialize_sketches(
                     Some("p1") => Some(1),
                     _ => None,
                 };
-                if let Some(((target, source), endpoint)) = target.zip(source).zip(endpoint) {
-                    if document.normal_links.get(&target) == Some(&(source, endpoint)) {
-                        if let Some((target_id, source_id)) =
-                            next_ids.get(&target).zip(next_ids.get(&source))
-                        {
-                            relation["a"]["entityId"] = json!(target_id);
-                            relation["b"] = json!(source_id);
-                            return true;
-                        }
-                    }
+                if let Some(((target, source), endpoint)) = target.zip(source).zip(endpoint)
+                    && document.normal_links.get(&target) == Some(&(source, endpoint))
+                    && let Some((target_id, source_id)) =
+                        next_ids.get(&target).zip(next_ids.get(&source))
+                {
+                    relation["a"]["entityId"] = json!(target_id);
+                    relation["b"] = json!(source_id);
+                    return true;
                 }
                 return false;
             }
@@ -2985,16 +2977,14 @@ fn serialize_sketches(
                             .or_else(|| graph_shape_ids.get(id))
                     })
                     .copied();
-                if let Some((point, curve)) = point.zip(curve) {
-                    if document.point_curve_links.get(&point) == Some(&curve) {
-                        if let Some((point_id, curve_id)) =
-                            next_ids.get(&point).zip(next_ids.get(&curve))
-                        {
-                            relation["a"]["entityId"] = json!(point_id);
-                            relation["b"] = json!(curve_id);
-                            return true;
-                        }
-                    }
+                if let Some((point, curve)) = point.zip(curve)
+                    && document.point_curve_links.get(&point) == Some(&curve)
+                    && let Some((point_id, curve_id)) =
+                        next_ids.get(&point).zip(next_ids.get(&curve))
+                {
+                    relation["a"]["entityId"] = json!(point_id);
+                    relation["b"] = json!(curve_id);
+                    return true;
                 }
                 return false;
             }
@@ -3018,16 +3008,14 @@ fn serialize_sketches(
                             .or_else(|| graph_shape_ids.get(id))
                     })
                     .copied();
-                if let Some((point, curve)) = point.zip(curve) {
-                    if document.midpoint_links.get(&point) == Some(&curve) {
-                        if let Some((point_id, curve_id)) =
-                            next_ids.get(&point).zip(next_ids.get(&curve))
-                        {
-                            relation["a"]["entityId"] = json!(point_id);
-                            relation["b"] = json!(curve_id);
-                            return true;
-                        }
-                    }
+                if let Some((point, curve)) = point.zip(curve)
+                    && document.midpoint_links.get(&point) == Some(&curve)
+                    && let Some((point_id, curve_id)) =
+                        next_ids.get(&point).zip(next_ids.get(&curve))
+                {
+                    relation["a"]["entityId"] = json!(point_id);
+                    relation["b"] = json!(curve_id);
+                    return true;
                 }
                 return false;
             }
@@ -3039,16 +3027,14 @@ fn serialize_sketches(
                         .or_else(|| graph_shape_ids.get(id))
                         .copied()
                 };
-                if let Some((source, target)) = resolve("a").zip(resolve("b")) {
-                    if document.external_tangents.get(&target) == Some(&source) {
-                        if let Some((source_id, target_id)) =
-                            next_ids.get(&source).zip(next_ids.get(&target))
-                        {
-                            relation["a"] = json!(source_id);
-                            relation["b"] = json!(target_id);
-                            return true;
-                        }
-                    }
+                if let Some((source, target)) = resolve("a").zip(resolve("b"))
+                    && document.external_tangents.get(&target) == Some(&source)
+                    && let Some((source_id, target_id)) =
+                        next_ids.get(&source).zip(next_ids.get(&target))
+                {
+                    relation["a"] = json!(source_id);
+                    relation["b"] = json!(target_id);
+                    return true;
                 }
                 return false;
             }
@@ -3060,16 +3046,14 @@ fn serialize_sketches(
                         .or_else(|| graph_shape_ids.get(id))
                         .copied()
                 };
-                if let Some((outer, inner)) = resolve("a").zip(resolve("b")) {
-                    if document.internal_tangents.get(&inner) == Some(&outer) {
-                        if let Some((outer_id, inner_id)) =
-                            next_ids.get(&outer).zip(next_ids.get(&inner))
-                        {
-                            relation["a"] = json!(outer_id);
-                            relation["b"] = json!(inner_id);
-                            return true;
-                        }
-                    }
+                if let Some((outer, inner)) = resolve("a").zip(resolve("b"))
+                    && document.internal_tangents.get(&inner) == Some(&outer)
+                    && let Some((outer_id, inner_id)) =
+                        next_ids.get(&outer).zip(next_ids.get(&inner))
+                {
+                    relation["a"] = json!(outer_id);
+                    relation["b"] = json!(inner_id);
+                    return true;
                 }
                 return false;
             }
@@ -3081,19 +3065,16 @@ fn serialize_sketches(
                         .or_else(|| graph_shape_ids.get(id))
                         .copied()
                 };
-                if let Some((source, target)) = resolve("a").zip(resolve("b")) {
-                    if let Some(&(old_source, value)) = document.radius_differences.get(&target) {
-                        if old_source == source {
-                            if let Some((source_id, target_id)) =
-                                next_ids.get(&source).zip(next_ids.get(&target))
-                            {
-                                relation["a"] = json!(source_id);
-                                relation["b"] = json!(target_id);
-                                relation["value"] = json!(value);
-                                return true;
-                            }
-                        }
-                    }
+                if let Some((source, target)) = resolve("a").zip(resolve("b"))
+                    && let Some(&(old_source, value)) = document.radius_differences.get(&target)
+                    && old_source == source
+                    && let Some((source_id, target_id)) =
+                        next_ids.get(&source).zip(next_ids.get(&target))
+                {
+                    relation["a"] = json!(source_id);
+                    relation["b"] = json!(target_id);
+                    relation["value"] = json!(value);
+                    return true;
                 }
                 return false;
             }
@@ -3111,14 +3092,13 @@ fn serialize_sketches(
                         .get(&source)
                         .copied()
                         .unwrap_or(source);
-                    if document.shared_ellipses.get(&target) == Some(&root) {
-                        if let Some((source_id, target_id)) =
+                    if document.shared_ellipses.get(&target) == Some(&root)
+                        && let Some((source_id, target_id)) =
                             next_ids.get(&source).zip(next_ids.get(&target))
-                        {
-                            relation["a"] = json!(source_id);
-                            relation["b"] = json!(target_id);
-                            return true;
-                        }
+                    {
+                        relation["a"] = json!(source_id);
+                        relation["b"] = json!(target_id);
+                        return true;
                     }
                 }
                 return false;
@@ -3135,22 +3115,21 @@ fn serialize_sketches(
                         .or_else(|| graph_shape_ids.get(id))
                         .copied()
                 };
-                if let Some((source, target)) = resolve("a").zip(resolve("b")) {
-                    if let Some(&(old_source, relation_kind)) = document.line_relations.get(&target)
+                if let Some((source, target)) = resolve("a").zip(resolve("b"))
+                    && let Some(&(old_source, relation_kind)) = document.line_relations.get(&target)
+                {
+                    if old_source != source || relation_kind.name() != kind {
+                        return false;
+                    }
+                    if let Some((source_id, target_id)) =
+                        next_ids.get(&source).zip(next_ids.get(&target))
                     {
-                        if old_source != source || relation_kind.name() != kind {
-                            return false;
+                        relation["a"] = json!(source_id);
+                        relation["b"] = json!(target_id);
+                        if let Some(value) = relation_kind.angle_value() {
+                            relation["value"] = json!(value);
                         }
-                        if let Some((source_id, target_id)) =
-                            next_ids.get(&source).zip(next_ids.get(&target))
-                        {
-                            relation["a"] = json!(source_id);
-                            relation["b"] = json!(target_id);
-                            if let Some(value) = relation_kind.angle_value() {
-                                relation["value"] = json!(value);
-                            }
-                            return true;
-                        }
+                        return true;
                     }
                 }
                 return false;
@@ -3163,16 +3142,14 @@ fn serialize_sketches(
                         .or_else(|| graph_shape_ids.get(id))
                         .copied()
                 };
-                if let Some((source, target)) = resolve("a").zip(resolve("b")) {
-                    if document.concentric.get(&target) == Some(&source) {
-                        if let Some((source_id, target_id)) =
-                            next_ids.get(&source).zip(next_ids.get(&target))
-                        {
-                            relation["a"] = json!(source_id);
-                            relation["b"] = json!(target_id);
-                            return true;
-                        }
-                    }
+                if let Some((source, target)) = resolve("a").zip(resolve("b"))
+                    && document.concentric.get(&target) == Some(&source)
+                    && let Some((source_id, target_id)) =
+                        next_ids.get(&source).zip(next_ids.get(&target))
+                {
+                    relation["a"] = json!(source_id);
+                    relation["b"] = json!(target_id);
+                    return true;
                 }
                 return false;
             }
@@ -3184,19 +3161,16 @@ fn serialize_sketches(
                         .or_else(|| graph_shape_ids.get(id))
                         .copied()
                 };
-                if let Some((source, target)) = resolve("a").zip(resolve("b")) {
-                    if document.equal_lines.get(&target) == Some(&source)
+                if let Some((source, target)) = resolve("a").zip(resolve("b"))
+                    && (document.equal_lines.get(&target) == Some(&source)
                         || document.equal_radii.get(&target) == Some(&source)
-                        || document.equal_ellipses.get(&target) == Some(&source)
-                    {
-                        if let Some((source_id, target_id)) =
-                            next_ids.get(&source).zip(next_ids.get(&target))
-                        {
-                            relation["a"] = json!(source_id);
-                            relation["b"] = json!(target_id);
-                            return true;
-                        }
-                    }
+                        || document.equal_ellipses.get(&target) == Some(&source))
+                    && let Some((source_id, target_id)) =
+                        next_ids.get(&source).zip(next_ids.get(&target))
+                {
+                    relation["a"] = json!(source_id);
+                    relation["b"] = json!(target_id);
+                    return true;
                 }
                 return false;
             }

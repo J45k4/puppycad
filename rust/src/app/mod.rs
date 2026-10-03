@@ -583,19 +583,18 @@ impl App {
                 .project
                 .as_ref()
                 .and_then(ProjectFile::extrusion_previews)
+                && let Some((scene, projector)) = self.solid_projector(layout)
             {
-                if let Some((scene, projector)) = self.solid_projector(layout) {
-                    if scene.bodies < solids.len() {
-                        self.paint_boolean_preview(
-                            &mut painter,
-                            layout,
-                            &scene,
-                            &projector,
-                            scene.bodies,
-                        );
-                    } else {
-                        self.paint_solid_preview(&mut painter, layout, &solids, &projector);
-                    }
+                if scene.bodies < solids.len() {
+                    self.paint_boolean_preview(
+                        &mut painter,
+                        layout,
+                        &scene,
+                        &projector,
+                        scene.bodies,
+                    );
+                } else {
+                    self.paint_solid_preview(&mut painter, layout, &solids, &projector);
                 }
             }
         } else {

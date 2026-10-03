@@ -7,21 +7,20 @@ pub(super) fn finite_intersections(first: &Shape, second: &Shape) -> Vec<Point> 
         closed,
         ..
     } = first
+        && let Ok(curves) = spline::beziers(*mode, points, *closed)
     {
-        if let Ok(curves) = spline::beziers(*mode, points, *closed) {
-            let hits = spline_boundary_intersections(&curves, second);
-            if !hits.is_empty()
-                || matches!(
-                    second,
-                    Shape::Circle { .. }
-                        | Shape::Arc { .. }
-                        | Shape::Ellipse { .. }
-                        | Shape::EllipticArc { .. }
-                        | Shape::Spline { .. }
-                )
-            {
-                return hits.into_iter().map(|(_, _, point)| point).collect();
-            }
+        let hits = spline_boundary_intersections(&curves, second);
+        if !hits.is_empty()
+            || matches!(
+                second,
+                Shape::Circle { .. }
+                    | Shape::Arc { .. }
+                    | Shape::Ellipse { .. }
+                    | Shape::EllipticArc { .. }
+                    | Shape::Spline { .. }
+            )
+        {
+            return hits.into_iter().map(|(_, _, point)| point).collect();
         }
     }
     if matches!(second, Shape::Spline { .. })

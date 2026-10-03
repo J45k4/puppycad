@@ -106,16 +106,16 @@ impl Document {
         } else {
             drag.original.clone()
         };
-        if let Some(&(source_id, kind)) = self.line_relations.get(&drag.id) {
-            if kind == LineRelationKind::Collinear {
-                let Some(source) = self.shapes.iter().find(|shape| shape.id() == source_id) else {
-                    return false;
-                };
-                let Some(projected) = Self::line_relation_shape(source, &next, kind) else {
-                    return false;
-                };
-                next = projected;
-            }
+        if let Some(&(source_id, kind)) = self.line_relations.get(&drag.id)
+            && kind == LineRelationKind::Collinear
+        {
+            let Some(source) = self.shapes.iter().find(|shape| shape.id() == source_id) else {
+                return false;
+            };
+            let Some(projected) = Self::line_relation_shape(source, &next, kind) else {
+                return false;
+            };
+            next = projected;
         }
         let Some(index) = self.shapes.iter().position(|shape| shape.id() == drag.id) else {
             return false;
@@ -502,10 +502,10 @@ impl Document {
         let first = self
             .solve_once(&held, Some((id, index)))
             .map(|()| (self.shapes.clone(), distance(self)));
-        if let Ok((_, gap)) = &first {
-            if *gap <= 1e-3 {
-                return Ok(());
-            }
+        if let Ok((_, gap)) = &first
+            && *gap <= 1e-3
+        {
+            return Ok(());
         }
         self.shapes = start.clone();
         let second = self

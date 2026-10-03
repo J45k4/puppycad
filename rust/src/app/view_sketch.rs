@@ -101,118 +101,114 @@ impl App {
             );
         }
         self.paint_anchor_handles(painter, layout);
-        if let Some(start) = self.document.draft_start {
-            if layout.viewport.contains(self.cursor.x, self.cursor.y) {
-                let raw_end = self.document.screen_to_world(self.cursor, origin);
-                let end = self
-                    .document
-                    .snap_point(raw_end, self.snap_grid, self.snap_geometry)
-                    .map_or(raw_end, |snap| snap.point);
-                let draft = match self.document.tool {
-                    Tool::Line => Some(Shape::Line {
+        if let Some(start) = self.document.draft_start
+            && layout.viewport.contains(self.cursor.x, self.cursor.y)
+        {
+            let raw_end = self.document.screen_to_world(self.cursor, origin);
+            let end = self
+                .document
+                .snap_point(raw_end, self.snap_grid, self.snap_geometry)
+                .map_or(raw_end, |snap| snap.point);
+            let draft = match self.document.tool {
+                Tool::Line => Some(Shape::Line {
+                    id: 0,
+                    a: start,
+                    b: end,
+                }),
+                Tool::Rectangle => Some(Shape::Rectangle {
+                    id: 0,
+                    a: start,
+                    b: end,
+                }),
+                Tool::CenterRectangle => Some(Shape::Rectangle {
+                    id: 0,
+                    a: Point {
+                        x: start.x * 2.0 - end.x,
+                        y: start.y * 2.0 - end.y,
+                    },
+                    b: end,
+                }),
+                Tool::ThreePointRectangle => match self.document.draft_end {
+                    Some(second) => Shape::rectangle_from_three_points(0, start, second, end),
+                    None => Some(Shape::Line {
                         id: 0,
                         a: start,
                         b: end,
                     }),
-                    Tool::Rectangle => Some(Shape::Rectangle {
+                },
+                Tool::ThreePointCenterRectangle => match self.document.draft_end {
+                    Some(midpoint) => Shape::rectangle_from_center_side(0, start, midpoint, end),
+                    None => Some(Shape::Line {
                         id: 0,
                         a: start,
                         b: end,
                     }),
-                    Tool::CenterRectangle => Some(Shape::Rectangle {
+                },
+                Tool::Circle => Some(Shape::Circle {
+                    id: 0,
+                    center: start,
+                    radius: start.distance(end),
+                    segments: 64,
+                }),
+                Tool::ThreePointCircle => match self.document.draft_end {
+                    Some(second) => Shape::circle_from_three_points(0, start, second, end),
+                    None => Some(Shape::Line {
                         id: 0,
-                        a: Point {
-                            x: start.x * 2.0 - end.x,
-                            y: start.y * 2.0 - end.y,
-                        },
+                        a: start,
                         b: end,
                     }),
-                    Tool::ThreePointRectangle => match self.document.draft_end {
-                        Some(second) => Shape::rectangle_from_three_points(0, start, second, end),
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::ThreePointCenterRectangle => match self.document.draft_end {
-                        Some(midpoint) => {
-                            Shape::rectangle_from_center_side(0, start, midpoint, end)
-                        }
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::Circle => Some(Shape::Circle {
+                },
+                Tool::Ellipse => match self.document.draft_end {
+                    Some(first_axis) => Shape::ellipse_from_three_points(0, start, first_axis, end),
+                    None => Some(Shape::Line {
                         id: 0,
-                        center: start,
-                        radius: start.distance(end),
-                        segments: 64,
+                        a: start,
+                        b: end,
                     }),
-                    Tool::ThreePointCircle => match self.document.draft_end {
-                        Some(second) => Shape::circle_from_three_points(0, start, second, end),
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::Ellipse => match self.document.draft_end {
-                        Some(first_axis) => {
-                            Shape::ellipse_from_three_points(0, start, first_axis, end)
-                        }
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::Arc => match self.document.draft_end {
-                        Some(arc_end) => Shape::arc_from_three_points(0, start, arc_end, end),
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::CenterArc => match self.document.draft_end {
-                        Some(radial_start) => Shape::arc_from_center_points(
-                            0,
-                            start,
-                            radial_start,
-                            end,
-                            self.document.arc_clockwise,
-                        ),
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::Polygon => Some(Shape::Polygon {
+                },
+                Tool::Arc => match self.document.draft_end {
+                    Some(arc_end) => Shape::arc_from_three_points(0, start, arc_end, end),
+                    None => Some(Shape::Line {
                         id: 0,
-                        center: start,
-                        radius: start.distance(end),
-                        sides: 6,
-                        rotation: (end.y - start.y).atan2(end.x - start.x).to_degrees(),
+                        a: start,
+                        b: end,
                     }),
-                    Tool::Slot => match self.document.draft_end {
-                        Some(to) => Shape::capsule_from_three_points(0, start, to, end),
-                        None => Some(Shape::Line {
-                            id: 0,
-                            a: start,
-                            b: end,
-                        }),
-                    },
-                    Tool::Point => None,
-                    Tool::FitSpline | Tool::ControlSpline => None,
-                    Tool::Select => None,
-                };
-                if let Some(shape) = draft {
-                    self.paint_shape(painter, &shape, origin, true);
-                }
+                },
+                Tool::CenterArc => match self.document.draft_end {
+                    Some(radial_start) => Shape::arc_from_center_points(
+                        0,
+                        start,
+                        radial_start,
+                        end,
+                        self.document.arc_clockwise,
+                    ),
+                    None => Some(Shape::Line {
+                        id: 0,
+                        a: start,
+                        b: end,
+                    }),
+                },
+                Tool::Polygon => Some(Shape::Polygon {
+                    id: 0,
+                    center: start,
+                    radius: start.distance(end),
+                    sides: 6,
+                    rotation: (end.y - start.y).atan2(end.x - start.x).to_degrees(),
+                }),
+                Tool::Slot => match self.document.draft_end {
+                    Some(to) => Shape::capsule_from_three_points(0, start, to, end),
+                    None => Some(Shape::Line {
+                        id: 0,
+                        a: start,
+                        b: end,
+                    }),
+                },
+                Tool::Point => None,
+                Tool::FitSpline | Tool::ControlSpline => None,
+                Tool::Select => None,
+            };
+            if let Some(shape) = draft {
+                self.paint_shape(painter, &shape, origin, true);
             }
         }
         if matches!(self.document.tool, Tool::FitSpline | Tool::ControlSpline)
@@ -601,11 +597,10 @@ impl App {
                     | Shape::Polygon { .. }
                     | Shape::RotatedRectangle { .. }
             )
+            && let Some(center) = self.document.fixed_anchor_position(shape.id(), 0)
         {
-            if let Some(center) = self.document.fixed_anchor_position(shape.id(), 0) {
-                let at = self.document.world_to_screen(center, origin);
-                painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
-            }
+            let at = self.document.world_to_screen(center, origin);
+            painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
         }
         if selected && matches!(shape, Shape::Arc { .. } | Shape::EllipticArc { .. }) {
             for index in [1, 2] {
@@ -613,11 +608,10 @@ impl App {
                     .document
                     .fixed_anchors
                     .contains_key(&(shape.id(), index))
+                    && let Some(point) = self.document.fixed_anchor_position(shape.id(), index)
                 {
-                    if let Some(point) = self.document.fixed_anchor_position(shape.id(), index) {
-                        let at = self.document.world_to_screen(point, origin);
-                        painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
-                    }
+                    let at = self.document.world_to_screen(point, origin);
+                    painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
                 }
             }
         }
@@ -634,12 +628,10 @@ impl App {
                         .document
                         .fixed_anchors
                         .contains_key(&(shape.id(), index))
+                        && let Some(point) = self.document.fixed_anchor_position(shape.id(), index)
                     {
-                        if let Some(point) = self.document.fixed_anchor_position(shape.id(), index)
-                        {
-                            let at = self.document.world_to_screen(point, origin);
-                            painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
-                        }
+                        let at = self.document.world_to_screen(point, origin);
+                        painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
                     }
                 }
             }
@@ -650,11 +642,10 @@ impl App {
                     .document
                     .fixed_anchors
                     .contains_key(&(shape.id(), index))
+                    && let Some(point) = self.document.fixed_anchor_position(shape.id(), index)
                 {
-                    if let Some(point) = self.document.fixed_anchor_position(shape.id(), index) {
-                        let at = self.document.world_to_screen(point, origin);
-                        painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
-                    }
+                    let at = self.document.world_to_screen(point, origin);
+                    painter.circle(at.x, at.y, 5.0, 1.5, ACCENT);
                 }
             }
         }

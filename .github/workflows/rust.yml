@@ -36,9 +36,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
       - name: Clippy
-        # Existing code has outstanding clippy warnings; non-blocking until fixed.
-        continue-on-error: true
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   ui-smoke:
     runs-on: ubuntu-latest
