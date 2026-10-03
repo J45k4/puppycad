@@ -208,3 +208,45 @@ fn entity_dimension_picks_the_next_missing_field() {
     assert_eq!(doc.dimension_anchor_near(p(50.5, 50.0), 2.0), Some((a, 0)));
     assert_eq!(doc.dimension_anchor_near(p(55.0, 50.0), 2.0), None);
 }
+
+#[test]
+fn reference_dimensions_measure_and_add_no_constraint() {
+    let mut doc = Document::default();
+    let l = line(&mut doc, p(0.0, 0.0), p(40.0, 0.0));
+    let key = doc.add_entity_dimension(l).unwrap();
+    assert_eq!(doc.toggle_reference(key), Ok(true));
+    assert!(doc.driving_dimensions.is_empty());
+    assert_eq!(doc.dimension_keys(), vec![key]);
+    assert_eq!(doc.dimension_text(key).unwrap(), "(40)");
+    assert!(doc.set_dimension_value(key, 10.0).is_err());
+    // The line is free again: moving its end changes the measurement.
+    doc.selected = Some(l);
+    doc.set_dimension(DimensionField::LineLength, 55.0).unwrap();
+    assert!(!doc.is_reference(key));
+    doc.toggle_reference(key).unwrap();
+    if let Shape::Line { b, .. } = &mut doc.shapes[0] {
+        b.x = 70.0;
+    }
+    assert_eq!(doc.dimension_text(key).unwrap(), "(70)");
+    // Back to driving at the measured value; one undo step each.
+    assert_eq!(doc.toggle_reference(key), Ok(false));
+    assert_eq!(doc.dimension_value(key), Some(70.0));
+    doc.undo();
+    assert!(doc.is_reference(key));
+    assert!(doc.toggle_reference(DimensionKey::Angle(99)).is_err());
+}
+
+#[test]
+fn reference_point_dimension_is_skipped_by_the_solver() {
+    let mut doc = Document::default();
+    let a = point(&mut doc, p(0.0, 0.0));
+    let b = point(&mut doc, p(3.0, 4.0));
+    let key = doc.add_point_dimension((a, 0), Some((b, 0)), None).unwrap();
+    doc.toggle_reference(key).unwrap();
+    let (problem, _) = doc.build_problem(&HashSet::new(), true, None);
+    assert!(problem.constraints.is_empty());
+    assert_eq!(doc.dimension_text(key).unwrap(), "(5)");
+    doc.toggle_reference(key).unwrap();
+    let (problem, _) = doc.build_problem(&HashSet::new(), true, None);
+    assert_eq!(problem.constraints.len(), 1);
+}

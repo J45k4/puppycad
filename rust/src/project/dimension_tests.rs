@@ -155,3 +155,59 @@ fn unsupported_distance_relation_keeps_sketch_read_only() {
     assert!(reopened.read_only_reason().is_some());
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn reference_dimensions_round_trip_with_web_reference_flag() {
+    let path = test_path("reference");
+    let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+    let line = draw_line(
+        &mut document,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 40.0, y: 0.0 },
+    );
+    let length = document.add_entity_dimension(line).unwrap();
+    document.toggle_reference(length).unwrap();
+    document.add_point(Point { x: 0.0, y: 30.0 });
+    let point = document.shapes.last().unwrap().id();
+    let distance = document
+        .add_point_dimension((line, 1), Some((point, 0)), None)
+        .unwrap();
+    document.toggle_reference(distance).unwrap();
+    project.save(&document).unwrap();
+    let relations = sketch_relations(&project);
+    let saved_length = relations
+        .iter()
+        .find(|relation| relation["type"] == "length")
+        .unwrap();
+    assert_eq!(saved_length["reference"], true);
+    assert_eq!(saved_length["value"], 40.0);
+    let saved_distance = relations
+        .iter()
+        .find(|relation| relation["type"] == "distance")
+        .unwrap();
+    assert_eq!(saved_distance["reference"], true);
+    assert_eq!(saved_distance["value"], 50.0);
+
+    let (mut reopened, mut loaded) = ProjectFile::open(&path).unwrap();
+    assert_eq!(reopened.read_only_reason(), None);
+    assert!(loaded.is_reference(length));
+    assert!(loaded.driving_dimensions.is_empty());
+    let distance = loaded
+        .dimension_keys()
+        .into_iter()
+        .find(|key| matches!(key, DimensionKey::Point(_)))
+        .unwrap();
+    assert!(loaded.is_reference(distance));
+    // Back to driving: the reference flag is removed in place.
+    loaded.toggle_reference(length).unwrap();
+    reopened.save(&loaded).unwrap();
+    let relations = sketch_relations(&reopened);
+    let lengths: Vec<&Value> = relations
+        .iter()
+        .filter(|relation| relation["type"] == "length")
+        .collect();
+    assert_eq!(lengths.len(), 1);
+    assert!(lengths[0].get("reference").is_none());
+    assert_eq!(lengths[0]["id"], saved_length["id"]);
+    fs::remove_file(path).unwrap();
+}

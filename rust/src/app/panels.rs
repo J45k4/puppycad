@@ -239,6 +239,121 @@ impl App {
         };
     }
 
+    /// Rows of the dimension Properties panel (y offsets from the panel top).
+    pub(super) const DIMENSION_VALUE_ROW: f32 = 105.0;
+    pub(super) const DIMENSION_MODE_ROW: f32 = 175.0;
+
+    fn paint_dimension_panel(&self, painter: &mut Painter, layout: Layout, key: DimensionKey) {
+        let x = layout.right.x + 18.0;
+        let kind = match key {
+            DimensionKey::Field(_, field) => match field {
+                DimensionField::LineLength => "LENGTH",
+                DimensionField::RectangleWidth => "WIDTH",
+                DimensionField::RectangleHeight => "HEIGHT",
+                DimensionField::CircleDiameter => "DIAMETER",
+                DimensionField::CurveRadius => "RADIUS",
+                DimensionField::ArcSweep => "ARC SWEEP",
+                DimensionField::Rotation => "ROTATION",
+            },
+            DimensionKey::Angle(_) => "ANGLE",
+            DimensionKey::Point(id) => match self
+                .document
+                .dims
+                .point_dimensions
+                .get(&id)
+                .and_then(|dimension| dimension.axis)
+            {
+                Some(model::PointAxis::X) => "X DISTANCE",
+                Some(model::PointAxis::Y) => "Y DISTANCE",
+                None => "DISTANCE",
+            },
+        };
+        painter.text(x, layout.right.y + 66.0, kind, 1.7, ACCENT);
+        let reference = self.document.is_reference(key);
+        painter.text(
+            x,
+            layout.right.y + 90.0,
+            if reference {
+                "REFERENCE DIMENSION"
+            } else {
+                "DRIVING DIMENSION"
+            },
+            1.0,
+            MUTED,
+        );
+        let unit = if Document::dimension_is_angle(key) {
+            "deg"
+        } else {
+            "mm"
+        };
+        let value = self
+            .document
+            .displayed_dimension_value(key)
+            .map(model::format_value)
+            .unwrap_or_default();
+        painter.text(
+            x,
+            layout.right.y + Self::DIMENSION_VALUE_ROW + 8.0,
+            &if reference {
+                format!("VALUE   ({value}) {unit}")
+            } else {
+                format!("VALUE   {value} {unit}")
+            },
+            1.25,
+            TEXT,
+        );
+        let button = Rect {
+            x: layout.right.x + 10.0,
+            y: layout.right.y + Self::DIMENSION_MODE_ROW,
+            w: layout.right.w - 20.0,
+            h: 28.0,
+        };
+        painter.rect(button, PANEL_LIGHT);
+        painter.outline(button, 1.0, BORDER);
+        painter.text(
+            button.x + 8.0,
+            button.y + 9.0,
+            if reference {
+                "[R] MAKE DRIVING"
+            } else {
+                "[R] MAKE REFERENCE"
+            },
+            1.1,
+            TEXT,
+        );
+        painter.text(
+            x,
+            layout.right.y + 225.0,
+            "CLICK VALUE OR LABEL TO EDIT",
+            1.0,
+            MUTED,
+        );
+        painter.text(
+            x,
+            layout.right.y + 245.0,
+            "DEL  REMOVE DIMENSION",
+            1.0,
+            MUTED,
+        );
+    }
+
+    /// Toggles driving / reference for the selected dimension.
+    pub(super) fn toggle_selected_reference(&mut self) {
+        let Some(key) = self.selected_dimension else {
+            return;
+        };
+        if self.read_only() {
+            self.status_message = "READ ONLY: this sketch has unsupported native features".into();
+            return;
+        }
+        self.editing = None;
+        self.status_message = match self.document.toggle_reference(key) {
+            Ok(true) => "Reference dimension  |  Ctrl+S to save".into(),
+            Ok(false) => "Driving dimension  |  Ctrl+S to save".into(),
+            Err(error) => format!("Dimension: {error}"),
+        };
+    }
+
     pub(super) fn paint_panels(&self, painter: &mut Painter, layout: Layout) {
         painter.rect(layout.top, PANEL);
         painter.rect(layout.left, PANEL);
@@ -689,6 +804,11 @@ impl App {
                 1.2,
                 MUTED,
             );
+        } else if let Some(key) = self
+            .selected_dimension
+            .filter(|key| self.document.dimension_keys().contains(key))
+        {
+            self.paint_dimension_panel(painter, layout, key);
         } else if let Some(shape) = self
             .document
             .shapes

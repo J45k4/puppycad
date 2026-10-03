@@ -693,7 +693,13 @@ impl App {
                 .map(|_| self.cursor);
             let at = dragged.unwrap_or_else(|| self.document.world_to_screen(label.at, origin));
             let selected = self.selected_dimension == Some(label.key);
-            let color = if selected { ACCENT } else { DIMENSION };
+            let color = if selected {
+                ACCENT
+            } else if self.document.is_reference(label.key) {
+                MUTED
+            } else {
+                DIMENSION
+            };
             for (p, q) in &label.lines {
                 let p = self.document.world_to_screen(*p, origin);
                 let q = self.document.world_to_screen(*q, origin);

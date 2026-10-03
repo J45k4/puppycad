@@ -1,6 +1,6 @@
 use crate::solver;
 use crate::spline::{self, SplineMode};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 mod annotations;
 #[cfg(test)]
 mod dimension_tests;

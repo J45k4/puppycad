@@ -247,6 +247,7 @@ impl Document {
             self.future.clear();
             self.shapes[index] = next;
             self.driving_dimensions.insert((id, field), value);
+            self.dims.references.remove(&DimensionKey::Field(id, field));
             let pin = if matches!(self.shapes[index], Shape::Line { .. }) {
                 Pin::Anchor(id, 0)
             } else {

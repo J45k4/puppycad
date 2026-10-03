@@ -2142,7 +2142,32 @@ impl ProjectFile {
                                 .iter()
                                 .find_map(|(shape_id, id)| (id == graph_id).then_some(*shape_id))
                         });
-                        if relation.get("reference") == Some(&Value::Bool(true))
+                        if relation.get("reference") == Some(&Value::Bool(true)) {
+                            // Reference dimensions only measure.
+                            let key = field
+                                .zip(shape_id)
+                                .map(|(field, id)| DimensionKey::Field(id, field));
+                            let valid = relation.get("id").and_then(Value::as_str).is_some()
+                                && relation.get("expression").is_none()
+                                && value.is_some_and(f64::is_finite)
+                                && field.zip(shape_id).is_some_and(|(field, id)| {
+                                    !document.driving_dimensions.contains_key(&(id, field))
+                                        && document
+                                            .measure_dimension(DimensionKey::Field(id, field))
+                                            .is_some()
+                                });
+                            match key {
+                                Some(key) if valid && document.dims.references.insert(key) => {}
+                                _ => {
+                                    read_only_reason =
+                                        Some("unsupported reference dimension".into())
+                                }
+                            }
+                            continue;
+                        }
+                        if relation
+                            .get("reference")
+                            .is_some_and(|value| value != false)
                             || relation.get("expression").is_some()
                             || relation.get("id").and_then(Value::as_str).is_none()
                             || field.is_none()
@@ -3269,6 +3294,7 @@ fn serialize_sketches(
                     document
                         .driving_dimensions
                         .contains_key(&(*shape_id, field))
+                        || document.is_reference(DimensionKey::Field(*shape_id, field))
                 })
         });
         let mut relation_ids: HashSet<String> = relations
@@ -3319,6 +3345,35 @@ fn serialize_sketches(
                     "value": value
                 }));
             }
+        }
+        for key in document.dims.references.iter().copied() {
+            let DimensionKey::Field(shape_id, field) = key else {
+                continue;
+            };
+            let Some(graph_id) = next_ids.get(&shape_id) else {
+                continue;
+            };
+            let kind = relation_name(field);
+            if relations.iter().any(|relation| {
+                relation.get("type").and_then(Value::as_str) == Some(kind)
+                    && relation.get("entityId").and_then(Value::as_str) == Some(graph_id)
+            }) {
+                continue;
+            }
+            let base = format!("native-dimension-{graph_id}-{kind}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            // Value and the reference flag are written by the annotations.
+            relations.push(json!({
+                "id": relation_id,
+                "type": kind,
+                "entityId": graph_id,
+                "value": 0
+            }));
         }
         let mut axes: Vec<_> = document.axis_constraints.iter().collect();
         axes.sort_by_key(|(shape_id, _)| **shape_id);
@@ -3846,6 +3901,14 @@ fn annotate_dimension(document: &Document, relation: &mut Value, key: DimensionK
             object.remove("labelPosition");
         }
     }
+    if document.is_reference(key) {
+        object.insert("reference".into(), json!(true));
+        if let Some(value) = document.measure_dimension(key) {
+            object.insert("value".into(), json!(value));
+        }
+    } else {
+        object.remove("reference");
+    }
 }
 
 /// Web anchor name of a dimensionable anchor (see
@@ -3907,16 +3970,19 @@ fn load_point_dimension(
         Some(axis) if axis == "y" => Some(crate::model::PointAxis::Y),
         Some(_) => return Err(unsupported()),
     };
+    let reference = relation.get("reference") == Some(&Value::Bool(true));
     let value = relation
         .get("value")
         .and_then(Value::as_f64)
         .filter(|value| value.is_finite() && value.abs() <= f32::MAX as f64)
         .ok_or_else(unsupported)? as f32;
     if relation.get("direction").is_some()
-        || relation.get("reference").is_some()
+        || relation
+            .get("reference")
+            .is_some_and(|reference| !reference.is_boolean())
         || relation.get("expression").is_some()
         || a == b
-        || (axis.is_none() && value <= 0.0)
+        || (axis.is_none() && value <= 0.0 && !reference)
     {
         return Err(unsupported());
     }
@@ -3936,6 +4002,9 @@ fn load_point_dimension(
             graph_id: Some(id.to_string()),
         },
     );
+    if reference {
+        document.dims.references.insert(DimensionKey::Point(key));
+    }
     if let Some(position) = relation.get("labelPosition") {
         let at = read_point(position).ok_or("invalid dimension label position")?;
         document

@@ -54,13 +54,17 @@ pub struct DimensionMeta {
     /// Absolute label positions in sketch coordinates (web `labelPosition`).
     pub label_positions: BTreeMap<DimensionKey, Point>,
     pub point_dimensions: BTreeMap<u32, PointDimension>,
+    /// Reference dimensions: measured, shown in parentheses, never solved
+    /// (web `reference: true`). Reference `Field` keys are not in
+    /// `driving_dimensions`.
+    pub references: BTreeSet<DimensionKey>,
 }
 
 impl DimensionMeta {
     /// Whether the dimension carries state a graph `sketchConstraint` node
     /// cannot store.
     pub fn has_annotation(&self, key: DimensionKey) -> bool {
-        self.label_positions.contains_key(&key)
+        self.label_positions.contains_key(&key) || self.references.contains(&key)
     }
 }
 
@@ -145,6 +149,9 @@ impl Document {
             .driving_dimensions
             .keys()
             .map(|&(id, field)| DimensionKey::Field(id, field))
+            .chain(self.dims.references.iter().copied().filter(|key| {
+                matches!(key, DimensionKey::Field(..)) && self.measure_dimension(*key).is_some()
+            }))
             .chain(
                 self.line_relations
                     .iter()
@@ -164,6 +171,7 @@ impl Document {
             )
             .collect();
         keys.sort();
+        keys.dedup();
         keys
     }
 
@@ -364,9 +372,149 @@ impl Document {
         )
     }
 
-    pub fn dimension_text(&self, key: DimensionKey) -> Option<String> {
-        let value = format_value(self.dimension_value(key)?);
+    pub fn is_reference(&self, key: DimensionKey) -> bool {
+        self.dims.references.contains(&key)
+    }
+
+    /// Value shown for a dimension: the driving value, or the measurement
+    /// of a reference dimension.
+    pub fn displayed_dimension_value(&self, key: DimensionKey) -> Option<f32> {
+        if self.is_reference(key) {
+            self.measure_dimension(key)
+        } else {
+            self.dimension_value(key)
+        }
+    }
+
+    /// Current geometric value of a dimension (web
+    /// `measureSketchDimension`).
+    pub fn measure_dimension(&self, key: DimensionKey) -> Option<f32> {
+        let shape = |id: u32| self.shapes.iter().find(|shape| shape.id() == id);
         Some(match key {
+            DimensionKey::Point(id) => {
+                self.measure_point_dimension(self.dims.point_dimensions.get(&id)?)?
+            }
+            DimensionKey::Angle(target) => {
+                let (source, _) = self.line_relations.get(&target)?;
+                let angle = |id: u32| match shape(id)? {
+                    Shape::Line { a, b, .. } => Some((b.y - a.y).atan2(b.x - a.x)),
+                    _ => None,
+                };
+                let delta = angle(target)? - angle(*source)?;
+                delta.sin().atan2(delta.cos()).to_degrees()
+            }
+            DimensionKey::Field(id, field) => match (shape(id)?, field) {
+                (Shape::Line { a, b, .. }, DimensionField::LineLength) => a.distance(*b),
+                (Shape::Line { a, b, .. }, DimensionField::Rotation) => {
+                    (b.y - a.y).atan2(b.x - a.x).to_degrees()
+                }
+                (Shape::Rectangle { a, b, .. }, DimensionField::RectangleWidth) => {
+                    (b.x - a.x).abs()
+                }
+                (Shape::Rectangle { a, b, .. }, DimensionField::RectangleHeight) => {
+                    (b.y - a.y).abs()
+                }
+                (Shape::RotatedRectangle { width, .. }, DimensionField::RectangleWidth) => *width,
+                (Shape::RotatedRectangle { height, .. }, DimensionField::RectangleHeight) => {
+                    *height
+                }
+                (
+                    Shape::Ellipse { rx, .. } | Shape::EllipticArc { rx, .. },
+                    DimensionField::RectangleWidth,
+                ) => rx * 2.0,
+                (
+                    Shape::Ellipse { ry, .. } | Shape::EllipticArc { ry, .. },
+                    DimensionField::RectangleHeight,
+                ) => ry * 2.0,
+                (Shape::Circle { radius, .. }, DimensionField::CircleDiameter) => radius * 2.0,
+                (
+                    Shape::Circle { radius, .. }
+                    | Shape::Arc { radius, .. }
+                    | Shape::Polygon { radius, .. },
+                    DimensionField::CurveRadius,
+                ) => *radius,
+                (
+                    Shape::Arc { sweep, .. } | Shape::EllipticArc { sweep, .. },
+                    DimensionField::ArcSweep,
+                ) => sweep.to_degrees() as f32,
+                (
+                    Shape::RotatedRectangle { rotation, .. }
+                    | Shape::Ellipse { rotation, .. }
+                    | Shape::EllipticArc { rotation, .. }
+                    | Shape::Polygon { rotation, .. },
+                    DimensionField::Rotation,
+                ) => *rotation,
+                _ => return None,
+            },
+        })
+    }
+
+    /// Switches a dimension between driving and reference. A reference
+    /// keeps measuring; a driving dimension starts from the measured value.
+    /// One undo step; returns whether the dimension is now a reference.
+    pub fn toggle_reference(&mut self, key: DimensionKey) -> Result<bool, String> {
+        if !self.dimension_keys().contains(&key) {
+            return Err("Dimension no longer exists".into());
+        }
+        if matches!(key, DimensionKey::Angle(_)) {
+            return Err("Angle relations cannot be reference dimensions".into());
+        }
+        let measured = self
+            .measure_dimension(key)
+            .ok_or("Dimension cannot be measured")?;
+        let before = self.snapshot();
+        let depth = self.history.len();
+        let reference = !self.is_reference(key);
+        let result = if reference {
+            if let DimensionKey::Field(id, field) = key {
+                self.driving_dimensions.remove(&(id, field));
+            }
+            self.dims.references.insert(key);
+            Ok(())
+        } else {
+            self.dims.references.remove(&key);
+            match key {
+                DimensionKey::Field(..) => {
+                    if measured <= 0.0
+                        && !matches!(
+                            key,
+                            DimensionKey::Field(
+                                _,
+                                DimensionField::Rotation | DimensionField::ArcSweep
+                            )
+                        )
+                    {
+                        Err("A zero-size dimension cannot drive geometry".to_string())
+                    } else {
+                        self.set_dimension_value(key, measured)
+                    }
+                }
+                DimensionKey::Point(id) => {
+                    if let Some(dimension) = self.dims.point_dimensions.get_mut(&id) {
+                        dimension.value = measured;
+                    }
+                    self.solve_constraints(&[])
+                }
+                DimensionKey::Angle(_) => unreachable!("rejected above"),
+            }
+        };
+        self.history.truncate(depth);
+        match result {
+            Ok(()) => {
+                self.history.push(before);
+                self.future.clear();
+                Ok(reference)
+            }
+            Err(error) => {
+                self.restore_keeping_selection(before);
+                Err(error)
+            }
+        }
+    }
+
+    pub fn dimension_text(&self, key: DimensionKey) -> Option<String> {
+        let value = format_value(self.displayed_dimension_value(key)?);
+        let text = match key {
             DimensionKey::Field(_, DimensionField::CircleDiameter) => format!("D{value}"),
             DimensionKey::Field(_, DimensionField::CurveRadius) => format!("R{value}"),
             DimensionKey::Point(id) => match self.dims.point_dimensions.get(&id)?.axis {
@@ -376,6 +524,11 @@ impl Document {
             },
             key if Self::dimension_is_angle(key) => format!("{value}deg"),
             _ => value,
+        };
+        Some(if self.is_reference(key) {
+            format!("({text})")
+        } else {
+            text
         })
     }
 
@@ -699,6 +852,9 @@ impl Document {
     /// Sets a dimension's driving value; the geometry follows. The selection
     /// is kept.
     pub fn set_dimension_value(&mut self, key: DimensionKey, value: f32) -> Result<(), String> {
+        if self.is_reference(key) {
+            return Err("Reference dimensions are measured; make it driving first".into());
+        }
         let selected = self.selected;
         let spline_point = self.selected_spline_point;
         let result = match key {
@@ -736,6 +892,7 @@ impl Document {
         self.dims
             .label_positions
             .retain(|key, _| keys.contains(key));
+        self.dims.references.retain(|key| keys.contains(key));
     }
 
     /// Deletes a dimension and its annotations. One undo step.
@@ -756,6 +913,7 @@ impl Document {
                 self.dims.point_dimensions.remove(&id);
             }
         }
+        self.dims.references.remove(&key);
         self.prune_dimension_meta();
         Ok(())
     }

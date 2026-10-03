@@ -90,6 +90,26 @@ impl App {
             }
             self.more_open = false;
         }
+        if !self.solid_preview
+            && layout.right.contains(point.x, point.y)
+            && let Some(key) = self
+                .selected_dimension
+                .filter(|key| self.document.dimension_keys().contains(key))
+        {
+            let y = point.y - layout.right.y;
+            if (Self::DIMENSION_VALUE_ROW..Self::DIMENSION_VALUE_ROW + 25.0).contains(&y) {
+                if self.read_only() {
+                    self.status_message =
+                        "READ ONLY: this sketch has unsupported native features".into();
+                } else {
+                    self.begin_label_edit(key);
+                }
+            } else if (Self::DIMENSION_MODE_ROW..Self::DIMENSION_MODE_ROW + 28.0).contains(&y) {
+                self.toggle_selected_reference();
+            }
+            self.redraw();
+            return;
+        }
         if let Some(field) = self.editable_field_at(point) {
             if self.read_only() && !matches!(field, EditField::ExtrusionDepth) {
                 self.status_message =
@@ -322,6 +342,7 @@ impl App {
                     .dimension_label_at(point, self.viewport_origin())
                 {
                     self.selected_dimension = Some(key);
+                    self.document.selected = None;
                     self.label_drag = Some(LabelDrag {
                         key,
                         start: point,
@@ -505,6 +526,13 @@ impl App {
 
     pub(super) fn begin_label_edit(&mut self, key: DimensionKey) {
         self.selected_dimension = Some(key);
+        self.document.selected = None;
+        if self.document.is_reference(key) {
+            self.editing = None;
+            self.status_message =
+                "Reference dimensions are measured  |  R: make driving to edit".into();
+            return;
+        }
         self.editing = Some(DimensionEdit {
             field: EditField::Label(key),
             buffer: String::new(),
@@ -1037,6 +1065,13 @@ impl ApplicationHandler for App {
                         }
                         KeyCode::KeyL if !self.modifiers.shift_key() => {
                             self.select_tool(Tool::Line)
+                        }
+                        KeyCode::KeyR
+                            if self.selected_dimension.is_some()
+                                && !self.modifiers.shift_key()
+                                && !self.solid_preview =>
+                        {
+                            self.toggle_selected_reference();
                         }
                         KeyCode::KeyR if self.modifiers.shift_key() => {
                             self.select_tool(Tool::CenterRectangle)

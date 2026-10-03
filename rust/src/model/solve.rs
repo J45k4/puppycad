@@ -375,7 +375,13 @@ impl Document {
             .chain(self.equal_ellipses.keys())
             .chain(self.shared_ellipses.keys())
             .chain(self.point_links.values())
-            .chain(self.dims.point_dimensions.values().map(|d| &d.b.0))
+            .chain(
+                self.dims
+                    .point_dimensions
+                    .iter()
+                    .filter(|(id, _)| !self.dims.references.contains(&DimensionKey::Point(**id)))
+                    .map(|(_, d)| &d.b.0),
+            )
             .copied()
             .chain(self.projected_targets())
             .collect();
@@ -557,7 +563,10 @@ impl Document {
                 _ => {}
             }
         }
-        for dimension in self.dims.point_dimensions.values() {
+        for (id, dimension) in &self.dims.point_dimensions {
+            if self.dims.references.contains(&DimensionKey::Point(*id)) {
+                continue;
+            }
             let anchor = |b: &mut SolverBuilder, (id, index): (u32, usize)| match b.entity(id)? {
                 SolverEntity::Line(line) => match index {
                     0 => Some(line.a),
