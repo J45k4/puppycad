@@ -3036,3 +3036,52 @@ cp /tmp/native-fillet.pcad /out/rust-native-fillet.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Box-select two of three lines with a left-to-right window, then drag one
+# of them: both selected lines move together, the third stays put.
+./target/debug/puppycad /tmp/native-box-select.pcad >/tmp/puppycad-box-select.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-box-select.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-box-select.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+for y in 300 400; do
+    xdotool key --window "$window_id" l
+    xdotool mousemove 400 "$y" click 1
+    xdotool mousemove 520 "$y" click 1
+    xdotool key --window "$window_id" Escape
+done
+xdotool key --window "$window_id" l
+xdotool mousemove 760 300 click 1
+xdotool mousemove 880 300 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" v
+xdotool mousemove 370 260 mousedown 1
+xdotool mousemove 450 340
+xdotool mousemove 550 440
+sleep 0.5
+import -window root /out/rust-native-box-select-band.png
+xdotool mouseup 1
+sleep 0.5
+import -window root /out/rust-native-box-select.png
+xdotool mousemove 460 300 mousedown 1
+xdotool mousemove 470 260
+xdotool mousemove 480 200
+xdotool mouseup 1
+sleep 0.5
+import -window root /out/rust-native-box-select-moved.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test -s /tmp/native-box-select.pcad
+cp /tmp/native-box-select.pcad /out/rust-native-box-select.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

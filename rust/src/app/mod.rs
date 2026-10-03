@@ -23,8 +23,8 @@ use crate::renderer::{Color, Painter, Rect, Renderer};
 use crate::view3d::{self, OrbitView};
 use manifold_rust::manifold::Manifold;
 use model::{
-    AxisConstraint, ChamferMode, DimensionField, Document, LineRelationKind, Point, Shape,
-    SketchAnalysis, SnapKind, Tool,
+    AxisConstraint, ChamferMode, DimensionField, Document, LineRelationKind, Point,
+    SelectionFilter, Shape, SketchAnalysis, SnapKind, Tool,
 };
 use project::{
     EntryKind, ProjectFile, ProjectSummary, SketchPlane, SolidPreview, list_projects,
@@ -111,6 +111,17 @@ impl Layout {
         }
     }
 
+    /// Selection filter toggles in the status bar: 0 geometry,
+    /// 1 construction, 2 points.
+    fn filter_button(self, index: usize) -> Rect {
+        Rect {
+            x: self.top.w - 420.0 + index as f32 * 98.0,
+            y: self.bottom.y + 4.0,
+            w: 92.0,
+            h: 23.0,
+        }
+    }
+
     fn tool_button(self, index: usize) -> Rect {
         Rect {
             x: 20.0 + index as f32 * 120.0,
@@ -167,6 +178,10 @@ pub(crate) struct App {
     status_message: String,
     cursor: Point,
     pan_drag: bool,
+    /// Screen point where a Select-mode rubber band started.
+    box_start: Option<Point>,
+    /// Selection filter shared by every sketch (copied into the document).
+    selection_filter: SelectionFilter,
     modifiers: ModifiersState,
     editing: Option<DimensionEdit>,
     name_edit: Option<NameEdit>,
@@ -257,6 +272,8 @@ impl Default for App {
             status_message: String::new(),
             cursor: Point { x: 0.0, y: 0.0 },
             pan_drag: false,
+            box_start: None,
+            selection_filter: SelectionFilter::default(),
             modifiers: ModifiersState::empty(),
             editing: None,
             name_edit: None,

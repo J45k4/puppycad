@@ -84,6 +84,25 @@ selected** or **Copy selected** (Ctrl+D also copies using those values), press
 Delete to remove it, Ctrl+Z to undo, drag with the middle mouse button to
 pan, and use the wheel to zoom around the pointer.
 Press **F** in sketch view to fit all sketch geometry inside the viewport.
+
+**Multi-selection.** In Select mode, drag from empty canvas to draw a rubber
+band. Dragging left to right (blue window) selects only shapes fully enclosed
+by the box; dragging right to left (green crossing box) selects every shape the
+box touches, matching the web workspace. Hold Shift while releasing to add to
+the selection. Shift+click a shape (in the viewport or its Project row) to
+toggle it in or out of the selection; a plain click selects only that shape,
+and Esc or a click on empty canvas clears the selection. The last selected
+shape is the primary: Properties shows its fields with the count ("Line
+(2 selected)"), and relation gestures that combine the selection with the
+hovered shape use it. Every selected shape is highlighted in the viewport and
+the Project list. Move/Copy selected, Ctrl+D, Scale/Rotate (about the shared
+CX/CY), Delete and **K** act on the whole selection as one undo step (K makes
+everything construction unless all of it already is), and dragging any
+selected shape moves the whole group; anchors are not individually draggable
+while more than one shape is selected. The **GEOMETRY / CONSTR / POINTS**
+toggles in the status bar limit what click and box selection can pick
+(regular shapes, construction shapes, sketch points); filtered shapes still
+render.
 Sketch placement snaps to existing anchors, midpoints, and finite line-line,
 line-circle, line-arc, line-ellipse, circle-circle, circle-arc, arc-arc,
 circle-ellipse, and ellipse-ellipse intersections, plus
@@ -466,7 +485,9 @@ Library crate (`rust/src/lib.rs`):
   `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
   `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
   shared with split/trim),
-  `dimensions.rs` (`set_dimension`), `edit.rs` (delete, split, trim, extend,
+  `dimensions.rs` (`set_dimension`), `selection.rs` (multi-selection,
+  `SelectionFilter`, box and toggle selection, `for_each_selected`),
+  `edit.rs` (delete, split, trim, extend,
   copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
   `geometry.rs` (curve intersections and boundaries), `tests.rs`.

@@ -92,15 +92,12 @@ impl App {
 
     pub(super) fn paint_shapes(&self, painter: &mut Painter, layout: Layout) {
         let origin = self.viewport_origin();
+        let selected = self.document.selected_ids();
         for shape in &self.document.shapes {
-            self.paint_shape(
-                painter,
-                shape,
-                origin,
-                self.document.selected == Some(shape.id()),
-            );
+            self.paint_shape(painter, shape, origin, selected.contains(&shape.id()));
         }
         self.paint_anchor_handles(painter, layout);
+        self.paint_box_select(painter, layout);
         if let Some(start) = self.document.draft_start
             && layout.viewport.contains(self.cursor.x, self.cursor.y)
         {
@@ -665,5 +662,38 @@ impl App {
         std::cell::Ref::map(self.analysis.borrow(), |cache| {
             &cache.as_ref().expect("analysis cached above").1
         })
+    }
+}
+
+impl App {
+    /// Rubber band of a Select-mode box drag: solid for a left-to-right
+    /// window (fully enclosed), green for a right-to-left crossing box.
+    fn paint_box_select(&self, painter: &mut Painter, layout: Layout) {
+        let Some(start) = self.box_start else {
+            return;
+        };
+        let end = Point {
+            x: self
+                .cursor
+                .x
+                .clamp(layout.viewport.x, layout.viewport.x + layout.viewport.w),
+            y: self
+                .cursor
+                .y
+                .clamp(layout.viewport.y, layout.viewport.y + layout.viewport.h),
+        };
+        let rect = Rect {
+            x: start.x.min(end.x),
+            y: start.y.min(end.y),
+            w: (end.x - start.x).abs(),
+            h: (end.y - start.y).abs(),
+        };
+        let (fill, edge) = if end.x >= start.x {
+            ([0.32, 0.78, 0.93, 0.10], ACCENT)
+        } else {
+            ([0.46, 0.84, 0.52, 0.10], FULLY_CONSTRAINED)
+        };
+        painter.rect(rect, fill);
+        painter.outline(rect, 1.0, edge);
     }
 }

@@ -454,6 +454,7 @@ impl App {
                 if active { TEXT } else { MUTED },
             );
         }
+        let selected_ids = self.document.selected_ids();
         for (index, shape) in self.document.shapes.iter().enumerate() {
             if layout
                 .row(index + solids.len(), part_rows.len(), self.sketch_count())
@@ -464,7 +465,7 @@ impl App {
                 break;
             }
             let row = layout.row(index + solids.len(), part_rows.len(), self.sketch_count());
-            if self.document.selected == Some(shape.id()) {
+            if selected_ids.contains(&shape.id()) {
                 painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
             }
             painter.text(
@@ -693,10 +694,15 @@ impl App {
             .iter()
             .find(|shape| Some(shape.id()) == self.document.selected)
         {
+            let count = self.document.selection_count();
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 66.0,
-                shape.name(),
+                &if count > 1 {
+                    format!("{}  ({count} selected)", shape.name())
+                } else {
+                    shape.name().to_string()
+                },
                 1.7,
                 ACCENT,
             );
@@ -1457,7 +1463,9 @@ impl App {
             );
         }
         let tool_status = match self.document.tool {
-            Tool::Select => "Select geometry  |  Middle drag: pan  |  Wheel: zoom",
+            Tool::Select => {
+                "Select: click, Shift+click toggle, drag box (right: enclosed, left: crossing)"
+            }
             Tool::Line => "Line: click start, then end  |  Esc: cancel",
             Tool::Rectangle => "Rectangle: click two corners  |  Esc: cancel",
             Tool::CenterRectangle => "Center rectangle: click center, then corner  |  Esc: cancel",
@@ -1502,6 +1510,35 @@ impl App {
             &self.status_message
         };
         painter.text(15.0, layout.bottom.y + 10.0, status, 1.2, MUTED);
+        if !self.solid_preview {
+            let filter = self.selection_filter;
+            for (index, (label, on)) in [
+                ("GEOMETRY", filter.geometry),
+                ("CONSTR", filter.construction),
+                ("POINTS", filter.points),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let button = layout.filter_button(index);
+                painter.rect(
+                    button,
+                    if on {
+                        [0.13, 0.31, 0.40, 1.0]
+                    } else {
+                        PANEL_LIGHT
+                    },
+                );
+                painter.outline(button, 1.0, if on { ACCENT } else { BORDER });
+                painter.text(
+                    button.x + 8.0,
+                    button.y + 7.0,
+                    label,
+                    1.1,
+                    if on { TEXT } else { MUTED },
+                );
+            }
+        }
         painter.text(
             layout.top.w - 110.0,
             layout.bottom.y + 10.0,

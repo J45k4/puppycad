@@ -5510,3 +5510,146 @@ fn filleted_corner_follows_a_moved_line() {
     assert!(doc.move_selected(Point { x: -3.0, y: 0.0 }));
     assert_fillet(&doc, arc, 5.0);
 }
+
+fn p(x: f32, y: f32) -> Point {
+    Point { x, y }
+}
+
+fn selection_fixture() -> Document {
+    Document::from_shapes(vec![
+        Shape::Line {
+            id: 1,
+            a: p(0.0, 0.0),
+            b: p(10.0, 0.0),
+        },
+        Shape::Circle {
+            id: 2,
+            center: p(30.0, 0.0),
+            radius: 5.0,
+            segments: 64,
+        },
+        Shape::Point {
+            id: 3,
+            at: p(50.0, 0.0),
+        },
+    ])
+}
+
+#[test]
+fn window_box_selects_only_enclosed_shapes() {
+    let mut doc = selection_fixture();
+    // Left to right: encloses the line, only crosses the circle.
+    assert_eq!(doc.box_select(p(-1.0, -1.0), p(30.0, 1.0), false), 1);
+    assert_eq!(doc.selected_ids(), vec![1]);
+    assert_eq!(doc.box_select(p(-1.0, -6.0), p(36.0, 6.0), false), 2);
+    assert_eq!(doc.selected_ids(), vec![1, 2]);
+    assert_eq!(doc.selected, Some(2));
+}
+
+#[test]
+fn crossing_box_selects_anything_touched() {
+    let mut doc = selection_fixture();
+    // Right to left over the line's end and the circle's left edge.
+    assert_eq!(doc.box_select(p(26.0, 1.0), p(5.0, -1.0), false), 2);
+    assert_eq!(doc.selected_ids(), vec![1, 2]);
+    // A crossing box in the circle's empty middle touches nothing.
+    assert_eq!(doc.box_select(p(31.0, 1.0), p(29.0, -1.0), false), 0);
+    assert!(doc.selected_ids().is_empty());
+}
+
+#[test]
+fn shift_box_and_toggle_extend_the_selection() {
+    let mut doc = selection_fixture();
+    doc.select_at(p(5.0, 0.0));
+    assert_eq!(doc.selected_ids(), vec![1]);
+    doc.box_select(p(45.0, -1.0), p(55.0, 1.0), true);
+    assert_eq!(doc.selected_ids(), vec![1, 3]);
+    assert!(doc.toggle_at(p(35.0, 0.0)));
+    assert_eq!(doc.selected_ids(), vec![1, 3, 2]);
+    assert!(doc.toggle_at(p(5.0, 0.0)));
+    assert_eq!(doc.selected_ids(), vec![3, 2]);
+    assert!(!doc.toggle_at(p(100.0, 100.0)));
+    // A plain click selects only the clicked shape.
+    doc.select_at(p(5.0, 0.0));
+    assert_eq!(doc.selected_ids(), vec![1]);
+    // Assigning the primary directly collapses to a single selection.
+    doc.set_selection(&[1, 2]);
+    doc.selected = Some(3);
+    assert_eq!(doc.selected_ids(), vec![3]);
+    doc.clear_selection();
+    assert!(doc.selected_ids().is_empty());
+}
+
+#[test]
+fn selection_filters_apply_to_click_and_box() {
+    let mut doc = selection_fixture();
+    doc.construction.insert(2);
+    doc.selection_filter.points = false;
+    doc.box_select(p(-1.0, -6.0), p(60.0, 6.0), false);
+    assert_eq!(doc.selected_ids(), vec![1, 2]);
+    doc.selection_filter.construction = false;
+    doc.box_select(p(-1.0, -6.0), p(60.0, 6.0), false);
+    assert_eq!(doc.selected_ids(), vec![1]);
+    doc.select_at(p(50.0, 0.0));
+    assert!(doc.selected_ids().is_empty());
+    doc.selection_filter.geometry = false;
+    doc.select_at(p(5.0, 0.0));
+    assert!(doc.selected_ids().is_empty());
+    doc.selection_filter = SelectionFilter::default();
+    doc.select_at(p(50.0, 0.0));
+    assert_eq!(doc.selected_ids(), vec![3]);
+}
+
+#[test]
+fn multi_selection_edits_are_one_undo_step() {
+    let mut doc = selection_fixture();
+    doc.set_selection(&[1, 2]);
+    assert!(doc.move_selected(p(0.0, 10.0)));
+    assert!(matches!(doc.shapes[0], Shape::Line { a, .. } if a == p(0.0, 10.0)));
+    assert!(matches!(doc.shapes[1], Shape::Circle { center, .. } if center == p(30.0, 10.0)));
+    assert_eq!(doc.selected_ids(), vec![1, 2]);
+    assert!(doc.undo());
+    assert!(matches!(doc.shapes[0], Shape::Line { a, .. } if a == p(0.0, 0.0)));
+    assert!(matches!(doc.shapes[1], Shape::Circle { center, .. } if center == p(30.0, 0.0)));
+
+    doc.set_selection(&[1, 2]);
+    assert_eq!(doc.toggle_construction(), Some(true));
+    assert!(doc.construction.contains(&1) && doc.construction.contains(&2));
+    assert!(doc.undo());
+    assert!(doc.construction.is_empty());
+
+    doc.set_selection(&[1, 2]);
+    assert!(doc.copy_selected(p(0.0, 20.0)));
+    assert_eq!(doc.shapes.len(), 5);
+    assert_eq!(doc.selected_ids().len(), 2);
+    assert!(doc.undo());
+    assert_eq!(doc.shapes.len(), 3);
+
+    doc.set_selection(&[1, 2]);
+    assert!(doc.rotate_selected(90.0, p(0.0, 0.0), false));
+    assert!(
+        matches!(doc.shapes[1], Shape::Circle { center, .. } if center.distance(p(0.0, 30.0)) < 1e-3)
+    );
+    assert!(doc.undo());
+
+    doc.set_selection(&[1, 2]);
+    assert!(doc.delete_selected());
+    assert_eq!(doc.shapes.len(), 1);
+    assert!(doc.selected_ids().is_empty());
+    assert!(doc.undo());
+    assert_eq!(doc.shapes.len(), 3);
+    assert!(!doc.undo());
+}
+
+#[test]
+fn whole_shape_drag_moves_every_selected_shape() {
+    let mut doc = selection_fixture();
+    doc.set_selection(&[2, 1]);
+    assert!(doc.begin_drag(p(5.0, 0.0)));
+    assert!(doc.drag_to(p(5.0, 10.0)));
+    assert!(doc.finish_drag());
+    assert!(matches!(doc.shapes[0], Shape::Line { a, .. } if a == p(0.0, 10.0)));
+    assert!(matches!(doc.shapes[1], Shape::Circle { center, .. } if center == p(30.0, 10.0)));
+    assert!(doc.undo());
+    assert!(matches!(doc.shapes[1], Shape::Circle { center, .. } if center == p(30.0, 0.0)));
+}
