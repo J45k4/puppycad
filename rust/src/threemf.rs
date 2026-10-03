@@ -138,7 +138,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 1.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         };
         Body::new(name, solid_triangles(&solid).unwrap())
     }

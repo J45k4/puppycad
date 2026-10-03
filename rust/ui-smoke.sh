@@ -3309,3 +3309,49 @@ cp /tmp/native-pattern.pcad /out/rust-native-pattern.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Sketch on a face: extrude a rectangle, hover its top face in the 3D preview,
+# press 4 to sketch on it, draw a circle and Shift+X cut it into the block.
+./target/debug/puppycad /tmp/native-face-sketch.pcad >/tmp/puppycad-face.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-face.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-face.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 500 330 click 1
+xdotool mousemove 750 530 click 1
+xdotool key --window "$window_id" x
+sleep 0.3
+xdotool mousemove 610 420
+sleep 0.3
+import -window root /out/rust-native-face-hover.png
+xdotool key --window "$window_id" 4
+sleep 0.3
+xdotool key --window "$window_id" c
+xdotool mousemove 625 430 click 1
+xdotool mousemove 675 430 click 1
+sleep 0.3
+import -window root /out/rust-native-face-sketch.png
+xdotool key --window "$window_id" shift+x
+sleep 0.5
+import -window root /out/rust-native-face-cut.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.3
+test -s /tmp/native-face-sketch.pcad
+grep -q '"type": "face"' /tmp/native-face-sketch.pcad
+grep -q '"faceId": "native-extrude-1-solid-face-6"' /tmp/native-face-sketch.pcad
+grep -q '"targetId": "face-native-extrude-1-native-extrude-1-solid-face-6"' /tmp/native-face-sketch.pcad
+grep -q '"operation": "cut"' /tmp/native-face-sketch.pcad
+cp /tmp/native-face-sketch.pcad /out/rust-native-face-sketch.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

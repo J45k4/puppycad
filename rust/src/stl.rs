@@ -198,6 +198,11 @@ pub fn solid_triangles(solid: &SolidPreview) -> Result<Vec<[Vertex; 3]>, String>
             triangles.push([a_bottom, b_bottom, c_bottom]);
         }
     }
+    if solid.frame.mirrored() {
+        for triangle in &mut triangles {
+            triangle.swap(1, 2);
+        }
+    }
     Ok(triangles)
 }
 
@@ -308,7 +313,7 @@ mod tests {
                 Point { x: 0.0, y: 5.0 },
             ],
             depth: 20.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
             holes: Vec::new(),
         };
         let stl = export_solid(&solid).unwrap();
@@ -340,7 +345,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 10.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         };
         let cutter = SolidPreview {
             name: "Cutter".into(),
@@ -352,7 +357,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 10.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         };
         let result = manifold_from_solid(&base)
             .unwrap()
@@ -373,7 +378,7 @@ mod tests {
                     Point { x: 10.0, y: 40.0 },
                 ],
                 depth: 30.0,
-                plane,
+                frame: plane.frame(),
                 holes: Vec::new(),
             };
             let stl = export_solid(&solid).unwrap();
@@ -413,7 +418,7 @@ mod tests {
                 ],
             ],
             depth: 10.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         };
         let stl = export_solid(&solid).unwrap();
         let vertices: Vec<Vec<f64>> = stl
@@ -466,7 +471,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 10.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         };
         let stl = export_solid(&solid).unwrap();
         let vertices: Vec<Vec<f64>> = stl
@@ -515,7 +520,7 @@ mod binary_tests {
             ],
             holes: Vec::new(),
             depth: 1.0,
-            plane: SketchPlane::Top,
+            frame: SketchPlane::Top.frame(),
         }
     }
 

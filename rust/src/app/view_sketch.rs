@@ -1,6 +1,43 @@
 use super::*;
 
 impl App {
+    /// A face sketch's supporting body (web `sketchSupportEdges`), drawn
+    /// dashed between the grid and the sketch geometry.
+    pub(super) fn paint_reference_edges(&self, painter: &mut Painter, layout: Layout) {
+        if self.document.reference_edges.is_empty() {
+            return;
+        }
+        let origin = self.viewport_origin();
+        let color: Color = [0.42, 0.55, 0.66, 1.0];
+        for &(a, b) in &self.document.reference_edges {
+            let (a, b) = (
+                self.document.world_to_screen(a, origin),
+                self.document.world_to_screen(b, origin),
+            );
+            let length = a.distance(b);
+            let steps = (length / 9.0).ceil().max(1.0) as usize;
+            for step in (0..steps).step_by(2) {
+                let t0 = step as f32 / steps as f32;
+                let t1 = ((step + 1) as f32 / steps as f32).min(1.0);
+                painter.line(
+                    a.x + (b.x - a.x) * t0,
+                    a.y + (b.y - a.y) * t0,
+                    a.x + (b.x - a.x) * t1,
+                    a.y + (b.y - a.y) * t1,
+                    1.5,
+                    color,
+                );
+            }
+        }
+        painter.text(
+            layout.viewport.x + 18.0,
+            layout.viewport.y + layout.viewport.h - 24.0,
+            "FACE SKETCH  |  5 HIDE BODY CONTEXT",
+            1.0,
+            MUTED,
+        );
+    }
+
     pub(super) fn paint_grid(&self, painter: &mut Painter, layout: Layout) {
         let viewport = layout.viewport;
         let origin = self.viewport_origin();

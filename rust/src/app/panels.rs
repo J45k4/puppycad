@@ -626,8 +626,12 @@ impl App {
             let plane = self
                 .project
                 .as_ref()
-                .and_then(|project| project.sketch_plane(index))
-                .map(SketchPlane::name)
+                .and_then(|project| {
+                    project
+                        .sketch_plane(index)
+                        .map(SketchPlane::name)
+                        .or(project.sketch_face(index).map(|_| "FACE"))
+                })
                 .unwrap_or(if self.project.is_some() {
                     "OTHER"
                 } else {

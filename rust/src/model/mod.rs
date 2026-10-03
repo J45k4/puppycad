@@ -245,6 +245,10 @@ pub struct Document {
     /// Linked linear and circular patterns (web `linearPattern` /
     /// `circularPattern`).
     pub patterns: Vec<SketchPattern>,
+    /// Display-only reference segments (a face sketch's supporting body
+    /// projected into the sketch plane). Their ends and midpoints snap; they
+    /// are not sketch entities, take no relations and are never saved.
+    pub reference_edges: Vec<(Point, Point)>,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -301,6 +305,7 @@ impl Default for Document {
             offset_chains: Vec::new(),
             dims: DimensionMeta::default(),
             patterns: Vec::new(),
+            reference_edges: Vec::new(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -323,6 +328,25 @@ impl Document {
                 if d < distance {
                     best = Some(candidate);
                     distance = d;
+                }
+            }
+            for &(a, b) in &self.reference_edges {
+                for (point, kind) in [
+                    (a, SnapKind::Anchor),
+                    (b, SnapKind::Anchor),
+                    (
+                        Point {
+                            x: (a.x + b.x) * 0.5,
+                            y: (a.y + b.y) * 0.5,
+                        },
+                        SnapKind::Midpoint,
+                    ),
+                ] {
+                    let d = raw.distance(point);
+                    if d < distance {
+                        best = Some(SnapResult { point, kind });
+                        distance = d;
+                    }
                 }
             }
             for (index, shape) in self.shapes.iter().enumerate() {

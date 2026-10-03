@@ -142,11 +142,15 @@ impl SolidProjector {
         ])
     }
 
-    /// Orbit pivot for a drag starting at `point`: the nearest surface under the cursor,
-    /// or the current pivot depth when the cursor misses (web: `getOrbitAnchorPoint`).
-    pub(super) fn pick_pivot(&self, scene: &SolidScene, point: Point) -> [f32; 3] {
-        let mut nearest: Option<f32> = None;
-        for &[a, b, c] in &scene.triangles {
+    /// Nearest scene triangle under screen `point`: its index, view depth and the
+    /// world-space hit point (perspective-correct barycentric interpolation).
+    pub(super) fn pick_triangle(
+        &self,
+        scene: &SolidScene,
+        point: Point,
+    ) -> Option<(usize, f32, [f32; 3])> {
+        let mut nearest: Option<(usize, f32, [f32; 3])> = None;
+        for (index, &[a, b, c]) in scene.triangles.iter().enumerate() {
             let [pa, pb, pc] = [a, b, c].map(|p| (self.screen(p), self.depth(p)));
             let det = (pb.0[1] - pc.0[1]) * (pa.0[0] - pc.0[0])
                 + (pc.0[0] - pb.0[0]) * (pa.0[1] - pc.0[1]);
@@ -163,22 +167,122 @@ impl SolidProjector {
             if wa < -1e-4 || wb < -1e-4 || wc < -1e-4 {
                 continue;
             }
+            let mut weights = [wa, wb, wc];
             let depth = if self.view.perspective {
-                self.camera_distance
-                    - 1.0
-                        / (wa / (self.camera_distance - pa.1)
-                            + wb / (self.camera_distance - pb.1)
-                            + wc / (self.camera_distance - pc.1))
+                let inverse = [pa.1, pb.1, pc.1].map(|d| 1.0 / (self.camera_distance - d));
+                let sum: f32 = (0..3).map(|i| weights[i] * inverse[i]).sum();
+                for i in 0..3 {
+                    weights[i] = weights[i] * inverse[i] / sum;
+                }
+                self.camera_distance - 1.0 / sum
             } else {
                 wa * pa.1 + wb * pb.1 + wc * pc.1
             };
-            if nearest.is_none_or(|best| depth > best) {
-                nearest = Some(depth);
+            if nearest.is_none_or(|(_, best, _)| depth > best) {
+                let hit = std::array::from_fn(|axis| {
+                    weights[0] * a[axis] + weights[1] * b[axis] + weights[2] * c[axis]
+                });
+                nearest = Some((index, depth, hit));
             }
         }
-        let depth = nearest.unwrap_or_else(|| view3d::add(self.view.pan, self.view.pivot)[2]);
+        nearest
+    }
+
+    /// Orbit pivot for a drag starting at `point`: the nearest surface under the cursor,
+    /// or the current pivot depth when the cursor misses (web: `getOrbitAnchorPoint`).
+    pub(super) fn pick_pivot(&self, scene: &SolidScene, point: Point) -> [f32; 3] {
+        let depth = self.pick_triangle(scene, point).map_or_else(
+            || view3d::add(self.view.pan, self.view.pivot)[2],
+            |hit| hit.1,
+        );
         self.model_at(point, depth)
     }
+}
+
+/// Planar face under the cursor in the 3D preview.
+#[derive(Clone, Debug)]
+pub(super) struct FaceHover {
+    /// Web face reference, when the face belongs to an extrusion prism.
+    pub(super) face: Option<project::FaceRef>,
+    pub(super) label: String,
+    /// Boundary segments of the coplanar, connected triangles that were hit.
+    pub(super) outline: Vec<[[f32; 3]; 2]>,
+}
+
+/// The coplanar, edge-connected triangles around `seed` and their boundary
+/// segments (edges used by one triangle of the group).
+pub(super) fn coplanar_face(scene: &SolidScene, seed: usize) -> (Vec<usize>, Vec<[[f32; 3]; 2]>) {
+    let [a, b, c] = scene.triangles[seed];
+    let Some(normal) = triangle_normal(a, b, c).map(unit) else {
+        return (vec![seed], Vec::new());
+    };
+    let offset = dot3(normal, a);
+    let coplanar: Vec<usize> = (0..scene.triangles.len())
+        .filter(|&index| {
+            let [p, q, r] = scene.triangles[index];
+            triangle_normal(p, q, r).is_some_and(|n| dot3(unit(n), normal) > 0.9999)
+                && [p, q, r]
+                    .iter()
+                    .all(|v| (dot3(normal, *v) - offset).abs() < 1e-3)
+        })
+        .collect();
+    let key = |p: [f32; 3]| p.map(f32::to_bits);
+    let edge_key = |p: [f32; 3], q: [f32; 3]| {
+        let (u, v) = (key(p), key(q));
+        if u <= v { (u, v) } else { (v, u) }
+    };
+    let mut group = vec![seed];
+    let mut in_group = std::collections::HashSet::from([seed]);
+    let mut edges = std::collections::HashSet::new();
+    for [p, q, r] in [scene.triangles[seed]] {
+        for (u, v) in [(p, q), (q, r), (r, p)] {
+            edges.insert(edge_key(u, v));
+        }
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &index in &coplanar {
+            if in_group.contains(&index) {
+                continue;
+            }
+            let [p, q, r] = scene.triangles[index];
+            if [(p, q), (q, r), (r, p)]
+                .iter()
+                .any(|&(u, v)| edges.contains(&edge_key(u, v)))
+            {
+                in_group.insert(index);
+                group.push(index);
+                for (u, v) in [(p, q), (q, r), (r, p)] {
+                    edges.insert(edge_key(u, v));
+                }
+                changed = true;
+            }
+        }
+    }
+    let mut counts: std::collections::HashMap<_, (usize, [[f32; 3]; 2])> =
+        std::collections::HashMap::new();
+    for &index in &group {
+        let [p, q, r] = scene.triangles[index];
+        for (u, v) in [(p, q), (q, r), (r, p)] {
+            counts.entry(edge_key(u, v)).or_insert((0, [u, v])).0 += 1;
+        }
+    }
+    let outline = counts
+        .into_values()
+        .filter(|(count, _)| *count == 1)
+        .map(|(_, segment)| segment)
+        .collect();
+    (group, outline)
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn unit(v: [f32; 3]) -> [f32; 3] {
+    let length = dot3(v, v).sqrt().max(1e-12);
+    v.map(|c| c / length)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -225,6 +329,109 @@ impl App {
             _ => None,
         };
         self.solid_drag.is_some()
+    }
+
+    /// The planar face under the cursor in the 3D preview.
+    pub(super) fn face_hover(&self, layout: Layout) -> Option<FaceHover> {
+        if !self.solid_preview
+            || self.projects_page.is_some()
+            || !layout.viewport.contains(self.cursor.x, self.cursor.y)
+        {
+            return None;
+        }
+        let (scene, projector) = self.solid_projector(layout)?;
+        let (index, _, hit) = projector.pick_triangle(&scene, self.cursor)?;
+        let [a, b, c] = scene.triangles[index];
+        let normal = triangle_normal(a, b, c)?;
+        let (_, outline) = coplanar_face(&scene, index);
+        let picked = self.project.as_ref()?.face_at(hit, normal);
+        Some(FaceHover {
+            label: picked.as_ref().map_or_else(
+                || "FACE (NOT ON AN EXTRUSION PRISM)".into(),
+                |(_, label)| label.to_uppercase(),
+            ),
+            face: picked.map(|(face, _)| face),
+            outline,
+        })
+    }
+
+    pub(super) fn update_face_hover(&mut self) {
+        if self.more_open || self.solid_drag.is_some() {
+            return;
+        }
+        self.hovered_face = self.face_hover(self.layout());
+    }
+
+    pub(super) fn paint_face_hover(
+        &self,
+        painter: &mut Painter,
+        layout: Layout,
+        projector: &SolidProjector,
+    ) {
+        let Some(hover) = self
+            .face_hover(layout)
+            .or_else(|| self.hovered_face.clone().filter(|_| self.more_open))
+        else {
+            return;
+        };
+        let color = if hover.face.is_some() {
+            FACE_HOVER
+        } else {
+            MUTED
+        };
+        for [a, b] in &hover.outline {
+            let (a, b) = (projector.screen(*a), projector.screen(*b));
+            painter.line(a[0], a[1], b[0], b[1], 3.0, color);
+        }
+        painter.text(
+            layout.viewport.x + 18.0,
+            layout.viewport.y + 68.0,
+            &if hover.face.is_some() {
+                format!("{}  |  4 SKETCH ON FACE", hover.label)
+            } else {
+                hover.label
+            },
+            1.0,
+            color,
+        );
+    }
+
+    /// Creates a sketch on the hovered extrusion face and opens it (key 4).
+    pub(super) fn sketch_on_face(&mut self) {
+        self.more_open = false;
+        if !self.solid_preview {
+            self.status_message = "Sketch on face: hover a face in the 3D preview (Tab)".into();
+            return;
+        }
+        let hover = self
+            .face_hover(self.layout())
+            .or_else(|| self.hovered_face.clone());
+        let Some(face) = hover.as_ref().and_then(|hover| hover.face.clone()) else {
+            self.status_message = "Sketch on face: hover a planar face of an extrusion".into();
+            return;
+        };
+        self.document.finish_drag();
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        match project.create_sketch_on_face(&self.document, &face) {
+            Ok(document) => {
+                self.document = document;
+                self.solid_preview = false;
+                self.selected_profile = 0;
+                self.editing = None;
+                self.hovered_face = None;
+                self.face_context = true;
+                self.status_message = format!(
+                    "Created {} on {}  |  5 toggles body context  |  Ctrl+S to save",
+                    project
+                        .sketch_name(project.active_sketch())
+                        .unwrap_or("Sketch"),
+                    hover.map_or_else(String::new, |hover| hover.label.to_lowercase())
+                );
+            }
+            Err(error) => self.status_message = format!("Sketch on face: {error}"),
+        }
     }
 
     pub(super) fn cycle_solid(&mut self, direction: isize) {

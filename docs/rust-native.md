@@ -527,8 +527,9 @@ Pass a `.pcad` path to open a v4 project or start a new one. Ctrl+S saves
 supported reference-plane sketch projects in the existing v4 project format. The native
 app opens the selected top-level part when `selectedPath` names one, preserves
 other project documents, and refuses to save when the file changed
-on disk. Projects with unsupported sketch entities, constraints, face-based
-sketches, or solid features open read-only until those features are ported.
+on disk. Projects with unsupported sketch entities, constraints, or solid
+features open read-only until those features are ported. Face sketches open
+editable when their face still exists on the supporting extrusion.
 Rotated rectangle primitives from the web app can now be opened, selected,
 dimensioned, moved, scaled, rendered, and saved while preserving their angle.
 The native rectangle drawing tool starts axis-aligned; use Rotate to turn it.
@@ -596,7 +597,40 @@ Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion wit
 that body. The shaded preview and STL export use the evaluated Boolean mesh.
 The Project panel lists each extrusion feature; select the cut or join
 feature to edit its depth or delete it. Earlier features with dependent cuts or
-joins cannot be deleted in isolation. Face sketches and chamfers still need native support.
+joins cannot be deleted in isolation. Chamfers still need native support.
+
+### Sketches on faces
+
+In the 3D preview, hovering a planar face outlines it in yellow (the
+evaluated mesh is ray-cast under the cursor and its coplanar, edge-connected
+triangles are grouped into one face) and names it, e.g. **TOP FACE**. Press
+**4** or **MORE → SKETCH ON FACE** to add a sketch on that face and open it.
+Faces that do not belong to an extrusion prism (for example the wall of a
+cut) are outlined in grey and cannot carry a sketch.
+
+The face sketch is saved like the web app's: a graph `face` node
+`face-<extrudeId>-<faceId>` with `sourceId` (the extrusion) and `faceId`
+(`<extrudeId>-solid-face-<n>`), targeted by the sketch's `targetId`. Faces and
+plane frames follow `getExtrudedFaceDescriptors` in `src/cad/extrude.ts`: one
+side face per profile point (outer loop, then holes), then the bottom and top
+caps. A side face's origin is its first profile point, x runs along the edge,
+y along the extrusion normal and the normal is x × y; caps keep the source
+sketch's axes, the bottom with a negated normal, the top moved by the depth.
+Frames are recomputed from the graph on every evaluation, so a face sketch
+follows its source when that extrusion's depth changes, as on the web.
+
+While a face sketch is open, the supporting extrusion's edges are projected
+into the sketch plane and drawn dashed between the grid and the sketch (web
+`sketchSupportEdges`); their ends and midpoints snap like sketch geometry.
+Press **5** to hide or show this context. They are display references only and
+take no relations.
+
+**X**, **Shift+J** and **Shift+X** on a face sketch extrude along the face
+normal: new bodies and joins grow outward, cuts run into the body from the
+face. The result joins the same Boolean evaluation as reference-plane
+extrusions. The web graph has no direction field and the web part view does
+not evaluate graph cuts, so the inward cut direction is a native rule; faces
+of such cuts are not offered for further face sketches.
 In the 3D preview, press Delete to remove the selected extrusion. Its graph and
 feature-tree references are removed; when the sketch has no remaining extrusion,
 its geometry is editable again. Supported extrusion projects reopen without a
@@ -651,7 +685,9 @@ Library crate (`rust/src/lib.rs`):
   `geometry.rs` (curve intersections and boundaries), `tests.rs`,
   `dimension_tests.rs`.
 - `project.rs` (`.pcad` load/save, parts, extrusion profiles; dimension
-  round-trip tests in `project/dimension_tests.rs`), `solver.rs`,
+  round-trip tests in `project/dimension_tests.rs`), `project/face.rs`
+  (plane frames, web face descriptors, face lookup, face sketches and their
+  support edges; tests in `project/face_tests.rs`), `solver.rs`,
   `sketch_value.rs` (dimension expressions and sketch variables),
   `spline.rs`, `stl.rs` (body triangles, ASCII/binary STL, numbered
   writes), `threemf.rs` (3MF package). `lib.rs` also hosts `roundtrip` and
@@ -667,7 +703,7 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   arc tool and smooth join key),
   `pattern.rs` (linear/circular pattern prompts and center pick),
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
-  preview projection, dragging and painting), `view_sketch.rs` (sketch grid
+  preview projection, dragging, face picking and painting), `view_sketch.rs` (sketch grid
   and shape painting, dimension labels), `tests.rs`.
 - `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
 
@@ -696,6 +732,10 @@ Two tests guard against format drift between the apps:
   come back with identical relations and variables. These parts are skipped,
   with a warning, when `cargo` is not installed. `rust/fixtures/dimensions.pcad`
   holds every dimension kind the native app writes, so both loaders check it.
+  `rust/fixtures/face-sketch.pcad` has a pocket cut from a top-face sketch and
+  a boss joined from a side-face sketch; the TypeScript test checks the web
+  resolves the same face frames as `project/face_tests.rs`, and a web-built
+  face sketch keeps its face target through `--roundtrip`.
 
 ## Isolated UI check
 
@@ -793,6 +833,10 @@ captures the live preview (`rust-native-tangent-arc-preview.png`), places the
 arc, then smooth-joins a second line to the first line's start with `.`
 (`rust-native-tangent-arc.png`) and checks the two saved `smoothJoin`
 relations.
+A face sketch scenario extrudes a rectangle, hovers its top face
+(`rust-native-face-hover.png`), presses 4, draws a circle over the projected
+block outline (`rust-native-face-sketch.png`), cuts it with Shift+X
+(`rust-native-face-cut.png`) and checks the saved `face` node and cut.
 It does not open a host desktop
 window.
 

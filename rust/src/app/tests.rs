@@ -594,3 +594,47 @@ fn tangent_arc_tool_and_smooth_join_key() {
     app.smooth_join_key();
     assert!(!app.document.smooth_joins.contains_key(&(2, 0)));
 }
+
+#[test]
+fn hovering_picks_the_top_face_and_key_4_sketches_on_it() {
+    let mut app = App::with_project(Path::new("fixtures/extruded-rectangle.pcad")).unwrap();
+    let layout = app.layout();
+    let (scene, projector) = app.solid_projector(layout).unwrap();
+    let top = scene
+        .vertices
+        .iter()
+        .map(|v| v[2])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let cap: Vec<_> = scene
+        .vertices
+        .iter()
+        .filter(|v| (v[2] - top).abs() < 1e-4)
+        .collect();
+    let center: [f32; 3] =
+        std::array::from_fn(|axis| cap.iter().map(|v| v[axis]).sum::<f32>() / cap.len() as f32);
+    let screen = projector.screen(center);
+    app.cursor = Point {
+        x: screen[0],
+        y: screen[1],
+    };
+    let (index, _, hit) = projector.pick_triangle(&scene, app.cursor).unwrap();
+    assert!((hit[2] - top).abs() < 1e-3, "ray hits the top cap: {hit:?}");
+    let [a, b, c] = scene.triangles[index];
+    assert!(triangle_normal(a, b, c).unwrap()[2] > 0.0);
+    let (group, outline) = coplanar_face(&scene, index);
+    assert!(group.len() >= 2);
+    assert!(
+        outline
+            .iter()
+            .all(|[a, b]| (a[2] - top).abs() < 1e-4 && (b[2] - top).abs() < 1e-4)
+    );
+    let hover = app.face_hover(layout).unwrap();
+    assert_eq!(hover.label, "TOP FACE");
+    let face = hover.face.clone().unwrap();
+    assert!(face.face_id.ends_with("-solid-face-6"));
+    app.sketch_on_face();
+    assert!(!app.solid_preview, "{}", app.status_message);
+    let project = app.project.as_ref().unwrap();
+    assert_eq!(project.sketch_face(project.active_sketch()), Some(&face));
+    assert_eq!(app.document.reference_edges.len(), outline.len());
+}
