@@ -97,6 +97,7 @@ per-instance selection and export.
 
 1. (Done) Split `model.rs` and `main.rs` into modules by concern; clippy is
    clean with `--all-targets` and blocking in CI.
-2. Unit tests for `renderer.rs` and for input handling.
+2. (Done) Unit tests for `renderer.rs` (`Painter` geometry and text) and
+   for input handling (`app/input_tests.rs` drives `App` headlessly).
 3. Restructure `rust-native.md` into sections and add a Native column to
    `sketch-parity.md`.

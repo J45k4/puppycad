@@ -706,8 +706,37 @@ impl ApplicationHandler for App {
         if self.window.as_ref().is_none_or(|window| window.id() != id) {
             return;
         }
+        let exit = match event {
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed {
+                    self.handle_key(KeyPress {
+                        physical_key: event.physical_key,
+                        text: event.text,
+                    });
+                }
+                false
+            }
+            event => self.handle_window_event(event),
+        };
+        if exit {
+            event_loop.exit();
+        }
+    }
+}
+
+/// The parts of a `winit` key press the app reads. `winit::event::KeyEvent`
+/// cannot be built outside winit, so tests drive `App::handle_key` with this.
+pub(super) struct KeyPress {
+    pub physical_key: PhysicalKey,
+    pub text: Option<winit::keyboard::SmolStr>,
+}
+
+impl App {
+    /// Handle every window event except key presses (see `handle_key`).
+    /// Returns true when the event loop should exit.
+    pub(super) fn handle_window_event(&mut self, event: WindowEvent) -> bool {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => return true,
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
@@ -816,1073 +845,6 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if self.projects_page.is_some() {
-                        let layout = self.layout();
-                        match code {
-                            KeyCode::Escape => self.close_projects_page(),
-                            KeyCode::ArrowDown => self.select_project_row(1, layout),
-                            KeyCode::ArrowUp => self.select_project_row(-1, layout),
-                            KeyCode::Enter | KeyCode::NumpadEnter => {
-                                if let Some(index) =
-                                    self.projects_page.as_ref().map(|page| page.selected)
-                                {
-                                    self.open_listed_project(index);
-                                }
-                            }
-                            KeyCode::Backspace => self.show_parent_folder(),
-                            KeyCode::KeyS
-                                if self.modifiers.control_key() || self.modifiers.super_key() =>
-                            {
-                                self.save_project()
-                            }
-                            KeyCode::PageDown => self.select_project_row(
-                                project_page_visible_rows(layout) as isize,
-                                layout,
-                            ),
-                            KeyCode::PageUp => self.select_project_row(
-                                -(project_page_visible_rows(layout) as isize),
-                                layout,
-                            ),
-                            _ => {}
-                        }
-                        self.redraw();
-                        return;
-                    }
-                    if self.name_edit.is_some() {
-                        match code {
-                            KeyCode::Enter | KeyCode::NumpadEnter => self.finish_rename(),
-                            KeyCode::Escape => {
-                                self.name_edit = None;
-                                self.status_message = "Rename cancelled".into();
-                            }
-                            KeyCode::Backspace => {
-                                if let Some(edit) = &mut self.name_edit {
-                                    edit.buffer.pop();
-                                }
-                            }
-                            KeyCode::KeyA
-                                if self.modifiers.control_key() || self.modifiers.super_key() =>
-                            {
-                                if let Some(edit) = &mut self.name_edit {
-                                    edit.buffer.clear();
-                                }
-                            }
-                            _ if !self.modifiers.control_key() && !self.modifiers.super_key() => {
-                                if let (Some(edit), Some(text)) = (&mut self.name_edit, &event.text)
-                                {
-                                    for ch in text.chars() {
-                                        if !ch.is_control() && edit.buffer.chars().count() < 80 {
-                                            edit.buffer.push(ch);
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                        self.redraw();
-                        return;
-                    }
-                    if self.editing.is_some() {
-                        match code {
-                            KeyCode::Enter | KeyCode::NumpadEnter => self.finish_dimension_edit(),
-                            KeyCode::Escape => {
-                                self.editing = None;
-                                self.corner_pair = None;
-                                self.pattern_prompt = None;
-                                self.status_message = "Dimension edit cancelled".into();
-                            }
-                            KeyCode::Tab
-                                if self.editing.as_ref().is_some_and(|edit| {
-                                    matches!(
-                                        edit.field,
-                                        EditField::ChamferFirst | EditField::ChamferSecond
-                                    )
-                                }) =>
-                            {
-                                self.toggle_chamfer_mode();
-                                if let Some(edit) = &mut self.editing {
-                                    edit.field = EditField::ChamferFirst;
-                                    edit.buffer.clear();
-                                }
-                                self.status_message = format!(
-                                    "Chamfer mode: {}  |  type the first setback in mm",
-                                    self.corner_values.mode.name()
-                                );
-                            }
-                            KeyCode::Backspace => {
-                                if let Some(editing) = &mut self.editing {
-                                    editing.buffer.pop();
-                                }
-                            }
-                            _ if !self.modifiers.control_key() && !self.modifiers.super_key() => {
-                                let pattern_signed = self.pattern_step_signed();
-                                if let (Some(editing), Some(text)) =
-                                    (&mut self.editing, &event.text)
-                                {
-                                    for ch in text.chars() {
-                                        if matches!(
-                                            editing.field,
-                                            EditField::Label(_)
-                                                | EditField::Dimension(_)
-                                                | EditField::Variable(_)
-                                        ) {
-                                            let allowed = expression_char(ch)
-                                                || (ch == '='
-                                                    && matches!(
-                                                        editing.field,
-                                                        EditField::Variable(_)
-                                                    ));
-                                            if allowed && editing.buffer.len() < 64 {
-                                                editing.buffer.push(ch);
-                                            }
-                                            continue;
-                                        }
-                                        if (ch.is_ascii_digit()
-                                            || ch == '.'
-                                            || ((ch == '-' || ch == '+')
-                                                && editing.buffer.is_empty()
-                                                && matches!(
-                                                    editing.field,
-                                                    EditField::MoveX
-                                                        | EditField::MoveY
-                                                        | EditField::RotateAngle
-                                                        | EditField::RelationAngle
-                                                        | EditField::RadialDifference
-                                                        | EditField::OffsetCreate
-                                                        | EditField::OffsetDistance
-                                                        | EditField::Dimension(
-                                                            DimensionField::ArcSweep
-                                                        )
-                                                        | EditField::Dimension(
-                                                            DimensionField::Rotation
-                                                        )
-                                                        | EditField::CenterX
-                                                        | EditField::CenterY
-                                                        | EditField::SplineX
-                                                        | EditField::SplineY
-                                                        | EditField::PointX
-                                                        | EditField::PointY
-                                                )
-                                                || (matches!(
-                                                    editing.field,
-                                                    EditField::PatternValue
-                                                ) && pattern_signed)))
-                                            && editing.buffer.len() < 16
-                                        {
-                                            editing.buffer.push(ch);
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                        self.redraw();
-                        return;
-                    }
-                    match code {
-                        KeyCode::Escape if self.pick.is_some() => {
-                            self.pick = None;
-                            self.status_message = "Cancelled".into();
-                        }
-                        KeyCode::KeyS
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            self.begin_symmetry();
-                        }
-                        KeyCode::KeyI
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            self.begin_mirror();
-                        }
-                        KeyCode::Enter | KeyCode::NumpadEnter
-                            if matches!(
-                                self.document.tool,
-                                Tool::FitSpline | Tool::ControlSpline
-                            ) =>
-                        {
-                            self.finish_spline(self.modifiers.shift_key());
-                        }
-                        KeyCode::F2 => self.begin_rename(if self.modifiers.shift_key() {
-                            NameTarget::Sketch
-                        } else {
-                            NameTarget::Part
-                        }),
-                        KeyCode::Tab => {
-                            if self
-                                .project
-                                .as_ref()
-                                .and_then(ProjectFile::extrusion_previews)
-                                .is_some()
-                            {
-                                self.solid_preview = !self.solid_preview;
-                                if !self.solid_preview {
-                                    self.refresh_reference_edges();
-                                }
-                                self.status_message = if self.solid_preview {
-                                    "3D extrusion preview  |  Tab: sketch"
-                                } else {
-                                    "Sketch view  |  Tab: 3D preview"
-                                }
-                                .into();
-                            }
-                        }
-                        KeyCode::KeyD
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
-                        {
-                            if !self.read_only() && self.document.copy_selected(self.move_offset) {
-                                self.status_message = "Copied geometry  |  Ctrl+S to save".into();
-                            }
-                        }
-                        KeyCode::KeyV
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(
-                                            shape,
-                                            Shape::Line { .. }
-                                                | Shape::Circle { .. }
-                                                | Shape::Arc { .. }
-                                                | Shape::Ellipse { .. }
-                                                | Shape::EllipticArc { .. }
-                                                | Shape::Spline { .. }
-                                        )
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => match self
-                                    .document
-                                    .toggle_point_on_curve_with(source)
-                                {
-                                    Ok(true) => "Point on curve linked  |  Ctrl+S to save".into(),
-                                    Ok(false) => "Point on curve unlinked".into(),
-                                    Err(error) => format!("Point on curve: {error}"),
-                                },
-                                None => "Hover a line or curve".into(),
-                            };
-                        }
-                        KeyCode::KeyV => self.select_tool(Tool::Select),
-                        KeyCode::KeyI if !self.read_only() && !self.solid_preview => {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let closed_curve = self.document.selected.and_then(|id| {
-                                self.document
-                                    .shapes
-                                    .iter()
-                                    .find(|shape| shape.id() == id)
-                                    .and_then(|shape| {
-                                        matches!(
-                                            shape,
-                                            Shape::Circle { .. } | Shape::Ellipse { .. }
-                                        )
-                                        .then(|| (id, shape.clone()))
-                                    })
-                            });
-                            if let Some((id, shape)) = closed_curve {
-                                let on_curve = match &shape {
-                                    Shape::Circle { center, radius, .. } => {
-                                        (world.distance(*center) - radius).abs()
-                                            <= 8.0 / self.document.zoom.max(0.2)
-                                    }
-                                    Shape::Ellipse {
-                                        center,
-                                        rx,
-                                        ry,
-                                        rotation,
-                                        ..
-                                    } => {
-                                        let angle = Shape::ellipse_parameter_angle(
-                                            *center, *rx, *ry, *rotation, world,
-                                        );
-                                        world.distance(Shape::elliptic_arc_point(
-                                            *center, *rx, *ry, *rotation, angle, 0.0, 0.0,
-                                        )) <= 8.0 / self.document.zoom.max(0.2)
-                                    }
-                                    _ => false,
-                                };
-                                if let Some((_, first)) = self
-                                    .split_circle_start
-                                    .filter(|(pending_id, _)| *pending_id == id)
-                                {
-                                    let split = match shape {
-                                        Shape::Circle { .. } => {
-                                            self.document.split_selected_circle(first, world)
-                                        }
-                                        Shape::Ellipse { .. } => {
-                                            self.document.split_selected_ellipse(first, world)
-                                        }
-                                        _ => unreachable!(),
-                                    };
-                                    self.status_message = match split {
-                                        Ok(_) => {
-                                            self.split_circle_start = None;
-                                            "Curve split  |  Ctrl+Z to undo  |  Ctrl+S to save"
-                                                .into()
-                                        }
-                                        Err(error) => format!("Split: {error}"),
-                                    };
-                                } else if on_curve {
-                                    self.split_circle_start = Some((id, world));
-                                    self.status_message =
-                                        "Curve split: choose second point  |  Esc: cancel".into();
-                                } else {
-                                    self.status_message =
-                                        "Split: move the pointer onto the selected curve".into();
-                                }
-                            } else {
-                                self.split_circle_start = None;
-                                self.status_message =
-                                    match self.document.split_selected_curve(world) {
-                                        Ok(_) => {
-                                            "Curve split  |  Ctrl+Z to undo  |  Ctrl+S to save"
-                                                .into()
-                                        }
-                                        Err(error) => format!("Split: {error}"),
-                                    };
-                            }
-                        }
-                        KeyCode::KeyQ
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview
-                                && !self.read_only() =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(
-                                            shape,
-                                            Shape::Line { .. }
-                                                | Shape::Circle { .. }
-                                                | Shape::Arc { .. }
-                                                | Shape::Ellipse { .. }
-                                                | Shape::EllipticArc { .. }
-                                        )
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => {
-                                    match self.document.toggle_external_tangent_with(source) {
-                                        Ok(true) => "Tangent set  |  Ctrl+S to save".into(),
-                                        Ok(false) => "Tangent removed".into(),
-                                        Err(error) => format!("Tangent: {error}"),
-                                    }
-                                }
-                                None => "Hover a line or curve for tangent".into(),
-                            };
-                        }
-                        KeyCode::KeyQ if !self.read_only() && !self.solid_preview => {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            self.status_message = match self.document.trim_selected_curve(world) {
-                                Ok(_) => {
-                                    "Curve trimmed  |  Ctrl+Z to undo  |  Ctrl+S to save".into()
-                                }
-                                Err(error) => format!("Trim: {error}"),
-                            };
-                        }
-                        KeyCode::KeyU
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            self.begin_offset();
-                        }
-                        KeyCode::Comma
-                            if !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview =>
-                        {
-                            self.start_tangent_arc();
-                        }
-                        KeyCode::Period
-                            if !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            self.smooth_join_key();
-                        }
-                        KeyCode::KeyZ
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview =>
-                        {
-                            self.begin_pattern(PatternTool::Linear);
-                        }
-                        KeyCode::Semicolon
-                            if !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview =>
-                        {
-                            self.begin_pattern(PatternTool::Circular);
-                        }
-                        KeyCode::KeyU if !self.read_only() && !self.solid_preview => {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            self.status_message = match self.document.extend_selected_curve(world) {
-                                Ok(_) => {
-                                    "Curve extended  |  Ctrl+Z to undo  |  Ctrl+S to save".into()
-                                }
-                                Err(error) => format!("Extend: {error}"),
-                            };
-                        }
-                        KeyCode::KeyW | KeyCode::KeyH
-                            if self.modifiers.shift_key()
-                                && self.document.tool != Tool::CenterArc
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            self.corner_key(if code == KeyCode::KeyW {
-                                CornerKind::Fillet
-                            } else {
-                                CornerKind::Chamfer
-                            });
-                        }
-                        KeyCode::KeyH | KeyCode::KeyJ
-                            if !self.read_only()
-                                && !self.solid_preview
-                                && !self.modifiers.shift_key() =>
-                        {
-                            let axis = if code == KeyCode::KeyH {
-                                AxisConstraint::Horizontal
-                            } else {
-                                AxisConstraint::Vertical
-                            };
-                            self.status_message = match self.document.toggle_axis_constraint(axis) {
-                                Ok(true) => {
-                                    format!("{} constraint set  |  Ctrl+S to save", axis.name())
-                                }
-                                Ok(false) => format!("{} constraint removed", axis.name()),
-                                Err(error) => format!("Constraint: {error}"),
-                            };
-                        }
-                        KeyCode::BracketLeft if !self.solid_preview => {
-                            self.cycle_profile(-1);
-                        }
-                        KeyCode::BracketRight if !self.solid_preview => {
-                            self.cycle_profile(1);
-                        }
-                        KeyCode::BracketLeft if self.solid_preview => self.cycle_solid(-1),
-                        KeyCode::BracketRight if self.solid_preview => self.cycle_solid(1),
-                        KeyCode::KeyX if self.modifiers.shift_key() => {
-                            self.create_extrusion("cut");
-                        }
-                        KeyCode::KeyJ if self.modifiers.shift_key() => {
-                            self.create_extrusion("join");
-                        }
-                        KeyCode::KeyX
-                            if !self.modifiers.control_key() && !self.modifiers.super_key() =>
-                        {
-                            self.create_extrusion("newBody");
-                        }
-                        KeyCode::KeyL if !self.modifiers.shift_key() => {
-                            self.select_tool(Tool::Line)
-                        }
-                        KeyCode::KeyR
-                            if self.selected_dimension.is_some()
-                                && !self.modifiers.shift_key()
-                                && !self.solid_preview =>
-                        {
-                            self.toggle_selected_reference();
-                        }
-                        KeyCode::KeyR if self.modifiers.shift_key() => {
-                            self.select_tool(Tool::CenterRectangle)
-                        }
-                        KeyCode::KeyR => self.select_tool(Tool::Rectangle),
-                        KeyCode::KeyT if self.modifiers.shift_key() => {
-                            self.select_tool(Tool::ThreePointCenterRectangle)
-                        }
-                        KeyCode::KeyT => self.select_tool(Tool::ThreePointRectangle),
-                        KeyCode::KeyC if self.modifiers.shift_key() => {
-                            self.select_tool(Tool::ThreePointCircle)
-                        }
-                        KeyCode::KeyC => self.select_tool(Tool::Circle),
-                        KeyCode::KeyY
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview
-                                && !self.read_only() =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(shape, Shape::Circle { .. } | Shape::Arc { .. })
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => match self
-                                    .document
-                                    .toggle_internal_tangent_with(source)
-                                {
-                                    Ok(true) => "Internal tangent set  |  Ctrl+S to save".into(),
-                                    Ok(false) => "Internal tangent removed".into(),
-                                    Err(error) => format!("Internal tangent: {error}"),
-                                },
-                                None => "Hover another circle or arc for internal tangent".into(),
-                            };
-                        }
-                        KeyCode::KeyD
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview
-                                && !self.read_only() =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(shape, Shape::Circle { .. })
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => {
-                                    match self.document.toggle_radius_difference_with(source) {
-                                        Ok(true) => "Radial distance set  |  Ctrl+S to save".into(),
-                                        Ok(false) => "Radial distance removed".into(),
-                                        Err(error) => format!("Radial distance: {error}"),
-                                    }
-                                }
-                                None => "Hover another circle for radial distance".into(),
-                            };
-                        }
-                        KeyCode::KeyO
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview
-                                && !self.read_only() =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(
-                                            shape,
-                                            Shape::Circle { .. }
-                                                | Shape::Arc { .. }
-                                                | Shape::Ellipse { .. }
-                                                | Shape::EllipticArc { .. }
-                                        )
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => {
-                                    match self.document.toggle_concentric_with(source) {
-                                        Ok(true) => "Concentric set  |  Ctrl+S to save".into(),
-                                        Ok(false) => "Concentric removed".into(),
-                                        Err(error) => format!("Concentric: {error}"),
-                                    }
-                                }
-                                None => "Hover another circle, arc or ellipse".into(),
-                            };
-                        }
-                        KeyCode::KeyE
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview
-                                && !self.read_only() =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(
-                                            shape,
-                                            Shape::Line { .. }
-                                                | Shape::Circle { .. }
-                                                | Shape::Arc { .. }
-                                                | Shape::Ellipse { .. }
-                                                | Shape::EllipticArc { .. }
-                                        )
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => {
-                                    let circular = selected
-                                        .and_then(|id| {
-                                            self.document
-                                                .shapes
-                                                .iter()
-                                                .find(|shape| shape.id() == id)
-                                        })
-                                        .is_some_and(|shape| {
-                                            matches!(
-                                                shape,
-                                                Shape::Circle { .. } | Shape::Arc { .. }
-                                            )
-                                        });
-                                    let elliptical = selected
-                                        .and_then(|id| {
-                                            self.document
-                                                .shapes
-                                                .iter()
-                                                .find(|shape| shape.id() == id)
-                                        })
-                                        .is_some_and(|shape| {
-                                            matches!(
-                                                shape,
-                                                Shape::Ellipse { .. } | Shape::EllipticArc { .. }
-                                            )
-                                        });
-                                    match if elliptical {
-                                        self.document.toggle_equal_ellipse_with(source)
-                                    } else if circular {
-                                        self.document.toggle_equal_radius_with(source)
-                                    } else {
-                                        self.document.toggle_equal_line_with(source)
-                                    } {
-                                        Ok(true) => "Equal set  |  Ctrl+S to save".into(),
-                                        Ok(false) => "Equal removed".into(),
-                                        Err(error) => format!("Equal: {error}"),
-                                    }
-                                }
-                                None => "Hover another compatible curve for Equal".into(),
-                            };
-                        }
-                        KeyCode::KeyE
-                            if !self.modifiers.control_key() && !self.modifiers.super_key() =>
-                        {
-                            self.select_tool(Tool::Ellipse)
-                        }
-                        KeyCode::KeyA if self.modifiers.shift_key() => {
-                            self.select_tool(Tool::CenterArc)
-                        }
-                        KeyCode::KeyA => self.select_tool(Tool::Arc),
-                        KeyCode::KeyW if self.document.tool == Tool::CenterArc => {
-                            self.document.arc_clockwise = !self.document.arc_clockwise;
-                            self.status_message = if self.document.arc_clockwise {
-                                "Center arc: clockwise sweep"
-                            } else {
-                                "Center arc: counterclockwise sweep"
-                            }
-                            .into();
-                        }
-                        code @ (KeyCode::KeyP | KeyCode::KeyN | KeyCode::KeyL | KeyCode::KeyB)
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.solid_preview
-                                && !self.read_only() =>
-                        {
-                            let kind = match code {
-                                KeyCode::KeyP => Some(LineRelationKind::Parallel),
-                                KeyCode::KeyN => Some(LineRelationKind::Perpendicular),
-                                KeyCode::KeyL => Some(LineRelationKind::Collinear),
-                                _ => None,
-                            };
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(shape, Shape::Line { .. })
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => match if let Some(kind) = kind {
-                                    self.document.toggle_line_relation_with(source, kind)
-                                } else {
-                                    self.document.toggle_line_angle_with(source)
-                                } {
-                                    Ok(true) => format!(
-                                        "{} set  |  Ctrl+S to save",
-                                        kind.map_or("angle", LineRelationKind::name)
-                                    ),
-                                    Ok(false) => format!(
-                                        "{} removed",
-                                        kind.map_or("angle", LineRelationKind::name)
-                                    ),
-                                    Err(error) => format!("Direction: {error}"),
-                                },
-                                None => "Hover another line for direction relation".into(),
-                            };
-                        }
-                        KeyCode::KeyP => self.select_tool(Tool::Point),
-                        KeyCode::KeyD => self.select_tool(Tool::Dimension),
-                        KeyCode::KeyG if self.modifiers.shift_key() => {
-                            self.snap_grid = !self.snap_grid;
-                            self.status_message = format!(
-                                "Grid snapping {}",
-                                if self.snap_grid { "on" } else { "off" }
-                            );
-                        }
-                        KeyCode::KeyG => self.select_tool(Tool::Polygon),
-                        KeyCode::KeyN => {
-                            self.snap_geometry = !self.snap_geometry;
-                            self.status_message = format!(
-                                "Geometry snapping {}",
-                                if self.snap_geometry { "on" } else { "off" }
-                            );
-                        }
-                        KeyCode::KeyS
-                            if !self.modifiers.control_key() && !self.modifiers.super_key() =>
-                        {
-                            self.select_tool(Tool::Slot)
-                        }
-                        KeyCode::KeyM
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(
-                                            shape,
-                                            Shape::Line { .. }
-                                                | Shape::Arc { .. }
-                                                | Shape::EllipticArc { .. }
-                                        )
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => match self.document.toggle_midpoint_with(source) {
-                                    Ok(true) => "Midpoint linked  |  Ctrl+S to save".into(),
-                                    Ok(false) => "Midpoint unlinked".into(),
-                                    Err(error) => format!("Midpoint: {error}"),
-                                },
-                                None => "Hover a line or arc midpoint".into(),
-                            };
-                        }
-                        KeyCode::KeyM => self.more_open = !self.more_open,
-                        KeyCode::KeyB => self.create_part(),
-                        KeyCode::KeyK => {
-                            if !self.read_only() {
-                                if self.modifiers.shift_key() {
-                                    let line_selected = self
-                                        .document
-                                        .selected
-                                        .and_then(|id| {
-                                            self.document
-                                                .shapes
-                                                .iter()
-                                                .find(|shape| shape.id() == id)
-                                        })
-                                        .is_some_and(|shape| {
-                                            matches!(
-                                                shape,
-                                                Shape::Line { .. } | Shape::Rectangle { .. }
-                                            )
-                                        });
-                                    let arc_selected = self
-                                        .document
-                                        .selected
-                                        .and_then(|id| {
-                                            self.document
-                                                .shapes
-                                                .iter()
-                                                .find(|shape| shape.id() == id)
-                                        })
-                                        .is_some_and(|shape| {
-                                            matches!(
-                                                shape,
-                                                Shape::Arc { .. } | Shape::EllipticArc { .. }
-                                            )
-                                        });
-                                    let anchored_shape_selected = self
-                                        .document
-                                        .selected
-                                        .and_then(|id| {
-                                            self.document
-                                                .shapes
-                                                .iter()
-                                                .find(|shape| shape.id() == id)
-                                        })
-                                        .is_some_and(|shape| {
-                                            matches!(
-                                                shape,
-                                                Shape::Ellipse { .. }
-                                                    | Shape::RotatedRectangle { .. }
-                                                    | Shape::Polygon { .. }
-                                                    | Shape::Capsule { .. }
-                                            )
-                                        });
-                                    let result = if line_selected {
-                                        let at = self
-                                            .document
-                                            .screen_to_world(self.cursor, self.viewport_origin());
-                                        self.document.toggle_fixed_line_endpoint_at(at)
-                                    } else if arc_selected {
-                                        let at = self
-                                            .document
-                                            .screen_to_world(self.cursor, self.viewport_origin());
-                                        self.document
-                                            .toggle_fixed_arc_anchor_at(at)
-                                            .map(|(_, enabled)| enabled)
-                                    } else if anchored_shape_selected {
-                                        let at = self
-                                            .document
-                                            .screen_to_world(self.cursor, self.viewport_origin());
-                                        self.document
-                                            .toggle_fixed_shape_anchor_at(at)
-                                            .map(|(_, enabled)| enabled)
-                                    } else {
-                                        self.document.toggle_fixed_anchor()
-                                    };
-                                    self.status_message = match result {
-                                        Ok(enabled) => format!(
-                                            "Fixed anchor {}  |  Ctrl+S to save",
-                                            if enabled { "on" } else { "off" }
-                                        ),
-                                        Err(error) => error,
-                                    };
-                                } else if let Some(enabled) = self.document.toggle_construction() {
-                                    self.status_message = format!(
-                                        "Construction {}  |  Ctrl+S to save",
-                                        if enabled { "on" } else { "off" }
-                                    );
-                                }
-                            }
-                        }
-                        KeyCode::Digit1 => self.create_sketch(SketchPlane::Top),
-                        KeyCode::Digit2 => self.create_sketch(SketchPlane::Front),
-                        KeyCode::Digit3 => self.create_sketch(SketchPlane::Right),
-                        KeyCode::Digit4 => self.sketch_on_face(),
-                        KeyCode::Digit5 => self.toggle_face_context(),
-                        KeyCode::KeyF
-                            if self.modifiers.shift_key()
-                                && !self.modifiers.control_key()
-                                && !self.modifiers.super_key()
-                                && !self.read_only()
-                                && !self.solid_preview =>
-                        {
-                            let world = self
-                                .document
-                                .screen_to_world(self.cursor, self.viewport_origin());
-                            let selected = self.document.selected;
-                            let source = self
-                                .document
-                                .shapes
-                                .iter()
-                                .rev()
-                                .find(|shape| {
-                                    Some(shape.id()) != selected
-                                        && matches!(
-                                            shape,
-                                            Shape::Line { .. }
-                                                | Shape::Circle { .. }
-                                                | Shape::Arc { .. }
-                                                | Shape::Ellipse { .. }
-                                                | Shape::EllipticArc { .. }
-                                                | Shape::Spline { .. }
-                                        )
-                                        && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
-                                })
-                                .map(Shape::id);
-                            self.status_message = match source {
-                                Some(source) => {
-                                    match self.document.toggle_normal_with(source, world) {
-                                        Ok(true) => "Normal set  |  Ctrl+S to save".into(),
-                                        Ok(false) => "Normal removed".into(),
-                                        Err(error) => format!("Normal: {error}"),
-                                    }
-                                }
-                                None => "Hover a separate line or curve for Normal".into(),
-                            };
-                        }
-                        KeyCode::KeyF if !self.solid_preview => {
-                            self.status_message = if self
-                                .document
-                                .fit_shapes(self.layout().viewport.w, self.layout().viewport.h)
-                            {
-                                "Sketch fitted to viewport".into()
-                            } else {
-                                "Draw geometry before fitting the sketch".into()
-                            };
-                        }
-                        KeyCode::Escape => {
-                            self.box_start = None;
-                            self.split_circle_start = None;
-                            self.corner_pick = None;
-                            self.dimension_start = None;
-                            self.selected_dimension = None;
-                            self.spline_points.clear();
-                            if self.document.cancel_drag() {
-                                self.status_message = "Move cancelled".into();
-                            } else {
-                                self.document.draft_start = None;
-                                self.document.draft_end = None;
-                                self.document.clear_selection();
-                            }
-                        }
-                        KeyCode::Delete | KeyCode::Backspace => {
-                            if self.solid_preview {
-                                if let Some(project) = &mut self.project {
-                                    match project.delete_extrusion_at(self.selected_solid) {
-                                        Ok(()) => {
-                                            let remaining = project
-                                                .extrusion_previews()
-                                                .map_or(0, |solids| solids.len());
-                                            self.selected_solid = self
-                                                .selected_solid
-                                                .min(remaining.saturating_sub(1));
-                                            self.solid_preview = remaining > 0;
-                                            self.status_message =
-                                                "Extrusion removed  |  Ctrl+S to save".into();
-                                        }
-                                        Err(error) => {
-                                            self.status_message =
-                                                format!("Delete extrusion: {error}")
-                                        }
-                                    }
-                                }
-                            } else if !self.read_only() {
-                                if let Some(key) = self.selected_dimension.take() {
-                                    self.status_message = match self.document.delete_dimension(key)
-                                    {
-                                        Ok(()) => "Dimension removed  |  Ctrl+S to save".into(),
-                                        Err(error) => format!("Dimension: {error}"),
-                                    };
-                                } else {
-                                    self.document.delete_selected();
-                                }
-                            }
-                        }
-                        KeyCode::KeyS
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
-                        {
-                            self.save_project();
-                        }
-                        KeyCode::PageDown
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
-                        {
-                            self.switch_part(1);
-                        }
-                        KeyCode::PageUp
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
-                        {
-                            self.switch_part(-1);
-                        }
-                        KeyCode::KeyE
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
-                        {
-                            if self.modifiers.alt_key() {
-                                self.export_3mf();
-                            } else if self.modifiers.shift_key() {
-                                self.export_stl(stl::StlFormat::Ascii);
-                            } else {
-                                self.export_stl(stl::StlFormat::Binary);
-                            }
-                        }
-                        KeyCode::KeyZ
-                            if self.modifiers.control_key() || self.modifiers.super_key() =>
-                        {
-                            if !self.read_only() {
-                                if self.modifiers.shift_key() {
-                                    self.document.redo();
-                                } else {
-                                    self.document.undo();
-                                }
-                            }
-                        }
-                        KeyCode::KeyY
-                            if (self.modifiers.control_key() || self.modifiers.super_key())
-                                && !self.read_only() =>
-                        {
-                            self.document.redo();
-                        }
-                        _ => {}
-                    }
-                    self.redraw();
-                }
-            }
             WindowEvent::RedrawRequested => {
                 let painter = self.paint();
                 if let Some(renderer) = &mut self.renderer {
@@ -1892,12 +854,979 @@ impl ApplicationHandler for App {
                             let size = self.window.as_ref().expect("window exists").inner_size();
                             renderer.resize(size.width, size.height);
                         }
-                        Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                        Err(wgpu::SurfaceError::OutOfMemory) => return true,
                         Err(error) => eprintln!("render: {error}"),
                     }
                 }
             }
             _ => {}
+        }
+        false
+    }
+
+    pub(super) fn handle_key(&mut self, event: KeyPress) {
+        if let PhysicalKey::Code(code) = event.physical_key {
+            if self.projects_page.is_some() {
+                let layout = self.layout();
+                match code {
+                    KeyCode::Escape => self.close_projects_page(),
+                    KeyCode::ArrowDown => self.select_project_row(1, layout),
+                    KeyCode::ArrowUp => self.select_project_row(-1, layout),
+                    KeyCode::Enter | KeyCode::NumpadEnter => {
+                        if let Some(index) = self.projects_page.as_ref().map(|page| page.selected) {
+                            self.open_listed_project(index);
+                        }
+                    }
+                    KeyCode::Backspace => self.show_parent_folder(),
+                    KeyCode::KeyS if self.modifiers.control_key() || self.modifiers.super_key() => {
+                        self.save_project()
+                    }
+                    KeyCode::PageDown => {
+                        self.select_project_row(project_page_visible_rows(layout) as isize, layout)
+                    }
+                    KeyCode::PageUp => self
+                        .select_project_row(-(project_page_visible_rows(layout) as isize), layout),
+                    _ => {}
+                }
+                self.redraw();
+                return;
+            }
+            if self.name_edit.is_some() {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => self.finish_rename(),
+                    KeyCode::Escape => {
+                        self.name_edit = None;
+                        self.status_message = "Rename cancelled".into();
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(edit) = &mut self.name_edit {
+                            edit.buffer.pop();
+                        }
+                    }
+                    KeyCode::KeyA if self.modifiers.control_key() || self.modifiers.super_key() => {
+                        if let Some(edit) = &mut self.name_edit {
+                            edit.buffer.clear();
+                        }
+                    }
+                    _ if !self.modifiers.control_key() && !self.modifiers.super_key() => {
+                        if let (Some(edit), Some(text)) = (&mut self.name_edit, &event.text) {
+                            for ch in text.chars() {
+                                if !ch.is_control() && edit.buffer.chars().count() < 80 {
+                                    edit.buffer.push(ch);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                self.redraw();
+                return;
+            }
+            if self.editing.is_some() {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => self.finish_dimension_edit(),
+                    KeyCode::Escape => {
+                        self.editing = None;
+                        self.corner_pair = None;
+                        self.pattern_prompt = None;
+                        self.status_message = "Dimension edit cancelled".into();
+                    }
+                    KeyCode::Tab
+                        if self.editing.as_ref().is_some_and(|edit| {
+                            matches!(
+                                edit.field,
+                                EditField::ChamferFirst | EditField::ChamferSecond
+                            )
+                        }) =>
+                    {
+                        self.toggle_chamfer_mode();
+                        if let Some(edit) = &mut self.editing {
+                            edit.field = EditField::ChamferFirst;
+                            edit.buffer.clear();
+                        }
+                        self.status_message = format!(
+                            "Chamfer mode: {}  |  type the first setback in mm",
+                            self.corner_values.mode.name()
+                        );
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(editing) = &mut self.editing {
+                            editing.buffer.pop();
+                        }
+                    }
+                    _ if !self.modifiers.control_key() && !self.modifiers.super_key() => {
+                        let pattern_signed = self.pattern_step_signed();
+                        if let (Some(editing), Some(text)) = (&mut self.editing, &event.text) {
+                            for ch in text.chars() {
+                                if matches!(
+                                    editing.field,
+                                    EditField::Label(_)
+                                        | EditField::Dimension(_)
+                                        | EditField::Variable(_)
+                                ) {
+                                    let allowed = expression_char(ch)
+                                        || (ch == '='
+                                            && matches!(editing.field, EditField::Variable(_)));
+                                    if allowed && editing.buffer.len() < 64 {
+                                        editing.buffer.push(ch);
+                                    }
+                                    continue;
+                                }
+                                if (ch.is_ascii_digit()
+                                    || ch == '.'
+                                    || ((ch == '-' || ch == '+')
+                                        && editing.buffer.is_empty()
+                                        && matches!(
+                                            editing.field,
+                                            EditField::MoveX
+                                                | EditField::MoveY
+                                                | EditField::RotateAngle
+                                                | EditField::RelationAngle
+                                                | EditField::RadialDifference
+                                                | EditField::OffsetCreate
+                                                | EditField::OffsetDistance
+                                                | EditField::Dimension(DimensionField::ArcSweep)
+                                                | EditField::Dimension(DimensionField::Rotation)
+                                                | EditField::CenterX
+                                                | EditField::CenterY
+                                                | EditField::SplineX
+                                                | EditField::SplineY
+                                                | EditField::PointX
+                                                | EditField::PointY
+                                        )
+                                        || (matches!(editing.field, EditField::PatternValue)
+                                            && pattern_signed)))
+                                    && editing.buffer.len() < 16
+                                {
+                                    editing.buffer.push(ch);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                self.redraw();
+                return;
+            }
+            match code {
+                KeyCode::Escape if self.pick.is_some() => {
+                    self.pick = None;
+                    self.status_message = "Cancelled".into();
+                }
+                KeyCode::KeyS
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    self.begin_symmetry();
+                }
+                KeyCode::KeyI
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    self.begin_mirror();
+                }
+                KeyCode::Enter | KeyCode::NumpadEnter
+                    if matches!(self.document.tool, Tool::FitSpline | Tool::ControlSpline) =>
+                {
+                    self.finish_spline(self.modifiers.shift_key());
+                }
+                KeyCode::F2 => self.begin_rename(if self.modifiers.shift_key() {
+                    NameTarget::Sketch
+                } else {
+                    NameTarget::Part
+                }),
+                KeyCode::Tab => {
+                    if self
+                        .project
+                        .as_ref()
+                        .and_then(ProjectFile::extrusion_previews)
+                        .is_some()
+                    {
+                        self.solid_preview = !self.solid_preview;
+                        if !self.solid_preview {
+                            self.refresh_reference_edges();
+                        }
+                        self.status_message = if self.solid_preview {
+                            "3D extrusion preview  |  Tab: sketch"
+                        } else {
+                            "Sketch view  |  Tab: 3D preview"
+                        }
+                        .into();
+                    }
+                }
+                KeyCode::KeyD if self.modifiers.control_key() || self.modifiers.super_key() => {
+                    if !self.read_only() && self.document.copy_selected(self.move_offset) {
+                        self.status_message = "Copied geometry  |  Ctrl+S to save".into();
+                    }
+                }
+                KeyCode::KeyV
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(
+                                    shape,
+                                    Shape::Line { .. }
+                                        | Shape::Circle { .. }
+                                        | Shape::Arc { .. }
+                                        | Shape::Ellipse { .. }
+                                        | Shape::EllipticArc { .. }
+                                        | Shape::Spline { .. }
+                                )
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_point_on_curve_with(source) {
+                            Ok(true) => "Point on curve linked  |  Ctrl+S to save".into(),
+                            Ok(false) => "Point on curve unlinked".into(),
+                            Err(error) => format!("Point on curve: {error}"),
+                        },
+                        None => "Hover a line or curve".into(),
+                    };
+                }
+                KeyCode::KeyV => self.select_tool(Tool::Select),
+                KeyCode::KeyI if !self.read_only() && !self.solid_preview => {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let closed_curve = self.document.selected.and_then(|id| {
+                        self.document
+                            .shapes
+                            .iter()
+                            .find(|shape| shape.id() == id)
+                            .and_then(|shape| {
+                                matches!(shape, Shape::Circle { .. } | Shape::Ellipse { .. })
+                                    .then(|| (id, shape.clone()))
+                            })
+                    });
+                    if let Some((id, shape)) = closed_curve {
+                        let on_curve = match &shape {
+                            Shape::Circle { center, radius, .. } => {
+                                (world.distance(*center) - radius).abs()
+                                    <= 8.0 / self.document.zoom.max(0.2)
+                            }
+                            Shape::Ellipse {
+                                center,
+                                rx,
+                                ry,
+                                rotation,
+                                ..
+                            } => {
+                                let angle = Shape::ellipse_parameter_angle(
+                                    *center, *rx, *ry, *rotation, world,
+                                );
+                                world.distance(Shape::elliptic_arc_point(
+                                    *center, *rx, *ry, *rotation, angle, 0.0, 0.0,
+                                )) <= 8.0 / self.document.zoom.max(0.2)
+                            }
+                            _ => false,
+                        };
+                        if let Some((_, first)) = self
+                            .split_circle_start
+                            .filter(|(pending_id, _)| *pending_id == id)
+                        {
+                            let split = match shape {
+                                Shape::Circle { .. } => {
+                                    self.document.split_selected_circle(first, world)
+                                }
+                                Shape::Ellipse { .. } => {
+                                    self.document.split_selected_ellipse(first, world)
+                                }
+                                _ => unreachable!(),
+                            };
+                            self.status_message = match split {
+                                Ok(_) => {
+                                    self.split_circle_start = None;
+                                    "Curve split  |  Ctrl+Z to undo  |  Ctrl+S to save".into()
+                                }
+                                Err(error) => format!("Split: {error}"),
+                            };
+                        } else if on_curve {
+                            self.split_circle_start = Some((id, world));
+                            self.status_message =
+                                "Curve split: choose second point  |  Esc: cancel".into();
+                        } else {
+                            self.status_message =
+                                "Split: move the pointer onto the selected curve".into();
+                        }
+                    } else {
+                        self.split_circle_start = None;
+                        self.status_message = match self.document.split_selected_curve(world) {
+                            Ok(_) => "Curve split  |  Ctrl+Z to undo  |  Ctrl+S to save".into(),
+                            Err(error) => format!("Split: {error}"),
+                        };
+                    }
+                }
+                KeyCode::KeyQ
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview
+                        && !self.read_only() =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(
+                                    shape,
+                                    Shape::Line { .. }
+                                        | Shape::Circle { .. }
+                                        | Shape::Arc { .. }
+                                        | Shape::Ellipse { .. }
+                                        | Shape::EllipticArc { .. }
+                                )
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_external_tangent_with(source) {
+                            Ok(true) => "Tangent set  |  Ctrl+S to save".into(),
+                            Ok(false) => "Tangent removed".into(),
+                            Err(error) => format!("Tangent: {error}"),
+                        },
+                        None => "Hover a line or curve for tangent".into(),
+                    };
+                }
+                KeyCode::KeyQ if !self.read_only() && !self.solid_preview => {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    self.status_message = match self.document.trim_selected_curve(world) {
+                        Ok(_) => "Curve trimmed  |  Ctrl+Z to undo  |  Ctrl+S to save".into(),
+                        Err(error) => format!("Trim: {error}"),
+                    };
+                }
+                KeyCode::KeyU
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    self.begin_offset();
+                }
+                KeyCode::Comma
+                    if !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview =>
+                {
+                    self.start_tangent_arc();
+                }
+                KeyCode::Period
+                    if !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    self.smooth_join_key();
+                }
+                KeyCode::KeyZ
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview =>
+                {
+                    self.begin_pattern(PatternTool::Linear);
+                }
+                KeyCode::Semicolon
+                    if !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview =>
+                {
+                    self.begin_pattern(PatternTool::Circular);
+                }
+                KeyCode::KeyU if !self.read_only() && !self.solid_preview => {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    self.status_message = match self.document.extend_selected_curve(world) {
+                        Ok(_) => "Curve extended  |  Ctrl+Z to undo  |  Ctrl+S to save".into(),
+                        Err(error) => format!("Extend: {error}"),
+                    };
+                }
+                KeyCode::KeyW | KeyCode::KeyH
+                    if self.modifiers.shift_key()
+                        && self.document.tool != Tool::CenterArc
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    self.corner_key(if code == KeyCode::KeyW {
+                        CornerKind::Fillet
+                    } else {
+                        CornerKind::Chamfer
+                    });
+                }
+                KeyCode::KeyH | KeyCode::KeyJ
+                    if !self.read_only() && !self.solid_preview && !self.modifiers.shift_key() =>
+                {
+                    let axis = if code == KeyCode::KeyH {
+                        AxisConstraint::Horizontal
+                    } else {
+                        AxisConstraint::Vertical
+                    };
+                    self.status_message = match self.document.toggle_axis_constraint(axis) {
+                        Ok(true) => {
+                            format!("{} constraint set  |  Ctrl+S to save", axis.name())
+                        }
+                        Ok(false) => format!("{} constraint removed", axis.name()),
+                        Err(error) => format!("Constraint: {error}"),
+                    };
+                }
+                KeyCode::BracketLeft if !self.solid_preview => {
+                    self.cycle_profile(-1);
+                }
+                KeyCode::BracketRight if !self.solid_preview => {
+                    self.cycle_profile(1);
+                }
+                KeyCode::BracketLeft if self.solid_preview => self.cycle_solid(-1),
+                KeyCode::BracketRight if self.solid_preview => self.cycle_solid(1),
+                KeyCode::KeyX if self.modifiers.shift_key() => {
+                    self.create_extrusion("cut");
+                }
+                KeyCode::KeyJ if self.modifiers.shift_key() => {
+                    self.create_extrusion("join");
+                }
+                KeyCode::KeyX if !self.modifiers.control_key() && !self.modifiers.super_key() => {
+                    self.create_extrusion("newBody");
+                }
+                KeyCode::KeyL if !self.modifiers.shift_key() => self.select_tool(Tool::Line),
+                KeyCode::KeyR
+                    if self.selected_dimension.is_some()
+                        && !self.modifiers.shift_key()
+                        && !self.solid_preview =>
+                {
+                    self.toggle_selected_reference();
+                }
+                KeyCode::KeyR if self.modifiers.shift_key() => {
+                    self.select_tool(Tool::CenterRectangle)
+                }
+                KeyCode::KeyR => self.select_tool(Tool::Rectangle),
+                KeyCode::KeyT if self.modifiers.shift_key() => {
+                    self.select_tool(Tool::ThreePointCenterRectangle)
+                }
+                KeyCode::KeyT => self.select_tool(Tool::ThreePointRectangle),
+                KeyCode::KeyC if self.modifiers.shift_key() => {
+                    self.select_tool(Tool::ThreePointCircle)
+                }
+                KeyCode::KeyC => self.select_tool(Tool::Circle),
+                KeyCode::KeyY
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview
+                        && !self.read_only() =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(shape, Shape::Circle { .. } | Shape::Arc { .. })
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_internal_tangent_with(source) {
+                            Ok(true) => "Internal tangent set  |  Ctrl+S to save".into(),
+                            Ok(false) => "Internal tangent removed".into(),
+                            Err(error) => format!("Internal tangent: {error}"),
+                        },
+                        None => "Hover another circle or arc for internal tangent".into(),
+                    };
+                }
+                KeyCode::KeyD
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview
+                        && !self.read_only() =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(shape, Shape::Circle { .. })
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_radius_difference_with(source) {
+                            Ok(true) => "Radial distance set  |  Ctrl+S to save".into(),
+                            Ok(false) => "Radial distance removed".into(),
+                            Err(error) => format!("Radial distance: {error}"),
+                        },
+                        None => "Hover another circle for radial distance".into(),
+                    };
+                }
+                KeyCode::KeyO
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview
+                        && !self.read_only() =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(
+                                    shape,
+                                    Shape::Circle { .. }
+                                        | Shape::Arc { .. }
+                                        | Shape::Ellipse { .. }
+                                        | Shape::EllipticArc { .. }
+                                )
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_concentric_with(source) {
+                            Ok(true) => "Concentric set  |  Ctrl+S to save".into(),
+                            Ok(false) => "Concentric removed".into(),
+                            Err(error) => format!("Concentric: {error}"),
+                        },
+                        None => "Hover another circle, arc or ellipse".into(),
+                    };
+                }
+                KeyCode::KeyE
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview
+                        && !self.read_only() =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(
+                                    shape,
+                                    Shape::Line { .. }
+                                        | Shape::Circle { .. }
+                                        | Shape::Arc { .. }
+                                        | Shape::Ellipse { .. }
+                                        | Shape::EllipticArc { .. }
+                                )
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => {
+                            let circular = selected
+                                .and_then(|id| {
+                                    self.document.shapes.iter().find(|shape| shape.id() == id)
+                                })
+                                .is_some_and(|shape| {
+                                    matches!(shape, Shape::Circle { .. } | Shape::Arc { .. })
+                                });
+                            let elliptical = selected
+                                .and_then(|id| {
+                                    self.document.shapes.iter().find(|shape| shape.id() == id)
+                                })
+                                .is_some_and(|shape| {
+                                    matches!(
+                                        shape,
+                                        Shape::Ellipse { .. } | Shape::EllipticArc { .. }
+                                    )
+                                });
+                            match if elliptical {
+                                self.document.toggle_equal_ellipse_with(source)
+                            } else if circular {
+                                self.document.toggle_equal_radius_with(source)
+                            } else {
+                                self.document.toggle_equal_line_with(source)
+                            } {
+                                Ok(true) => "Equal set  |  Ctrl+S to save".into(),
+                                Ok(false) => "Equal removed".into(),
+                                Err(error) => format!("Equal: {error}"),
+                            }
+                        }
+                        None => "Hover another compatible curve for Equal".into(),
+                    };
+                }
+                KeyCode::KeyE if !self.modifiers.control_key() && !self.modifiers.super_key() => {
+                    self.select_tool(Tool::Ellipse)
+                }
+                KeyCode::KeyA if self.modifiers.shift_key() => self.select_tool(Tool::CenterArc),
+                KeyCode::KeyA => self.select_tool(Tool::Arc),
+                KeyCode::KeyW if self.document.tool == Tool::CenterArc => {
+                    self.document.arc_clockwise = !self.document.arc_clockwise;
+                    self.status_message = if self.document.arc_clockwise {
+                        "Center arc: clockwise sweep"
+                    } else {
+                        "Center arc: counterclockwise sweep"
+                    }
+                    .into();
+                }
+                code @ (KeyCode::KeyP | KeyCode::KeyN | KeyCode::KeyL | KeyCode::KeyB)
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.solid_preview
+                        && !self.read_only() =>
+                {
+                    let kind = match code {
+                        KeyCode::KeyP => Some(LineRelationKind::Parallel),
+                        KeyCode::KeyN => Some(LineRelationKind::Perpendicular),
+                        KeyCode::KeyL => Some(LineRelationKind::Collinear),
+                        _ => None,
+                    };
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(shape, Shape::Line { .. })
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match if let Some(kind) = kind {
+                            self.document.toggle_line_relation_with(source, kind)
+                        } else {
+                            self.document.toggle_line_angle_with(source)
+                        } {
+                            Ok(true) => format!(
+                                "{} set  |  Ctrl+S to save",
+                                kind.map_or("angle", LineRelationKind::name)
+                            ),
+                            Ok(false) => {
+                                format!("{} removed", kind.map_or("angle", LineRelationKind::name))
+                            }
+                            Err(error) => format!("Direction: {error}"),
+                        },
+                        None => "Hover another line for direction relation".into(),
+                    };
+                }
+                KeyCode::KeyP => self.select_tool(Tool::Point),
+                KeyCode::KeyD => self.select_tool(Tool::Dimension),
+                KeyCode::KeyG if self.modifiers.shift_key() => {
+                    self.snap_grid = !self.snap_grid;
+                    self.status_message = format!(
+                        "Grid snapping {}",
+                        if self.snap_grid { "on" } else { "off" }
+                    );
+                }
+                KeyCode::KeyG => self.select_tool(Tool::Polygon),
+                KeyCode::KeyN => {
+                    self.snap_geometry = !self.snap_geometry;
+                    self.status_message = format!(
+                        "Geometry snapping {}",
+                        if self.snap_geometry { "on" } else { "off" }
+                    );
+                }
+                KeyCode::KeyS if !self.modifiers.control_key() && !self.modifiers.super_key() => {
+                    self.select_tool(Tool::Slot)
+                }
+                KeyCode::KeyM
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(
+                                    shape,
+                                    Shape::Line { .. }
+                                        | Shape::Arc { .. }
+                                        | Shape::EllipticArc { .. }
+                                )
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_midpoint_with(source) {
+                            Ok(true) => "Midpoint linked  |  Ctrl+S to save".into(),
+                            Ok(false) => "Midpoint unlinked".into(),
+                            Err(error) => format!("Midpoint: {error}"),
+                        },
+                        None => "Hover a line or arc midpoint".into(),
+                    };
+                }
+                KeyCode::KeyM => self.more_open = !self.more_open,
+                KeyCode::KeyB => self.create_part(),
+                KeyCode::KeyK => {
+                    if !self.read_only() {
+                        if self.modifiers.shift_key() {
+                            let line_selected = self
+                                .document
+                                .selected
+                                .and_then(|id| {
+                                    self.document.shapes.iter().find(|shape| shape.id() == id)
+                                })
+                                .is_some_and(|shape| {
+                                    matches!(shape, Shape::Line { .. } | Shape::Rectangle { .. })
+                                });
+                            let arc_selected = self
+                                .document
+                                .selected
+                                .and_then(|id| {
+                                    self.document.shapes.iter().find(|shape| shape.id() == id)
+                                })
+                                .is_some_and(|shape| {
+                                    matches!(shape, Shape::Arc { .. } | Shape::EllipticArc { .. })
+                                });
+                            let anchored_shape_selected = self
+                                .document
+                                .selected
+                                .and_then(|id| {
+                                    self.document.shapes.iter().find(|shape| shape.id() == id)
+                                })
+                                .is_some_and(|shape| {
+                                    matches!(
+                                        shape,
+                                        Shape::Ellipse { .. }
+                                            | Shape::RotatedRectangle { .. }
+                                            | Shape::Polygon { .. }
+                                            | Shape::Capsule { .. }
+                                    )
+                                });
+                            let result = if line_selected {
+                                let at = self
+                                    .document
+                                    .screen_to_world(self.cursor, self.viewport_origin());
+                                self.document.toggle_fixed_line_endpoint_at(at)
+                            } else if arc_selected {
+                                let at = self
+                                    .document
+                                    .screen_to_world(self.cursor, self.viewport_origin());
+                                self.document
+                                    .toggle_fixed_arc_anchor_at(at)
+                                    .map(|(_, enabled)| enabled)
+                            } else if anchored_shape_selected {
+                                let at = self
+                                    .document
+                                    .screen_to_world(self.cursor, self.viewport_origin());
+                                self.document
+                                    .toggle_fixed_shape_anchor_at(at)
+                                    .map(|(_, enabled)| enabled)
+                            } else {
+                                self.document.toggle_fixed_anchor()
+                            };
+                            self.status_message = match result {
+                                Ok(enabled) => format!(
+                                    "Fixed anchor {}  |  Ctrl+S to save",
+                                    if enabled { "on" } else { "off" }
+                                ),
+                                Err(error) => error,
+                            };
+                        } else if let Some(enabled) = self.document.toggle_construction() {
+                            self.status_message = format!(
+                                "Construction {}  |  Ctrl+S to save",
+                                if enabled { "on" } else { "off" }
+                            );
+                        }
+                    }
+                }
+                KeyCode::Digit1 => self.create_sketch(SketchPlane::Top),
+                KeyCode::Digit2 => self.create_sketch(SketchPlane::Front),
+                KeyCode::Digit3 => self.create_sketch(SketchPlane::Right),
+                KeyCode::Digit4 => self.sketch_on_face(),
+                KeyCode::Digit5 => self.toggle_face_context(),
+                KeyCode::KeyF
+                    if self.modifiers.shift_key()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.read_only()
+                        && !self.solid_preview =>
+                {
+                    let world = self
+                        .document
+                        .screen_to_world(self.cursor, self.viewport_origin());
+                    let selected = self.document.selected;
+                    let source = self
+                        .document
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find(|shape| {
+                            Some(shape.id()) != selected
+                                && matches!(
+                                    shape,
+                                    Shape::Line { .. }
+                                        | Shape::Circle { .. }
+                                        | Shape::Arc { .. }
+                                        | Shape::Ellipse { .. }
+                                        | Shape::EllipticArc { .. }
+                                        | Shape::Spline { .. }
+                                )
+                                && shape.hit(world, 7.0 / self.document.zoom.max(0.2))
+                        })
+                        .map(Shape::id);
+                    self.status_message = match source {
+                        Some(source) => match self.document.toggle_normal_with(source, world) {
+                            Ok(true) => "Normal set  |  Ctrl+S to save".into(),
+                            Ok(false) => "Normal removed".into(),
+                            Err(error) => format!("Normal: {error}"),
+                        },
+                        None => "Hover a separate line or curve for Normal".into(),
+                    };
+                }
+                KeyCode::KeyF if !self.solid_preview => {
+                    self.status_message = if self
+                        .document
+                        .fit_shapes(self.layout().viewport.w, self.layout().viewport.h)
+                    {
+                        "Sketch fitted to viewport".into()
+                    } else {
+                        "Draw geometry before fitting the sketch".into()
+                    };
+                }
+                KeyCode::Escape => {
+                    self.box_start = None;
+                    self.split_circle_start = None;
+                    self.corner_pick = None;
+                    self.dimension_start = None;
+                    self.selected_dimension = None;
+                    self.spline_points.clear();
+                    if self.document.cancel_drag() {
+                        self.status_message = "Move cancelled".into();
+                    } else {
+                        self.document.draft_start = None;
+                        self.document.draft_end = None;
+                        self.document.clear_selection();
+                    }
+                }
+                KeyCode::Delete | KeyCode::Backspace => {
+                    if self.solid_preview {
+                        if let Some(project) = &mut self.project {
+                            match project.delete_extrusion_at(self.selected_solid) {
+                                Ok(()) => {
+                                    let remaining = project
+                                        .extrusion_previews()
+                                        .map_or(0, |solids| solids.len());
+                                    self.selected_solid =
+                                        self.selected_solid.min(remaining.saturating_sub(1));
+                                    self.solid_preview = remaining > 0;
+                                    self.status_message =
+                                        "Extrusion removed  |  Ctrl+S to save".into();
+                                }
+                                Err(error) => {
+                                    self.status_message = format!("Delete extrusion: {error}")
+                                }
+                            }
+                        }
+                    } else if !self.read_only() {
+                        if let Some(key) = self.selected_dimension.take() {
+                            self.status_message = match self.document.delete_dimension(key) {
+                                Ok(()) => "Dimension removed  |  Ctrl+S to save".into(),
+                                Err(error) => format!("Dimension: {error}"),
+                            };
+                        } else {
+                            self.document.delete_selected();
+                        }
+                    }
+                }
+                KeyCode::KeyS if self.modifiers.control_key() || self.modifiers.super_key() => {
+                    self.save_project();
+                }
+                KeyCode::PageDown if self.modifiers.control_key() || self.modifiers.super_key() => {
+                    self.switch_part(1);
+                }
+                KeyCode::PageUp if self.modifiers.control_key() || self.modifiers.super_key() => {
+                    self.switch_part(-1);
+                }
+                KeyCode::KeyE if self.modifiers.control_key() || self.modifiers.super_key() => {
+                    if self.modifiers.alt_key() {
+                        self.export_3mf();
+                    } else if self.modifiers.shift_key() {
+                        self.export_stl(stl::StlFormat::Ascii);
+                    } else {
+                        self.export_stl(stl::StlFormat::Binary);
+                    }
+                }
+                KeyCode::KeyZ if self.modifiers.control_key() || self.modifiers.super_key() => {
+                    if !self.read_only() {
+                        if self.modifiers.shift_key() {
+                            self.document.redo();
+                        } else {
+                            self.document.undo();
+                        }
+                    }
+                }
+                KeyCode::KeyY
+                    if (self.modifiers.control_key() || self.modifiers.super_key())
+                        && !self.read_only() =>
+                {
+                    self.document.redo();
+                }
+                _ => {}
+            }
+            self.redraw();
         }
     }
 }
