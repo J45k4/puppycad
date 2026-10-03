@@ -483,7 +483,7 @@ impl App {
                 painter.text(
                     chip.x + 4.0,
                     chip.y + 2.0,
-                    &truncate(&chip_text, ((chip_w - 8.0) / 7.2) as usize),
+                    &truncate(&chip_text, ((chip_w - 8.0) / 7.2 + 0.5) as usize),
                     0.9,
                     MUTED,
                 );

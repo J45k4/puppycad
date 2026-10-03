@@ -24,7 +24,10 @@ export DISPLAY=:99
 export PUPPYCAD_CONFIG_DIR=/tmp/puppycad-config
 rm -rf "$PUPPYCAD_CONFIG_DIR"
 mkdir -p "$PUPPYCAD_CONFIG_DIR"
-printf '{"ui_scale": 1.0}\n' > "$PUPPYCAD_CONFIG_DIR/settings.json"
+# Quick actions (NEXT) start hidden: the band covers the bottom of the
+# Properties column, where the older steps click; the NEXT scenario at the
+# end turns it on with Ctrl+Shift+N.
+printf '{"ui_scale": 1.0, "quick_actions": false}\n' > "$PUPPYCAD_CONFIG_DIR/settings.json"
 tries=0
 until xdpyinfo >/dev/null 2>&1; do
     tries=$((tries + 1))
@@ -3960,6 +3963,46 @@ sleep 0.5
 test "$(grep -c '"type": "projected"' /tmp/native-use-edges.pcad)" -eq 8
 test "$(grep -c '"type": "extrude"' /tmp/native-use-edges.pcad)" -eq 4
 cp /tmp/native-use-edges.pcad /out/rust-native-use-edges.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
+
+# Quick actions: Ctrl+Shift+N shows NEXT; a closed rectangle leads with
+# Finish sketch, Ctrl+Enter opens the extrude prompt (Commit / Flip /
+# Cancel), Enter commits and NEXT shows the 3D suggestions.
+rm -f /tmp/native-next.pcad
+./target/debug/puppycad /tmp/native-next.pcad >/tmp/puppycad-next.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-next.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-next.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" ctrl+shift+n
+xdotool key --window "$window_id" r
+xdotool mousemove 500 300 click 1
+xdotool mousemove 700 450 click 1
+xdotool key --window "$window_id" v
+xdotool key --window "$window_id" Escape
+sleep 0.3
+import -window root /out/rust-native-next-sketch.png
+xdotool key --window "$window_id" ctrl+Return
+sleep 0.5
+import -window root /out/rust-native-next-draft.png
+xdotool key --window "$window_id" Return
+sleep 0.8
+import -window root /out/rust-native-next-3d.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test "$(grep -c '"type": "extrude"' /tmp/native-next.pcad)" -eq 1
+xdotool key --window "$window_id" ctrl+shift+n
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
