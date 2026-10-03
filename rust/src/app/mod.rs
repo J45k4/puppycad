@@ -1,6 +1,7 @@
 mod commands;
 mod corner;
 mod input;
+mod palette;
 mod panels;
 mod pattern;
 mod project_panel;
@@ -13,6 +14,7 @@ mod tests;
 
 use commands::*;
 use corner::*;
+use palette::*;
 use pattern::*;
 use project_panel::*;
 use solid::*;
@@ -247,6 +249,8 @@ pub(crate) struct App {
     label_drag: Option<LabelDrag>,
     /// First anchor picked with the D tool.
     dimension_start: Option<(u32, usize)>,
+    /// Command palette (Ctrl+K) while open.
+    palette: Option<Palette>,
 }
 
 #[derive(Clone, Copy)]
@@ -361,6 +365,7 @@ impl Default for App {
             selected_dimension: None,
             label_drag: None,
             dimension_start: None,
+            palette: None,
         }
     }
 }
@@ -888,6 +893,7 @@ impl App {
         }
         self.paint_panels(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
+        self.paint_palette(&mut painter, layout);
         painter
     }
 

@@ -5,6 +5,10 @@ impl App {
         self.name_edit = None;
         let layout = self.layout();
         let point = self.cursor;
+        if self.overlay_click(layout, point) {
+            self.redraw();
+            return;
+        }
         if self.select_projection(layout, point) {
             self.redraw();
             return;
@@ -716,6 +720,10 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    if self.palette_key(code, event.text.as_deref()) {
+                        self.redraw();
+                        return;
+                    }
                     if self.projects_page.is_some() {
                         let layout = self.layout();
                         match code {

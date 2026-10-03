@@ -143,6 +143,7 @@ pub(super) enum Cmd {
     GridSnap,
     GeometrySnap,
     MoreMenu,
+    CommandPalette,
     NewPart,
     SketchTop,
     SketchFront,
@@ -745,6 +746,14 @@ pub(super) static COMMANDS: &[Command] = &[
     cmd(Cmd::MoreMenu, "MORE menu", "M", C::View, S::Any, |app| {
         app.more_open = !app.more_open
     }),
+    cmd(
+        Cmd::CommandPalette,
+        "Command palette",
+        "Ctrl+K / Ctrl+Shift+P",
+        C::View,
+        S::Any,
+        App::open_palette,
+    ),
     // Project
     cmd(Cmd::NewPart, "New part", "B", C::Project, S::Any, |app| {
         app.create_part()
@@ -922,6 +931,8 @@ impl App {
         let read_only = self.read_only();
         let sketch_edit = !read_only && !self.solid_preview;
         Some(match code {
+            KeyCode::KeyK if ctrl => Cmd::CommandPalette,
+            KeyCode::KeyP if ctrl && shift => Cmd::CommandPalette,
             KeyCode::Escape if self.pick.is_some() => Cmd::Cancel,
             KeyCode::KeyS if plain_shift && sketch_edit => Cmd::Symmetry,
             KeyCode::KeyI if plain_shift && sketch_edit => Cmd::Mirror,

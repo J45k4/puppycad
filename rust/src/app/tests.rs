@@ -715,3 +715,93 @@ fn key_resolution_respects_modifiers_and_context() {
     app.run_command(Cmd::Circle);
     assert_eq!(app.document.tool, Tool::Circle);
 }
+
+#[test]
+fn palette_filters_and_orders_matches() {
+    assert_eq!(palette_matches("").len(), COMMANDS.len());
+    let labels = |query| -> Vec<&str> {
+        palette_matches(query)
+            .into_iter()
+            .map(|command| command.label)
+            .collect()
+    };
+    assert_eq!(labels("mirr")[0], "Mirror");
+    assert_eq!(labels("MIRR")[0], "Mirror");
+    // Label prefix beats a word inside the label, ties keep registry order.
+    let circle = labels("circle");
+    assert_eq!(&circle[..2], ["Circle", "3-point circle"]);
+    let ext = labels("ext");
+    assert_eq!(&ext[..2], ["Extend curve to cursor", "Extrude new body"]);
+    // Category and shortcut text match too, after label matches.
+    assert_eq!(labels("ctrl+s")[0], "Save project");
+    assert!(labels("constrain").contains(&"Horizontal"));
+    // Subsequence fallback.
+    assert_eq!(labels("ctrspl")[0], "Control spline");
+    assert!(labels("zzzz").is_empty());
+}
+
+#[test]
+fn palette_skips_unavailable_rows_and_enter_runs_selection() {
+    let mut app = App {
+        modifiers: ModifiersState::CONTROL,
+        ..App::default()
+    };
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyK),
+        Some(Cmd::CommandPalette)
+    );
+    app.modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyP),
+        Some(Cmd::CommandPalette)
+    );
+    app.modifiers = ModifiersState::empty();
+    app.run_command(Cmd::CommandPalette);
+    assert!(app.palette.is_some());
+    // In the sketch view the solid cycling rows are dimmed and skipped.
+    app.palette_type("solid");
+    let entries = app.palette_entries();
+    assert_eq!(entries[0].0.id, Cmd::PreviousSolid);
+    assert!(!entries[0].1 && !entries[1].1);
+    let selected = app.palette.as_ref().unwrap().selected;
+    assert!(selected >= 2 && entries[selected].1);
+    app.palette_move(-1);
+    assert_eq!(app.palette.as_ref().unwrap().selected, selected);
+    app.palette_move(1);
+    assert!(app.palette.as_ref().unwrap().selected > selected);
+    // Esc closes without running anything.
+    assert!(app.palette_key(KeyCode::Escape, None));
+    assert!(app.palette.is_none());
+    assert!(!app.palette_key(KeyCode::Escape, None));
+
+    // Typed text filters; Enter runs the selected command.
+    app.open_palette();
+    app.palette_key(KeyCode::KeyC, Some("circ"));
+    app.palette_key(KeyCode::KeyX, Some("x"));
+    app.palette_key(KeyCode::Backspace, None);
+    assert_eq!(app.palette.as_ref().unwrap().query, "circ");
+    app.palette_key(KeyCode::ArrowDown, None);
+    app.palette_key(KeyCode::Enter, None);
+    assert!(app.palette.is_none());
+    assert_eq!(app.document.tool, Tool::ThreePointCircle);
+
+    // Mirror needs a selection: dimmed without one, runs with one.
+    let mut app = App {
+        document: Document::from_shapes(vec![Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 10.0, y: 0.0 },
+        }]),
+        ..App::default()
+    };
+    app.open_palette();
+    app.palette_type("mirr");
+    assert!(!app.palette_entries()[0].1);
+    app.palette = None;
+    app.document.selected = Some(1);
+    app.open_palette();
+    app.palette_type("mirr");
+    assert!(app.palette_entries()[0].1);
+    app.palette_run();
+    assert!(matches!(app.pick, Some(Pick::Mirror { .. })));
+}
