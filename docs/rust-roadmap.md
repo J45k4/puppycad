@@ -44,6 +44,9 @@ everything after it. Each item shows its final status.
    between planar faces; web `chamfer` nodes open read-only.
 4. Feature tree: reorder, suppress, rollback, cached re-evaluation. **Done.**
 5. Export. **Partial:** binary/ASCII STL and 3MF done; STEP missing.
+6. Vertex / edge / face selection in the 3D views (hover priority,
+   multi-select, measure, selection-driven chamfer/fillet, sketch on face and
+   mates, right-click context menu). **Done.**
 
 ## Phase 4 — Assembly
 
