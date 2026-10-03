@@ -494,3 +494,50 @@ fn fillet_and_chamfer_prompts_use_defaults_and_modes() {
         (ChamferMode::DistanceAngle, 4.0, 45.0)
     );
 }
+
+#[test]
+fn tangent_arc_tool_and_smooth_join_key() {
+    let line = |id, a: (f32, f32), b: (f32, f32)| Shape::Line {
+        id,
+        a: Point { x: a.0, y: a.1 },
+        b: Point { x: b.0, y: b.1 },
+    };
+    let mut app = App {
+        document: Document::from_shapes(vec![
+            line(1, (0.0, 0.0), (40.0, 0.0)),
+            line(2, (41.0, 3.0), (60.0, 20.0)),
+        ]),
+        ..App::default()
+    };
+    app.start_tangent_arc();
+    assert_eq!(app.document.tool, Tool::TangentArc);
+    // A click away from any endpoint is ignored.
+    let away = Point { x: 20.0, y: 20.0 };
+    app.tangent_arc_click(away, away);
+    assert!(app.document.draft_start.is_none());
+    let near = Point { x: 1.0, y: 1.0 };
+    app.tangent_arc_click(near, near);
+    assert_eq!(app.document.tangent_source, Some((1, 0)));
+    let end = Point { x: -20.0, y: 20.0 };
+    app.tangent_arc_click(end, end);
+    let arc = app.document.selected.unwrap();
+    assert_eq!(app.document.smooth_joins.get(&(arc, 0)), Some(&(1, 0)));
+    // ".": select line 1, hover line 2 near its endpoint.
+    app.select_tool(Tool::Select);
+    app.document.selected = Some(1);
+    app.cursor = app
+        .document
+        .world_to_screen(Point { x: 50.0, y: 11.5 }, app.viewport_origin());
+    app.smooth_join_key();
+    assert_eq!(app.document.smooth_joins.get(&(2, 0)), Some(&(1, 1)));
+    let Some(Shape::Line { a, b, .. }) = app.document.shapes.iter().find(|s| s.id() == 2) else {
+        unreachable!()
+    };
+    let middle = Point {
+        x: (a.x + b.x) * 0.5,
+        y: (a.y + b.y) * 0.5,
+    };
+    app.cursor = app.document.world_to_screen(middle, app.viewport_origin());
+    app.smooth_join_key();
+    assert!(!app.document.smooth_joins.contains_key(&(2, 0)));
+}
