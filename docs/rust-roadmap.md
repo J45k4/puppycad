@@ -83,7 +83,8 @@ per-instance selection and export.
 
 ## Phase 6 — Code health (continuous)
 
-1. Split `model.rs` and `main.rs` into modules by concern.
+1. (Done) Split `model.rs` and `main.rs` into modules by concern; clippy is
+   clean with `--all-targets` and blocking in CI.
 2. Unit tests for `renderer.rs` and for input handling.
 3. Restructure `rust-native.md` into sections and add a Native column to
    `sketch-parity.md`.

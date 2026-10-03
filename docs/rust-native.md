@@ -413,6 +413,30 @@ Press Ctrl+E in the solid preview to export each supported body as an ASCII STL
 beside the project file. Existing STL files are preserved; additional bodies
 and repeated exports use numbered filenames.
 
+## Code layout
+
+Library crate (`rust/src/lib.rs`):
+
+- `model/` — the sketch `Document`: `mod.rs` (document state, snapping,
+  selection, drafting, undo), `shapes.rs` (`Point`, `Shape` and per-shape
+  geometry), `relations.rs` (fixed anchors and relation toggles),
+  `dimensions.rs` (`set_dimension`), `edit.rs` (delete, split, trim, extend,
+  copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
+  dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
+  `geometry.rs` (curve intersections and boundaries), `tests.rs`.
+- `project.rs` (`.pcad` load/save, parts, extrusion profiles), `solver.rs`,
+  `spline.rs`, `stl.rs`.
+
+Binary (`rust/src/main.rs` parses arguments and starts the event loop):
+
+- `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
+  `input.rs` (mouse/keyboard handling and the `winit` handler),
+  `panels.rs` (toolbar and properties panels, dimension editing),
+  `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
+  preview projection, dragging and painting), `view_sketch.rs` (sketch grid
+  and shape painting), `tests.rs`.
+- `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
+
 ## Cross-loader round-trip
 
 The project, model, spline and STL code is a library crate (`rust/src/lib.rs`);
