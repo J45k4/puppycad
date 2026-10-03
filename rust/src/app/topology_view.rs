@@ -152,6 +152,19 @@ impl App {
                 "Selected {}  |  Shift+click adds  |  Esc clears",
                 self.describe_pick(&scene, &topology, one)
             ),
+            [a, b] => {
+                let measure = measure_lines(topology.measure(&scene, a.element, b.element));
+                format!(
+                    "2 elements selected{}  |  Shift+click adds or removes  |  Esc clears",
+                    measure
+                        .iter()
+                        .map(|line| format!(
+                            "  {}",
+                            line.split_whitespace().collect::<Vec<_>>().join(" ")
+                        ))
+                        .collect::<String>()
+                )
+            }
             many => format!(
                 "{} elements selected  |  Shift+click adds or removes  |  Esc clears",
                 many.len()
@@ -252,6 +265,11 @@ impl App {
                 })
                 .sum();
             lines.push(format!("{} SELECTED", selection.len()));
+            if let [a, b] = selection.as_slice() {
+                lines.extend(measure_lines(
+                    topology.measure(&scene, a.element, b.element),
+                ));
+            }
             if edges > 0.0 {
                 lines.push(format!("TOTAL LEN  {edges:.2} mm"));
             }
@@ -285,6 +303,21 @@ impl App {
         paint_lines(painter, x, layout.right.y + 104.0, &lines, layout.right.w);
         true
     }
+}
+
+/// "DIST" / "ANGLE" lines of a two-element measurement.
+pub(super) fn measure_lines(measure: Measure) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(distance) = measure.distance {
+        lines.push(format!("DIST  {distance:.3} mm"));
+    }
+    if let Some(angle) = measure.angle {
+        lines.push(format!("ANGLE {angle:.2} deg"));
+    }
+    if lines.is_empty() {
+        lines.push("NO MEASUREMENT".into());
+    }
+    lines
 }
 
 /// Properties lines, clipped to the panel width.

@@ -49,6 +49,49 @@ fn cache_returns_the_same_topology_for_the_same_scene() {
     assert!(std::rc::Rc::ptr_eq(&first, &second));
 }
 
+#[test]
+fn measures_the_box_diagonal_and_parallel_faces_and_edges() {
+    let scene = box_scene();
+    let topology = Topology::from_scene(&scene);
+    let vertex =
+        |p: [f32; 3]| TopoRef::Vertex(topology.vertices.iter().position(|v| v.point == p).unwrap());
+    let diagonal = topology.measure(&scene, vertex([0.0; 3]), vertex([20.0, 10.0, 5.0]));
+    assert!((diagonal.distance.unwrap() - 525f32.sqrt()).abs() < 1e-4);
+    assert_eq!(diagonal.angle, None);
+    let face = |n: [f32; 3]| {
+        TopoRef::Face(
+            topology
+                .faces
+                .iter()
+                .position(|f| dot3(f.normal, n) > 0.999)
+                .unwrap(),
+        )
+    };
+    let caps = topology.measure(&scene, face([0.0, 0.0, 1.0]), face([0.0, 0.0, -1.0]));
+    assert!((caps.distance.unwrap() - 5.0).abs() < 1e-4);
+    assert!((caps.angle.unwrap() - 180.0).abs() < 1e-3);
+    let corner = topology.measure(&scene, face([0.0, 0.0, 1.0]), face([1.0, 0.0, 0.0]));
+    assert_eq!(corner.distance, None);
+    assert!((corner.angle.unwrap() - 90.0).abs() < 1e-3);
+    let to_face = topology.measure(&scene, vertex([0.0; 3]), face([1.0, 0.0, 0.0]));
+    assert!((to_face.distance.unwrap() - 20.0).abs() < 1e-4);
+    let x_edges: Vec<usize> = (0..topology.edges.len())
+        .filter(|&i| topology.edge_direction(i).unwrap()[0].abs() > 0.999)
+        .collect();
+    assert_eq!(x_edges.len(), 4);
+    let edges = topology.measure(&scene, TopoRef::Edge(x_edges[0]), TopoRef::Edge(x_edges[1]));
+    let d = edges.distance.unwrap();
+    assert!(
+        [5.0f32, 10.0, 125f32.sqrt()]
+            .iter()
+            .any(|e| (d - e).abs() < 1e-4),
+        "{d}"
+    );
+    assert!(edges.angle.unwrap().abs() < 1e-3);
+    let lines = super::topology_view::measure_lines(diagonal);
+    assert_eq!(lines, vec!["DIST  22.913 mm".to_string()]);
+}
+
 use super::input::KeyPress;
 use winit::dpi::PhysicalPosition;
 use winit::event::DeviceId;

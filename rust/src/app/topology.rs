@@ -569,6 +569,137 @@ impl Topology {
     }
 }
 
+/// Read-only measurement between two selected elements.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct Measure {
+    /// Minimum distance in millimeters, when it is defined (vertex to
+    /// anything, parallel edges, parallel faces, an edge parallel to a face).
+    pub(super) distance: Option<f32>,
+    /// Angle in degrees between two edges (0-90), two planar faces (between
+    /// normals, 0-180) or an edge and a planar face (0-90).
+    pub(super) angle: Option<f32>,
+}
+
+enum Shape3 {
+    Point([f32; 3]),
+    Line([f32; 3], [f32; 3]),
+    Curve(usize),
+    Plane([f32; 3], [f32; 3], usize),
+    Surface(usize),
+}
+
+/// Distance from `p` to segment `a`-`b`.
+fn point_segment(p: [f32; 3], a: [f32; 3], b: [f32; 3]) -> f32 {
+    let d = sub3(b, a);
+    let length = dot3(d, d);
+    let t = if length < 1e-12 {
+        0.0
+    } else {
+        (dot3(sub3(p, a), d) / length).clamp(0.0, 1.0)
+    };
+    norm3(sub3(p, lerp3(a, b, t)))
+}
+
+/// Distance from `p` to triangle `a b c`.
+fn point_triangle(p: [f32; 3], [a, b, c]: [[f32; 3]; 3]) -> f32 {
+    let n = cross(sub3(b, a), sub3(c, a));
+    if dot3(n, n) > 1e-12 {
+        let n = unit3(n);
+        let height = dot3(sub3(p, a), n);
+        let q = sub3(p, n.map(|c| c * height));
+        let inside = [(a, b), (b, c), (c, a)]
+            .iter()
+            .all(|&(u, v)| dot3(cross(sub3(v, u), sub3(q, u)), n) >= -1e-6);
+        if inside {
+            return height.abs();
+        }
+    }
+    point_segment(p, a, b)
+        .min(point_segment(p, b, c))
+        .min(point_segment(p, c, a))
+}
+
+impl Topology {
+    fn shape(&self, element: TopoRef) -> Shape3 {
+        match element {
+            TopoRef::Vertex(i) => Shape3::Point(self.vertices[i].point),
+            TopoRef::Edge(i) => {
+                let points = &self.edges[i].points;
+                if points.len() == 2 {
+                    Shape3::Line(points[0], points[1])
+                } else {
+                    Shape3::Curve(i)
+                }
+            }
+            TopoRef::Face(i) => {
+                let face = &self.faces[i];
+                if face.planar {
+                    let p = face.outline.first().map_or([0.0; 3], |s| s[0]);
+                    Shape3::Plane(p, face.normal, i)
+                } else {
+                    Shape3::Surface(i)
+                }
+            }
+        }
+    }
+
+    fn point_distance(&self, scene: &SolidScene, p: [f32; 3], other: &Shape3) -> f32 {
+        let face = |index: usize| {
+            self.faces[index]
+                .triangles
+                .iter()
+                .map(|&t| point_triangle(p, scene.triangles[t]))
+                .fold(f32::INFINITY, f32::min)
+        };
+        match *other {
+            Shape3::Point(q) => norm3(sub3(p, q)),
+            Shape3::Line(a, b) => point_segment(p, a, b),
+            Shape3::Curve(index) => self.edges[index]
+                .points
+                .windows(2)
+                .map(|pair| point_segment(p, pair[0], pair[1]))
+                .fold(f32::INFINITY, f32::min),
+            Shape3::Plane(_, _, index) | Shape3::Surface(index) => face(index),
+        }
+    }
+
+    pub(super) fn measure(&self, scene: &SolidScene, a: TopoRef, b: TopoRef) -> Measure {
+        let degrees = |cos: f32| cos.clamp(-1.0, 1.0).acos().to_degrees();
+        let (sa, sb) = (self.shape(a), self.shape(b));
+        match (&sa, &sb) {
+            (Shape3::Point(p), other) | (other, Shape3::Point(p)) => Measure {
+                distance: Some(self.point_distance(scene, *p, other)),
+                angle: None,
+            },
+            (Shape3::Line(a0, a1), Shape3::Line(b0, b1)) => {
+                let (u, v) = (unit3(sub3(*a1, *a0)), unit3(sub3(*b1, *b0)));
+                let cos = dot3(u, v).abs();
+                let distance = (cos > 0.9999).then(|| {
+                    let w = sub3(*b0, *a0);
+                    norm3(sub3(w, u.map(|c| c * dot3(w, u))))
+                });
+                Measure {
+                    distance,
+                    angle: Some(degrees(cos)),
+                }
+            }
+            (Shape3::Plane(p, n, _), Shape3::Plane(q, m, _)) => Measure {
+                distance: (dot3(*n, *m).abs() > 0.9999).then(|| dot3(*n, sub3(*q, *p)).abs()),
+                angle: Some(degrees(dot3(*n, *m))),
+            },
+            (Shape3::Line(a0, a1), Shape3::Plane(p, n, _))
+            | (Shape3::Plane(p, n, _), Shape3::Line(a0, a1)) => {
+                let sin = dot3(unit3(sub3(*a1, *a0)), *n).abs();
+                Measure {
+                    distance: (sin < 1e-4).then(|| dot3(*n, sub3(*a0, *p)).abs()),
+                    angle: Some(sin.clamp(0.0, 1.0).asin().to_degrees()),
+                }
+            }
+            _ => Measure::default(),
+        }
+    }
+}
+
 /// Screen distance from `p` to segment `a`-`b` and the segment parameter
 /// of the closest point.
 pub(super) fn segment_distance(p: Point, a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
