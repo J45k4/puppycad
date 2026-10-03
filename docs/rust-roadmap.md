@@ -22,11 +22,11 @@ Every relation in `rust/src/model.rs` currently has hand-written propagation.
 Replace it with a general solver so relations compose, dragging works under
 constraints, and conflicts are diagnosed.
 
-1. `rust/src/solver.rs`: parameters are every anchor coordinate and dimension
+1. (Done) `rust/src/solver.rs`: parameters are every anchor coordinate and dimension
    value; one residual function per relation kind; Gauss–Newton /
    Levenberg–Marquardt with numeric Jacobians. Port the structure of
    `src/sketch-solver.ts` so results match the web app.
-2. Edits become mutate → solve → commit as one undo step. Keep the current
+2. (Done for solver-backed relations) Edits become mutate → solve → commit as one undo step. Keep the current
    "anchor the first endpoint" behavior as soft weights so solved results stay
    intuitive.
 3. Port `src/sketch-redundancy.ts`: DOF count, over-constrained and conflicting
