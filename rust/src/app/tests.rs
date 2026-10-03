@@ -1484,3 +1484,85 @@ fn bodies_are_lit_per_face_and_carry_sharp_edges() {
     let _ = app.paint();
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn extrude_draft_reads_as_a_preview_until_enter() {
+    let path = temp_project("draft-status");
+    let mut app = App::with_project(&path).unwrap();
+    app.document.tool = Tool::Rectangle;
+    app.document.draft_start = Some(Point { x: 0.0, y: 0.0 });
+    assert!(app.document.finish_draft(Point { x: 40.0, y: 20.0 }));
+    let layout = Layout::new(1280.0, 800.0);
+    let preview = "Extrusion preview \u{2014} not created yet  |  Enter commit  |  Esc cancel";
+
+    // First extrusion: a placeholder row with no features yet.
+    app.begin_extrude("newBody");
+    assert_eq!(app.shown_status(), preview);
+    assert_eq!(app.tree_row_count(), 1);
+    assert!(app.draft_row(layout).is_some());
+    let crumbs = app.breadcrumbs(Layout::new(2400.0, 800.0));
+    assert_eq!(
+        crumbs.last().map(|crumb| crumb.1.as_str()),
+        Some("New extrusion (preview)")
+    );
+    let _ = app.paint();
+    app.handle_draft_key(KeyCode::Enter, None);
+    assert!(app.shown_status().starts_with("Created 50.0 mm"));
+    assert!(app.shown_status().contains("Ctrl+Z to undo"));
+    assert_eq!(app.tree_row_count(), 2);
+    assert!(app.draft_row(layout).is_none());
+
+    // Second draft (on a second profile): feature tree keys and clicks do nothing.
+    app.solid_preview = false;
+    app.document.draft_start = Some(Point { x: 60.0, y: 0.0 });
+    assert!(app.document.finish_draft(Point { x: 80.0, y: 20.0 }));
+    app.selected_profile = 1;
+    app.begin_extrude("join");
+    assert_eq!(app.tree_row_count(), 3, "{}", app.status_message);
+    let tree = app.project.as_ref().unwrap().feature_tree_snapshot();
+    app.toggle_selected_suppressed();
+    app.move_selected_feature(-1);
+    app.move_rollback(-1);
+    app.handle_draft_key(KeyCode::KeyH, None);
+    app.handle_draft_key(KeyCode::BracketLeft, None);
+    let row = app.feature_row(layout, 0);
+    let inside = Point {
+        x: row.x + 4.0,
+        y: row.y + 4.0,
+    };
+    assert!(app.click_feature_tree(layout, inside));
+    assert_eq!(app.project.as_ref().unwrap().feature_tree_snapshot(), tree);
+    assert!(app.extrude_draft.is_some());
+    assert_eq!(app.shown_status(), preview);
+    app.handle_draft_key(KeyCode::Escape, None);
+    assert_eq!(app.shown_status(), "Extrusion cancelled");
+    assert!(!app.solid_preview);
+    assert_eq!(app.tree_row_count(), 2);
+    assert!(app.draft_row(layout).is_none());
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn ghost_sharp_edges_are_the_twelve_box_edges() {
+    // Unit cube, two triangles per face (each face split on a diagonal,
+    // which is flat and so not sharp).
+    let corner = |i: usize| [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32];
+    let quads = [
+        [0, 2, 3, 1],
+        [4, 5, 7, 6],
+        [0, 1, 5, 4],
+        [2, 6, 7, 3],
+        [0, 4, 6, 2],
+        [1, 3, 7, 5],
+    ];
+    let triangles: Vec<[[f32; 3]; 3]> = quads
+        .iter()
+        .flat_map(|q| {
+            [
+                [corner(q[0]), corner(q[1]), corner(q[2])],
+                [corner(q[0]), corner(q[2]), corner(q[3])],
+            ]
+        })
+        .collect();
+    assert_eq!(solid::mesh_sharp_edges(&triangles).len(), 12);
+}

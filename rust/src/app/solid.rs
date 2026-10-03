@@ -1,5 +1,47 @@
 use super::*;
 
+/// Sharp edges of a loose triangle mesh (the ghost preview), using the same
+/// rule as bodies: the two face normals are more than
+/// `SHARP_EDGE_DEGREES` apart. Corners are welded on a 1 µm grid.
+pub(super) fn mesh_sharp_edges(triangles: &[[[f32; 3]; 3]]) -> Vec<([f32; 3], [f32; 3])> {
+    type Key = [i64; 3];
+    let key = |p: [f32; 3]| p.map(|c| (c * 1000.0).round() as i64);
+    let normals: Vec<Option<[f32; 3]>> = triangles
+        .iter()
+        .map(|&[a, b, c]| {
+            triangle_normal(a, b, c).map(|n| {
+                let length = n.iter().map(|c| c * c).sum::<f32>().sqrt();
+                n.map(|c| c / length)
+            })
+        })
+        .collect();
+    let threshold = project::SHARP_EDGE_DEGREES.to_radians().cos();
+    let mut first: std::collections::HashMap<(Key, Key), usize> = Default::default();
+    let mut sharp = Vec::new();
+    for (t, tri) in triangles.iter().enumerate() {
+        for k in 0..3 {
+            let (a, b) = (tri[k], tri[(k + 1) % 3]);
+            let (ka, kb) = (key(a), key(b));
+            if ka == kb {
+                continue;
+            }
+            match first.entry((ka.min(kb), ka.max(kb))) {
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(t);
+                }
+                std::collections::hash_map::Entry::Occupied(slot) => {
+                    if let (Some(n1), Some(n2)) = (normals[*slot.get()], normals[t])
+                        && n1.iter().zip(n2).map(|(x, y)| x * y).sum::<f32>() < threshold
+                    {
+                        sharp.push((a, b));
+                    }
+                }
+            }
+        }
+    }
+    sharp
+}
+
 pub(super) fn triangle_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> Option<[f32; 3]> {
     let u = view3d::sub(b, a);
     let v = view3d::sub(c, a);

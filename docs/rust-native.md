@@ -419,6 +419,18 @@ flip inverts it). The extruded sketch locks; **Tab** returns to it to
 extrude another profile. Delete removes the selected extrusion and unlocks
 its sketch.
 
+**Preview state.** While an extrude, revolve or edge finish prompt is open
+nothing exists yet, and the UI says so: the status bar reads "Extrusion
+preview — not created yet | Enter commit | Esc cancel" (Revolve / Chamfer /
+Fillet likewise, plus the reason when the ghost cannot be built), the last
+breadcrumb is "New extrusion (preview)", a "PREVIEW" tag in the ghost color
+sits right of the DEPTH / ANGLE prompt, the ghost's sharp edges (same 20°
+rule as bodies) are outlined in the ghost color, and the Project panel shows
+a dimmed, inert "NEW EXTRUSION (preview)" row after the feature tree.
+Feature tree keys and row clicks do nothing until the draft ends. Enter
+creates the feature as one undo step ("Created … | Ctrl+Z to undo"); Esc
+reports "Extrusion cancelled" and returns to the sketch.
+
 **Revolve** (**8**, MORE → REVOLVE). With a profile selected, click a sketch
 line as the axis or press **X** / **Y**; an ANGLE prompt (empty = 360°) with
 ghost, **O** cycles new body / cut / join. 32 segments per full turn; the

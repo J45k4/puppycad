@@ -185,7 +185,12 @@ impl App {
         if let Some(project) = &self.project {
             segments.push((Crumb::Part, project.part_name().to_string()));
         }
-        if self.solid_preview {
+        if let Some(kind) = self.draft_kind() {
+            segments.push((
+                Crumb::Solid,
+                format!("New {} (preview)", kind.to_lowercase()),
+            ));
+        } else if self.solid_preview {
             // The selected tree feature (extrusion, revolve, loft or finish).
             let name = self.project.as_ref().and_then(|project| {
                 project

@@ -1803,12 +1803,13 @@ impl App {
                 edit.buffer
             )
         });
+        let shown = self.shown_status();
         let status = if let Some(name_status) = &name_status {
             name_status.as_str()
-        } else if self.status_message.is_empty() {
+        } else if shown.is_empty() {
             tool_status
         } else {
-            &self.status_message
+            &shown
         };
         // Keep the message left of the status fields (cursor, tool, snap);
         // a long message narrows the fields to get more room.

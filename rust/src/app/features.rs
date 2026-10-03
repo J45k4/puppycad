@@ -57,6 +57,15 @@ impl EdgePick {
     }
 }
 
+/// Opaque ghost color: red-orange for cuts, amber otherwise.
+fn ghost_edge_color(cut: bool) -> Color {
+    if cut {
+        [0.95, 0.42, 0.32, 1.0]
+    } else {
+        [0.98, 0.72, 0.30, 1.0]
+    }
+}
+
 fn next_operation(operation: &'static str) -> &'static str {
     match operation {
         "newBody" => "cut",
@@ -214,7 +223,7 @@ impl App {
                 self.select_feature(&id);
                 self.solid_preview = true;
                 self.status_message = format!(
-                    "Created {angle:.1} deg {} revolve  |  Ctrl+S to save  |  Tab: sketch",
+                    "Created {angle:.1} deg {} revolve  |  Ctrl+Z to undo  |  Ctrl+S to save",
                     draft.operation
                 );
             }
@@ -408,7 +417,7 @@ impl App {
                         self.push_tree_step(snapshot, label);
                         self.select_feature(&id);
                         self.status_message = format!(
-                            "Created {size:.1} mm {} on {} edge{}  |  Ctrl+S to save",
+                            "Created {size:.1} mm {} on {} edge{}  |  Ctrl+Z to undo  |  Ctrl+S to save",
                             pick.kind.name(),
                             pick.edges.len(),
                             if pick.edges.len() == 1 { "" } else { "s" }
@@ -521,7 +530,7 @@ impl App {
     }
 
     /// Translucent ghost triangles over the current bodies, plus a prompt.
-    fn paint_ghost(
+    pub(super) fn paint_ghost(
         &self,
         painter: &mut Painter,
         layout: Layout,
@@ -556,6 +565,11 @@ impl App {
             for (_, [a, b, c]) in faces {
                 painter.triangle(a, b, c, color);
             }
+            // Silhouette: the ghost's sharp edges, opaque, over the bodies.
+            for (a, b) in solid::mesh_sharp_edges(ghost) {
+                let (a, b) = (projector.screen(a), projector.screen(b));
+                painter.line(a[0], a[1], b[0], b[1], 1.8, ghost_edge_color(cut));
+            }
         }
         let rect = Rect {
             x: layout.viewport.x + 18.0,
@@ -566,6 +580,20 @@ impl App {
         painter.rect(rect, PANEL_LIGHT);
         painter.outline(rect, 1.0, ACCENT);
         painter.text(rect.x + 12.0, rect.y + 13.0, prompt, 1.2, ACCENT);
+        // "PREVIEW" tag right of the prompt, in the ghost color.
+        let color = ghost_edge_color(cut);
+        let tag = Rect {
+            x: rect.x + rect.w + 10.0,
+            y: rect.y,
+            w: 96.0,
+            h: rect.h,
+        };
+        painter.rect(
+            tag,
+            [color[0] * 0.25, color[1] * 0.25, color[2] * 0.25, 0.92],
+        );
+        painter.outline(tag, 1.5, color);
+        painter.text(tag.x + 12.0, tag.y + 13.0, "PREVIEW", 1.2, color);
     }
 
     /// Revolve ghost and ANGLE prompt (after the axis is picked).

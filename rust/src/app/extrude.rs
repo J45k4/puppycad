@@ -94,6 +94,42 @@ impl App {
             .next_back()
     }
 
+    /// What the open draft would create ("Extrusion", "Revolve", ...), or
+    /// `None` when no extrude / revolve / edge finish prompt is open.
+    pub(super) fn draft_kind(&self) -> Option<&'static str> {
+        if self.extrude_draft.is_some() {
+            Some("Extrusion")
+        } else if self.revolve_draft.is_some() {
+            Some("Revolve")
+        } else {
+            self.edge_pick.as_ref().map(|pick| match pick.kind {
+                project::FinishKind::Chamfer => "Chamfer",
+                project::FinishKind::Fillet => "Fillet",
+            })
+        }
+    }
+
+    /// Status bar text: while a draft is open it says plainly that nothing
+    /// exists yet (plus why the ghost cannot be built, if it cannot).
+    pub(super) fn shown_status(&self) -> String {
+        let Some(kind) = self.draft_kind() else {
+            return self.status_message.clone();
+        };
+        let error = match (&self.extrude_draft, &self.revolve_draft) {
+            (Some(draft), _) => draft.ghost.as_ref().err().cloned(),
+            (_, Some(draft)) if draft.axis.is_some() => draft.ghost.as_ref().err().cloned(),
+            (_, Some(_)) => Some("click an axis line, or X / Y".into()),
+            _ => None,
+        };
+        let mut text =
+            format!("{kind} preview \u{2014} not created yet  |  Enter commit  |  Esc cancel");
+        if let Some(error) = error.filter(|error| !error.is_empty()) {
+            text.push_str("  |  ");
+            text.push_str(&error);
+        }
+        text
+    }
+
     pub(super) fn begin_extrude(&mut self, operation: &'static str) {
         self.document.finish_drag();
         self.more_open = false;
@@ -160,7 +196,7 @@ impl App {
             }
             KeyCode::Escape => {
                 self.solid_preview = false;
-                self.status_message = "Extrude cancelled".into();
+                self.status_message = "Extrusion cancelled".into();
                 return;
             }
             KeyCode::Backspace => {
@@ -195,6 +231,7 @@ impl App {
             return;
         };
         let project = self.project.as_mut().expect("draft has project");
+        let snapshot = project.feature_tree_snapshot();
         match project.create_extrusion_with_options(
             &self.document,
             depth,
@@ -207,8 +244,12 @@ impl App {
                     .extrusion_previews()
                     .map_or(0, |solids| solids.len() - 1);
                 self.solid_preview = true;
+                self.push_tree_step(
+                    snapshot,
+                    format!("Extrude {} mm", model::history_number_label(depth)),
+                );
                 self.status_message = format!(
-                    "Created {depth:.1} mm {} {} extrusion  |  Ctrl+S to save  |  Tab: sketch",
+                    "Created {depth:.1} mm {} {} extrusion  |  Ctrl+Z to undo  |  Ctrl+S to save",
                     draft.options.end.label().to_lowercase(),
                     draft.operation
                 );
@@ -433,80 +474,23 @@ impl App {
         let Some(draft) = &self.extrude_draft else {
             return;
         };
-        let solids = self
-            .project
-            .as_ref()
-            .and_then(ProjectFile::evaluated_solids)
-            .unwrap_or_default();
-        let scene = SolidScene::from_manifolds(&solids);
         let ghost = draft
             .ghost
             .as_ref()
             .ok()
             .and_then(|solid| stl::solid_triangles(solid).ok())
             .unwrap_or_default();
-        let mut vertices = scene.vertices.clone();
-        vertices.extend(ghost.iter().flatten().copied());
-        painter.rect(layout.viewport, [0.065, 0.085, 0.115, 1.0]);
-        let Some(projector) = SolidProjector::new(self.solid_view, &vertices, layout.viewport)
-        else {
-            return;
-        };
-        self.paint_boolean_preview(painter, layout, &scene, &projector, scene.bodies);
-        let color: Color = if draft.operation == "cut" {
-            [0.95, 0.42, 0.32, 0.38]
-        } else {
-            [0.98, 0.72, 0.30, 0.38]
-        };
-        let mut faces: Vec<(f32, [[f32; 2]; 3])> = ghost
-            .iter()
-            .map(|&[a, b, c]| {
-                let mid = std::array::from_fn(|axis| (a[axis] + b[axis] + c[axis]) / 3.0);
-                (projector.depth(mid), [a, b, c].map(|p| projector.screen(p)))
-            })
-            .collect();
-        faces.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for (_, [a, b, c]) in faces {
-            painter.triangle(a, b, c, color);
-        }
-        if let Ok(solid) = &draft.ghost {
-            let edge = [color[0], color[1], color[2], 1.0];
-            for loop_points in solid.loops() {
-                for offset in [0.0, solid.depth] {
-                    for index in 0..loop_points.len() {
-                        let a = projector.screen(solid.world_point(loop_points[index], offset));
-                        let b = projector.screen(
-                            solid.world_point(loop_points[(index + 1) % loop_points.len()], offset),
-                        );
-                        painter.line(a[0], a[1], b[0], b[1], 1.5, edge);
-                    }
-                }
-            }
-        }
-        let prompt = Rect {
-            x: layout.viewport.x + 18.0,
-            y: layout.viewport.y + layout.viewport.h - 58.0,
-            w: 420.0,
-            h: 40.0,
-        };
-        painter.rect(prompt, PANEL_LIGHT);
-        painter.outline(prompt, 1.0, ACCENT);
-        painter.text(
-            prompt.x + 12.0,
-            prompt.y + 13.0,
-            &format!(
-                "DEPTH  {}_ mm   {}{}",
-                if draft.buffer.is_empty() {
-                    format!("{DEFAULT_DEPTH:.0}")
-                } else {
-                    draft.buffer.clone()
-                },
-                draft.options.end.label(),
-                if draft.options.flip { "  FLIPPED" } else { "" }
-            ),
-            1.2,
-            ACCENT,
+        let prompt = format!(
+            "DEPTH  {}_ mm   {}{}",
+            if draft.buffer.is_empty() {
+                format!("{DEFAULT_DEPTH:.0}")
+            } else {
+                draft.buffer.clone()
+            },
+            draft.options.end.label(),
+            if draft.options.flip { "  FLIPPED" } else { "" }
         );
+        self.paint_ghost(painter, layout, &ghost, draft.operation == "cut", &prompt);
     }
 
     /// Properties panel while the extrude prompt is open.

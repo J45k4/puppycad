@@ -20,12 +20,24 @@ impl App {
             .unwrap_or(total)
     }
 
-    /// Rows the feature tree takes: one per feature plus the ROLLBACK row.
+    /// Rows the feature tree takes: one per feature plus the ROLLBACK row,
+    /// plus the dimmed "NEW ... (preview)" row while a draft is open.
     pub(super) fn tree_row_count(&self) -> usize {
-        match self.feature_total() {
+        let rows = match self.feature_total() {
             0 => 0,
             total => total + 1,
-        }
+        };
+        rows + usize::from(self.draft_kind().is_some())
+    }
+
+    /// The placeholder row of the open draft: last in the tree.
+    pub(super) fn draft_row(&self, layout: Layout) -> Option<Rect> {
+        self.draft_kind()?;
+        Some(layout.solid_row(
+            self.tree_row_count() - 1,
+            self.part_rows().len(),
+            self.sketch_count(),
+        ))
     }
 
     pub(super) fn feature_row(&self, layout: Layout, index: usize) -> Rect {
@@ -117,6 +129,9 @@ impl App {
     }
 
     pub(super) fn move_selected_feature(&mut self, delta: isize) {
+        if self.draft_kind().is_some() {
+            return;
+        }
         let index = self.selected_solid;
         let mut moved = index;
         if self.tree_edit("Reorder feature".into(), |project| {
@@ -131,6 +146,9 @@ impl App {
     }
 
     pub(super) fn toggle_selected_suppressed(&mut self) {
+        if self.draft_kind().is_some() {
+            return;
+        }
         let index = self.selected_solid;
         let Some(project) = self.project.as_ref() else {
             return;
@@ -173,6 +191,9 @@ impl App {
     }
 
     pub(super) fn move_rollback(&mut self, delta: isize) {
+        if self.draft_kind().is_some() {
+            return;
+        }
         let position = self.rollback_position() as isize + delta;
         if position >= 0 {
             self.set_rollback(position as usize);
@@ -193,6 +214,15 @@ impl App {
 
     /// Clicks on feature rows and the ROLLBACK row; true when handled.
     pub(super) fn click_feature_tree(&mut self, layout: Layout, point: Point) -> bool {
+        if self.draft_kind().is_some() {
+            // Tree rows (and the placeholder) are inert while a draft is open.
+            let rows = self.tree_row_count();
+            return (0..rows).any(|slot| {
+                layout
+                    .solid_row(slot, self.part_rows().len(), self.sketch_count())
+                    .contains(point.x, point.y)
+            });
+        }
         if self.feature_total() == 0 {
             return false;
         }
@@ -224,6 +254,22 @@ impl App {
         let Some(project) = self.project.as_ref() else {
             return;
         };
+        if let (Some(kind), Some(row)) = (self.draft_kind(), self.draft_row(layout))
+            && Self::panel_row_shown(layout, row)
+        {
+            painter.outline(row, 1.0, DIM);
+            painter.text(
+                row.x + 9.0,
+                row.y + 9.0,
+                &clip_text(
+                    &format!("NEW {} (preview)", kind.to_uppercase()),
+                    ((row.w - 18.0) / 8.0) as usize,
+                    false,
+                ),
+                1.0,
+                DIM,
+            );
+        }
         let total = project.feature_count();
         if total == 0 {
             return;
