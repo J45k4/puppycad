@@ -1,3 +1,4 @@
+mod commands;
 mod corner;
 mod input;
 mod panels;
@@ -10,6 +11,7 @@ mod view_sketch;
 #[cfg(test)]
 mod tests;
 
+use commands::*;
 use corner::*;
 use pattern::*;
 use project_panel::*;
@@ -893,32 +895,7 @@ impl App {
         if !self.more_open {
             return;
         }
-        for (index, label) in [
-            "POINT [P]",
-            "POLYGON [G]",
-            "SLOT [S]",
-            "EXTRUDE [X]",
-            "NEW PART [B]",
-            "3PT CIRCLE",
-            "CENTER ARC",
-            "CENTER RECT",
-            "3PT RECT",
-            "3PT CTR RECT",
-            "JOIN [SHIFT J]",
-            "FIT SPLINE",
-            "CTRL SPLINE",
-            "MIRROR [SHIFT I]",
-            "FILLET [SHIFT W]",
-            "CHAMFER [SHIFT H]",
-            "OFFSET [SHIFT U]",
-            "TANGENT ARC [,]",
-            "LIN PATTERN [SHIFT Z]",
-            "CIRC PATTERN [;]",
-            "SKETCH ON FACE [4]",
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (index, (_, label)) in MORE_MENU.iter().enumerate() {
             let row = layout.more_item(index);
             painter.rect(row, PANEL_LIGHT);
             painter.outline(row, 1.0, ACCENT);

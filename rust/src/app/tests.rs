@@ -638,3 +638,80 @@ fn hovering_picks_the_top_face_and_key_4_sketches_on_it() {
     assert_eq!(project.sketch_face(project.active_sketch()), Some(&face));
     assert_eq!(app.document.reference_edges.len(), outline.len());
 }
+
+#[test]
+fn registry_has_unique_ids_and_no_duplicate_shortcuts() {
+    let mut seen: Vec<(String, Scope, &str)> = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut duplicates = Vec::new();
+    for command in COMMANDS {
+        assert!(ids.insert(command.id), "{:?} registered twice", command.id);
+        assert!(!command.label.is_empty());
+        for chord in shortcut_chords(command.shortcut) {
+            if let Some((_, _, other)) = seen.iter().find(|(seen_chord, scope, _)| {
+                *seen_chord == chord && scope.overlaps(command.scope)
+            }) {
+                duplicates.push(format!("{chord}: {other} / {}", command.label));
+            }
+            seen.push((chord, command.scope, command.label));
+        }
+    }
+    assert!(duplicates.is_empty(), "duplicate shortcuts: {duplicates:?}");
+    assert_eq!(
+        shortcut_chords("Ctrl+Shift+E"),
+        shortcut_chords("Shift+Ctrl+E")
+    );
+    assert_eq!(shortcut_chords("Ctrl+Y / Ctrl+Shift+Z").len(), 2);
+}
+
+#[test]
+fn every_more_item_maps_to_a_registered_command() {
+    let layout = Layout::new(1280.0, 800.0);
+    for (index, (id, label)) in MORE_MENU.iter().enumerate() {
+        assert_eq!(command(*id).id, *id, "{label}");
+        let row = layout.more_item(index);
+        assert!(row.y + row.h <= 800.0 && row.x >= 0.0, "{label}: {row:?}");
+    }
+    let mut app = App {
+        more_open: true,
+        ..App::default()
+    };
+    let row = layout.more_item(0);
+    app.cursor = Point {
+        x: row.x + 5.0,
+        y: row.y + 5.0,
+    };
+    app.handle_left_press();
+    assert_eq!(app.document.tool, Tool::Point);
+    assert!(!app.more_open);
+}
+
+#[test]
+fn key_resolution_respects_modifiers_and_context() {
+    let mut app = App::default();
+    assert_eq!(app.command_for_key(KeyCode::KeyR), Some(Cmd::Rectangle));
+    assert_eq!(app.command_for_key(KeyCode::KeyW), None);
+    app.modifiers = ModifiersState::SHIFT;
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyR),
+        Some(Cmd::CenterRectangle)
+    );
+    assert_eq!(app.command_for_key(KeyCode::KeyW), Some(Cmd::FilletCorner));
+    assert_eq!(app.command_for_key(KeyCode::KeyL), Some(Cmd::Collinear));
+    app.modifiers = ModifiersState::CONTROL;
+    assert_eq!(app.command_for_key(KeyCode::KeyS), Some(Cmd::Save));
+    assert_eq!(app.command_for_key(KeyCode::KeyZ), Some(Cmd::Undo));
+    app.modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    assert_eq!(app.command_for_key(KeyCode::KeyZ), Some(Cmd::Redo));
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyE),
+        Some(Cmd::ExportAsciiStl)
+    );
+    app.modifiers = ModifiersState::empty();
+    app.select_tool(Tool::CenterArc);
+    assert_eq!(app.command_for_key(KeyCode::KeyW), Some(Cmd::ArcDirection));
+    app.run_command(Cmd::ArcDirection);
+    assert!(app.status_message.contains("sweep"));
+    app.run_command(Cmd::Circle);
+    assert_eq!(app.document.tool, Tool::Circle);
+}
