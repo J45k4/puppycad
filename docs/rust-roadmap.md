@@ -61,8 +61,9 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 
 ## Phase 3 — Solid modeling
 
-1. Extrude options: direction, symmetric, through-all, up-to-body; preview
-   before commit.
+1. (Done) Extrude options: direction, symmetric, through-all, up-to-body; preview
+   before commit (end condition, flip, up-to-body pick, ghost preview with a
+   DEPTH prompt; see `rust-native.md`).
 2. Sketch on a planar face: face picking in the 3D view, with the plane frame
    derived as `src/solid-model.ts` does so files stay web-compatible.
 3. Revolve, loft (`loft.ts`), edge fillet and chamfer (`edge-finish.ts`), all

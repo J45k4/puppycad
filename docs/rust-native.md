@@ -534,8 +534,8 @@ ellipse, polygon, or slot on the Top, Front, or Right reference plane opens in a
 3D preview. The preview and STL export use the web app's XY, XZ, and YZ plane
 frames. Construction
 guides may coexist with that closed shape and are ignored for the profile. Draw one of
-those closed shapes on a reference-plane sketch and choose **MORE → EXTRUDE** or press **X** to create a 50 mm new-body
-extrusion, then Ctrl+S to save it in the web graph format.
+those closed shapes on a reference-plane sketch and choose **MORE → EXTRUDE** or press **X** and Enter to create a 50 mm new-body
+extrusion (see *Extrude options and preview*), then Ctrl+S to save it in the web graph format.
 Separate open line components and sketch points may also coexist with the
 closed profile; they do not contribute to the extrusion.
 The same extrusion command accepts closed simple loops assembled from line
@@ -582,6 +582,49 @@ project-wide read-only lock, so new reference-plane sketches can be added.
 Extrusions appear as clickable rows in the Project panel between sketches and
 sketch entities. Clicking a row selects that body and opens the 3D preview;
 clicking a sketch or entity row returns to the sketch view.
+
+### Extrude options and preview
+
+**X**, **Shift+X** (cut) and **Shift+J** (join), and the MORE menu entries, do
+not create the extrusion right away. They switch to the 3D view with a
+translucent ghost of the would-be tool solid (orange, red-tinted for cuts) over
+the existing bodies and open a DEPTH prompt in the viewport and Properties.
+Type a depth, press **E** to cycle the end condition and **F** to flip; the
+ghost updates on each key. **Enter** commits (an empty prompt keeps the old
+one-key default of 50 mm blind), **Esc** cancels and returns to the sketch.
+
+For a selected extrusion in the solid view, Properties shows DEPTH, END and
+FLIP rows, plus TARGET for up-to-body. Click END or press **E** to cycle
+Blind → Symmetric → Through all → Up to body → Blind (through all and up to
+body only for cut and join features once a body exists). Click FLIP or press
+**F** to reverse the direction. Click TARGET or press **U** to arm a body pick,
+then click a body in the viewport (**Esc** cancels). Each edit re-evaluates the
+Boolean mesh and is one undo step: **Ctrl+Z** / **Ctrl+Shift+Z** (or Ctrl+Y)
+in the solid view undo and redo extrusion edits, including depth edits. An
+edit that would not evaluate is rejected and leaves the graph unchanged.
+
+End conditions:
+
+- **Blind**: `depth` along the sketch normal (`-depth..0` when flipped).
+- **Symmetric**: `depth` is the total length, centred on the sketch plane;
+  flip has no effect.
+- **Through all**: spans the previous body along the sketch normal in both
+  directions with a small margin, like the web's through-all solid step.
+  Flip has no effect.
+- **Up to body**: from the sketch plane to the far side of the target body's
+  bounding box along the (flipped) normal. The target must be an earlier
+  new-body extrusion.
+
+File format: the `extrude` graph node keeps the fields the web writes
+(`operation`, `depth`) and adds optional `endCondition` (`"symmetric"`,
+`"through-all"` — the web's solid-step spelling — or `"up-to-body"` with
+`targetId` naming the body's extrude node) and `flip: true`. Defaults are
+omitted, so blind extrusions stay byte-identical. The web loader reads such
+files and evaluates them as blind with the stored depth (it ignores the extra
+fields). Unknown end conditions, a non-boolean `flip`, a missing or later
+up-to-body target, or through-all/up-to-body on a new body open read-only with
+an `extrusion options:` reason. Fixture: `rust/fixtures/extrude-options.pcad`.
+
 Press Ctrl+E in the solid preview to export each supported body as an ASCII STL
 beside the project file. Existing STL files are preserved; additional bodies
 and repeated exports use numbered filenames.
@@ -607,8 +650,9 @@ Library crate (`rust/src/lib.rs`):
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
   `geometry.rs` (curve intersections and boundaries), `tests.rs`,
   `dimension_tests.rs`.
-- `project.rs` (`.pcad` load/save, parts, extrusion profiles; dimension
-  round-trip tests in `project/dimension_tests.rs`), `solver.rs`,
+- `project.rs` (`.pcad` load/save, parts, extrusion profiles and end
+  conditions; dimension round-trip tests in `project/dimension_tests.rs`,
+  extrude option tests in `project/extrude_option_tests.rs`), `solver.rs`,
   `sketch_value.rs` (dimension expressions and sketch variables),
   `spline.rs`, `stl.rs`.
 
@@ -621,7 +665,9 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   `corner.rs` (fillet/chamfer gestures and prompts), `tangent.rs` (tangent
   arc tool and smooth join key),
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
-  preview projection, dragging and painting), `view_sketch.rs` (sketch grid
+  preview projection, dragging, body picking and painting), `extrude.rs`
+  (extrude prompt with ghost preview, end condition/flip/target edits and
+  their undo), `view_sketch.rs` (sketch grid
   and shape painting, dimension labels), `tests.rs`.
 - `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
 
