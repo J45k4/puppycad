@@ -1901,7 +1901,7 @@ impl App {
         };
     }
 
-    fn fit_view_key(&mut self) {
+    pub(super) fn fit_view_key(&mut self) {
         self.status_message = if self
             .document
             .fit_shapes(self.layout().viewport.w, self.layout().viewport.h)

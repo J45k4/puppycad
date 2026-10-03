@@ -864,6 +864,14 @@ pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> 
         arrangement = faces;
     }
     let region = |index: usize| arrangement && index >= shapes;
+    // Arrangement faces that share a vertex are neighbors, not nested.
+    let neighbors = |i: usize, j: usize| {
+        region(i)
+            && region(j)
+            && loops[i]
+                .iter()
+                .any(|p| loops[j].iter().any(|q| p.distance(*q) < 1e-4))
+    };
     if loops.is_empty() {
         return None;
     }
@@ -872,7 +880,7 @@ pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> 
     }
     for i in 0..loops.len() {
         for j in i + 1..loops.len() {
-            if region(i) && region(j) {
+            if neighbors(i, j) {
                 continue;
             }
             if loops_intersect(&loops[i], &loops[j]) {
@@ -889,7 +897,7 @@ pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> 
             (0..loops.len())
                 .filter(|candidate| {
                     *candidate != index
-                        && !(region(index) && region(*candidate))
+                        && !neighbors(index, *candidate)
                         && areas[*candidate] > areas[index]
                         && point_inside_loop(loops[index][0], &loops[*candidate])
                 })

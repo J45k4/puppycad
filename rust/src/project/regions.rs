@@ -23,8 +23,20 @@ fn interior_parameter(p: Point, a: Point, b: Point) -> Option<f32> {
     (t > 0.0 && t < 1.0).then_some(t)
 }
 
+/// Parameter along `a`-`b` where it properly crosses `c`-`d`.
+fn crossing(a: Point, b: Point, c: Point, d: Point) -> Option<f32> {
+    let denominator = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+    if denominator.abs() <= 1e-12 {
+        return None;
+    }
+    let t = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / denominator;
+    let u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / denominator;
+    (t > 1e-6 && t < 1.0 - 1e-6 && u > 1e-6 && u < 1.0 - 1e-6).then_some(t)
+}
+
 /// True when some segment end has more than two segment ends at it or lies
-/// inside another segment: the curves form an arrangement, not loops.
+/// inside another segment, or two segments cross: the curves form an
+/// arrangement, not separate loops.
 pub(super) fn needs_arrangement(segments: &[(Point, Point)]) -> bool {
     let ends: Vec<Point> = segments.iter().flat_map(|&(a, b)| [a, b]).collect();
     ends.iter().any(|p| {
@@ -32,6 +44,10 @@ pub(super) fn needs_arrangement(segments: &[(Point, Point)]) -> bool {
             || segments
                 .iter()
                 .any(|&(a, b)| interior_parameter(*p, a, b).is_some())
+    }) || segments.iter().enumerate().any(|(i, &(a, b))| {
+        segments[i + 1..]
+            .iter()
+            .any(|&(c, d)| crossing(a, b, c, d).is_some())
     })
 }
 
@@ -52,13 +68,8 @@ pub(super) fn arrangement_faces(segments: &[(Point, Point)]) -> Vec<Vec<Point>> 
                     cuts.push(t);
                 }
             }
-            let denominator = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
-            if denominator.abs() > 1e-12 {
-                let t = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / denominator;
-                let u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / denominator;
-                if t > 1e-6 && t < 1.0 - 1e-6 && u > 1e-6 && u < 1.0 - 1e-6 {
-                    cuts.push(t);
-                }
+            if let Some(t) = crossing(a, b, c, d) {
+                cuts.push(t);
             }
         }
         cuts.sort_by(f32::total_cmp);

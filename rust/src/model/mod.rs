@@ -432,7 +432,24 @@ impl Document {
     }
 
     pub fn fit_shapes(&mut self, viewport_width: f32, viewport_height: f32) -> bool {
-        let mut bounds = self.shapes.iter().filter_map(Shape::bounds);
+        // A face sketch's body context counts, so F frames the face.
+        let context = self
+            .reference_edges
+            .iter()
+            .chain(&self.reference_silhouette)
+            .map(|&(a, b)| {
+                (
+                    Point {
+                        x: a.x.min(b.x),
+                        y: a.y.min(b.y),
+                    },
+                    Point {
+                        x: a.x.max(b.x),
+                        y: a.y.max(b.y),
+                    },
+                )
+            });
+        let mut bounds = self.shapes.iter().filter_map(Shape::bounds).chain(context);
         let Some((mut min, mut max)) = bounds.next() else {
             return false;
         };

@@ -405,3 +405,40 @@ fn context_menu_offers_project_into_sketch_on_edges_and_faces() {
     assert_eq!(app.document.shapes.len(), 1, "{}", app.status_message);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn split_projected_face_keeps_the_hole_in_its_region() {
+    let path = copy_fixture("extrude-options");
+    let mut app = App::with_project(&path).unwrap();
+    sketch_on(&mut app, [0.0, 0.0, 1.0]);
+    app.use_edges();
+    assert_eq!(app.document.projections.len(), 8, "outer loop and hole");
+    app.document.tool = Tool::Line;
+    app.document.draft_start = Some(p(-40.0, 60.0));
+    assert!(app.document.finish_draft(p(-40.0, -60.0)));
+    let profiles = project::profiles_from_document(&app.document).unwrap();
+    assert_eq!(profiles.len(), 2);
+    let right = profiles
+        .iter()
+        .position(|profile| profile.holes.len() == 1)
+        .expect("the hole stays a hole of the right part");
+    let project = app.project.as_mut().unwrap();
+    let volume = |project: &project::ProjectFile| -> f64 {
+        project
+            .evaluated_solids()
+            .unwrap()
+            .iter()
+            .map(|body| body.volume())
+            .sum()
+    };
+    let before = volume(project);
+    project
+        .create_extrusion_with_operation(&app.document, 10.0, right, "cut")
+        .unwrap();
+    let removed = before - volume(project);
+    assert!(
+        (removed - (120.0 * 100.0 - 40.0 * 40.0) * 10.0).abs() < 1.0,
+        "{removed}"
+    );
+    let _ = std::fs::remove_file(path);
+}
