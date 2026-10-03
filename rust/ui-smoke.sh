@@ -2948,3 +2948,41 @@ cp /tmp/native-anchor-drag.pcad /out/rust-native-anchor-drag.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Mirror a circle across a line (Shift+I, click the line): a linked copy
+# appears on the other side, both rows show [SYM], and the project saves a
+# web "mirror" relation.
+./target/debug/puppycad /tmp/native-mirror.pcad >/tmp/puppycad-mirror.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-mirror.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-mirror.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" l
+xdotool mousemove 530 230 click 1
+xdotool mousemove 530 520 click 1
+xdotool key --window "$window_id" c
+xdotool mousemove 660 330 click 1
+xdotool mousemove 710 330 click 1
+xdotool key --window "$window_id" v
+xdotool mousemove 710 330 click 1
+xdotool key --window "$window_id" shift+i
+xdotool mousemove 530 400 click 1
+sleep 0.5
+import -window root /out/rust-native-mirror.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test -s /tmp/native-mirror.pcad
+grep -q '"type": *"mirror"' /tmp/native-mirror.pcad
+cp /tmp/native-mirror.pcad /out/rust-native-mirror.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
