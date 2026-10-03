@@ -1114,6 +1114,136 @@ impl Document {
         self.dims.expressions.retain(|key, _| keys.contains(key));
     }
 
+    /// Runs a split or trim of the selected shape and carries its point
+    /// dimensions to the retained piece that still has the dimensioned
+    /// anchor (web `mapAnchor`: matched by position); dimensions whose anchor
+    /// was cut away are dropped with their annotations.
+    pub(super) fn carrying_dimensions<T>(
+        &mut self,
+        edit: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let Some(id) = self.selected else {
+            return edit(self);
+        };
+        let mut anchored: Vec<(u32, bool, Point)> = Vec::new();
+        for (&key, dimension) in &self.dims.point_dimensions {
+            for (first, anchor) in [(true, dimension.a), (false, dimension.b)] {
+                if anchor.0 == id
+                    && let Some(at) = self.dimension_anchor(anchor)
+                {
+                    anchored.push((key, first, at));
+                }
+            }
+        }
+        let first_new = self.next_id;
+        let result = edit(self)?;
+        let pieces: Vec<u32> = std::iter::once(id)
+            .chain(first_new..self.next_id)
+            .filter(|piece| self.shapes.iter().any(|shape| shape.id() == *piece))
+            .collect();
+        for (key, first, at) in anchored {
+            let found = pieces.iter().find_map(|&piece| {
+                (0..self.anchor_count(piece)).find_map(|index| {
+                    self.dimension_anchor((piece, index))
+                        .filter(|p| p.distance(at) <= 1e-4)
+                        .map(|_| (piece, index))
+                })
+            });
+            match (found, self.dims.point_dimensions.get_mut(&key)) {
+                (Some(anchor), Some(dimension)) => {
+                    if first {
+                        dimension.a = anchor;
+                    } else {
+                        dimension.b = anchor;
+                    }
+                }
+                (None, Some(_)) => {
+                    self.dims.point_dimensions.remove(&key);
+                }
+                _ => {}
+            }
+        }
+        self.prune_dimension_meta();
+        Ok(result)
+    }
+
+    /// Number of dimensionable anchor indices of shape `id`.
+    fn anchor_count(&self, id: u32) -> usize {
+        match self.shapes.iter().find(|shape| shape.id() == id) {
+            Some(Shape::Spline { points, .. }) => points.len(),
+            Some(Shape::Line { .. }) => 2,
+            Some(_) => 1,
+            None => 0,
+        }
+    }
+
+    /// A circle that became an arc keeps its diameter dimension as a radius
+    /// dimension (value, reference flag, label position and expression).
+    pub(super) fn diameter_to_radius(&mut self, id: u32) {
+        let from = DimensionKey::Field(id, DimensionField::CircleDiameter);
+        let to = DimensionKey::Field(id, DimensionField::CurveRadius);
+        if let Some(value) = self
+            .driving_dimensions
+            .remove(&(id, DimensionField::CircleDiameter))
+        {
+            self.driving_dimensions
+                .insert((id, DimensionField::CurveRadius), value * 0.5);
+        }
+        if self.dims.references.remove(&from) {
+            self.dims.references.insert(to);
+        }
+        if let Some(at) = self.dims.label_positions.remove(&from) {
+            self.dims.label_positions.insert(to, at);
+        }
+        if let Some(expression) = self.dims.expressions.remove(&from) {
+            self.dims
+                .expressions
+                .insert(to, format!("({expression}) / 2"));
+        }
+    }
+
+    /// Scale or rotate the annotations of shape `id`'s dimensions with the
+    /// shape (web `transformSketchSelection`): label positions follow the
+    /// transform, and an expression whose value the transform changed is
+    /// cleared (the dimension keeps its new numeric value). With `copy` the
+    /// annotations are copied to `target` instead.
+    pub(super) fn transform_dimension_meta(
+        &mut self,
+        id: u32,
+        target: u32,
+        transform: impl Fn(Point) -> Point,
+        changed: impl Fn(DimensionField) -> bool,
+    ) {
+        let keys: BTreeSet<DimensionKey> = self
+            .dims
+            .label_positions
+            .keys()
+            .chain(self.dims.expressions.keys())
+            .copied()
+            .filter(|key| matches!(key, DimensionKey::Field(shape, _) if *shape == id))
+            .collect();
+        for key in keys {
+            let DimensionKey::Field(_, field) = key else {
+                continue;
+            };
+            let moved = DimensionKey::Field(target, field);
+            if let Some(&at) = self.dims.label_positions.get(&key) {
+                self.dims.label_positions.insert(moved, transform(at));
+            }
+            match self.dims.expressions.get(&key).cloned() {
+                Some(_) if changed(field) => {
+                    if target == id {
+                        self.dims.expressions.remove(&key);
+                    }
+                }
+                Some(expression) => {
+                    self.dims.expressions.insert(moved, expression);
+                }
+                None => {}
+            }
+        }
+    }
+
     /// Deletes a dimension and its annotations. One undo step.
     pub fn delete_dimension(&mut self, key: DimensionKey) -> Result<(), String> {
         if !self.dimension_keys().contains(&key) {

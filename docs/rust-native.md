@@ -288,11 +288,24 @@ kind is inferred (its previous kind, else length, angle, scalar). Changing a
 variable re-evaluates every dependent dimension and solves as one undo step;
 any failure rolls everything back. Expressions save as the web relation
 `expression` next to the exactly evaluated `value` (the web loader checks
-they match), and variables as the sketch node's `variables` array. An
-expression that no longer produces the stored value (after a direct edit such
-as scaling) is dropped on save. Dimensions stored as graph `sketchConstraint`
-nodes move to sketch relations once they get a label position, reference
-flag or expression.
+they match), and variables as the sketch node's `variables` array. As in
+the web `transformSketchSelection`, scaling a shape clears the expressions of
+the dimensions whose value it changes, rotating clears a rotation
+dimension's expression, and both move moved label positions with the shape
+(a copy gets transformed copies). An expression that still no longer produces
+the stored value is dropped on save. Dimensions stored as graph
+`sketchConstraint` nodes move to sketch relations once they get a label
+position, reference flag or expression.
+
+**Split and trim.** As in the web `splitSketchCurve`/`trimSketchCurve`, a
+point dimension on a split or trimmed shape moves to the retained piece that
+still has its anchor at the same position (a dimension on a line's far end
+follows the new piece); one whose anchor is cut away is dropped with its
+label position, reference flag and expression. Driving lengths and sweeps of
+the cut shape are dropped (reference ones keep measuring), ellipse width and
+height stay on the first piece, and a circle's diameter dimension becomes
+the arc's radius dimension, keeping its reference flag, label position and
+expression (as `(expression) / 2`).
 
 ### Constraint solver
 

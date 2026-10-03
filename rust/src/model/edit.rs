@@ -138,6 +138,10 @@ impl Document {
     }
 
     pub fn split_selected_curve(&mut self, click: Point) -> Result<u32, String> {
+        self.carrying_dimensions(|document| document.split_curve_at(click))
+    }
+
+    fn split_curve_at(&mut self, click: Point) -> Result<u32, String> {
         let id = self.selected.ok_or("Select a curve to split")?;
         if self.has_offset(id) {
             return Err("Remove the offset before splitting".into());
@@ -311,6 +315,10 @@ impl Document {
     }
 
     pub fn split_selected_ellipse(&mut self, first: Point, second: Point) -> Result<u32, String> {
+        self.carrying_dimensions(|document| document.split_ellipse_at(first, second))
+    }
+
+    fn split_ellipse_at(&mut self, first: Point, second: Point) -> Result<u32, String> {
         let id = self.selected.ok_or("Select an ellipse to split")?;
         let index = self
             .shapes
@@ -386,10 +394,6 @@ impl Document {
         if self.construction.contains(&id) {
             self.construction.insert(new_id);
         }
-        self.driving_dimensions
-            .remove(&(id, DimensionField::RectangleWidth));
-        self.driving_dimensions
-            .remove(&(id, DimensionField::RectangleHeight));
         self.selected = Some(new_id);
         Ok(new_id)
     }
@@ -473,6 +477,10 @@ impl Document {
     }
 
     pub fn split_selected_circle(&mut self, first: Point, second: Point) -> Result<u32, String> {
+        self.carrying_dimensions(|document| document.split_circle_at(first, second))
+    }
+
+    fn split_circle_at(&mut self, first: Point, second: Point) -> Result<u32, String> {
         let id = self.selected.ok_or("Select a circle to split")?;
         if self.has_offset(id) {
             return Err("Remove the offset before splitting".into());
@@ -554,8 +562,7 @@ impl Document {
         if self.construction.contains(&id) {
             self.construction.insert(new_id);
         }
-        self.driving_dimensions
-            .remove(&(id, DimensionField::CircleDiameter));
+        self.diameter_to_radius(id);
         self.selected = Some(new_id);
         Ok(new_id)
     }
@@ -690,6 +697,10 @@ impl Document {
     }
 
     pub fn trim_selected_curve(&mut self, click: Point) -> Result<usize, String> {
+        self.carrying_dimensions(|document| document.trim_curve_at(click))
+    }
+
+    fn trim_curve_at(&mut self, click: Point) -> Result<usize, String> {
         let id = self.selected.ok_or("Select a curve to trim")?;
         if self.has_offset(id) {
             return Err("Remove the offset before trimming".into());
@@ -932,10 +943,6 @@ impl Document {
             sweep: retained_sweep,
             segments,
         };
-        self.driving_dimensions
-            .remove(&(id, DimensionField::RectangleWidth));
-        self.driving_dimensions
-            .remove(&(id, DimensionField::RectangleHeight));
         Ok(1)
     }
 
@@ -1127,8 +1134,7 @@ impl Document {
             sweep: retained_sweep,
             segments,
         };
-        self.driving_dimensions
-            .remove(&(id, DimensionField::CircleDiameter));
+        self.diameter_to_radius(id);
         Ok(1)
     }
 
@@ -1801,6 +1807,23 @@ impl Document {
                 self.driving_dimensions.insert(key, value);
             }
         }
+        let target = if copy {
+            self.selected.unwrap_or(id)
+        } else {
+            id
+        };
+        self.transform_dimension_meta(
+            id,
+            target,
+            |p| Point {
+                x: center.x + (p.x - center.x) * factor,
+                y: center.y + (p.y - center.y) * factor,
+            },
+            |field| {
+                factor != 1.0
+                    && !matches!(field, DimensionField::ArcSweep | DimensionField::Rotation)
+            },
+        );
         let pinned = if copy {
             self.selected.unwrap_or(id)
         } else {
@@ -1927,6 +1950,24 @@ impl Document {
                 self.driving_dimensions.insert((source_id, field), value);
             }
         }
+        let target = if copy {
+            self.selected.unwrap_or(source_id)
+        } else {
+            source_id
+        };
+        let (s, c) = degrees.to_radians().sin_cos();
+        self.transform_dimension_meta(
+            source_id,
+            target,
+            |p| {
+                let (x, y) = (p.x - center.x, p.y - center.y);
+                Point {
+                    x: center.x + x * c - y * s,
+                    y: center.y + x * s + y * c,
+                }
+            },
+            |field| field == DimensionField::Rotation && degrees.rem_euclid(360.0) != 0.0,
+        );
         let pinned = if copy {
             self.selected.unwrap_or(source_id)
         } else {
