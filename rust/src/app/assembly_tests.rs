@@ -247,3 +247,106 @@ fn instances_carry_transformed_sharp_edges() {
     assert!(visible > 0 && visible < scene.edges.len(), "{visible}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn click_rect(app: &mut App, rect: Rect) {
+    click(
+        app,
+        Point {
+            x: rect.x + 5.0,
+            y: rect.y + rect.h * 0.5,
+        },
+    );
+}
+
+/// World frame of connector `id` (on an instance).
+fn world_frame(asm: &puppycad::assembly::Assembly, id: &str) -> puppycad::assembly::Pose {
+    let connector = asm.connectors.iter().find(|c| c.id == id).unwrap();
+    let instance = asm
+        .instance(connector.instance_id.as_deref().unwrap())
+        .unwrap();
+    instance.transform().pose().mul(&connector.frame())
+}
+
+#[test]
+fn mate_row_selects_and_delete_removes_mate_with_undo() {
+    let (mut app, dir) = open_fixture("mate-delete");
+    let p = point_on(&app, 2);
+    click(&mut app, p);
+    let layout = app.layout();
+    click_rect(&mut app, assembly_mate_row(layout, 0));
+    assert_eq!(view(&app).selected_mate.as_deref(), Some("mate-elbow"));
+    let painter = app.paint();
+    drop(painter);
+    key(&mut app, KeyCode::Delete);
+    let asm = &view(&app).asm;
+    assert_eq!(asm.instances.len(), 3, "the instance stays");
+    assert_eq!(asm.mates.len(), 1);
+    assert!(asm.actuators.is_empty());
+    assert!(
+        !asm.connectors
+            .iter()
+            .any(|c| c.id == "arm1-end" || c.id == "arm2-pin")
+    );
+    assert_eq!(view(&app).selected_mate, None);
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::KeyZ);
+    let asm = &view(&app).asm;
+    assert_eq!(asm.mates.len(), 2);
+    assert_eq!(asm.connectors.len(), 4);
+    assert_eq!(asm.servo_angles(), vec![("mate-elbow".to_string(), 30.0)]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn servo_edit_re_solves_the_revolute_angle() {
+    let (mut app, dir) = open_fixture("servo");
+    let p = point_on(&app, 2);
+    click(&mut app, p);
+    let layout = app.layout();
+    click_rect(&mut app, servo_value_rect(assembly_mate_row(layout, 0)));
+    assert!(matches!(view(&app).prompt, Some(AsmPrompt::Servo { .. })));
+    for ch in ["6", "0"] {
+        key_text(&mut app, KeyCode::Digit6, Some(ch));
+    }
+    key(&mut app, KeyCode::Enter);
+    let asm = &view(&app).asm;
+    assert_eq!(asm.servo_angles(), vec![("mate-elbow".to_string(), 60.0)]);
+    let angle = puppycad::assembly::solver::revolute_angle(
+        &world_frame(asm, "arm1-end"),
+        &world_frame(asm, "arm2-pin"),
+    );
+    assert!((angle - 60.0).abs() < 1e-3, "{angle}");
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::KeyZ);
+    assert_eq!(
+        view(&app).asm.servo_angles(),
+        vec![("mate-elbow".to_string(), 30.0)]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn j_over_empty_space_fastens_the_selection_to_the_world() {
+    let (mut app, dir) = open_fixture("world");
+    key(&mut app, KeyCode::KeyI);
+    key_text(&mut app, KeyCode::Digit1, Some("1"));
+    let before = view(&app).asm.instances[3].transform();
+    let viewport = app.layout().viewport;
+    move_to(
+        &mut app,
+        Point {
+            x: viewport.x + 4.0,
+            y: viewport.y + viewport.h - 4.0,
+        },
+    );
+    assert_eq!(view(&app).hovered, None);
+    key(&mut app, KeyCode::KeyJ);
+    let asm = &view(&app).asm;
+    assert_eq!(asm.mates.len(), 3, "{}", app.status_message);
+    let mate = asm.mates.last().unwrap();
+    assert_eq!(mate.kind, puppycad::assembly::MateKind::Fasten);
+    assert_eq!(mate.a.instance_id, None);
+    let after = asm.instances[3].transform();
+    assert!(after.pose().max_difference(&before.pose()) < 1e-6);
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::KeyZ);
+    assert_eq!(view(&app).asm.mates.len(), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}

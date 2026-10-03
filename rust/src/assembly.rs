@@ -741,6 +741,26 @@ impl Assembly {
         Some(removed)
     }
 
+    /// Removes a mate, the actuators driving it and the connectors it used
+    /// that no other mate references.
+    pub fn remove_mate(&mut self, mate_id: &str) -> Option<Mate> {
+        let index = self.mates.iter().position(|m| m.id == mate_id)?;
+        let removed = self.mates.remove(index);
+        self.actuators
+            .retain(|a| a.get("mateId").and_then(Value::as_str) != Some(mate_id));
+        for r in [&removed.a, &removed.b] {
+            let used = self
+                .mates
+                .iter()
+                .any(|m| [&m.a, &m.b].into_iter().any(|o| o == r));
+            if !used {
+                self.connectors
+                    .retain(|c| !(c.id == r.connector_id && c.instance_id == r.instance_id));
+            }
+        }
+        Some(removed)
+    }
+
     /// Adds a connector frame (local to `instance_id`) and returns its id.
     pub fn add_connector(&mut self, instance_id: Option<&str>, frame: &Pose) -> String {
         let id = self.unique_id("connector", |a, id| a.connectors.iter().any(|c| c.id == id));

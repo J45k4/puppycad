@@ -91,6 +91,8 @@ pub(super) enum AsmPrompt {
     MateKind { a: FacePick, b: FacePick },
     /// Typing a value for a Properties field.
     Field { field: AsmField, buffer: String },
+    /// Typing the servo angle (degrees) of a revolute mate.
+    Servo { mate_id: String, buffer: String },
 }
 
 pub(super) struct AssemblyView {
@@ -105,6 +107,8 @@ pub(super) struct AssemblyView {
     pub(super) hovered: Option<usize>,
     /// Face clicked on the selected instance (mate side A).
     pub(super) pick_a: Option<FacePick>,
+    /// Mate id selected in the Properties mate list (Delete removes it).
+    pub(super) selected_mate: Option<String>,
     pub(super) prompt: Option<AsmPrompt>,
     undo: Vec<Assembly>,
     redo: Vec<Assembly>,
@@ -249,6 +253,7 @@ impl App {
             selected: None,
             hovered: None,
             pick_a: None,
+            selected_mate: None,
             prompt: None,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -350,6 +355,11 @@ impl App {
             view.selected = None;
         }
         view.pick_a = None;
+        if let Some(id) = &view.selected_mate
+            && !view.asm.mates.iter().any(|m| &m.id == id)
+        {
+            view.selected_mate = None;
+        }
         if let Some(project) = &mut self.project {
             let _ = project.set_assembly(view.item, &view.asm);
         }
@@ -421,11 +431,15 @@ impl App {
                 if let Some(view) = &mut self.assembly {
                     view.selected = Some(index);
                     view.pick_a = None;
+                    view.selected_mate = None;
                     view.prompt = None;
                 }
                 self.describe_selection();
                 return;
             }
+        }
+        if self.assembly_mate_row_click(layout, point) {
+            return;
         }
         for (index, field) in AsmField::ALL.into_iter().enumerate() {
             if assembly_property_row(layout, index + 2).contains(point.x, point.y) {
@@ -441,6 +455,7 @@ impl App {
             view.prompt = None;
             view.selected = pick.map(|pick| pick.instance);
             view.pick_a = pick;
+            view.selected_mate = None;
         }
         self.describe_selection();
     }
@@ -569,6 +584,10 @@ impl App {
 
     /// Delete: remove the selected instance and its mates.
     pub(super) fn delete_selected_instance(&mut self) {
+        if let Some(mate_id) = self.assembly.as_ref().and_then(|v| v.selected_mate.clone()) {
+            self.delete_mate(&mate_id);
+            return;
+        }
         let Some(index) = self.assembly.as_ref().and_then(|view| view.selected) else {
             self.status_message = "Select an instance to delete".into();
             return;
@@ -597,6 +616,12 @@ impl App {
         let Some(view) = &mut self.assembly else {
             return;
         };
+        if b.is_none()
+            && let Some(selected) = view.selected
+        {
+            self.fasten_to_world(selected);
+            return;
+        }
         let Some(a) = view.pick_a.filter(|a| Some(a.instance) == view.selected) else {
             self.status_message = "Mate: click a face of the first instance".into();
             return;
@@ -702,35 +727,137 @@ impl App {
                 }
             }
             AsmPrompt::Field { field, mut buffer } => {
-                match code {
-                    KeyCode::Enter | KeyCode::NumpadEnter => {
-                        if let Some(view) = &mut self.assembly {
-                            view.prompt = None;
-                        }
-                        self.finish_assembly_field(field, &buffer);
-                        return true;
+                if edit_number(&mut buffer, code, text) {
+                    if let Some(view) = &mut self.assembly {
+                        view.prompt = None;
                     }
-                    KeyCode::Backspace => {
-                        buffer.pop();
-                    }
-                    _ => {
-                        for ch in text.unwrap_or("").chars() {
-                            if (ch.is_ascii_digit()
-                                || ch == '.'
-                                || (ch == '-' && buffer.is_empty()))
-                                && buffer.len() < 24
-                            {
-                                buffer.push(ch);
-                            }
-                        }
-                    }
-                }
-                if let Some(view) = &mut self.assembly {
+                    self.finish_assembly_field(field, &buffer);
+                } else if let Some(view) = &mut self.assembly {
                     view.prompt = Some(AsmPrompt::Field { field, buffer });
+                }
+            }
+            AsmPrompt::Servo {
+                mate_id,
+                mut buffer,
+            } => {
+                if edit_number(&mut buffer, code, text) {
+                    if let Some(view) = &mut self.assembly {
+                        view.prompt = None;
+                    }
+                    self.finish_servo(&mate_id, &buffer);
+                } else if let Some(view) = &mut self.assembly {
+                    view.prompt = Some(AsmPrompt::Servo { mate_id, buffer });
                 }
             }
         }
         true
+    }
+
+    /// Click on a Properties mate row: the DEG value of a revolute mate
+    /// starts a servo edit, anywhere else selects the mate. True when hit.
+    fn assembly_mate_row_click(&mut self, layout: Layout, point: Point) -> bool {
+        let Some(view) = &mut self.assembly else {
+            return false;
+        };
+        let Some(selected) = view.selected else {
+            return false;
+        };
+        let rows: Vec<(String, MateKind)> = view
+            .asm
+            .mates_of(selected)
+            .into_iter()
+            .map(|m| (m.id.clone(), m.kind))
+            .collect();
+        for (index, (id, kind)) in rows.into_iter().enumerate() {
+            let row = assembly_mate_row(layout, index);
+            if !row.contains(point.x, point.y) {
+                continue;
+            }
+            view.selected_mate = Some(id.clone());
+            view.pick_a = None;
+            if kind == MateKind::Revolute && servo_value_rect(row).contains(point.x, point.y) {
+                view.prompt = Some(AsmPrompt::Servo {
+                    mate_id: id,
+                    buffer: String::new(),
+                });
+                self.status_message =
+                    "Servo angle: type degrees, Enter applies and re-solves  |  Esc cancels".into();
+            } else {
+                view.prompt = None;
+                self.status_message = format!(
+                    "Selected {} mate  |  Delete removes it{}",
+                    kind.label(),
+                    if kind == MateKind::Revolute {
+                        "  |  click its DEG value to drive it"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            return true;
+        }
+        false
+    }
+
+    fn finish_servo(&mut self, mate_id: &str, buffer: &str) {
+        let Some(value) = buffer.trim().parse::<f64>().ok().filter(|v| v.is_finite()) else {
+            self.status_message = "Servo angle: enter a number".into();
+            return;
+        };
+        self.assembly_edit(&format!("Servo angle {value} deg"), |asm| {
+            asm.set_servo_angle(mate_id, value);
+            Ok(())
+        });
+    }
+
+    /// Delete with a mate selected: remove it, its servo and its now-unused
+    /// connectors.
+    fn delete_mate(&mut self, mate_id: &str) {
+        let label = self
+            .assembly
+            .as_ref()
+            .and_then(|v| v.asm.mates.iter().find(|m| m.id == mate_id))
+            .map_or("mate", |m| m.kind.label())
+            .to_string();
+        if self.assembly_edit(&format!("Deleted {label} mate"), |asm| {
+            asm.remove_mate(mate_id)
+                .map(|_| ())
+                .ok_or_else(|| "mate does not exist".to_string())
+        }) && let Some(view) = &mut self.assembly
+        {
+            view.selected_mate = None;
+        }
+    }
+
+    /// J with nothing hovered: fasten the selected instance to the world at
+    /// its current placement.
+    fn fasten_to_world(&mut self, index: usize) {
+        let Some(view) = &mut self.assembly else {
+            return;
+        };
+        view.prompt = None;
+        let instance = &view.asm.instances[index];
+        let (id, name, pose) = (
+            instance.id.clone(),
+            instance.label().to_string(),
+            instance.transform().pose(),
+        );
+        self.assembly_edit(&format!("FASTENED {name} to the world"), |asm| {
+            let ground = asm.add_connector(None, &pose);
+            let local = asm.add_connector(Some(&id), &Pose::IDENTITY);
+            asm.add_mate(
+                MateKind::Fasten,
+                MateRef {
+                    instance_id: None,
+                    connector_id: ground,
+                },
+                MateRef {
+                    instance_id: Some(id.clone()),
+                    connector_id: local,
+                },
+            );
+            Ok(())
+        });
     }
 
     /// Esc without a prompt: clear the selection, then close the view.
@@ -895,7 +1022,7 @@ impl App {
         painter.text(
             viewport.x + 18.0,
             viewport.y + 43.0,
-            "CLICK SELECT / I INSERT / J MATE / DEL DELETE / CTRL+B PART",
+            "CLICK SELECT / I INSERT / J MATE (EMPTY: GROUND) / DEL DELETE / CTRL+B PART",
             1.0,
             MUTED,
         );
@@ -1137,9 +1264,14 @@ impl App {
             );
             let servos: HashMap<String, f64> = view.asm.servo_angles().into_iter().collect();
             for (index, mate) in mates.iter().enumerate() {
-                let row = assembly_property_row(layout, 9 + index);
+                let row = assembly_mate_row(layout, index);
                 if !fits(row) {
                     break;
+                }
+                let chosen = view.selected_mate.as_deref() == Some(mate.id.as_str());
+                if chosen {
+                    painter.rect(row, ACTIVE_ROW);
+                    painter.outline(row, 1.0, ACCENT);
                 }
                 let other = [&mate.a, &mate.b]
                     .into_iter()
@@ -1151,20 +1283,37 @@ impl App {
                             .map_or("WORLD", |i| i.label())
                     })
                     .unwrap_or("?");
-                let servo = servos
-                    .get(&mate.id)
-                    .map_or_else(String::new, |deg| format!(" {deg:.0}DEG"));
                 painter.text(
-                    row.x,
+                    row.x + 6.0,
                     row.y + 9.0,
-                    &clip_text(
-                        &format!("{} - {other}{servo}", mate.kind.label()),
-                        28,
-                        false,
-                    ),
+                    &clip_text(&format!("{} - {other}", mate.kind.label()), 20, false),
                     1.0,
                     TEXT,
                 );
+                if mate.kind == MateKind::Revolute {
+                    let value = servo_value_rect(row);
+                    let editing = match &view.prompt {
+                        Some(AsmPrompt::Servo { mate_id, buffer }) if *mate_id == mate.id => {
+                            Some(buffer)
+                        }
+                        _ => None,
+                    };
+                    painter.rect(
+                        value,
+                        if editing.is_some() {
+                            ACTIVE
+                        } else {
+                            PANEL_LIGHT
+                        },
+                    );
+                    painter.outline(value, 1.0, if editing.is_some() { ACCENT } else { BORDER });
+                    let text = match (editing, servos.get(&mate.id)) {
+                        (Some(buffer), _) => format!("{buffer}_"),
+                        (None, Some(deg)) => format!("{deg:.0}DEG"),
+                        (None, None) => "-- DEG".into(),
+                    };
+                    painter.text(value.x + 6.0, value.y + 7.0, &text, 1.0, TEXT);
+                }
             }
         } else {
             let row = assembly_property_row(layout, 0);
@@ -1196,6 +1345,41 @@ impl App {
         }
         Some(segments)
     }
+}
+
+/// Row of the `index`th mate in the Properties mate list.
+pub(super) fn assembly_mate_row(layout: Layout, index: usize) -> Rect {
+    assembly_property_row(layout, 9 + index)
+}
+
+/// The clickable servo DEG value at the right of a revolute mate row.
+pub(super) fn servo_value_rect(row: Rect) -> Rect {
+    Rect {
+        x: row.x + row.w - 74.0,
+        y: row.y + 3.0,
+        w: 70.0,
+        h: row.h - 6.0,
+    }
+}
+
+/// Number-entry key handling; true on Enter.
+fn edit_number(buffer: &mut String, code: KeyCode, text: Option<&str>) -> bool {
+    match code {
+        KeyCode::Enter | KeyCode::NumpadEnter => return true,
+        KeyCode::Backspace => {
+            buffer.pop();
+        }
+        _ => {
+            for ch in text.unwrap_or("").chars() {
+                if (ch.is_ascii_digit() || ch == '.' || (ch == '-' && buffer.is_empty()))
+                    && buffer.len() < 24
+                {
+                    buffer.push(ch);
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Row `index` of the assembly Properties panel.
