@@ -3415,3 +3415,50 @@ cp /tmp/native-extrude.pcad /out/rust-native-extrude-options.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Feature tree: block, suppressed cut and join from fixtures/feature-tree.pcad.
+# Feature rows sit at y 266/301/336 (ROLLBACK row below them at 371).
+# Ctrl+H toggles suppression, Ctrl+Up reorders, Ctrl+[ and a drag move the
+# rollback bar; each edit is saved and checked.
+cp fixtures/feature-tree.pcad /tmp/native-tree.pcad
+./target/debug/puppycad /tmp/native-tree.pcad >/tmp/puppycad-tree.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-tree.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-tree.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool mousemove 90 301 click 1
+sleep 0.3
+import -window root /out/rust-native-tree-suppressed.png
+xdotool key --window "$window_id" ctrl+h
+sleep 0.3
+import -window root /out/rust-native-tree-unsuppressed.png
+xdotool mousemove 90 336 click 1
+xdotool key --window "$window_id" ctrl+Up
+sleep 0.3
+import -window root /out/rust-native-tree-reordered.png
+xdotool key --window "$window_id" ctrl+bracketleft
+sleep 0.3
+import -window root /out/rust-native-tree-rollback.png
+# Drag the ROLLBACK row (now above the cut, at y 336) above the join.
+xdotool mousemove 90 336 mousedown 1
+xdotool mousemove 90 310
+xdotool mousemove 90 290 mouseup 1
+sleep 0.3
+import -window root /out/rust-native-tree-rollback-drag.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"rollbackIndex": 1' /tmp/native-tree.pcad
+! grep -q '"suppressed": true' /tmp/native-tree.pcad
+cp /tmp/native-tree.pcad /out/rust-native-feature-tree.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
