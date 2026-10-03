@@ -980,6 +980,14 @@ impl App {
     }
 
     /// Esc without a prompt: clear the selection, then close the view.
+    /// Context menu: fasten the selected instance to the world.
+    pub(super) fn fasten_selected(&mut self) {
+        match self.assembly.as_ref().and_then(|view| view.selected) {
+            Some(index) => self.fasten_to_world(index),
+            None => self.status_message = "Fasten: select an instance".into(),
+        }
+    }
+
     pub(super) fn assembly_cancel(&mut self) {
         match &mut self.assembly {
             Some(view) if view.selected.is_some() => {

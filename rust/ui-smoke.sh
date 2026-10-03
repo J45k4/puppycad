@@ -3896,6 +3896,18 @@ sleep 0.5
 grep -q '"type": "edgeFinish"' /tmp/native-topology.pcad
 grep -Eq '"distance": ?2' /tmp/native-topology.pcad
 cp /tmp/native-topology.pcad /out/rust-native-topology.pcad
+# Right-click the top face (no drag): context menu; Enter = Sketch on face.
+xdotool key --window "$window_id" Escape
+xdotool mousemove 620 400
+xdotool mousedown 3 mouseup 3
+sleep 0.3
+import -window root /out/rust-native-topology-context-menu.png
+xdotool key --window "$window_id" Return
+sleep 0.5
+import -window root /out/rust-native-topology-face-sketch.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"type": "face"' /tmp/native-topology.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""

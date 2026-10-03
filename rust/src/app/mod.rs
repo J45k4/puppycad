@@ -1,5 +1,6 @@
 mod assembly;
 mod commands;
+mod context_menu;
 mod corner;
 mod extrude;
 mod feature_tree;
@@ -37,6 +38,7 @@ mod topology_tests;
 use assembly::*;
 pub(crate) use commands::shortcuts_markdown;
 use commands::*;
+use context_menu::ContextMenu;
 use corner::*;
 use extrude::*;
 use features::*;
@@ -300,6 +302,10 @@ pub(crate) struct App {
     topo_key: u64,
     /// Element under the cursor in the 3D views (status line tracking).
     topo_hover: Option<TopoRef>,
+    /// Open right-click menu of a 3D view.
+    context_menu: Option<ContextMenu>,
+    /// Where the right button went down (right-click detection).
+    right_press: Option<Point>,
     /// Show (and snap to) a face sketch's supporting body; key 5 toggles.
     face_context: bool,
     selected_solid: usize,
@@ -482,6 +488,8 @@ impl Default for App {
             topo_selection: Vec::new(),
             topo_key: 0,
             topo_hover: None,
+            context_menu: None,
+            right_press: None,
             face_context: true,
             selected_solid: 0,
             selected_profile: 0,
@@ -1057,6 +1065,7 @@ impl App {
             self.paint_assembly(&mut painter, layout);
             self.paint_assembly_panels(&mut painter, layout);
             self.paint_more_menu(&mut painter, layout);
+            self.paint_context_menu(&mut painter);
             self.paint_settings(&mut painter, layout);
             self.paint_palette(&mut painter, layout);
             self.paint_shortcut_overlay(&mut painter, layout);
@@ -1096,6 +1105,7 @@ impl App {
         self.paint_panels(&mut painter, layout);
         self.paint_history_panel(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
+        self.paint_context_menu(&mut painter);
         self.paint_settings(&mut painter, layout);
         self.paint_palette(&mut painter, layout);
         self.paint_shortcut_overlay(&mut painter, layout);

@@ -383,3 +383,106 @@ fn key_4_sketches_on_the_selected_face_not_the_hovered_one() {
     );
     let _ = std::fs::remove_file(path);
 }
+
+fn move_to(app: &mut App, point: Point) {
+    app.handle_window_event(WindowEvent::CursorMoved {
+        device_id: DeviceId::dummy(),
+        position: PhysicalPosition::new(point.x as f64, point.y as f64),
+    });
+}
+
+fn right_click(app: &mut App, press: Point, release: Point) {
+    move_to(app, press);
+    app.handle_window_event(WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state: ElementState::Pressed,
+        button: MouseButton::Right,
+    });
+    move_to(app, release);
+    app.handle_window_event(WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state: ElementState::Released,
+        button: MouseButton::Right,
+    });
+}
+
+fn menu_items(app: &App) -> Vec<Cmd> {
+    app.context_menu
+        .as_ref()
+        .map(|menu| menu.items.iter().map(|(id, _)| *id).collect())
+        .unwrap_or_default()
+}
+
+fn top_face_point(app: &App) -> Point {
+    let (scene, projector, _, topology) = app.topology_context(app.layout()).unwrap();
+    let top = topology
+        .faces
+        .iter()
+        .position(|face| face.normal[2] > 0.99)
+        .unwrap();
+    let triangle = topology.faces[top].triangles[0];
+    let center: [f32; 3] =
+        std::array::from_fn(|i| scene.triangles[triangle].iter().map(|p| p[i]).sum::<f32>() / 3.0);
+    screen_point(&projector, center)
+}
+
+#[test]
+fn right_click_opens_a_menu_for_the_element_and_right_drag_does_not() {
+    let (mut app, path) = block_app("context");
+    let face = top_face_point(&app);
+    right_click(&mut app, face, face);
+    let items = menu_items(&app);
+    assert_eq!(items[0], Cmd::SketchOnFace);
+    assert!(items.contains(&Cmd::Measure));
+    assert!(matches!(app.topo_selection[0].element, TopoRef::Face(_)));
+    let _ = app.paint();
+    key(&mut app, KeyCode::Escape);
+    assert!(app.context_menu.is_none());
+    let edges = edge_points(&app, 1);
+    right_click(&mut app, edges[0].1, edges[0].1);
+    assert_eq!(menu_items(&app)[..2], [Cmd::EdgeChamfer, Cmd::EdgeFillet]);
+    key(&mut app, KeyCode::Escape);
+    let viewport = app.layout().viewport;
+    let empty = Point {
+        x: viewport.x + 10.0,
+        y: viewport.y + viewport.h - 10.0,
+    };
+    right_click(&mut app, empty, empty);
+    assert_eq!(
+        menu_items(&app),
+        vec![
+            Cmd::FitSolid,
+            Cmd::ToggleProjection,
+            Cmd::ExportStl,
+            Cmd::Export3mf
+        ]
+    );
+    // A click elsewhere closes it.
+    click(&mut app, face, false);
+    assert!(app.context_menu.is_none());
+    let moved = Point {
+        x: face.x + 30.0,
+        y: face.y + 10.0,
+    };
+    right_click(&mut app, face, moved);
+    assert!(app.context_menu.is_none(), "a right-drag orbits");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn enter_on_sketch_on_face_opens_the_face_sketch() {
+    let (mut app, path) = block_app("context-sketch");
+    let face = top_face_point(&app);
+    right_click(&mut app, face, face);
+    key(&mut app, KeyCode::ArrowDown);
+    key(&mut app, KeyCode::ArrowUp);
+    key(&mut app, KeyCode::Enter);
+    assert!(app.context_menu.is_none());
+    assert!(!app.solid_preview, "{}", app.status_message);
+    assert!(
+        app.status_message.contains("top face"),
+        "{}",
+        app.status_message
+    );
+    let _ = std::fs::remove_file(path);
+}

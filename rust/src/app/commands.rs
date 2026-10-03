@@ -203,6 +203,12 @@ pub(super) enum Cmd {
     AssemblyUndo,
     AssemblyRedo,
     AssemblyCancel,
+    Measure,
+    DeleteFeature,
+    FitSolid,
+    ToggleProjection,
+    ArmMate,
+    FastenInstance,
 }
 
 pub(super) struct Command {
@@ -1072,6 +1078,57 @@ pub(super) static COMMANDS: &[Command] = &[
         C::Assembly,
         S::Assembly,
         App::begin_mate,
+    ),
+    cmd(
+        Cmd::ArmMate,
+        "Mate: hover a face/edge/vertex of another instance, then J",
+        "",
+        C::Assembly,
+        S::Assembly,
+        |app| {
+            app.status_message =
+                "Mate: hover a vertex, edge or face of another instance, then press J".into()
+        },
+    ),
+    cmd(
+        Cmd::FastenInstance,
+        "Fasten selected instance to world",
+        "",
+        C::Assembly,
+        S::Assembly,
+        App::fasten_selected,
+    ),
+    cmd(
+        Cmd::Measure,
+        "Measure two selected elements",
+        "",
+        C::Solid,
+        S::Any,
+        App::measure_selection,
+    ),
+    cmd(
+        Cmd::DeleteFeature,
+        "Delete selected feature",
+        "",
+        C::Solid,
+        S::Solid,
+        App::delete_feature_command,
+    ),
+    cmd(
+        Cmd::FitSolid,
+        "Fit all (3D view)",
+        "",
+        C::View,
+        S::Any,
+        App::fit_solid,
+    ),
+    cmd(
+        Cmd::ToggleProjection,
+        "Toggle perspective / orthographic",
+        "",
+        C::View,
+        S::Any,
+        App::toggle_projection,
     ),
     cmd(
         Cmd::AssemblyUndo,

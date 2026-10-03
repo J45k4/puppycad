@@ -19,6 +19,7 @@ impl App {
             None => {}
         }
         self.cursor = next;
+        self.context_menu_hover();
         if let Some(drag) = &mut self.label_drag
             && drag.start.distance(next) > 3.0
         {
@@ -86,6 +87,10 @@ impl App {
         self.name_edit = None;
         let layout = self.layout();
         let point = self.cursor;
+        if self.context_menu_click(point) {
+            self.redraw();
+            return;
+        }
         self.document.grid_step = self.settings.grid_mm;
         if self.overlay_click(layout, point) || self.settings_click(layout, point) {
             self.redraw();
@@ -823,6 +828,8 @@ impl App {
                 }
                 (ElementState::Pressed, button @ (MouseButton::Right | MouseButton::Middle)) => {
                     let layout = self.layout();
+                    self.context_menu = None;
+                    self.right_press = (button == MouseButton::Right).then_some(self.cursor);
                     if !self.begin_solid_drag(layout, self.cursor, button)
                         && button == MouseButton::Middle
                         && !self.solid_preview
@@ -830,9 +837,15 @@ impl App {
                         self.pan_drag = true;
                     }
                 }
-                (ElementState::Released, MouseButton::Right | MouseButton::Middle) => {
+                (ElementState::Released, button @ (MouseButton::Right | MouseButton::Middle)) => {
                     self.solid_drag = None;
                     self.pan_drag = false;
+                    if button == MouseButton::Right
+                        && let Some(start) = self.right_press.take()
+                    {
+                        self.right_release(start, self.cursor);
+                    }
+                    self.redraw();
                 }
                 _ => {}
             },
@@ -912,7 +925,8 @@ impl App {
 
     fn handle_key_press(&mut self, event: KeyPress) {
         if let PhysicalKey::Code(code) = event.physical_key {
-            if self.palette_key(code, event.text.as_deref())
+            if self.context_menu_key(code)
+                || self.palette_key(code, event.text.as_deref())
                 || self.shortcut_overlay_key(code)
                 || self.settings_key(code)
             {
