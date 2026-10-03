@@ -283,16 +283,42 @@ impl App {
             self.status_message = format!("Edge {}: create a solid first", kind.name());
             return;
         }
+        // Straight edges selected in the 3D view are the starting set.
+        let selected: Vec<EdgeRef> = self
+            .current_topology_selection()
+            .filter(|_| self.solid_preview)
+            .map(|(_, topology, selection)| {
+                selection
+                    .iter()
+                    .filter_map(|pick| match pick.element {
+                        TopoRef::Edge(index) => topology.edges[index]
+                            .solid
+                            .as_ref()
+                            .map(SolidEdge::reference),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         self.solid_preview = true;
+        self.status_message = if selected.is_empty() {
+            format!(
+                "Edge {}: click edges, type the size, Enter commits  |  Esc cancel",
+                kind.name()
+            )
+        } else {
+            format!(
+                "Edge {}: {} selected edge{}, type the size, Enter commits  |  click edges to add or remove  |  Esc cancel",
+                kind.name(),
+                selected.len(),
+                if selected.len() == 1 { "" } else { "s" }
+            )
+        };
         self.edge_pick = Some(EdgePick {
             kind,
-            edges: Vec::new(),
+            edges: selected,
             buffer: String::new(),
         });
-        self.status_message = format!(
-            "Edge {}: click edges, type the size, Enter commits  |  Esc cancel",
-            kind.name()
-        );
     }
 
     /// The sharp edge nearest the screen point, within a few pixels, that

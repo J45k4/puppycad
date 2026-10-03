@@ -459,11 +459,24 @@ impl App {
             self.status_message = "Sketch on face: hover a face in the 3D preview (Tab)".into();
             return;
         }
-        let hover = self
-            .face_hover(self.layout())
-            .or_else(|| self.hovered_face.clone());
-        let Some(face) = hover.as_ref().and_then(|hover| hover.face.clone()) else {
-            self.status_message = "Sketch on face: hover a planar face of an extrusion".into();
+        // A selected face wins over the hovered one.
+        let selected =
+            self.current_topology_selection()
+                .and_then(|(scene, topology, selection)| {
+                    selection
+                        .iter()
+                        .rev()
+                        .find(|pick| matches!(pick.element, TopoRef::Face(_)))
+                        .and_then(|pick| self.pick_web_face(&scene, &topology, pick))
+                });
+        let hover = selected.or_else(|| {
+            self.face_hover(self.layout())
+                .or_else(|| self.hovered_face.clone())
+                .and_then(|hover| Some((hover.face?, hover.label)))
+        });
+        let Some((face, label)) = hover else {
+            self.status_message =
+                "Sketch on face: select or hover a planar face of an extrusion".into();
             return;
         };
         self.document.finish_drag();
@@ -483,7 +496,7 @@ impl App {
                     project
                         .sketch_name(project.active_sketch())
                         .unwrap_or("Sketch"),
-                    hover.map_or_else(String::new, |hover| hover.label.to_lowercase())
+                    label.to_lowercase()
                 );
             }
             Err(error) => self.status_message = format!("Sketch on face: {error}"),

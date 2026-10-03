@@ -1865,6 +1865,11 @@ impl App {
     }
 
     fn delete_key(&mut self) {
+        if self.solid_preview && self.current_topology_selection().is_some() {
+            // Vertices, edges and faces are never deleted.
+            self.status_message = "Select a feature row to delete".into();
+            return;
+        }
         if self.selected_feature_id().is_some() {
             self.delete_selected_feature();
         } else if self.solid_preview {

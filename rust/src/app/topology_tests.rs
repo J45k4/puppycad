@@ -249,3 +249,94 @@ fn shift_click_multi_selects_and_escape_clears() {
     assert!(app.topo_selection.is_empty());
     let _ = std::fs::remove_file(path);
 }
+
+/// Screen points of `count` visible straight edges whose pick is the edge.
+fn edge_points(app: &App, count: usize) -> Vec<(usize, Point)> {
+    let layout = app.layout();
+    let (_, projector, _, topology) = app.topology_context(layout).unwrap();
+    let found: Vec<(usize, Point)> = topology
+        .edges
+        .iter()
+        .enumerate()
+        .filter_map(|(index, edge)| {
+            let mid = std::array::from_fn(|i| (edge.points[0][i] + edge.points[1][i]) * 0.5);
+            let point = screen_point(&projector, mid);
+            (app.topology_pick_at(layout, point).map(|pick| pick.element)
+                == Some(TopoRef::Edge(index)))
+            .then_some((index, point))
+        })
+        .take(count)
+        .collect();
+    assert_eq!(found.len(), count);
+    found
+}
+
+fn volume(app: &App) -> f64 {
+    app.project.as_ref().unwrap().evaluated_solids().unwrap()[0].volume()
+}
+
+#[test]
+fn chamfer_from_selection_matches_the_click_to_pick_flow() {
+    let (mut selected, first) = block_app("chamfer-selected");
+    let edges = edge_points(&selected, 2);
+    click(&mut selected, edges[0].1, false);
+    click(&mut selected, edges[1].1, true);
+    key(&mut selected, KeyCode::Digit0);
+    let pick = selected.edge_pick.as_ref().expect("chamfer armed");
+    assert_eq!(pick.edges.len(), 2, "{}", selected.status_message);
+    key(&mut selected, KeyCode::Enter);
+    assert!(selected.edge_pick.is_none(), "{}", selected.status_message);
+
+    let (mut picked, second) = block_app("chamfer-picked");
+    picked.begin_edge_finish(project::FinishKind::Chamfer);
+    for (_, point) in &edges {
+        picked.toggle_edge_at(picked.layout(), *point);
+    }
+    key(&mut picked, KeyCode::Enter);
+    assert!(picked.edge_pick.is_none(), "{}", picked.status_message);
+    assert!((volume(&selected) - volume(&picked)).abs() < 1e-6);
+    assert!(volume(&selected) < 8000.0 - 1.0);
+    let _ = std::fs::remove_file(first);
+    let _ = std::fs::remove_file(second);
+}
+
+#[test]
+fn delete_with_a_topology_selection_removes_nothing() {
+    let (mut app, path) = block_app("delete");
+    let edges = edge_points(&app, 1);
+    click(&mut app, edges[0].1, false);
+    key(&mut app, KeyCode::Delete);
+    assert_eq!(app.status_message, "Select a feature row to delete");
+    assert!((volume(&app) - 8000.0).abs() < 1e-3);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn key_4_sketches_on_the_selected_face_not_the_hovered_one() {
+    let (mut app, path) = block_app("face");
+    let layout = app.layout();
+    let (scene, projector, _, topology) = app.topology_context(layout).unwrap();
+    let top = topology
+        .faces
+        .iter()
+        .position(|face| face.normal[2] > 0.99)
+        .unwrap();
+    let triangle = topology.faces[top].triangles[0];
+    let center: [f32; 3] =
+        std::array::from_fn(|i| scene.triangles[triangle].iter().map(|p| p[i]).sum::<f32>() / 3.0);
+    drop((scene, topology));
+    click(&mut app, screen_point(&projector, center), false);
+    let viewport = layout.viewport;
+    app.cursor = Point {
+        x: viewport.x + 5.0,
+        y: viewport.y + viewport.h - 5.0,
+    };
+    app.sketch_on_face();
+    assert!(!app.solid_preview, "{}", app.status_message);
+    assert!(
+        app.status_message.contains("top face"),
+        "{}",
+        app.status_message
+    );
+    let _ = std::fs::remove_file(path);
+}

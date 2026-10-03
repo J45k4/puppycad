@@ -433,3 +433,48 @@ fn scene_is_cached_until_the_assembly_changes() {
     assert_eq!(undone.triangles.len(), first.triangles.len());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn selected_vertex_is_mate_side_a_with_a_face_normal() {
+    let (mut app, dir) = open_fixture("vertex-mate");
+    let layout = app.layout();
+    let (scene, projector, _, topology) = app.topology_context(layout).unwrap();
+    let (vertex, point) = topology
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.body == 0)
+        .find_map(|(index, v)| {
+            let [x, y] = projector.screen(v.point);
+            let point = Point { x, y };
+            (app.topology_pick_at(layout, point).map(|pick| pick.element)
+                == Some(TopoRef::Vertex(index)))
+            .then_some((index, point))
+        })
+        .expect("a visible vertex of instance 0");
+    let world = topology.vertices[vertex].point;
+    drop((scene, topology));
+    click(&mut app, point);
+    let a = view(&app).pick_a.expect("the vertex is side A");
+    assert_eq!(a.instance, 0);
+    assert!(!a.edge);
+    assert!((a.normal.iter().map(|c| c * c).sum::<f64>() - 1.0).abs() < 1e-6);
+    let back = view(&app).asm.instances[0].transform().apply(a.point);
+    for i in 0..3 {
+        assert!(
+            (back[i] as f32 - world[i]).abs() < 1e-3,
+            "{back:?} {world:?}"
+        );
+    }
+    let target = point_on(&app, 1);
+    move_to(&mut app, target);
+    key(&mut app, KeyCode::KeyJ);
+    match &view(&app).prompt {
+        Some(AsmPrompt::MateKind { a: side, b }) => {
+            assert_eq!(*side, a);
+            assert_eq!(b.instance, 1);
+        }
+        other => panic!("{other:?} {}", app.status_message),
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -729,11 +729,12 @@ impl App {
             return;
         }
         let Some(a) = view.pick_a.filter(|a| Some(a.instance) == view.selected) else {
-            self.status_message = "Mate: click a face of the first instance".into();
+            self.status_message = "Mate: click a vertex, edge or face of the first instance".into();
             return;
         };
         let Some(b) = b.filter(|b| b.instance != a.instance) else {
-            self.status_message = "Mate: hover a face of another instance, then press J".into();
+            self.status_message =
+                "Mate: hover a vertex, edge or face of another instance, then press J".into();
             return;
         };
         view.prompt = Some(AsmPrompt::MateKind { a, b });
