@@ -92,6 +92,164 @@ pub struct SplineVar {
     pub closed: bool,
 }
 
+/// Closed outline primitives modeled by their natural parameters: a corner
+/// rectangle by two opposite corners, a rotated rectangle by center,
+/// half-axes and rotation (degrees), a regular polygon by center,
+/// circumradius and rotation (degrees), a slot by its two cap centers and
+/// full width. Corners, vertices and cap centers are derived anchors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeVar {
+    Rectangle {
+        a: PointVar,
+        b: PointVar,
+    },
+    RotatedRectangle {
+        center: PointVar,
+        half_width: usize,
+        half_height: usize,
+        rotation: usize,
+    },
+    Polygon {
+        center: PointVar,
+        radius: usize,
+        rotation: usize,
+        sides: u8,
+    },
+    Slot {
+        a: PointVar,
+        b: PointVar,
+        width: usize,
+    },
+}
+
+impl ShapeVar {
+    /// Parameter indices of the shape.
+    pub fn vars(&self) -> Vec<usize> {
+        match *self {
+            ShapeVar::Rectangle { a, b } => vec![a.x, a.y, b.x, b.y],
+            ShapeVar::RotatedRectangle {
+                center,
+                half_width,
+                half_height,
+                rotation,
+            } => vec![center.x, center.y, half_width, half_height, rotation],
+            ShapeVar::Polygon {
+                center,
+                radius,
+                rotation,
+                ..
+            } => vec![center.x, center.y, radius, rotation],
+            ShapeVar::Slot { a, b, width } => vec![a.x, a.y, b.x, b.y, width],
+        }
+    }
+}
+
+/// Anchor `index` of a shape, numbered like the document's drag and fixed
+/// anchors: corner rectangle corners a, b, (a.x, b.y), (b.x, a.y); rotated
+/// rectangle center 0 and corners 1..=4; polygon center 0 and vertices
+/// 1..=sides; slot cap centers 0 and 1.
+pub fn shape_anchor(p: &[f64], shape: &ShapeVar, index: usize) -> Option<(f64, f64)> {
+    match *shape {
+        ShapeVar::Rectangle { a, b } => {
+            let ((ax, ay), (bx, by)) = (pt(p, a), pt(p, b));
+            [(ax, ay), (bx, by), (ax, by), (bx, ay)].get(index).copied()
+        }
+        ShapeVar::RotatedRectangle {
+            center,
+            half_width,
+            half_height,
+            rotation,
+        } => {
+            let (cx, cy) = pt(p, center);
+            if index == 0 {
+                return Some((cx, cy));
+            }
+            if index > 4 {
+                return None;
+            }
+            let (sx, sy) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)][(index + 1) % 4];
+            let (s, c) = p[rotation].to_radians().sin_cos();
+            let (x, y) = (sx * p[half_width], sy * p[half_height]);
+            Some((cx + c * x - s * y, cy + s * x + c * y))
+        }
+        ShapeVar::Polygon {
+            center,
+            radius,
+            rotation,
+            sides,
+        } => {
+            let (cx, cy) = pt(p, center);
+            if index == 0 {
+                return Some((cx, cy));
+            }
+            if index > sides as usize || sides == 0 {
+                return None;
+            }
+            let angle = p[rotation].to_radians() + (index - 1) as f64 * TAU / sides as f64;
+            Some((cx + p[radius] * angle.cos(), cy + p[radius] * angle.sin()))
+        }
+        ShapeVar::Slot { a, b, .. } => match index {
+            0 => Some(pt(p, a)),
+            1 => Some(pt(p, b)),
+            _ => None,
+        },
+    }
+}
+
+/// Center, rotation (radians), two sizes and rotation period (radians) of a
+/// shape: the quantities a mirror image keeps or reflects.
+type Frame = ((f64, f64), f64, [f64; 2], f64);
+
+fn shape_frame(p: &[f64], shape: &ShapeVar) -> Frame {
+    match *shape {
+        ShapeVar::Rectangle { a, b } => {
+            let ((ax, ay), (bx, by)) = (pt(p, a), pt(p, b));
+            (
+                ((ax + bx) * 0.5, (ay + by) * 0.5),
+                0.0,
+                [(bx - ax).abs() * 0.5, (by - ay).abs() * 0.5],
+                PI,
+            )
+        }
+        ShapeVar::RotatedRectangle {
+            center,
+            half_width,
+            half_height,
+            rotation,
+        } => (
+            pt(p, center),
+            p[rotation].to_radians(),
+            [p[half_width].abs(), p[half_height].abs()],
+            PI,
+        ),
+        ShapeVar::Polygon {
+            center,
+            radius,
+            rotation,
+            sides,
+        } => (
+            pt(p, center),
+            p[rotation].to_radians(),
+            [p[radius], 0.0],
+            TAU / sides.max(1) as f64,
+        ),
+        ShapeVar::Slot { a, b, width } => {
+            let ((ax, ay), (bx, by)) = (pt(p, a), pt(p, b));
+            (
+                ((ax + bx) * 0.5, (ay + by) * 0.5),
+                (by - ay).atan2(bx - ax),
+                [(bx - ax).hypot(by - ay) * 0.5, p[width]],
+                TAU,
+            )
+        }
+    }
+}
+
+/// `angle` wrapped to (-period / 2, period / 2].
+fn wrap_period(angle: f64, period: f64) -> f64 {
+    angle - period * (angle / period).round()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Curve {
     Line(LineVar),
@@ -284,6 +442,26 @@ pub enum Constraint {
         closed: bool,
         distance: f64,
     },
+    /// `target` is the mirror image of `source` across `axis` (the web
+    /// `mirror` relation for rectangles, polygons and slots): reflected
+    /// center, equal sizes, rotation `2 * axis - source`.
+    MirrorShape {
+        source: ShapeVar,
+        target: ShapeVar,
+        axis: LineVar,
+    },
+    /// Shape anchor `index` (see [`shape_anchor`]) stays at `at`.
+    AnchorAt {
+        shape: ShapeVar,
+        index: usize,
+        at: (f64, f64),
+    },
+    /// Shape anchor `index` coincides with `point`.
+    AnchorOn {
+        shape: ShapeVar,
+        index: usize,
+        point: PointVar,
+    },
 }
 
 /// A line segment as two `(x, y)` points.
@@ -344,6 +522,13 @@ pub enum Soft {
     KeepLength {
         line: LineVar,
         length: f64,
+        weight: f64,
+    },
+    /// Keep a derived shape anchor near `at` (single-anchor drags).
+    Anchor {
+        shape: ShapeVar,
+        index: usize,
+        at: (f64, f64),
         weight: f64,
     },
 }
@@ -493,6 +678,15 @@ impl Problem {
                         length,
                         weight,
                     } => out.push(weight * (line_length(params, line) - length)),
+                    Soft::Anchor {
+                        shape,
+                        index,
+                        at,
+                        weight,
+                    } => {
+                        let (x, y) = shape_anchor(params, &shape, index).unwrap_or(at);
+                        out.extend([weight * (x - at.0), weight * (y - at.1)]);
+                    }
                 }
             }
         }
@@ -801,6 +995,22 @@ impl Constraint {
                     line(&mut out, l);
                 }
             }
+            Constraint::MirrorShape {
+                source,
+                target,
+                axis,
+            } => {
+                out.extend(source.vars());
+                out.extend(target.vars());
+                line(&mut out, axis);
+            }
+            Constraint::AnchorAt { shape, .. } => out.extend(shape.vars()),
+            Constraint::AnchorOn {
+                shape, point: q, ..
+            } => {
+                out.extend(shape.vars());
+                point(&mut out, q);
+            }
             Constraint::InternalTangent {
                 outer: ref a,
                 inner: ref b,
@@ -861,6 +1071,7 @@ impl Problem {
         for constraint in &self.constraints {
             let mut base = Vec::new();
             residual(constraint, params, &mut base);
+            curve_residual(constraint, params, &mut base);
             let m = base.len();
             let mut rows = vec![vec![0.0; n]; m];
             let mut vars = constraint.vars();
@@ -876,8 +1087,10 @@ impl Problem {
                 let mut minus = Vec::with_capacity(m);
                 probe[var] = params[var] + h;
                 residual(constraint, &probe, &mut plus);
+                curve_residual(constraint, &probe, &mut plus);
                 probe[var] = params[var] - h;
                 residual(constraint, &probe, &mut minus);
+                curve_residual(constraint, &probe, &mut minus);
                 probe[var] = params[var];
                 for (row, values) in rows.iter_mut().enumerate() {
                     values[column] = (plus[row] - minus[row]) / (2.0 * h);
@@ -1165,6 +1378,44 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             for i in 0..joins {
                 let (end, start) = (source[i].1, source[(i + 1) % source.len()].0);
                 out.extend([end.0 - start.0, end.1 - start.1]);
+            }
+        }
+        Constraint::MirrorShape {
+            source,
+            target,
+            axis,
+        } => {
+            let (dx, dy) = delta(p, axis);
+            let squared = (dx * dx + dy * dy).max(1e-300);
+            let (ox, oy) = pt(p, axis.a);
+            let (center, rotation, sizes, _) = shape_frame(p, &source);
+            let t = ((center.0 - ox) * dx + (center.1 - oy) * dy) / squared;
+            let reflected = (
+                2.0 * (ox + t * dx) - center.0,
+                2.0 * (oy + t * dy) - center.1,
+            );
+            let (other, other_rotation, other_sizes, period) = shape_frame(p, &target);
+            out.extend([
+                other.0 - reflected.0,
+                other.1 - reflected.1,
+                other_sizes[0] - sizes[0],
+                other_sizes[1] - sizes[1],
+                wrap_period(other_rotation + rotation - 2.0 * dy.atan2(dx), period),
+            ]);
+        }
+        Constraint::AnchorAt { shape, index, at } => {
+            if let Some((x, y)) = shape_anchor(p, &shape, index) {
+                out.extend([x - at.0, y - at.1]);
+            }
+        }
+        Constraint::AnchorOn {
+            shape,
+            index,
+            point,
+        } => {
+            if let Some((x, y)) = shape_anchor(p, &shape, index) {
+                let (px, py) = pt(p, point);
+                out.extend([x - px, y - py]);
             }
         }
         _ => {}

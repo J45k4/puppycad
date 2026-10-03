@@ -106,9 +106,8 @@ pub fn mirror_shape(shape: &Shape, a: Point, b: Point) -> Option<Shape> {
     Some(result)
 }
 
-/// Shapes whose mirror relation the solver models directly; the others
-/// (rectangles, polygons, slots) are regenerated from their source.
-pub(super) fn solver_mirrored(shape: &Shape) -> bool {
+/// Shapes with a single center symmetry anchor (or line/spline anchors).
+pub(super) fn center_anchored(shape: &Shape) -> bool {
     matches!(
         shape,
         Shape::Line { .. }
@@ -158,7 +157,7 @@ impl Document {
         let count = match self.shape(id)? {
             Shape::Line { .. } => 2,
             Shape::Spline { points, .. } => points.len(),
-            shape if solver_mirrored(shape) => 1,
+            shape if center_anchored(shape) => 1,
             _ => 0,
         };
         (0..count)
@@ -357,31 +356,6 @@ impl Document {
         Ok(created)
     }
 
-    /// Regenerate mirror targets the solver does not model (rectangles,
-    /// polygons, slots) from their source and axis.
-    pub(super) fn propagate_mirrors(&mut self) {
-        let mut targets: Vec<_> = self.mirrors.iter().map(|(&t, &r)| (t, r)).collect();
-        targets.sort_by_key(|(target, _)| *target);
-        for (target, (source, axis)) in targets {
-            let Ok((start, end)) = self.axis_points(axis) else {
-                continue;
-            };
-            let Some(index) = self.shapes.iter().position(|shape| shape.id() == target) else {
-                continue;
-            };
-            if solver_mirrored(&self.shapes[index]) {
-                continue;
-            }
-            if let Some(next) = self
-                .shape(source)
-                .and_then(|shape| mirror_shape(shape, start, end))
-                && std::mem::discriminant(&next) == std::mem::discriminant(&self.shapes[index])
-            {
-                self.shapes[index] = next.with_id(target);
-            }
-        }
-    }
-
     /// Solver constraints for every symmetry and mirror relation.
     pub(super) fn symmetry_constraints(
         &self,
@@ -412,9 +386,6 @@ impl Document {
         let mut mirrors: Vec<_> = self.mirrors.iter().map(|(&t, &r)| (t, r)).collect();
         mirrors.sort_by_key(|(target, _)| *target);
         for (target, (source, axis_id)) in mirrors {
-            if !self.shape(target).is_some_and(solver_mirrored) {
-                continue;
-            }
             let (Some(axis), Some(s), Some(t)) =
                 (b.line(axis_id), b.entity(source), b.entity(target))
             else {
@@ -458,6 +429,13 @@ impl Document {
                         constraints
                             .extend([Constraint::Opposite(ss, ts), Constraint::Opposite(sw, tw)]);
                     }
+                }
+                (E::Shape(source), E::Shape(target)) => {
+                    constraints.push(Constraint::MirrorShape {
+                        source,
+                        target,
+                        axis,
+                    });
                 }
                 (E::Spline(s), E::Spline(t)) if s.points.len() == t.points.len() => {
                     constraints.extend(s.points.iter().zip(&t.points).map(|(&a, &c)| sym(a, c)));

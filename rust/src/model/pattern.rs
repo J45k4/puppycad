@@ -2,8 +2,7 @@
 //! `src/sketch-pattern.ts` and `src/sketch-circular-pattern.ts` (web
 //! `linearPattern` / `circularPattern` relations).
 //!
-//! Instances are regenerated from their sources after every solve (the same
-//! fallback the Mirror tool uses for rectangles, polygons and slots), so
+//! Instances are regenerated from their sources after every solve, so
 //! editing a source updates every instance while instances themselves follow
 //! the pattern.
 

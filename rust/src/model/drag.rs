@@ -310,7 +310,14 @@ impl Document {
     pub(super) fn solver_shape(shape: &Shape) -> bool {
         matches!(
             shape,
-            Shape::Line { .. } | Shape::Point { .. } | Shape::Circle { .. } | Shape::Arc { .. }
+            Shape::Line { .. }
+                | Shape::Point { .. }
+                | Shape::Circle { .. }
+                | Shape::Arc { .. }
+                | Shape::Rectangle { .. }
+                | Shape::RotatedRectangle { .. }
+                | Shape::Polygon { .. }
+                | Shape::Capsule { .. }
         )
     }
 
