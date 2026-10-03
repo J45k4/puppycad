@@ -14,11 +14,12 @@ pub(super) enum Category {
     Solid,
     View,
     Project,
+    Assembly,
     File,
 }
 
 impl Category {
-    pub(super) const ALL: [Category; 8] = [
+    pub(super) const ALL: [Category; 9] = [
         Category::Draw,
         Category::Edit,
         Category::Constrain,
@@ -26,6 +27,7 @@ impl Category {
         Category::Solid,
         Category::View,
         Category::Project,
+        Category::Assembly,
         Category::File,
     ];
 
@@ -38,6 +40,7 @@ impl Category {
             Category::Solid => "Solid",
             Category::View => "View",
             Category::Project => "Project",
+            Category::Assembly => "Assembly",
             Category::File => "File",
         }
     }
@@ -59,6 +62,8 @@ pub(super) enum Scope {
     DimensionSelected,
     /// The 3D preview waits for an up-to-body pick (U).
     BodyPick,
+    /// The assembly view is open; its bindings replace the view-wide ones.
+    Assembly,
 }
 
 impl Scope {
@@ -78,7 +83,11 @@ impl Scope {
     fn is_modal(self) -> bool {
         matches!(
             self,
-            Scope::CenterArcTool | Scope::SplineTool | Scope::DimensionSelected | Scope::BodyPick
+            Scope::CenterArcTool
+                | Scope::SplineTool
+                | Scope::DimensionSelected
+                | Scope::BodyPick
+                | Scope::Assembly
         )
     }
 }
@@ -187,6 +196,13 @@ pub(super) enum Cmd {
     LoftJoin,
     EdgeChamfer,
     EdgeFillet,
+    AssemblyView,
+    InsertInstance,
+    DeleteInstance,
+    MateInstances,
+    AssemblyUndo,
+    AssemblyRedo,
+    AssemblyCancel,
 }
 
 pub(super) struct Command {
@@ -1024,10 +1040,67 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Any,
         |app| app.open_settings(),
     ),
+    // Assembly
+    cmd(
+        Cmd::AssemblyView,
+        "Open / close assembly view",
+        "Ctrl+B",
+        C::Assembly,
+        S::Any,
+        App::toggle_assembly_view,
+    ),
+    cmd(
+        Cmd::InsertInstance,
+        "Insert part instance",
+        "I",
+        C::Assembly,
+        S::Assembly,
+        App::begin_insert_instance,
+    ),
+    cmd(
+        Cmd::DeleteInstance,
+        "Delete instance",
+        "Delete / Backspace",
+        C::Assembly,
+        S::Assembly,
+        App::delete_selected_instance,
+    ),
+    cmd(
+        Cmd::MateInstances,
+        "Mate selected face to hovered face",
+        "J",
+        C::Assembly,
+        S::Assembly,
+        App::begin_mate,
+    ),
+    cmd(
+        Cmd::AssemblyUndo,
+        "Undo assembly edit",
+        "Ctrl+Z",
+        C::Assembly,
+        S::Assembly,
+        |app| app.assembly_undo(false),
+    ),
+    cmd(
+        Cmd::AssemblyRedo,
+        "Redo assembly edit",
+        "Ctrl+Y / Ctrl+Shift+Z",
+        C::Assembly,
+        S::Assembly,
+        |app| app.assembly_undo(true),
+    ),
+    cmd(
+        Cmd::AssemblyCancel,
+        "Clear selection / leave assembly",
+        "Escape",
+        C::Assembly,
+        S::Assembly,
+        App::assembly_cancel,
+    ),
 ];
 
 /// MORE menu rows (index = `Layout::more_item` slot) and their labels.
-pub(super) const MORE_MENU: [(Cmd, &str); 27] = [
+pub(super) const MORE_MENU: [(Cmd, &str); 28] = [
     (Cmd::Point, "POINT [P]"),
     (Cmd::Polygon, "POLYGON [G]"),
     (Cmd::Slot, "SLOT [S]"),
@@ -1055,6 +1128,7 @@ pub(super) const MORE_MENU: [(Cmd, &str); 27] = [
     (Cmd::EdgeChamfer, "EDGE CHAMFER [0]"),
     (Cmd::EdgeFillet, "EDGE FILLET [SHIFT 0]"),
     (Cmd::LoftJoin, "LOFT JOIN [SHIFT 9]"),
+    (Cmd::AssemblyView, "ASSEMBLY [CTRL B]"),
 ];
 
 /// Toolbar buttons 0..=9 (`Layout::tool_button` slot) and their commands.
@@ -1101,6 +1175,7 @@ pub(crate) fn shortcuts_markdown() -> String {
                 Scope::SplineTool => "placing a spline",
                 Scope::DimensionSelected => "dimension selected",
                 Scope::BodyPick => "picking an up-to body",
+                Scope::Assembly => "assembly view",
             }
             .to_string();
             if command.edits {
@@ -1148,6 +1223,20 @@ impl App {
 
     /// Whether a command can run in the current state (palette dimming).
     pub(super) fn command_available(&self, command: &Command) -> bool {
+        if self.assembly.is_some() {
+            return matches!(command.scope, Scope::Any | Scope::Assembly)
+                && !matches!(
+                    command.id,
+                    Cmd::NewPart
+                        | Cmd::SketchTop
+                        | Cmd::SketchFront
+                        | Cmd::SketchRight
+                        | Cmd::RenamePart
+                        | Cmd::RenameSketch
+                        | Cmd::EdgeChamfer
+                        | Cmd::EdgeFillet
+                );
+        }
         let scope = match command.scope {
             Scope::Any => true,
             Scope::Sketch => !self.solid_preview,
@@ -1159,6 +1248,7 @@ impl App {
             }
             Scope::DimensionSelected => !self.solid_preview && self.selected_dimension.is_some(),
             Scope::BodyPick => self.body_pick,
+            Scope::Assembly => false,
         };
         let selection = !command.needs_selection
             || !self.document.selected_ids().is_empty()
@@ -1174,7 +1264,35 @@ impl App {
         let plain_shift = shift && !ctrl;
         let read_only = self.read_only();
         let sketch_edit = !read_only && !self.solid_preview;
+        if self.assembly.is_some() {
+            // Only view-wide commands that make sense here, plus the
+            // assembly bindings.
+            return Some(match code {
+                KeyCode::KeyK if ctrl => Cmd::CommandPalette,
+                KeyCode::KeyP if ctrl && shift => Cmd::CommandPalette,
+                KeyCode::Comma if ctrl => Cmd::Settings,
+                KeyCode::Slash if plain_shift => Cmd::ShortcutOverlay,
+                KeyCode::F1 => Cmd::ShortcutOverlay,
+                KeyCode::KeyB if ctrl => Cmd::AssemblyView,
+                KeyCode::KeyM if !ctrl => Cmd::MoreMenu,
+                KeyCode::KeyI if !ctrl && !shift => Cmd::InsertInstance,
+                KeyCode::KeyJ if !ctrl && !shift => Cmd::MateInstances,
+                KeyCode::Delete | KeyCode::Backspace => Cmd::DeleteInstance,
+                KeyCode::Escape => Cmd::AssemblyCancel,
+                KeyCode::KeyS if ctrl => Cmd::Save,
+                KeyCode::PageDown if ctrl => Cmd::NextPart,
+                KeyCode::PageUp if ctrl => Cmd::PreviousPart,
+                KeyCode::KeyE if ctrl && self.modifiers.alt_key() => Cmd::Export3mf,
+                KeyCode::KeyE if ctrl && shift => Cmd::ExportAsciiStl,
+                KeyCode::KeyE if ctrl => Cmd::ExportStl,
+                KeyCode::KeyZ if ctrl && shift => Cmd::AssemblyRedo,
+                KeyCode::KeyZ if ctrl => Cmd::AssemblyUndo,
+                KeyCode::KeyY if ctrl => Cmd::AssemblyRedo,
+                _ => return None,
+            });
+        }
         Some(match code {
+            KeyCode::KeyB if ctrl => Cmd::AssemblyView,
             KeyCode::KeyK if ctrl => Cmd::CommandPalette,
             KeyCode::Comma if ctrl => Cmd::Settings,
             KeyCode::ArrowUp if ctrl && self.solid_preview => Cmd::FeatureUp,

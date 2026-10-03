@@ -15,6 +15,7 @@ use crate::model::{
 };
 use crate::spline::{self, SplineMode};
 
+mod assemblies;
 mod face;
 mod features;
 pub use face::{FaceDescriptor, FaceRef, Frame};

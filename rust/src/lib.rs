@@ -1,6 +1,7 @@
 //! Headless PuppyCAD core: project I/O, sketch model, splines and STL export.
 //! The windowed app in `main.rs` builds on this library.
 
+pub mod assembly;
 pub mod model;
 pub mod project;
 pub mod sketch_value;

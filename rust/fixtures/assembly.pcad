@@ -1,0 +1,74 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "part-base",
+      "type": "part",
+      "name": "Base",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Base sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchCornerRectangle", "sketchId": "native-sketch-1", "p0": { "x": -20, "y": -20 }, "p1": { "x": 20, "y": 20 } },
+            { "id": "extrude-1", "type": "extrude", "name": "Base block", "sketchId": "native-sketch-1", "profileId": "native-sketch-1-profile-1", "operation": "newBody", "depth": 10 }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1", "extrude-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1", "extrude-1"], "dirtySketchIds": [] }
+      }
+    },
+    {
+      "id": "part-arm",
+      "type": "part",
+      "name": "Arm",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Arm sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchCornerRectangle", "sketchId": "native-sketch-1", "p0": { "x": -5, "y": -20 }, "p1": { "x": 5, "y": 20 } },
+            { "id": "extrude-1", "type": "extrude", "name": "Arm bar", "sketchId": "native-sketch-1", "profileId": "native-sketch-1-profile-1", "operation": "newBody", "depth": 5 }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1", "extrude-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1", "extrude-1"], "dirtySketchIds": [] }
+      }
+    },
+    {
+      "id": "assembly-1",
+      "type": "assembly",
+      "name": "Arm assembly",
+      "data": {
+        "id": "assembly-1",
+        "name": "Arm assembly",
+        "instances": [
+          { "id": "base-1", "partId": "part-base", "name": "Base" },
+          { "id": "arm-1", "partId": "part-arm", "name": "Upper arm", "transform": { "translation": { "x": 5, "y": 5, "z": 0 } } },
+          { "id": "arm-2", "partId": "part-arm", "name": "Forearm", "transform": { "translation": { "x": -7.5, "y": 27.990381056766578, "z": 15 }, "rotation": { "x": 0, "y": 0, "z": 30 } } }
+        ],
+        "connectors": [
+          { "id": "base-top", "name": "Base top", "instanceId": "base-1", "position": { "x": 0, "y": 0, "z": 10 } },
+          { "id": "arm1-bottom", "instanceId": "arm-1", "position": { "x": 0, "y": 0, "z": 0 } },
+          { "id": "arm1-end", "instanceId": "arm-1", "position": { "x": 0, "y": 15, "z": 5 } },
+          { "id": "arm2-pin", "instanceId": "arm-2", "position": { "x": 0, "y": -15, "z": 0 } }
+        ],
+        "mates": [
+          { "id": "mate-fasten", "name": "Mount", "type": "fasten", "a": { "instanceId": "base-1", "connectorId": "base-top" }, "b": { "instanceId": "arm-1", "connectorId": "arm1-bottom" } },
+          { "id": "mate-elbow", "name": "Elbow", "type": "revolute", "a": { "instanceId": "arm-1", "connectorId": "arm1-end" }, "b": { "instanceId": "arm-2", "connectorId": "arm2-pin" } }
+        ],
+        "actuators": [
+          { "id": "servo-elbow", "type": "servo", "mateId": "mate-elbow", "homeDeg": 30, "commandRange": { "minDeg": -90, "maxDeg": 90 } }
+        ]
+      }
+    }
+  ],
+  "selectedPath": [0]
+}

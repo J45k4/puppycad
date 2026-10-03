@@ -178,6 +178,10 @@ impl App {
             .and_then(|name| name.to_str())
             .unwrap_or("UNTITLED");
         segments.push((Crumb::Project, project_name.to_string()));
+        if let Some(assembly) = self.assembly_breadcrumbs() {
+            segments.extend(assembly);
+            return layout_breadcrumbs(segments, layout.top.w - 270.0);
+        }
         if let Some(project) = &self.project {
             segments.push((Crumb::Part, project.part_name().to_string()));
         }
@@ -451,6 +455,12 @@ impl App {
     pub(super) fn open_breadcrumb(&mut self, crumb: Crumb) {
         if crumb == Crumb::Projects {
             self.open_projects_page();
+            return;
+        }
+        if self.assembly.is_some() {
+            if crumb == Crumb::Project {
+                self.close_assembly();
+            }
             return;
         }
         self.document.finish_drag();

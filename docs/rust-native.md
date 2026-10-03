@@ -940,6 +940,71 @@ highlighted with `>`, undone (redoable) steps are dimmed above it, and a
 `Start` row at the bottom stands for everything undone. Clicking an older row
 undoes back to it, clicking a dimmed row redoes up to it.
 
+### Assemblies
+
+Top-level `"type": "assembly"` items of a `.pcad` are web `Assembly`
+documents (`src/contract.ts`): `instances` (`id`, `partId` of a part in the
+same project, optional `transform` with `translation`, `rotation` as Euler
+XYZ degrees and `scale`), `connectors` (frames with `position` and `rotation`
+on an instance, or on the world when `instanceId` is `null`), `mates`
+(`type` `fasten`, `revolute`, `prismatic`, `planar` or `ball` between two
+connectors) and `actuators` (servos on a mate). `rust/src/assembly.rs` reads
+and writes that shape; `actuators`, `variables` and mate `params` are kept
+verbatim. Native extension: an instance may carry a `name`, which the web
+loader drops. An unknown mate type, a dangling connector reference or a
+non-positive scale opens the assembly read-only with the reason shown in the
+view, and saving never rewrites it.
+
+**Solver** (`rust/src/assembly/solver.rs`). Fasten mates are solved exactly
+like `solveFixedAssembly` in `src/assembly-solver.ts` (breadth-first from the
+world, then from root instances; a loop that disagrees is a conflict), so
+fastened instances land where the web app puts them. The web app stores the
+other kinds without solving them; natively each fasten-connected group is a
+rigid body with 6 DOF and a damped Gauss–Newton pass (numeric Jacobian, like
+the sketch solver) moves the free bodies until every mate holds. The group of
+the first instance and groups fastened to the world are grounded. Residuals:
+revolute = shared origin and Z axis (free angle), prismatic ("slider") =
+same orientation and origin on the `a` frame's Z axis (free offset), planar
+= parallel Z axes and coplanar origins, ball = shared origin. A servo on a
+revolute mate fixes the angle (`homeDeg`, about the `a` frame's Z from its X
+axis to the `b` frame's X axis). Mates are solved when the view opens and
+after every edit; a conflicting edit is rejected and rolled back.
+
+**View.** **Ctrl+B** (MORE → ASSEMBLY, or an `ASM` row in the Project panel)
+opens the first assembly, creating an empty one when the project has none;
+Ctrl+B, Esc with nothing selected, a PART row or Ctrl+PgUp/PgDn return to
+the part. Every instance is drawn with its part's evaluated bodies (the same
+evaluation as export) placed by its transform, in a per-instance color.
+Right-drag orbits, middle-drag pans, the wheel zooms, as in the 3D preview.
+The hovered instance is brightened; a click selects the instance under the
+cursor (per-triangle instance ids, like body picking) or an INSTANCES row.
+Properties shows the name, the part, editable X/Y/Z (mm) and RX/RY/RZ (deg)
+— click a row, type, Enter re-solves — and the mates on the instance with
+the other instance and any servo angle. **I** lists the project's parts;
+a digit inserts an instance beside the current scene. **Delete** removes
+the selected instance with its connectors, mates and their servos. Mate
+gesture: click a face of instance A, hover a face of instance B, press
+**J**, then **1** fastened, **2** revolute, **3** slider (prismatic), **4**
+planar or **5** ball. Two connectors are added at the picked points, A's Z
+along A's outward face normal and B's Z into B, so a fastened mate puts the
+faces flush and revolute/slider use the face normal as the axis. Every edit
+is one undo step (**Ctrl+Z**, **Ctrl+Y** / **Ctrl+Shift+Z**) and is written
+to the project for Ctrl+S.
+
+**Export.** In the assembly view **Ctrl+E** / **Ctrl+Shift+E** write one
+binary / ASCII STL per instance, `<project>-<instance name>.stl`, with the
+instance transform applied, and **Ctrl+Alt+E** writes `<project>.3mf` with
+one object per instance named after it.
+
+Not yet native: editing connectors or mates after creation (delete the
+instance instead), picking edges as mate axes, world (ground) connectors from
+the UI, servo angle editing, mate limits, and assemblies in `--export`.
+Fixture: `rust/fixtures/assembly.pcad` (two parts, three instances, a
+fastened and a servo-driven revolute mate); `test/rust-roundtrip.test.ts`
+checks that the web loader solves it to the same transforms as
+`rust/src/assembly/tests.rs` (within 1e-3). App tests in
+`rust/src/app/assembly_tests.rs`.
+
 ## Shortcuts
 
 Every command lives in one registry (`rust/src/app/commands.rs`): label,
@@ -1105,6 +1170,18 @@ or dimension):
 | `F2` | Rename part | any view |
 | `Shift+F2` | Rename sketch | any view |
 
+#### Assembly
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `Ctrl+B` | Open / close assembly view | any view |
+| `I` | Insert part instance | assembly view |
+| `Delete` / `Backspace` | Delete instance | assembly view |
+| `J` | Mate selected face to hovered face | assembly view |
+| `Ctrl+Z` | Undo assembly edit | assembly view |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo assembly edit | assembly view |
+| `Escape` | Clear selection / leave assembly | assembly view |
+
 #### File
 
 | Shortcut | Command | When |
@@ -1200,6 +1277,10 @@ Library crate (`rust/src/lib.rs`):
   `geometry.rs` (curve intersections and boundaries), `glyphs.rs` (relation
   glyph layout, placement inference, automatic H/V), `tests.rs`,
   `dimension_tests.rs`, `glyph_tests.rs`.
+- `assembly.rs` (assembly documents: instances, connectors, mates, servos,
+  rigid poses and Euler XYZ conversion), `assembly/solver.rs` (fasten graph
+  port and the mate least-squares pass; tests in `assembly/tests.rs`),
+  `project/assemblies.rs` (assembly items in a project, any part's bodies).
 - `project.rs` (`.pcad` load/save, parts, extrusion profiles and end
   conditions; dimension round-trip tests in `project/dimension_tests.rs`,
   extrude option tests in `project/extrude_option_tests.rs`),
@@ -1218,6 +1299,9 @@ Library crate (`rust/src/lib.rs`):
 Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
+  `assembly.rs` (assembly view: scene, picking, panels, insert/delete/mate,
+  property edits, undo and per-instance export; tests in
+  `assembly_tests.rs`),
   `commands.rs` (command registry, key resolution and the actions behind
   keyboard/MORE/palette), `palette.rs` (Ctrl+K command palette),
   `shortcut_overlay.rs` (? / F1 cheat sheet), `history.rs` (cross-view
@@ -1409,6 +1493,11 @@ starts a loft (9) from a wider rectangle on a new Top sketch, sketches a
 circle on the block's top face and picks MORE → LOFT JOIN
 (`rust-native-loft-more.png`, `rust-native-loft.png`), checking the saved
 join `loft` node.
+
+saved `revolve` / `edgeFinish` nodes. The assembly scenario opens
+`fixtures/assembly.pcad`, presses Ctrl+B, clicks an instance
+(`rust-native-assembly-selected.png`), exports three instance STLs and a
+3MF with three objects, deletes the instance and checks the saved file.
 It does not open a host desktop
 window.
 

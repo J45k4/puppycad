@@ -1,3 +1,4 @@
+mod assembly;
 mod commands;
 mod corner;
 mod extrude;
@@ -17,6 +18,8 @@ mod tangent;
 mod view_sketch;
 
 #[cfg(test)]
+mod assembly_tests;
+#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod input_tests;
@@ -27,6 +30,7 @@ mod status_tests;
 #[cfg(test)]
 mod tests;
 
+use assembly::*;
 pub(crate) use commands::shortcuts_markdown;
 use commands::*;
 use corner::*;
@@ -354,6 +358,8 @@ pub(crate) struct App {
     edge_pick: Option<EdgePick>,
     /// HISTORY panel over the Project panel (Ctrl+Shift+H).
     history_open: bool,
+    /// Open assembly view (replaces the sketch / part views while open).
+    assembly: Option<AssemblyView>,
 }
 
 /// What the pointer is over in Select mode.
@@ -501,12 +507,14 @@ impl Default for App {
             loft_start: None,
             edge_pick: None,
             history_open: false,
+            assembly: None,
         }
     }
 }
 
 impl App {
     fn switch_part(&mut self, direction: isize) {
+        self.close_assembly();
         let Some(project) = &self.project else {
             return;
         };
@@ -548,6 +556,10 @@ impl App {
     }
 
     fn export_stl(&mut self, format: stl::StlFormat) {
+        if self.assembly.is_some() {
+            self.export_assembly_stl(format);
+            return;
+        }
         self.status_message = match &self.project {
             Some(project) => match stl::project_bodies(project).and_then(|bodies| {
                 stl::write_stl_bodies(project.path(), project.part_name(), &bodies, format)
@@ -569,6 +581,10 @@ impl App {
     }
 
     fn export_3mf(&mut self) {
+        if self.assembly.is_some() {
+            self.export_assembly_3mf();
+            return;
+        }
         self.status_message = match &self.project {
             Some(project) => match stl::project_bodies(project).and_then(|bodies| {
                 threemf::write_3mf(project.path(), project.part_name(), &bodies)
@@ -758,11 +774,11 @@ impl App {
         self.project.as_ref().map_or(1, ProjectFile::sketch_count)
     }
 
+    /// Project panel rows (parts and assemblies), shown when there is more
+    /// than one.
     fn part_rows(&self) -> Vec<usize> {
-        self.project
-            .as_ref()
-            .map(ProjectFile::part_indices)
-            .filter(|indices| indices.len() > 1)
+        Some(self.project_rows())
+            .filter(|rows| rows.len() > 1)
             .unwrap_or_default()
     }
 
@@ -980,7 +996,7 @@ impl App {
     }
 
     fn select_projection(&mut self, layout: Layout, point: Point) -> bool {
-        if !self.solid_preview || self.projects_page.is_some() {
+        if (!self.solid_preview && self.assembly.is_none()) || self.projects_page.is_some() {
             return false;
         }
         for perspective in [true, false] {
@@ -1020,6 +1036,16 @@ impl App {
         );
         if let Some(page) = &self.projects_page {
             self.paint_projects_page(&mut painter, layout, page);
+            return painter;
+        }
+        if self.assembly.is_some() {
+            self.paint_assembly(&mut painter, layout);
+            self.paint_assembly_panels(&mut painter, layout);
+            self.paint_more_menu(&mut painter, layout);
+            self.paint_settings(&mut painter, layout);
+            self.paint_palette(&mut painter, layout);
+            self.paint_shortcut_overlay(&mut painter, layout);
+            self.paint_tooltip(&mut painter, layout);
             return painter;
         }
         if self.extrude_draft.is_some() {

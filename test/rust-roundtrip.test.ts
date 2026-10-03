@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ProjectPartDocument } from "../src/contract"
+import type { ProjectAssemblyDocument, ProjectPartDocument } from "../src/contract"
 import { resolveSketchTargetFrame } from "../src/cad/extrude"
 import { createPartRuntimeState, materializePartFeatures, serializePCadState } from "../src/pcad/part-state"
 import { createProjectFile, normalizeProjectFile, serializeProjectFile } from "../src/project-file"
@@ -16,6 +16,7 @@ const FIXTURES = join(ROOT, "rust", "fixtures")
 
 // Sketch count per top-level part for each native fixture.
 const EXPECTED: Record<string, number[]> = {
+	"assembly.pcad": [1, 1],
 	"dimensions.pcad": [1],
 	"extrude-options.pcad": [3],
 	"extruded-rectangle.pcad": [1],
@@ -50,6 +51,36 @@ it("loads every native Rust fixture in the TypeScript loader", () => {
 	expect(names).toEqual(Object.keys(EXPECTED).sort())
 	for (const name of names) {
 		expect({ name, counts: sketchCounts(readFileSync(join(FIXTURES, name), "utf8")) }).toEqual({ name, counts: EXPECTED[name] ?? [] })
+	}
+})
+
+it("solves the native assembly fixture like the native solver", () => {
+	const project = requireValue(normalizeProjectFile(JSON.parse(readFileSync(join(FIXTURES, "assembly.pcad"), "utf8"))))
+	const assembly = project.items.find((item): item is ProjectAssemblyDocument => "type" in item && item.type === "assembly")
+	const data = requireValue(assembly?.data)
+	expect(data.instances.map((instance) => instance.partId)).toEqual(["part-base", "part-arm", "part-arm"])
+	expect(data.mates?.map((mate) => mate.type)).toEqual(["fasten", "revolute"])
+	expect(data.actuators?.[0]?.mateId).toBe("mate-elbow")
+	// Same numbers as WEB_FIXTURE_TRANSFORMS in rust/src/assembly/tests.rs.
+	const expected: Record<string, [number[], number[]]> = {
+		"base-1": [
+			[0, 0, 0],
+			[0, 0, 0]
+		],
+		"arm-1": [
+			[0, 0, 10],
+			[0, 0, 0]
+		],
+		"arm-2": [
+			[-7.5, 27.990381056766577, 15],
+			[0, 0, 30]
+		]
+	}
+	for (const instance of data.instances) {
+		const [translation, rotation] = requireValue(expected[instance.id])
+		const t = instance.transform
+		const actual = [t?.translation?.x ?? 0, t?.translation?.y ?? 0, t?.translation?.z ?? 0, t?.rotation?.x ?? 0, t?.rotation?.y ?? 0, t?.rotation?.z ?? 0]
+		;[...translation, ...rotation].forEach((value, index) => expect(Math.abs((actual[index] ?? Number.NaN) - value)).toBeLessThan(1e-3))
 	}
 })
 
