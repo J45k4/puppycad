@@ -90,7 +90,8 @@ per-instance selection and export.
    ? / F1 cheat sheet, `puppycad --print-shortcuts`.
 2. (Done) Hover pre-highlight, relation glyphs beside entities, inference
    hints while placing.
-3. Undo history panel.
+3. (Done) Undo history panel (Ctrl+Shift+H), labelled undo steps, one
+   undo history across the sketch and 3D views, selection restored on undo.
 4. Toolbar icons, tooltips with shortcuts, status bar with cursor coordinates,
    DOF and snap mode.
 5. Settings: units, grid size, theme; persisted window layout.
