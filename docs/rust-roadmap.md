@@ -69,7 +69,9 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
    through `manifold-rust`.
 4. Feature tree with reorder, suppress and rollback; re-evaluation when an
    upstream sketch changes.
-5. Export: binary STL, then 3MF or STEP.
+5. Export: binary STL, then 3MF or STEP (**done** for binary/ASCII STL and 3MF:
+   `rust/src/stl.rs`, `rust/src/threemf.rs`, `puppycad --export`; STEP is still
+   open).
 
 ## Phase 4 — Assembly
 
