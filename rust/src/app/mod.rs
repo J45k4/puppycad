@@ -15,7 +15,7 @@ use pattern::*;
 use project_panel::*;
 use solid::*;
 
-use puppycad::{model, project, sketch_value, spline, stl};
+use puppycad::{model, project, sketch_value, spline, stl, threemf};
 
 use std::{
     path::{Path, PathBuf},
@@ -391,44 +391,42 @@ impl App {
         }
     }
 
-    fn export_stl(&mut self) {
+    fn export_stl(&mut self, format: stl::StlFormat) {
         self.status_message = match &self.project {
-            Some(project) => match project.extrusion_previews() {
-                Some(solids) => {
-                    let mut paths = Vec::new();
-                    let mut error = None;
-                    let meshes = project.evaluated_solids();
-                    for index in 0..meshes.as_ref().map_or(solids.len(), Vec::len) {
-                        let result = if meshes
-                            .as_ref()
-                            .is_some_and(|items| items.len() < solids.len())
-                        {
-                            stl::write_mesh_export(project.path(), &meshes.as_ref().unwrap()[index])
-                        } else {
-                            stl::write_export(project.path(), &solids[index])
-                        };
-                        match result {
-                            Ok(path) => paths.push(path),
-                            Err(reason) => {
-                                error = Some(reason);
-                                break;
-                            }
-                        }
-                    }
-                    match error {
-                        Some(reason) => {
-                            format!("STL export failed after {} bodies: {reason}", paths.len())
-                        }
-                        None => format!(
-                            "Exported {} STL {}",
-                            paths.len(),
-                            if paths.len() == 1 { "body" } else { "bodies" }
-                        ),
-                    }
-                }
-                None => "No supported solid to export".into(),
+            Some(project) => match stl::project_bodies(project).and_then(|bodies| {
+                stl::write_stl_bodies(project.path(), project.part_name(), &bodies, format)
+            }) {
+                Ok(paths) => format!(
+                    "Exported {} {} STL {}",
+                    paths.len(),
+                    if format == stl::StlFormat::Ascii {
+                        "ASCII"
+                    } else {
+                        "binary"
+                    },
+                    if paths.len() == 1 { "body" } else { "bodies" }
+                ),
+                Err(reason) => reason,
             },
             None => "Open a .pcad project to export STL".into(),
+        };
+    }
+
+    fn export_3mf(&mut self) {
+        self.status_message = match &self.project {
+            Some(project) => match stl::project_bodies(project).and_then(|bodies| {
+                threemf::write_3mf(project.path(), project.part_name(), &bodies)
+                    .map(|path| (path, bodies.len()))
+            }) {
+                Ok((path, count)) => format!(
+                    "Exported {count} {} to {}",
+                    if count == 1 { "body" } else { "bodies" },
+                    path.file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into())
+                ),
+                Err(reason) => format!("3MF export failed: {reason}"),
+            },
+            None => "Open a .pcad project to export 3MF".into(),
         };
     }
 

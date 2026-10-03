@@ -604,9 +604,29 @@ project-wide read-only lock, so new reference-plane sketches can be added.
 Extrusions appear as clickable rows in the Project panel between sketches and
 sketch entities. Clicking a row selects that body and opens the 3D preview;
 clicking a sketch or entity row returns to the sketch view.
-Press Ctrl+E in the solid preview to export each supported body as an ASCII STL
-beside the project file. Existing STL files are preserved; additional bodies
-and repeated exports use numbered filenames.
+Press Ctrl+E in the solid preview to export each supported body as a binary STL
+beside the project file (80-byte header `PuppyCAD <part> / <body>`,
+little-endian facet count, 50 bytes per facet with a per-facet normal and a zero
+attribute). Ctrl+Shift+E writes the same triangles as ASCII STL. Existing files
+are preserved; additional bodies and repeated exports use numbered filenames
+(`name.stl`, `name-2.stl`, …). Ctrl+Alt+E writes one `name.3mf` for the whole
+part: a deflated ZIP with `[Content_Types].xml`, `_rels/.rels` and
+`3D/3dmodel.model` (core 2015/02 namespace, `unit="millimeter"`, the part name
+as `Title` metadata, one welded-vertex `object` and one `build` item per body).
+When cut/join features merge extrusions, every format exports the evaluated
+Boolean bodies. STEP export is not implemented yet.
+
+Headless export uses the same code:
+
+```sh
+cargo run --manifest-path rust/Cargo.toml -- --export IN.pcad OUT.stl   # binary, OUT-2.stl… per extra body
+cargo run --manifest-path rust/Cargo.toml -- --export IN.pcad OUT.3mf
+```
+
+It prints the written paths, replaces existing files at those paths, and exits
+non-zero when the input is missing, has no supported solid, or the output
+extension is not `.stl`/`.3mf`. `rust/tests/export.rs` and
+`test/rust-export.test.ts` cover it.
 
 ## Code layout
 
@@ -633,7 +653,9 @@ Library crate (`rust/src/lib.rs`):
 - `project.rs` (`.pcad` load/save, parts, extrusion profiles; dimension
   round-trip tests in `project/dimension_tests.rs`), `solver.rs`,
   `sketch_value.rs` (dimension expressions and sketch variables),
-  `spline.rs`, `stl.rs`.
+  `spline.rs`, `stl.rs` (body triangles, ASCII/binary STL, numbered
+  writes), `threemf.rs` (3MF package). `lib.rs` also hosts `roundtrip` and
+  `export` for the CLI.
 
 Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 
@@ -683,7 +705,9 @@ rectangle, center rectangle, both three-point rectangle modes, circle, line, ell
 copies, moves, scales, and rotates selected shapes, adds Front and Right sketches and switches between them, saves a v4 project, opens a single-extrusion fixture and toggles its view, then authors and saves an extrusion. It writes
 screenshots and a project file to `workdir/`. It also extrudes a concave line
 loop, line-drawn through-hole, slot, arc-and-line profile, and rectangle with two circular through-holes,
-and exports their STLs. The authored extrusion scenario also checks a separate
+and exports their STLs (ASCII via Ctrl+Shift+E so facet counts can be grepped).
+The existing-solid scenario also checks a binary STL (header and 684-byte size)
+and a 3MF (ZIP parts, 12 triangles, millimeter unit). The authored extrusion scenario also checks a separate
 open line and point beside its closed profile. A web-compatible fixture checks
 an ellipse with 16 segments and a circular hole with 12 segments, plus a slot
 with 12 segments per end cap. Another scenario extrudes both disconnected

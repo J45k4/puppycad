@@ -1835,7 +1835,13 @@ impl ApplicationHandler for App {
                         KeyCode::KeyE
                             if self.modifiers.control_key() || self.modifiers.super_key() =>
                         {
-                            self.export_stl();
+                            if self.modifiers.alt_key() {
+                                self.export_3mf();
+                            } else if self.modifiers.shift_key() {
+                                self.export_stl(stl::StlFormat::Ascii);
+                            } else {
+                                self.export_stl(stl::StlFormat::Binary);
+                            }
                         }
                         KeyCode::KeyZ
                             if self.modifiers.control_key() || self.modifiers.super_key() =>

@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libvulkan1 \
     mesa-vulkan-drivers \
+    unzip \
     xdotool \
     xvfb \
     x11-utils \

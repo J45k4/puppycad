@@ -233,11 +233,25 @@ xdotool key --window "$window_id" ctrl+s
 sleep 0.2
 cp /tmp/native-existing-solid.pcad /out/rust-native-depth-edited.pcad
 grep -q '"depth": 80.0' /tmp/native-existing-solid.pcad
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-existing-solid.stl
 test "$(grep -c '^facet normal' /tmp/native-existing-solid.stl)" -eq 12
 cp /tmp/native-existing-solid.stl /out/rust-native-export.stl
+# Ctrl+E writes binary STL beside the ASCII one; Ctrl+Alt+E writes one 3MF.
+xdotool key --window "$window_id" ctrl+e
+sleep 0.2
+test "$(head -c 9 /tmp/native-existing-solid-2.stl)" = "PuppyCAD "
+test "$(stat -c %s /tmp/native-existing-solid-2.stl)" -eq $((84 + 12 * 50))
+cp /tmp/native-existing-solid-2.stl /out/rust-native-export-binary.stl
+xdotool key --window "$window_id" ctrl+alt+e
+sleep 0.2
+test "$(head -c 2 /tmp/native-existing-solid.3mf)" = "PK"
+unzip -l /tmp/native-existing-solid.3mf | grep -q '\[Content_Types\].xml'
+unzip -l /tmp/native-existing-solid.3mf | grep -q '_rels/.rels'
+test "$(unzip -p /tmp/native-existing-solid.3mf 3D/3dmodel.model | grep -c '<triangle ')" -eq 12
+unzip -p /tmp/native-existing-solid.3mf 3D/3dmodel.model | grep -q 'unit="millimeter"'
+cp /tmp/native-existing-solid.3mf /out/rust-native-export.3mf
 import -window root /out/rust-native-stl-export.png
 xdotool mousemove 600 380 mousedown 1
 xdotool mousemove --sync 790 425
@@ -268,7 +282,7 @@ xdotool windowsize "$window_id" 1280 800
 xdotool windowfocus --sync "$window_id"
 sleep 1
 import -window root /out/rust-native-segmented-solid.png
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-segmented.stl
 cp /tmp/native-segmented.stl /out/rust-native-segmented-solid.stl
@@ -293,7 +307,7 @@ xdotool windowsize "$window_id" 1280 800
 xdotool windowfocus --sync "$window_id"
 sleep 1
 import -window root /out/rust-native-segmented-slot.png
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-segmented-slot.stl
 cp /tmp/native-segmented-slot.stl /out/rust-native-segmented-slot.stl
@@ -507,7 +521,7 @@ sleep 0.3
 import -window root /out/rust-native-concave-solid.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-concave.pcad
 test -s /tmp/native-concave.stl
@@ -543,7 +557,7 @@ sleep 0.3
 import -window root /out/rust-native-line-hole-solid.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-line-hole.pcad
 test -s /tmp/native-line-hole.stl
@@ -579,7 +593,7 @@ sleep 0.3
 import -window root /out/rust-native-slot-solid.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-slot-solid.pcad
 test -s /tmp/native-slot-solid.stl
@@ -617,7 +631,7 @@ sleep 0.3
 import -window root /out/rust-native-arc-line-solid.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-arc-line.pcad
 test -s /tmp/native-arc-line.stl
@@ -657,7 +671,7 @@ sleep 0.3
 import -window root /out/rust-native-second-profile-solid.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-two-profiles.pcad
 test -s /tmp/native-two-profiles.stl
@@ -702,7 +716,7 @@ for plane in front right; do
     import -window root "/out/rust-native-$plane-solid.png"
     xdotool key --window "$window_id" ctrl+s
     sleep 0.2
-    xdotool key --window "$window_id" ctrl+e
+    xdotool key --window "$window_id" ctrl+shift+e
     sleep 0.2
     test -s "/tmp/native-$plane.pcad"
     test -s "/tmp/native-$plane.stl"
@@ -740,7 +754,7 @@ sleep 0.3
 import -window root /out/rust-native-hole-solid.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-hole.pcad
 test -s /tmp/native-hole.stl
@@ -793,7 +807,7 @@ sleep 0.2
 import -window root /out/rust-native-two-bodies.png
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-two-bodies.pcad
 test -s /tmp/native-two-bodies.stl
@@ -1088,7 +1102,7 @@ xdotool key --window "$window_id" shift+x
 sleep 0.2
 import -window root /out/rust-native-cut-extrusion.png
 xdotool key --window "$window_id" ctrl+s
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-cut-extrusion.pcad
 grep -q '"operation": "cut"' /tmp/native-cut-extrusion.pcad
@@ -1126,7 +1140,7 @@ xdotool key --window "$window_id" shift+j
 sleep 0.2
 import -window root /out/rust-native-join-extrusion.png
 xdotool key --window "$window_id" ctrl+s
-xdotool key --window "$window_id" ctrl+e
+xdotool key --window "$window_id" ctrl+shift+e
 sleep 0.2
 test -s /tmp/native-join-extrusion.pcad
 grep -q '"operation": "join"' /tmp/native-join-extrusion.pcad
