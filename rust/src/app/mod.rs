@@ -193,6 +193,8 @@ pub(crate) struct App {
     /// Lines of the corner whose fillet/chamfer prompt is open.
     corner_pair: Option<(u32, u32)>,
     corner_values: CornerValues,
+    /// Distance the Offset prompt starts from (and remembers).
+    offset_value: f32,
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
@@ -245,6 +247,10 @@ enum EditField {
     FilletRadius,
     ChamferFirst,
     ChamferSecond,
+    /// Offset tool prompt: signed distance for a new offset.
+    OffsetCreate,
+    /// Driving distance of the selected offset shape.
+    OffsetDistance,
 }
 
 impl Default for App {
@@ -280,6 +286,7 @@ impl Default for App {
             corner_pick: None,
             corner_pair: None,
             corner_values: CornerValues::default(),
+            offset_value: 5.0,
             analysis: Default::default(),
         }
     }
@@ -442,6 +449,47 @@ impl App {
         self.select_tool(Tool::Select);
         self.pick = Some(Pick::Mirror { sources });
         self.status_message = "Mirror: click the mirror line  |  Esc to cancel".into();
+    }
+
+    /// Offset tool (Shift+U or MORE > OFFSET): prompt for the signed
+    /// distance, then offset the selection (a line chain when the selected
+    /// line joins others end to end).
+    fn begin_offset(&mut self) {
+        self.more_open = false;
+        if self.document.selected.is_none() {
+            self.status_message = "Select a line, circle or arc to offset first".into();
+            return;
+        }
+        self.document.finish_drag();
+        self.editing = Some(DimensionEdit {
+            field: EditField::OffsetCreate,
+            buffer: String::new(),
+        });
+        self.status_message = format!(
+            "Offset distance in mm, sign picks the side (Enter keeps {:.1})  |  Esc to cancel",
+            self.offset_value
+        );
+    }
+
+    /// Finish the Offset prompt; returns the status message.
+    fn finish_offset_create(&mut self, buffer: &str) -> String {
+        let distance = if buffer.is_empty() {
+            self.offset_value
+        } else {
+            match buffer.parse::<f32>() {
+                Ok(value) if value.is_finite() && value != 0.0 => value,
+                _ => return "Offset: enter a non-zero distance".into(),
+            }
+        };
+        self.offset_value = distance;
+        match self.document.offset_selected(distance) {
+            Ok(created) => format!(
+                "Offset {} shape{} by {distance:.1} mm  |  Ctrl+Z to undo  |  Ctrl+S to save",
+                created.len(),
+                if created.len() == 1 { "" } else { "s" }
+            ),
+            Err(error) => format!("Offset: {error}"),
+        }
     }
 
     /// Handle a viewport click while a pick gesture is armed.
@@ -751,6 +799,7 @@ impl App {
             "MIRROR [SHIFT I]",
             "FILLET [SHIFT W]",
             "CHAMFER [SHIFT H]",
+            "OFFSET [SHIFT U]",
         ]
         .into_iter()
         .enumerate()

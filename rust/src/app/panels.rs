@@ -47,6 +47,11 @@ impl App {
         {
             return Some(EditField::RelationAngle);
         }
+        if self.document.offset_distance(shape.id()).is_some()
+            && (layout.right.y + 312.0..layout.right.y + 337.0).contains(&point.y)
+        {
+            return Some(EditField::OffsetDistance);
+        }
         if self.document.radius_differences.contains_key(&shape.id())
             && (layout.right.y + 312.0..layout.right.y + 337.0).contains(&point.y)
         {
@@ -118,6 +123,14 @@ impl App {
             EditField::FilletRadius | EditField::ChamferFirst | EditField::ChamferSecond => {
                 self.finish_corner_edit(edit.field, &edit.buffer)
             }
+            EditField::OffsetCreate => self.finish_offset_create(&edit.buffer),
+            EditField::OffsetDistance => match edit.buffer.parse::<f32>() {
+                Ok(value) => match self.document.set_offset_distance(value) {
+                    Ok(()) => format!("Offset distance set to {value:.1} mm  |  Ctrl+S to save"),
+                    Err(error) => format!("Offset error: {error}"),
+                },
+                Err(_) => "Offset error: enter a signed distance in mm".into(),
+            },
             EditField::ExtrusionDepth => match edit.buffer.parse::<f32>() {
                 Ok(depth) => match self
                     .project
@@ -596,6 +609,8 @@ impl App {
                         .unwrap_or(""),
                     if self.document.has_symmetry(shape.id()) {
                         " [SYM]"
+                    } else if self.document.has_offset(shape.id()) {
+                        " [OFS]"
                     } else {
                         ""
                     },
@@ -1200,7 +1215,15 @@ impl App {
                     ACCENT,
                 );
             }
-            if let Some((_, value)) = self.document.radius_differences.get(&shape.id()) {
+            if let Some(value) = self.document.offset_distance(shape.id()) {
+                painter.text(
+                    layout.right.x + 18.0,
+                    layout.right.y + 325.0,
+                    &format!("OFFSET {:.1} MM", value),
+                    1.0,
+                    ACCENT,
+                );
+            } else if let Some((_, value)) = self.document.radius_differences.get(&shape.id()) {
                 painter.text(
                     layout.right.x + 18.0,
                     layout.right.y + 325.0,
@@ -1370,6 +1393,8 @@ impl App {
                 | EditField::RelationAngle
                 | EditField::RadialDifference
                 | EditField::FilletRadius
+                | EditField::OffsetCreate
+                | EditField::OffsetDistance
                 | EditField::ChamferFirst
                 | EditField::ChamferSecond => 0,
             };
@@ -1383,7 +1408,7 @@ impl App {
                 EditField::PointX => layout.right.y + 105.0,
                 EditField::PointY => layout.right.y + 135.0,
                 EditField::RelationAngle => layout.right.y + 312.0,
-                EditField::RadialDifference => layout.right.y + 312.0,
+                EditField::RadialDifference | EditField::OffsetDistance => layout.right.y + 312.0,
                 _ => layout.right.y + 105.0 + row as f32 * 30.0,
             };
             let center_half = matches!(edit.field, EditField::CenterX | EditField::CenterY);
@@ -1406,7 +1431,9 @@ impl App {
             painter.text(
                 field.x + 8.0,
                 field.y + 7.0,
-                &if matches!(edit.field, EditField::FilletRadius) {
+                &if matches!(edit.field, EditField::OffsetCreate) {
+                    format!("OFFSET > {}_ mm", edit.buffer)
+                } else if matches!(edit.field, EditField::FilletRadius) {
                     format!("FILLET R > {}_ mm", edit.buffer)
                 } else if matches!(edit.field, EditField::ChamferFirst) {
                     format!("CHAMFER D1 > {}_ mm", edit.buffer)
