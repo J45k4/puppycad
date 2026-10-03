@@ -10,7 +10,7 @@ mod tests;
 use project_panel::*;
 use solid::*;
 
-use puppycad::{model, project, spline, stl};
+use puppycad::{model, project, sketch_value, spline, stl};
 
 use std::{
     path::{Path, PathBuf},
@@ -240,6 +240,8 @@ enum EditField {
     RadialDifference,
     /// Inline edit of a dimension label in the viewport.
     Label(DimensionKey),
+    /// Sketch variable row (`None`: add a variable).
+    Variable(Option<usize>),
 }
 
 impl Default for App {

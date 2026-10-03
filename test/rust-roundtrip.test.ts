@@ -15,6 +15,7 @@ const FIXTURES = join(ROOT, "rust", "fixtures")
 
 // Sketch count per top-level part for each native fixture.
 const EXPECTED: Record<string, number[]> = {
+	"dimensions.pcad": [1],
 	"extruded-rectangle.pcad": [1],
 	"graph-constrained-line.pcad": [1],
 	"segmented-primitives.pcad": [1],
@@ -89,6 +90,66 @@ it.skipIf(!hasCargo)(
 			const sketches = materializePartFeatures(state.cad, state.tree).filter((feature) => feature.type === "sketch")
 			expect(sketches).toHaveLength(1)
 			expect(sketches[0]?.type === "sketch" ? sketches[0].entities : null).toEqual(sketch.entities)
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	},
+	600_000
+)
+
+function dimensionSketch(): Sketch {
+	return {
+		id: "dim-sketch",
+		type: "sketch",
+		name: "Dimensions",
+		dirty: false,
+		target: { type: "plane", plane: "XY" },
+		entities: [
+			{ id: "line", type: "line", p0: { x: 0, y: 0 }, p1: { x: 50.8, y: 0 } },
+			{ id: "point", type: "point", center: { x: 10, y: 30 } }
+		],
+		relations: [
+			{ id: "len", type: "length", entityId: "line", value: 50.8, expression: "#w * 2", labelPosition: { x: 25, y: -12 } },
+			{ id: "dist", type: "distance", a: { entityId: "line", point: "p0" }, b: { entityId: "point", point: "center" }, value: Math.hypot(10, 30), reference: true },
+			{ id: "dx", type: "distance", a: { entityId: "line", point: "p1" }, b: { entityId: "point", point: "center" }, axis: "x", value: 10 - 50.8 },
+			{ id: "dy", type: "distance", a: { entityId: "line", point: "p0" }, b: { entityId: "point", point: "center" }, axis: "y", value: 30, expression: "#w + 4.6 mm" }
+		],
+		variables: [{ name: "w", kind: "length", expression: "1 in" }],
+		dimensions: [],
+		vertices: [],
+		loops: [],
+		profiles: []
+	}
+}
+
+it.skipIf(!hasCargo)(
+	"keeps web dimension relations and sketch variables through the native app",
+	() => {
+		const dir = mkdtempSync(join(tmpdir(), "puppycad-rust-dimensions-"))
+		try {
+			const sketch = dimensionSketch()
+			const runtime = createPartRuntimeState({ features: [sketch] })
+			const file = createProjectFile({
+				items: [{ id: "web-part", type: "part", name: "Web part", data: { features: [sketch], cad: serializePCadState(runtime.cad), tree: runtime.tree } }],
+				selectedPath: [0]
+			})
+			const input = join(dir, "web.pcad")
+			const output = join(dir, "native.pcad")
+			writeFileSync(input, serializeProjectFile(file))
+			const result = spawnSync("cargo", ["run", "--quiet", "--manifest-path", join(ROOT, "rust", "Cargo.toml"), "--", "--roundtrip", input, output], {
+				encoding: "utf8",
+				timeout: 600_000
+			})
+			expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: "" })
+			const project = requireValue(normalizeProjectFile(JSON.parse(readFileSync(output, "utf8"))))
+			const part = project.items[0] as ProjectPartDocument
+			const state = createPartRuntimeState(requireValue(part.data))
+			const loaded = materializePartFeatures(state.cad, state.tree).find((feature) => feature.type === "sketch")
+			expect(loaded?.type).toBe("sketch")
+			if (loaded?.type !== "sketch") return
+			expect(loaded.variables).toEqual(sketch.variables)
+			const byId = new Map((loaded.relations ?? []).map((relation) => [relation.id, relation]))
+			for (const relation of sketch.relations ?? []) expect(byId.get(relation.id)).toEqual(relation)
 		} finally {
 			rmSync(dir, { recursive: true, force: true })
 		}

@@ -250,3 +250,64 @@ fn reference_point_dimension_is_skipped_by_the_solver() {
     let (problem, _) = doc.build_problem(&HashSet::new(), true, None);
     assert_eq!(problem.constraints.len(), 1);
 }
+
+#[test]
+fn dimension_expressions_use_units_and_variables() {
+    let mut doc = Document::default();
+    let l = line(&mut doc, p(0.0, 0.0), p(40.0, 0.0));
+    let key = doc.add_entity_dimension(l).unwrap();
+    let depth = doc.history.len();
+    assert_eq!(doc.set_dimension_expression(key, "1 in + 4.6mm"), Ok(30.0));
+    assert_eq!(doc.history.len(), depth + 1);
+    assert_eq!(doc.dimension_expression(key), Some("1 in + 4.6mm"));
+    assert_eq!(doc.dimension_text(key).unwrap(), "1 in + 4.6mm = 30");
+    assert!(doc.set_dimension_expression(key, "10 deg").is_err());
+    assert!(doc.set_dimension_expression(key, "#missing").is_err());
+    assert_eq!(doc.dimension_value(key), Some(30.0));
+    // A plain number drops the expression.
+    doc.set_dimension_expression(key, "25").unwrap();
+    assert!(doc.dims.expressions.is_empty());
+
+    doc.define_variable(None, "w", "20 mm").unwrap();
+    doc.define_variable(None, "#half", "#w / 2").unwrap();
+    assert_eq!(
+        doc.dims.variables[1].kind,
+        crate::sketch_value::ValueKind::Length
+    );
+    doc.set_dimension_expression(key, "#w * 2 + #half").unwrap();
+    assert_eq!(doc.dimension_value(key), Some(50.0));
+    assert!(matches!(doc.shapes[0], Shape::Line { b, .. } if (b.x - 50.0).abs() < 1e-3));
+
+    // Changing a variable re-evaluates dependents as one undo step.
+    let depth = doc.history.len();
+    doc.define_variable(Some(0), "w", "30").unwrap();
+    assert_eq!(doc.history.len(), depth + 1);
+    assert_eq!(doc.dimension_value(key), Some(75.0));
+    assert!(matches!(doc.shapes[0], Shape::Line { b, .. } if (b.x - 75.0).abs() < 1e-3));
+    doc.undo();
+    assert_eq!(doc.dimension_value(key), Some(50.0));
+    assert_eq!(doc.dims.variables[0].expression, "20 mm");
+
+    // Renaming rewrites references; deleting a used variable is refused.
+    doc.define_variable(Some(0), "width", "20 mm").unwrap();
+    assert_eq!(doc.dimension_expression(key), Some("#width * 2 + #half"));
+    assert_eq!(doc.dims.variables[1].expression, "#width / 2");
+    assert!(doc.delete_variable(0).is_err());
+    assert!(doc.define_variable(None, "width", "1").is_err());
+    assert!(doc.define_variable(None, "loop", "#loop").is_err());
+    // A variable change that breaks geometry rolls back completely.
+    doc.selected = Some(l);
+    assert!(doc.define_variable(Some(0), "width", "-40 mm").is_err());
+    assert_eq!(doc.dims.variables[0].expression, "20 mm");
+    assert_eq!(doc.dimension_value(key), Some(50.0));
+}
+
+#[test]
+fn reference_toggle_drops_expression() {
+    let mut doc = Document::default();
+    let l = line(&mut doc, p(0.0, 0.0), p(40.0, 0.0));
+    let key = doc.add_entity_dimension(l).unwrap();
+    doc.set_dimension_expression(key, "2 * 20").unwrap();
+    doc.toggle_reference(key).unwrap();
+    assert!(doc.dims.expressions.is_empty());
+}

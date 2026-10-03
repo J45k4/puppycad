@@ -91,6 +91,32 @@ impl App {
             self.more_open = false;
         }
         if !self.solid_preview
+            && self.document.selected.is_none()
+            && !self
+                .selected_dimension
+                .is_some_and(|key| self.document.dimension_keys().contains(&key))
+            && let Some(index) = (0..=self.document.dims.variables.len())
+                .find(|index| Self::variable_row(layout, *index).contains(point.x, point.y))
+        {
+            if self.read_only() {
+                self.status_message =
+                    "READ ONLY: this sketch has unsupported native features".into();
+            } else {
+                let variable = self.document.dims.variables.get(index);
+                self.editing = Some(DimensionEdit {
+                    field: EditField::Variable(variable.map(|_| index)),
+                    buffer: variable
+                        .map(|variable| format!("{} = {}", variable.name, variable.expression))
+                        .unwrap_or_default(),
+                });
+                self.status_message =
+                    "Type name = expression (units, #variables), Enter  |  empty: delete  |  Esc"
+                        .into();
+            }
+            self.redraw();
+            return;
+        }
+        if !self.solid_preview
             && layout.right.contains(point.x, point.y)
             && let Some(key) = self
                 .selected_dimension
@@ -762,8 +788,19 @@ impl ApplicationHandler for App {
                                     (&mut self.editing, &event.text)
                                 {
                                     for ch in text.chars() {
-                                        if matches!(editing.field, EditField::Label(_)) {
-                                            if expression_char(ch) && editing.buffer.len() < 64 {
+                                        if matches!(
+                                            editing.field,
+                                            EditField::Label(_)
+                                                | EditField::Dimension(_)
+                                                | EditField::Variable(_)
+                                        ) {
+                                            let allowed = expression_char(ch)
+                                                || (ch == '='
+                                                    && matches!(
+                                                        editing.field,
+                                                        EditField::Variable(_)
+                                                    ));
+                                            if allowed && editing.buffer.len() < 64 {
                                                 editing.buffer.push(ch);
                                             }
                                             continue;

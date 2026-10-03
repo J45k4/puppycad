@@ -127,23 +127,12 @@ impl App {
                 },
                 Err(_) => "Extrusion error: enter a positive depth in millimeters".into(),
             },
-            EditField::Dimension(field) => match edit.buffer.parse::<f32>() {
-                Ok(value) => match self.document.set_dimension(field, value) {
-                    Ok(()) => format!("Dimension set to {value:.1} mm  |  Ctrl+S to save"),
-                    Err(error) => format!("Dimension error: {error}"),
-                },
-                Err(_) => "Dimension error: enter a number in millimeters".into(),
+            EditField::Dimension(field) => match self.document.selected {
+                Some(id) => self.apply_dimension_text(DimensionKey::Field(id, field), &edit.buffer),
+                None => "Dimension error: select geometry first".into(),
             },
-            EditField::Label(key) => match edit.buffer.trim().parse::<f32>() {
-                Ok(value) => match self.document.set_dimension_value(key, value) {
-                    Ok(()) => format!(
-                        "Dimension set to {}  |  Ctrl+S to save",
-                        model::format_value(value)
-                    ),
-                    Err(error) => format!("Dimension error: {error}"),
-                },
-                Err(_) => "Dimension error: enter a number".into(),
-            },
+            EditField::Label(key) => self.apply_dimension_text(key, &edit.buffer),
+            EditField::Variable(index) => self.apply_variable_text(index, &edit.buffer),
             EditField::RelationAngle => match edit.buffer.parse::<f32>() {
                 Ok(value) => match self.document.set_line_relation_angle(value) {
                     Ok(()) => format!("Line angle set to {value:.1} deg  |  Ctrl+S to save"),
@@ -335,6 +324,96 @@ impl App {
             1.0,
             MUTED,
         );
+    }
+
+    /// Applies a typed dimension value or expression; returns the status.
+    fn apply_dimension_text(&mut self, key: DimensionKey, text: &str) -> String {
+        match self.document.set_dimension_expression(key, text) {
+            Ok(value) => format!(
+                "Dimension set to {}  |  Ctrl+S to save",
+                model::format_value(value)
+            ),
+            Err(error) => format!("Dimension error: {error}"),
+        }
+    }
+
+    /// Applies `name = expression` to a sketch variable (`None` adds one);
+    /// an empty expression deletes it.
+    fn apply_variable_text(&mut self, index: Option<usize>, text: &str) -> String {
+        let (name, expression) = match text.split_once('=') {
+            Some((name, expression)) => (name.trim(), expression.trim()),
+            None => match index.and_then(|index| self.document.dims.variables.get(index)) {
+                // Only a new expression typed for an existing variable.
+                Some(variable) => (variable.name.as_str(), text.trim()),
+                None => return "Variable error: type name = expression".into(),
+            },
+        };
+        let name = name.to_string();
+        let result = match index {
+            Some(index) if expression.is_empty() => self.document.delete_variable(index),
+            _ => self.document.define_variable(index, &name, expression),
+        };
+        match result {
+            Ok(()) if expression.is_empty() => format!("Removed #{name}  |  Ctrl+S to save"),
+            Ok(()) => format!("#{name} = {expression}  |  Ctrl+S to save"),
+            Err(error) => format!("Variable error: {error}"),
+        }
+    }
+
+    /// Variables section of the Properties panel when nothing is selected:
+    /// one row per variable, then an add button.
+    pub(super) fn variable_row(layout: Layout, index: usize) -> Rect {
+        Rect {
+            x: layout.right.x + 10.0,
+            y: layout.right.y + 175.0 + index as f32 * 30.0,
+            w: layout.right.w - 20.0,
+            h: 25.0,
+        }
+    }
+
+    fn paint_variables(&self, painter: &mut Painter, layout: Layout) {
+        let x = layout.right.x + 18.0;
+        painter.text(x, layout.right.y + 150.0, "SKETCH VARIABLES", 1.2, ACCENT);
+        let values =
+            sketch_value::evaluate_variables(&self.document.dims.variables).unwrap_or_default();
+        let count = self.document.dims.variables.len();
+        for index in 0..=count {
+            let row = Self::variable_row(layout, index);
+            if row.y + row.h >= layout.bottom.y {
+                break;
+            }
+            let editing = self.editing.as_ref().filter(|edit| {
+                matches!(edit.field, EditField::Variable(target)
+                    if target == (index < count).then_some(index))
+            });
+            painter.rect(
+                row,
+                if editing.is_some() {
+                    [0.13, 0.29, 0.37, 1.0]
+                } else {
+                    PANEL_LIGHT
+                },
+            );
+            painter.outline(row, 1.0, if editing.is_some() { ACCENT } else { BORDER });
+            let text = if let Some(edit) = editing {
+                format!("> {}_", edit.buffer)
+            } else if let Some(variable) = self.document.dims.variables.get(index) {
+                let value = values
+                    .get(&variable.name)
+                    .map_or(String::new(), |quantity| {
+                        let unit = match quantity.kind {
+                            sketch_value::ValueKind::Length => " mm",
+                            sketch_value::ValueKind::Angle => " deg",
+                            sketch_value::ValueKind::Scalar => "",
+                        };
+                        format!("  ({}{unit})", model::format_value(quantity.value as f32))
+                    });
+                format!("#{} = {}{value}", variable.name, variable.expression)
+            } else {
+                "+ ADD VARIABLE (name = expr)".into()
+            };
+            painter.text(row.x + 8.0, row.y + 8.0, &text, 1.0, TEXT);
+        }
     }
 
     /// Toggles driving / reference for the selected dimension.
@@ -1442,9 +1521,12 @@ impl App {
                 1.3,
                 MUTED,
             );
+            if !self.solid_preview {
+                self.paint_variables(painter, layout);
+            }
         }
         if let Some(edit) = &self.editing
-            && !matches!(edit.field, EditField::Label(_))
+            && !matches!(edit.field, EditField::Label(_) | EditField::Variable(_))
         {
             let row = match edit.field {
                 EditField::ExtrusionDepth => 0,
@@ -1493,7 +1575,8 @@ impl App {
                 | EditField::PointY
                 | EditField::RelationAngle
                 | EditField::RadialDifference
-                | EditField::Label(_) => 0,
+                | EditField::Label(_)
+                | EditField::Variable(_) => 0,
             };
             let field_y = match edit.field {
                 EditField::MoveX => layout.right.y + 365.0,

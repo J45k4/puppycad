@@ -2,6 +2,7 @@
 //! hit-testing, and editing a dimension by its key.
 
 use super::*;
+use crate::sketch_value::{self, SketchVariable, ValueKind};
 
 /// Text scale of dimension labels in the viewport (8 px glyphs).
 pub const LABEL_SCALE: f32 = 1.25;
@@ -58,13 +59,20 @@ pub struct DimensionMeta {
     /// (web `reference: true`). Reference `Field` keys are not in
     /// `driving_dimensions`.
     pub references: BTreeSet<DimensionKey>,
+    /// Driving dimension expressions (web `expression`), evaluated against
+    /// `variables`; the numeric value is stored alongside.
+    pub expressions: BTreeMap<DimensionKey, String>,
+    /// Sketch variables (web sketch `variables`).
+    pub variables: Vec<SketchVariable>,
 }
 
 impl DimensionMeta {
     /// Whether the dimension carries state a graph `sketchConstraint` node
     /// cannot store.
     pub fn has_annotation(&self, key: DimensionKey) -> bool {
-        self.label_positions.contains_key(&key) || self.references.contains(&key)
+        self.label_positions.contains_key(&key)
+            || self.references.contains(&key)
+            || self.expressions.contains_key(&key)
     }
 }
 
@@ -470,6 +478,7 @@ impl Document {
                 self.driving_dimensions.remove(&(id, field));
             }
             self.dims.references.insert(key);
+            self.dims.expressions.remove(&key);
             Ok(())
         } else {
             self.dims.references.remove(&key);
@@ -527,9 +536,217 @@ impl Document {
         };
         Some(if self.is_reference(key) {
             format!("({text})")
+        } else if let Some(expression) = self.dimension_expression(key) {
+            format!("{expression} = {text}")
         } else {
             text
         })
+    }
+
+    /// Unit kind a dimension's expression must evaluate to.
+    pub fn dimension_value_kind(key: DimensionKey) -> ValueKind {
+        if Self::dimension_is_angle(key) {
+            ValueKind::Angle
+        } else {
+            ValueKind::Length
+        }
+    }
+
+    /// Evaluates an expression against this sketch's variables.
+    pub fn evaluate_expression(&self, text: &str, kind: ValueKind) -> Result<f64, String> {
+        sketch_value::evaluate_dimension(text, kind, &self.dims.variables)
+    }
+
+    /// The dimension's expression while it still produces the stored value
+    /// (an edit that changed the value directly makes it stale).
+    pub fn dimension_expression(&self, key: DimensionKey) -> Option<&str> {
+        let expression = self.dims.expressions.get(&key)?;
+        let value = self.dimension_value(key)?;
+        let evaluated = self
+            .evaluate_expression(expression, Self::dimension_value_kind(key))
+            .ok()?;
+        ((evaluated - value as f64).abs() <= 1e-4 * evaluated.abs().max(1.0))
+            .then_some(expression.as_str())
+    }
+
+    /// Runs `edit` as one undo step; on error everything is rolled back.
+    fn transaction<T>(
+        &mut self,
+        edit: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let before = self.snapshot();
+        let depth = self.history.len();
+        let result = edit(self);
+        self.history.truncate(depth);
+        match result {
+            Ok(value) => {
+                self.history.push(before);
+                self.future.clear();
+                Ok(value)
+            }
+            Err(error) => {
+                self.restore_keeping_selection(before);
+                Err(error)
+            }
+        }
+    }
+
+    /// Sets a dimension from typed text: a number or an expression with
+    /// units and `#variable` references (`src/sketch-value.ts`). A plain
+    /// number clears the stored expression. One undo step.
+    pub fn set_dimension_expression(
+        &mut self,
+        key: DimensionKey,
+        text: &str,
+    ) -> Result<f32, String> {
+        let text = text.trim();
+        let value = self.evaluate_expression(text, Self::dimension_value_kind(key))?;
+        if !value.is_finite() || value.abs() > f32::MAX as f64 {
+            return Err("Dimension is out of range".into());
+        }
+        let value = value as f32;
+        let expression = (!sketch_value::is_plain_number(text)).then(|| text.to_string());
+        if self.dimension_value(key) == Some(value)
+            && self.dims.expressions.get(&key) == expression.as_ref()
+        {
+            return Ok(value);
+        }
+        self.transaction(|doc| {
+            doc.set_dimension_value(key, value)?;
+            match expression {
+                Some(expression) => doc.dims.expressions.insert(key, expression),
+                None => doc.dims.expressions.remove(&key),
+            };
+            Ok(value)
+        })
+    }
+
+    /// Replaces the sketch variables and re-evaluates every dependent
+    /// dimension expression. One undo step; nothing changes on error.
+    pub fn set_variables(&mut self, variables: Vec<SketchVariable>) -> Result<(), String> {
+        self.replace_variables(variables, None)
+    }
+
+    /// Creates (`index == None`) or redefines a variable. Its kind is the
+    /// unit kind its expression evaluates to.
+    pub fn define_variable(
+        &mut self,
+        index: Option<usize>,
+        name: &str,
+        expression: &str,
+    ) -> Result<(), String> {
+        let name = name.trim().trim_start_matches('#');
+        let expression = expression.trim();
+        if !sketch_value::valid_variable_name(name) {
+            return Err(
+                "Variable names use letters, digits or _ and cannot start with a digit".into(),
+            );
+        }
+        let mut variables = self.dims.variables.clone();
+        let mut rename = None;
+        let previous_kind = match index {
+            Some(index) => {
+                let old = variables.get(index).ok_or("Variable no longer exists")?;
+                if old.name != name {
+                    rename = Some((format!("#{}", old.name), format!("#{name}")));
+                }
+                Some(old.kind)
+            }
+            None => None,
+        };
+        if let Some((from, to)) = &rename {
+            for other in &mut variables {
+                other.expression = rename_token(&other.expression, from, to);
+            }
+        }
+        let slot = match index {
+            Some(index) => index,
+            None => {
+                variables.push(SketchVariable {
+                    name: String::new(),
+                    kind: ValueKind::Length,
+                    expression: String::new(),
+                });
+                variables.len() - 1
+            }
+        };
+        variables[slot].name = name.to_string();
+        variables[slot].expression = expression.to_string();
+        // The kind is the first unit kind the whole set evaluates with,
+        // preferring the variable's previous kind, then length.
+        let mut error = String::new();
+        let mut chosen = None;
+        for kind in previous_kind.into_iter().chain([
+            ValueKind::Length,
+            ValueKind::Angle,
+            ValueKind::Scalar,
+        ]) {
+            variables[slot].kind = kind;
+            match sketch_value::evaluate_variables(&variables) {
+                Ok(_) => {
+                    chosen = Some(kind);
+                    break;
+                }
+                Err(message) => {
+                    if error.is_empty() {
+                        error = message;
+                    }
+                }
+            }
+        }
+        variables[slot].kind = chosen.ok_or(error)?;
+        self.replace_variables(variables, rename)
+    }
+
+    /// Installs a new variable set, renaming `#from` to `#to` in dimension
+    /// expressions, and re-evaluates every dependent dimension.
+    fn replace_variables(
+        &mut self,
+        variables: Vec<SketchVariable>,
+        rename: Option<(String, String)>,
+    ) -> Result<(), String> {
+        sketch_value::evaluate_variables(&variables)?;
+        let dependents: Vec<(DimensionKey, String)> = self
+            .dimension_keys()
+            .into_iter()
+            .filter_map(|key| {
+                let text = self.dimension_expression(key)?;
+                Some((
+                    key,
+                    match &rename {
+                        Some((from, to)) => rename_token(text, from, to),
+                        None => text.to_string(),
+                    },
+                ))
+            })
+            .collect();
+        self.transaction(|doc| {
+            doc.dims.variables = variables;
+            for (key, expression) in dependents {
+                let value =
+                    doc.evaluate_expression(&expression, Self::dimension_value_kind(key))?;
+                doc.set_dimension_value(key, value as f32)?;
+                doc.dims.expressions.insert(key, expression);
+            }
+            Ok(())
+        })
+    }
+
+    /// Removes a variable that no expression uses.
+    pub fn delete_variable(&mut self, index: usize) -> Result<(), String> {
+        let mut variables = self.dims.variables.clone();
+        if index >= variables.len() {
+            return Err("Variable no longer exists".into());
+        }
+        let name = variables.remove(index).name;
+        let token = format!("#{name}");
+        let used = |text: &str| rename_token(text, &token, "") != text;
+        if variables.iter().any(|variable| used(&variable.expression))
+            || self.dims.expressions.values().any(|text| used(text))
+        {
+            return Err(format!("#{name} is still used by an expression"));
+        }
+        self.set_variables(variables)
     }
 
     /// Default label placement and dimension lines. Offsets are a fixed
@@ -893,6 +1110,7 @@ impl Document {
             .label_positions
             .retain(|key, _| keys.contains(key));
         self.dims.references.retain(|key| keys.contains(key));
+        self.dims.expressions.retain(|key, _| keys.contains(key));
     }
 
     /// Deletes a dimension and its annotations. One undo step.
@@ -914,6 +1132,7 @@ impl Document {
             }
         }
         self.dims.references.remove(&key);
+        self.dims.expressions.remove(&key);
         self.prune_dimension_meta();
         Ok(())
     }
@@ -955,4 +1174,22 @@ impl Document {
         self.set_dimension_value(key, value)?;
         Ok(key)
     }
+}
+
+/// Replaces exact `#name` tokens (not longer names sharing the prefix).
+fn rename_token(text: &str, from: &str, to: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(from) {
+        let end = at + from.len();
+        let boundary = rest[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+        out.push_str(&rest[..at]);
+        out.push_str(if boundary { to } else { from });
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
 }

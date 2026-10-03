@@ -1461,6 +1461,10 @@ impl ProjectFile {
             }
 
             let mut document = Document::from_shapes(shapes);
+            match read_variables(sketch.get("variables")) {
+                Ok(variables) => document.dims.variables = variables,
+                Err(error) => read_only_reason = Some(error),
+            }
             document.construction = construction;
             if let Some(relations) = sketch.get("relations") {
                 if let Some(relations) = relations.as_array() {
@@ -2086,7 +2090,8 @@ impl ProjectFile {
                             });
                             if relation.get("id").and_then(Value::as_str).is_none()
                                 || relation.get("reference") == Some(&Value::Bool(true))
-                                || relation.get("expression").is_some()
+                                || (relation.get("expression").is_some()
+                                    && kind.angle_value().is_none())
                                 || !valid
                             {
                                 read_only_reason =
@@ -2168,7 +2173,6 @@ impl ProjectFile {
                         if relation
                             .get("reference")
                             .is_some_and(|value| value != false)
-                            || relation.get("expression").is_some()
                             || relation.get("id").and_then(Value::as_str).is_none()
                             || field.is_none()
                             || shape_id.is_none()
@@ -2879,6 +2883,20 @@ fn serialize_sketches(
         if !sketch.get("relations").is_some_and(Value::is_array) {
             sketch["relations"] = json!([]);
         }
+        sketch["variables"] = Value::Array(
+            document
+                .dims
+                .variables
+                .iter()
+                .map(|variable| {
+                    json!({
+                        "name": variable.name,
+                        "kind": variable.kind.name(),
+                        "expression": variable.expression,
+                    })
+                })
+                .collect(),
+        );
         let relations = sketch["relations"]
             .as_array_mut()
             .ok_or("project sketch relations changed unexpectedly")?;
@@ -3871,8 +3889,55 @@ fn load_dimension_meta(
                 .ok_or("invalid dimension label position")?;
             document.dims.label_positions.insert(key, at);
         }
+        load_expression(document, relation, key)?;
     }
     Ok(())
+}
+
+/// Reads a dimension relation's `expression`; it must evaluate to the
+/// stored value.
+fn load_expression(
+    document: &mut Document,
+    relation: &Value,
+    key: DimensionKey,
+) -> Result<(), String> {
+    let Some(expression) = relation.get("expression") else {
+        return Ok(());
+    };
+    let expression = expression.as_str().ok_or("invalid dimension expression")?;
+    document
+        .dims
+        .expressions
+        .insert(key, expression.to_string());
+    if document.dimension_expression(key).is_none() {
+        return Err("dimension expression does not match its value".into());
+    }
+    Ok(())
+}
+
+/// Sketch `variables` (`normalizeSketchVariables`).
+fn read_variables(
+    value: Option<&Value>,
+) -> Result<Vec<crate::sketch_value::SketchVariable>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let entries = value
+        .as_array()
+        .ok_or("sketch variables must be an array")?;
+    let variables = entries
+        .iter()
+        .map(|entry| {
+            Some(crate::sketch_value::SketchVariable {
+                name: entry.get("name")?.as_str()?.to_string(),
+                kind: crate::sketch_value::ValueKind::from_name(entry.get("kind")?.as_str()?)?,
+                expression: entry.get("expression")?.as_str()?.to_string(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or("invalid sketch variable definition")?;
+    crate::sketch_value::evaluate_variables(&variables)?;
+    Ok(variables)
 }
 
 /// Writes `labelPosition` of dimension relations.
@@ -3899,6 +3964,21 @@ fn annotate_dimension(document: &Document, relation: &mut Value, key: DimensionK
         }
         None => {
             object.remove("labelPosition");
+        }
+    }
+    match document.dimension_expression(key).and_then(|expression| {
+        let value = document
+            .evaluate_expression(expression, Document::dimension_value_kind(key))
+            .ok()?;
+        Some((expression, value))
+    }) {
+        Some((expression, value)) => {
+            // The exact evaluated value, as the web loader checks it.
+            object.insert("expression".into(), json!(expression));
+            object.insert("value".into(), json!(value));
+        }
+        None => {
+            object.remove("expression");
         }
     }
     if document.is_reference(key) {
@@ -3980,7 +4060,7 @@ fn load_point_dimension(
         || relation
             .get("reference")
             .is_some_and(|reference| !reference.is_boolean())
-        || relation.get("expression").is_some()
+        || (reference && relation.get("expression").is_some())
         || a == b
         || (axis.is_none() && value <= 0.0 && !reference)
     {
@@ -4005,6 +4085,7 @@ fn load_point_dimension(
     if reference {
         document.dims.references.insert(DimensionKey::Point(key));
     }
+    load_expression(document, relation, DimensionKey::Point(key))?;
     if let Some(position) = relation.get("labelPosition") {
         let at = read_point(position).ok_or("invalid dimension label position")?;
         document

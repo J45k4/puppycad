@@ -211,3 +211,153 @@ fn reference_dimensions_round_trip_with_web_reference_flag() {
     assert_eq!(lengths[0]["id"], saved_length["id"]);
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn expressions_and_variables_round_trip_as_web_fields() {
+    let path = test_path("expressions");
+    let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+    let line = draw_line(
+        &mut document,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 40.0, y: 0.0 },
+    );
+    document.define_variable(None, "w", "1 in").unwrap();
+    let length = document.add_entity_dimension(line).unwrap();
+    document.set_dimension_expression(length, "#w * 2").unwrap();
+    document.add_point(Point { x: 0.0, y: 20.0 });
+    let point = document.shapes.last().unwrap().id();
+    let distance = document
+        .add_point_dimension((line, 0), Some((point, 0)), Some(PointAxis::Y))
+        .unwrap();
+    document
+        .set_dimension_expression(distance, "#w + 5 mm")
+        .unwrap();
+    project.save(&document).unwrap();
+    let sketch = project.value["items"][0]["data"]["cad"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["type"] == "sketch")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        sketch["variables"],
+        json!([{"name": "w", "kind": "length", "expression": "1 in"}])
+    );
+    let relations = sketch_relations(&project);
+    let saved_length = relations
+        .iter()
+        .find(|relation| relation["type"] == "length")
+        .unwrap();
+    assert_eq!(saved_length["expression"], "#w * 2");
+    // Exactly the evaluated value, as the web loader requires.
+    assert_eq!(saved_length["value"], json!(50.8));
+    let saved_distance = relations
+        .iter()
+        .find(|relation| relation["type"] == "distance")
+        .unwrap();
+    assert_eq!(saved_distance["expression"], "#w + 5 mm");
+    assert_eq!(saved_distance["value"], json!(30.4));
+
+    let (mut reopened, mut loaded) = ProjectFile::open(&path).unwrap();
+    assert_eq!(reopened.read_only_reason(), None);
+    assert_eq!(loaded.dims.variables.len(), 1);
+    assert_eq!(loaded.dimension_expression(length), Some("#w * 2"));
+    loaded.define_variable(Some(0), "w", "10").unwrap();
+    assert_eq!(loaded.dimension_value(length), Some(20.0));
+    reopened.save(&loaded).unwrap();
+    let relations = sketch_relations(&reopened);
+    let saved_length = relations
+        .iter()
+        .find(|relation| relation["type"] == "length")
+        .unwrap();
+    assert_eq!(saved_length["value"], json!(20.0));
+    fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn mismatched_expression_or_bad_variables_keep_sketch_read_only() {
+    let path = test_path("bad-expression");
+    let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+    let line = draw_line(
+        &mut document,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 40.0, y: 0.0 },
+    );
+    let length = document.add_entity_dimension(line).unwrap();
+    document.set_dimension_expression(length, "2 * 20").unwrap();
+    project.save(&document).unwrap();
+    for (pointer, replacement) in [
+        ("/expression", json!("3 * 20")),
+        (
+            "/variables",
+            json!([{"name": "1x", "kind": "length", "expression": "1"}]),
+        ),
+    ] {
+        let mut value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let sketch = value["items"][0]["data"]["cad"]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|node| node["type"] == "sketch")
+            .unwrap();
+        if pointer == "/variables" {
+            sketch["variables"] = replacement;
+        } else {
+            let relation = sketch["relations"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|relation| relation["type"] == "length")
+                .unwrap();
+            relation["expression"] = replacement;
+        }
+        let broken = test_path("bad-expression-copy");
+        fs::write(&broken, serde_json::to_vec(&value).unwrap()).unwrap();
+        let (reopened, _) = ProjectFile::open(&broken).unwrap();
+        assert!(reopened.read_only_reason().is_some(), "{pointer}");
+        fs::remove_file(broken).unwrap();
+    }
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn dimensions_fixture_opens_editable_and_resaves_every_dimension_kind() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/dimensions.pcad");
+    let path = test_path("fixture");
+    fs::copy(&fixture, &path).unwrap();
+    let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+    assert_eq!(project.read_only_reason(), None);
+    assert_eq!(document.dimension_keys().len(), 4);
+    assert_eq!(document.dims.variables.len(), 1);
+    assert_eq!(
+        document
+            .dimension_keys()
+            .iter()
+            .filter(|key| document.is_reference(**key))
+            .count(),
+        1
+    );
+    // Edit the variable so every relation is rewritten by the native app.
+    document.define_variable(Some(0), "w", "1 in").unwrap();
+    let line = document.dimension_keys()[0];
+    document
+        .set_dimension_expression(line, "#w * 2 + 1 mm")
+        .unwrap();
+    project.save(&document).unwrap();
+    let relations = sketch_relations(&project);
+    let find = |id: &str| {
+        relations
+            .iter()
+            .find(|relation| relation["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(find("len")["expression"], "#w * 2 + 1 mm");
+    assert_eq!(find("len")["value"], json!(51.8));
+    assert_eq!(find("len")["labelPosition"], json!({"x": 25.0, "y": -12.0}));
+    assert_eq!(find("dist")["reference"], true);
+    assert_eq!(find("dx")["axis"], "x");
+    assert_eq!(find("oy")["expression"], "#w + 4.6 mm");
+    fs::remove_file(path).unwrap();
+}
