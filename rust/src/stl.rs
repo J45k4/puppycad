@@ -120,11 +120,13 @@ pub fn project_bodies(project: &ProjectFile) -> Result<Vec<Body>, String> {
         .extrusion_previews()
         .ok_or("No supported solid to export")?;
     match project.evaluated_solids() {
-        Some(meshes) if meshes.len() < solids.len() => Ok(meshes
-            .iter()
-            .enumerate()
-            .map(|(index, mesh)| Body::from_manifold(format!("Body {}", index + 1), mesh))
-            .collect()),
+        Some(meshes) if meshes.len() < solids.len() || project.has_extension_features() => {
+            Ok(meshes
+                .iter()
+                .enumerate()
+                .map(|(index, mesh)| Body::from_manifold(format!("Body {}", index + 1), mesh))
+                .collect())
+        }
         _ => solids
             .iter()
             .map(|solid| Ok(Body::new(solid.name.clone(), solid_triangles(solid)?)))
@@ -207,27 +209,45 @@ pub fn solid_triangles(solid: &SolidPreview) -> Result<Vec<[Vertex; 3]>, String>
 }
 
 pub fn manifold_from_solid(solid: &SolidPreview) -> Result<Manifold, String> {
-    let triangles = solid_triangles(solid)?;
+    manifold_from_triangles(&solid_triangles(solid)?, "extrusion")
+}
+
+/// Builds a manifold from a consistently wound, closed triangle soup.
+/// Coincident vertices are merged, collapsed triangles dropped, and the
+/// winding is flipped when the enclosed volume comes out negative.
+pub fn manifold_from_triangles(triangles: &[[Vertex; 3]], what: &str) -> Result<Manifold, String> {
     let mut mesh = MeshGL {
         num_prop: 3,
         ..MeshGL::default()
     };
     let mut indices = HashMap::<[u32; 3], u32>::new();
+    let mut volume = 0.0f64;
     for triangle in triangles {
-        for vertex in triangle {
-            let key = vertex.map(f32::to_bits);
-            let index = *indices.entry(key).or_insert_with(|| {
+        let corners = triangle.map(|vertex| {
+            let key = vertex.map(|c| (c + 0.0).to_bits());
+            *indices.entry(key).or_insert_with(|| {
                 let index = (mesh.vert_properties.len() / 3) as u32;
                 mesh.vert_properties.extend(vertex);
                 index
-            });
-            mesh.tri_verts.push(index);
+            })
+        });
+        if corners[0] == corners[1] || corners[1] == corners[2] || corners[0] == corners[2] {
+            continue;
+        }
+        let [a, b, c] = triangle.map(|v| v.map(f64::from));
+        volume += a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0]);
+        mesh.tri_verts.extend(corners);
+    }
+    if volume < 0.0 {
+        for triangle in mesh.tri_verts.as_chunks_mut::<3>().0 {
+            triangle.swap(1, 2);
         }
     }
     let manifold = Manifold::from_mesh_gl(&mesh);
-    if manifold.status() != ManifoldError::NoError {
+    if manifold.status() != ManifoldError::NoError || manifold.is_empty() {
         return Err(format!(
-            "extrusion mesh is not manifold: {:?}",
+            "{what} mesh is not manifold: {:?}",
             manifold.status()
         ));
     }

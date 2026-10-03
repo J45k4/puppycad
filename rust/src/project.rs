@@ -16,7 +16,9 @@ use crate::model::{
 use crate::spline::{self, SplineMode};
 
 mod face;
+mod features;
 pub use face::{FaceDescriptor, FaceRef, Frame};
+pub use features::{EdgeRef, FeatureInfo, FinishKind, SolidEdge, Tri};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
     let (Shape::Line { a: a0, b: a1, .. }, Shape::Line { a: b0, b: b1, .. }) = (source, target)
@@ -1151,9 +1153,16 @@ impl ProjectFile {
 
     /// First reason an extrusion's options cannot be evaluated natively.
     fn extrusion_options_error(&self) -> Option<String> {
-        let extrudes = self.extrude_nodes()?;
         let mut bodies = HashSet::new();
-        for node in extrudes {
+        for node in self.solid_nodes() {
+            if node["type"] != "extrude" {
+                if node.get("operation").and_then(Value::as_str) == Some("newBody")
+                    && let Some(id) = node.get("id").and_then(Value::as_str)
+                {
+                    bodies.insert(id);
+                }
+                continue;
+            }
             let options = match extrude_options(node) {
                 Ok(options) => options,
                 Err(error) => return Some(error),
@@ -1178,60 +1187,90 @@ impl ProjectFile {
         self.evaluate_extrusions().map(|(_, bodies)| bodies)
     }
 
-    /// Evaluate every extrusion in order: per-feature tool solids (with
-    /// resolved start and depth) and the resulting Boolean bodies.
     fn evaluate_extrusions(&self) -> Option<(Vec<SolidPreview>, Vec<Manifold>)> {
-        let nodes = self
-            .value
-            .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
-            .as_array()?;
+        self.evaluate_solids().ok()
+    }
+
+    /// Evaluate every solid feature in graph order: per-extrusion tool
+    /// solids (with resolved start and depth) and the resulting bodies.
+    /// Revolve, loft and edge finish nodes change the bodies only.
+    pub(super) fn evaluate_solids(&self) -> Result<(Vec<SolidPreview>, Vec<Manifold>), String> {
+        let nodes = self.graph_nodes().ok_or("part has no CAD graph")?;
         if nodes
             .iter()
             .any(|node| node.get("type").and_then(Value::as_str) == Some("chamfer"))
         {
-            return None;
+            return Err("web edge chamfers need native support".into());
         }
-        let extrudes = self.extrude_nodes()?;
-        if extrudes.is_empty() {
-            return None;
+        let solid_nodes = self.solid_nodes();
+        if solid_nodes.is_empty() {
+            return Err("part has no solid features".into());
         }
         let mut previews = Vec::new();
         let mut bodies: Vec<Manifold> = Vec::new();
         let mut body_ids: Vec<String> = Vec::new();
-        for node in extrudes {
-            let operation = node.get("operation")?.as_str()?;
-            let mut options = extrude_options(node).ok()?;
+        for node in solid_nodes {
+            if node.get("type").and_then(Value::as_str) != Some("extrude") {
+                self.apply_extension_feature(node, &mut bodies, &mut body_ids)
+                    .map_err(|error| {
+                        format!(
+                            "{}: {error}",
+                            node.get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or("feature")
+                        )
+                    })?;
+                continue;
+            }
+            let invalid = || {
+                format!(
+                    "{}: extrusion does not evaluate",
+                    node.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("extrusion")
+                )
+            };
+            let operation = node
+                .get("operation")
+                .and_then(Value::as_str)
+                .ok_or_else(invalid)?;
+            let mut options = extrude_options(node)?;
             // A cut from a face sketch runs into the body (against the face
             // normal) by default; new bodies and joins grow outward. Flip
             // inverts that default.
             if operation == "cut" && self.is_face_sketch(node) {
                 options.flip = !options.flip;
             }
-            let mut preview = self.preview_for_extrude(node)?;
-            resolve_extent(&mut preview, &options, &bodies, &body_ids)?;
-            let tool = crate::stl::manifold_from_solid(&preview).ok()?;
+            let mut preview = self.preview_for_extrude(node).ok_or_else(invalid)?;
+            resolve_extent(&mut preview, &options, &bodies, &body_ids).ok_or_else(invalid)?;
+            let tool = crate::stl::manifold_from_solid(&preview)?;
             match operation {
                 "newBody" => {
                     bodies.push(tool);
-                    body_ids.push(node.get("id")?.as_str()?.to_string());
+                    body_ids.push(
+                        node.get("id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(invalid)?
+                            .to_string(),
+                    );
                 }
                 "cut" | "join" => {
-                    let previous = bodies.last_mut()?;
+                    let previous = bodies.last_mut().ok_or_else(invalid)?;
                     let result = if operation == "cut" {
                         previous.difference(&tool)
                     } else {
                         previous.union(&tool)
                     };
                     if result.status() != ManifoldError::NoError || result.is_empty() {
-                        return None;
+                        return Err(invalid());
                     }
                     *previous = result;
                 }
-                _ => return None,
+                _ => return Err(invalid()),
             }
             previews.push(preview);
         }
-        Some((previews, bodies))
+        Ok((previews, bodies))
     }
 
     fn preview_for_extrude(&self, extrude: &Value) -> Option<SolidPreview> {
@@ -1377,10 +1416,9 @@ impl ProjectFile {
         }))
     }
 
-    /// Ids of the extrusions that start bodies, in body order.
+    /// Ids of the features that start bodies, in body order.
     pub fn body_ids(&self) -> Vec<String> {
-        self.extrude_nodes()
-            .unwrap_or_default()
+        self.solid_nodes()
             .into_iter()
             .filter(|node| node.get("operation").and_then(Value::as_str) == Some("newBody"))
             .filter_map(|node| node.get("id").and_then(Value::as_str).map(str::to_string))
@@ -1519,14 +1557,7 @@ impl ProjectFile {
     }
 
     fn has_any_extrusion(&self) -> bool {
-        self.value
-            .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))
-            .and_then(Value::as_array)
-            .is_some_and(|nodes| {
-                nodes
-                    .iter()
-                    .any(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
-            })
+        self.has_solid_nodes()
     }
 
     fn all_extrusions_registered(&self) -> bool {
@@ -1542,7 +1573,11 @@ impl ProjectFile {
         };
         nodes
             .iter()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|node| {
+                node.get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| features::SOLID_NODE_TYPES.contains(&t))
+            })
             .all(|node| {
                 node.get("id").and_then(Value::as_str).is_some_and(|id| {
                     roots.iter().any(|entry| entry.as_str() == Some(id))
@@ -1780,7 +1815,7 @@ impl ProjectFile {
             || nodes.iter().any(|node| {
                 matches!(
                     node.get("type").and_then(Value::as_str),
-                    Some("extrude" | "chamfer")
+                    Some("extrude" | "chamfer" | "revolve" | "loft" | "edgeFinish")
                 )
             })
         {
@@ -1843,7 +1878,7 @@ impl ProjectFile {
                 }
                 if matches!(
                     node.get("type").and_then(Value::as_str),
-                    Some("extrude" | "sketchConstraint")
+                    Some("extrude" | "revolve" | "sketchConstraint")
                 ) {
                     continue;
                 }
@@ -3229,6 +3264,13 @@ impl ProjectFile {
             && let Some(error) = project.extrusion_options_error()
         {
             project.read_only_reason = Some(format!("extrusion options: {error}"));
+        }
+        if project.read_only_reason.as_deref() == Some("solid features need native support")
+            && (project.has_extension_features()
+                || nodes_have_type(&project.value, project.part_index, "chamfer"))
+            && let Err(error) = project.evaluate_solids()
+        {
+            project.read_only_reason = Some(error);
         }
         if project.read_only_reason.as_deref() == Some("solid features need native support")
             && project.evaluated_solids().is_some()
@@ -6305,6 +6347,13 @@ fn update_shape(mut original: Value, shape: &Shape, graph_id: &str) -> Result<Va
         _ => return Err("original sketch entity type no longer matches its geometry".into()),
     }
     Ok(original)
+}
+
+fn nodes_have_type(value: &Value, part_index: usize, kind: &str) -> bool {
+    value
+        .pointer(&format!("/items/{part_index}/data/cad/nodes"))
+        .and_then(Value::as_array)
+        .is_some_and(|nodes| nodes.iter().any(|node| node["type"] == kind))
 }
 
 fn point(value: &Value) -> Option<Point> {
@@ -10250,6 +10299,9 @@ mod dimension_tests;
 #[cfg(test)]
 #[path = "project/extrude_option_tests.rs"]
 mod extrude_option_tests;
+
 #[cfg(test)]
 #[path = "project/face_tests.rs"]
 mod face_tests;
+#[cfg(test)]
+mod feature_tests;
