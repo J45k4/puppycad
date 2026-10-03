@@ -238,6 +238,20 @@ sleep 0.2
 test -s /tmp/native-existing-solid.stl
 test "$(grep -c '^facet normal' /tmp/native-existing-solid.stl)" -eq 12
 cp /tmp/native-existing-solid.stl /out/rust-native-export.stl
+# Ctrl+E writes binary STL beside the ASCII one; Ctrl+Alt+E writes one 3MF.
+xdotool key --window "$window_id" ctrl+e
+sleep 0.2
+test "$(head -c 9 /tmp/native-existing-solid-2.stl)" = "PuppyCAD "
+test "$(stat -c %s /tmp/native-existing-solid-2.stl)" -eq $((84 + 12 * 50))
+cp /tmp/native-existing-solid-2.stl /out/rust-native-export-binary.stl
+xdotool key --window "$window_id" ctrl+alt+e
+sleep 0.2
+test "$(head -c 2 /tmp/native-existing-solid.3mf)" = "PK"
+unzip -l /tmp/native-existing-solid.3mf | grep -q '\[Content_Types\].xml'
+unzip -l /tmp/native-existing-solid.3mf | grep -q '_rels/.rels'
+test "$(unzip -p /tmp/native-existing-solid.3mf 3D/3dmodel.model | grep -c '<triangle ')" -eq 12
+unzip -p /tmp/native-existing-solid.3mf 3D/3dmodel.model | grep -q 'unit="millimeter"'
+cp /tmp/native-existing-solid.3mf /out/rust-native-export.3mf
 import -window root /out/rust-native-stl-export.png
 xdotool mousemove 600 380 mousedown 1
 xdotool mousemove --sync 790 425
