@@ -110,6 +110,11 @@ impl App {
                     return;
                 }
             }
+            if layout.more_item(18).contains(point.x, point.y) {
+                self.sketch_on_face();
+                self.redraw();
+                return;
+            }
             if layout.more_item(17).contains(point.x, point.y) {
                 self.start_tangent_arc();
                 self.redraw();
@@ -332,6 +337,11 @@ impl App {
                     match project.switch_sketch(index, &self.document) {
                         Ok(document) => {
                             self.document = document;
+                            self.document.reference_edges = if self.face_context {
+                                project.sketch_support_edges(project.active_sketch())
+                            } else {
+                                Vec::new()
+                            };
                             self.solid_preview = false;
                             self.selected_profile = 0;
                             self.editing = None;
@@ -724,6 +734,9 @@ impl ApplicationHandler for App {
                     let world = self.document.screen_to_world(next, self.viewport_origin());
                     self.document.drag_to(world);
                 }
+                if self.solid_preview {
+                    self.update_face_hover();
+                }
                 self.redraw();
             }
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
@@ -999,6 +1012,9 @@ impl ApplicationHandler for App {
                                 .is_some()
                             {
                                 self.solid_preview = !self.solid_preview;
+                                if !self.solid_preview {
+                                    self.refresh_reference_edges();
+                                }
                                 self.status_message = if self.solid_preview {
                                     "3D extrusion preview  |  Tab: sketch"
                                 } else {
@@ -1690,6 +1706,8 @@ impl ApplicationHandler for App {
                         KeyCode::Digit1 => self.create_sketch(SketchPlane::Top),
                         KeyCode::Digit2 => self.create_sketch(SketchPlane::Front),
                         KeyCode::Digit3 => self.create_sketch(SketchPlane::Right),
+                        KeyCode::Digit4 => self.sketch_on_face(),
+                        KeyCode::Digit5 => self.toggle_face_context(),
                         KeyCode::KeyF
                             if self.modifiers.shift_key()
                                 && !self.modifiers.control_key()

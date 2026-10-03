@@ -55,6 +55,8 @@ const CONFLICT: Color = [0.96, 0.36, 0.36, 1.0];
 const REDUNDANT: Color = [0.78, 0.56, 0.96, 1.0];
 /// Driving dimension labels and their dimension lines.
 const DIMENSION: Color = [0.62, 0.80, 0.98, 1.0];
+/// Hovered planar face outline in the 3D preview.
+const FACE_HOVER: Color = [1.0, 0.86, 0.30, 1.0];
 
 #[derive(Clone, Copy, Debug)]
 struct Layout {
@@ -199,6 +201,11 @@ pub(crate) struct App {
     solid_preview: bool,
     solid_drag: Option<SolidDrag>,
     solid_view: OrbitView,
+    /// Face under the cursor at the last pointer move in the 3D preview
+    /// (kept while the MORE menu is open, for MORE → SKETCH ON FACE).
+    hovered_face: Option<FaceHover>,
+    /// Show (and snap to) a face sketch's supporting body; key 5 toggles.
+    face_context: bool,
     selected_solid: usize,
     selected_profile: usize,
     snap_grid: bool,
@@ -313,6 +320,8 @@ impl Default for App {
             solid_preview: false,
             solid_drag: None,
             solid_view: OrbitView::default(),
+            hovered_face: None,
+            face_context: true,
             selected_solid: 0,
             selected_profile: 0,
             snap_grid: true,
@@ -359,6 +368,11 @@ impl App {
         match project.switch_part(target, &self.document) {
             Ok(document) => {
                 self.document = document;
+                self.document.reference_edges = if self.face_context {
+                    project.sketch_support_edges(project.active_sketch())
+                } else {
+                    Vec::new()
+                };
                 self.selected_solid = 0;
                 self.selected_profile = 0;
                 self.solid_preview = project.extrusion_previews().is_some();
@@ -711,13 +725,43 @@ impl App {
                 .map(|reason| format!("READ ONLY: {reason}"))
                 .unwrap_or_else(|| format!("Project: {}", project.path().display()))
         };
-        Ok(Self {
+        let mut app = Self {
             document,
             project: Some(project),
             status_message,
             solid_preview,
             ..Self::default()
-        })
+        };
+        app.refresh_reference_edges();
+        Ok(app)
+    }
+
+    /// Loads the active face sketch's supporting-body edges into the document
+    /// (drawn behind the sketch and used as snap targets) unless key 5 hid them.
+    fn refresh_reference_edges(&mut self) {
+        self.document.reference_edges = match &self.project {
+            Some(project) if self.face_context => {
+                project.sketch_support_edges(project.active_sketch())
+            }
+            _ => Vec::new(),
+        };
+    }
+
+    fn toggle_face_context(&mut self) {
+        let on_face = self
+            .project
+            .as_ref()
+            .is_some_and(|project| project.sketch_face(project.active_sketch()).is_some());
+        if !on_face || self.solid_preview {
+            self.status_message = "Body context: open a face sketch first".into();
+            return;
+        }
+        self.face_context = !self.face_context;
+        self.refresh_reference_edges();
+        self.status_message = format!(
+            "Supporting body context {}",
+            if self.face_context { "shown" } else { "hidden" }
+        );
     }
 
     fn read_only(&self) -> bool {
@@ -809,9 +853,11 @@ impl App {
                 } else {
                     self.paint_solid_preview(&mut painter, layout, &solids, &projector);
                 }
+                self.paint_face_hover(&mut painter, layout, &projector);
             }
         } else {
             self.paint_grid(&mut painter, layout);
+            self.paint_reference_edges(&mut painter, layout);
             self.paint_shapes(&mut painter, layout);
             self.paint_profile_choice(&mut painter, layout);
         }
@@ -843,6 +889,7 @@ impl App {
             "CHAMFER [SHIFT H]",
             "OFFSET [SHIFT U]",
             "TANGENT ARC [,]",
+            "SKETCH ON FACE [4]",
         ]
         .into_iter()
         .enumerate()
