@@ -154,7 +154,7 @@ impl Document {
     }
 
     /// Anchor of shape `id` closest to `near`.
-    fn nearest_symmetry_anchor(&self, id: u32, near: Point) -> Option<(u32, usize)> {
+    pub(super) fn nearest_symmetry_anchor(&self, id: u32, near: Point) -> Option<(u32, usize)> {
         let count = match self.shape(id)? {
             Shape::Line { .. } => 2,
             Shape::Spline { points, .. } => points.len(),

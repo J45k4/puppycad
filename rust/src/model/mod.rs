@@ -6,6 +6,7 @@ mod dimensions;
 mod drag;
 mod edit;
 mod geometry;
+mod pattern;
 mod relations;
 mod selection;
 mod shapes;
@@ -16,6 +17,7 @@ mod tests;
 
 pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
+pub use pattern::{PatternKind, SketchPattern};
 pub use selection::SelectionFilter;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
@@ -144,6 +146,7 @@ struct DocumentState {
     fixed_anchors: HashMap<(u32, usize), Point>,
     symmetric_points: Vec<SymmetricPoints>,
     mirrors: HashMap<u32, (u32, u32)>,
+    patterns: Vec<SketchPattern>,
 }
 
 #[derive(Clone, Debug)]
@@ -206,6 +209,9 @@ pub struct Document {
     pub symmetric_points: Vec<SymmetricPoints>,
     /// Whole-shape symmetry (web `mirror`): target -> (source, axis line).
     pub mirrors: HashMap<u32, (u32, u32)>,
+    /// Linked linear and circular patterns (web `linearPattern` /
+    /// `circularPattern`).
+    pub patterns: Vec<SketchPattern>,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -256,6 +262,7 @@ impl Default for Document {
             fixed_anchors: HashMap::new(),
             symmetric_points: Vec::new(),
             mirrors: HashMap::new(),
+            patterns: Vec::new(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -384,6 +391,7 @@ impl Document {
             fixed_anchors: self.fixed_anchors.clone(),
             symmetric_points: self.symmetric_points.clone(),
             mirrors: self.mirrors.clone(),
+            patterns: self.patterns.clone(),
         }
     }
 
@@ -412,6 +420,7 @@ impl Document {
         self.fixed_anchors = state.fixed_anchors;
         self.symmetric_points = state.symmetric_points;
         self.mirrors = state.mirrors;
+        self.patterns = state.patterns;
         self.selected = None;
         self.selection_extra.clear();
         self.selection_primary = None;

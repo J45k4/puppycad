@@ -118,6 +118,7 @@ impl App {
             EditField::FilletRadius | EditField::ChamferFirst | EditField::ChamferSecond => {
                 self.finish_corner_edit(edit.field, &edit.buffer)
             }
+            EditField::PatternValue => self.finish_pattern_edit(&edit.buffer),
             EditField::ExtrusionDepth => match edit.buffer.parse::<f32>() {
                 Ok(depth) => match self
                     .project
@@ -472,7 +473,7 @@ impl App {
                 row.x + 10.0,
                 row.y + 9.0,
                 &format!(
-                    "{} {}{}{}{}{}{}{}{}",
+                    "{} {}{}{}{}{}{}{}{}{}",
                     shape.name(),
                     shape.id(),
                     if self.document.construction.contains(&shape.id()) {
@@ -597,6 +598,11 @@ impl App {
                         .unwrap_or(""),
                     if self.document.has_symmetry(shape.id()) {
                         " [SYM]"
+                    } else {
+                        ""
+                    },
+                    if self.document.pattern_of(shape.id()).is_some() {
+                        " [PAT]"
                     } else {
                         ""
                     },
@@ -1376,6 +1382,7 @@ impl App {
                 | EditField::RelationAngle
                 | EditField::RadialDifference
                 | EditField::FilletRadius
+                | EditField::PatternValue
                 | EditField::ChamferFirst
                 | EditField::ChamferSecond => 0,
             };
@@ -1412,7 +1419,9 @@ impl App {
             painter.text(
                 field.x + 8.0,
                 field.y + 7.0,
-                &if matches!(edit.field, EditField::FilletRadius) {
+                &if matches!(edit.field, EditField::PatternValue) {
+                    self.pattern_prompt_text(&edit.buffer)
+                } else if matches!(edit.field, EditField::FilletRadius) {
                     format!("FILLET R > {}_ mm", edit.buffer)
                 } else if matches!(edit.field, EditField::ChamferFirst) {
                     format!("CHAMFER D1 > {}_ mm", edit.buffer)

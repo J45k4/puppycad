@@ -5653,3 +5653,286 @@ fn whole_shape_drag_moves_every_selected_shape() {
     assert!(doc.undo());
     assert!(matches!(doc.shapes[1], Shape::Circle { center, .. } if center == p(30.0, 0.0)));
 }
+
+fn pattern_shape(doc: &Document, id: u32) -> Shape {
+    doc.shapes.iter().find(|s| s.id() == id).unwrap().clone()
+}
+
+/// Every pattern copy matches its source translated / rotated into its cell.
+fn assert_patterned(doc: &Document) {
+    for pattern in &doc.patterns {
+        for (cell, group) in pattern.instances.iter().enumerate() {
+            for (&source, &target) in pattern.sources.iter().zip(group) {
+                let source = pattern_shape(doc, source);
+                let expected = match pattern.kind {
+                    PatternKind::Linear { .. } => source.translated(pattern.cell_offset(cell + 1)),
+                    PatternKind::Circular { .. } => source
+                        .rotated_about(
+                            pattern.cell_angle(cell + 1),
+                            doc.pattern_center(pattern).unwrap(),
+                        )
+                        .unwrap(),
+                };
+                let actual = pattern_shape(doc, target);
+                assert_eq!(
+                    std::mem::discriminant(&expected),
+                    std::mem::discriminant(&actual)
+                );
+                let (p, q) = (expected.snap_points(), actual.snap_points());
+                assert!(
+                    p.len() == q.len()
+                        && p.iter().all(|p| q.iter().any(|q| near(p.point, q.point))),
+                    "{expected:?} != {actual:?}"
+                );
+            }
+        }
+    }
+}
+
+fn pattern_sources() -> Vec<Shape> {
+    vec![
+        Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 10.0, y: 5.0 },
+        },
+        Shape::Circle {
+            id: 2,
+            center: Point { x: 30.0, y: 0.0 },
+            radius: 4.0,
+            segments: 64,
+        },
+        Shape::Arc {
+            id: 3,
+            center: Point { x: 50.0, y: 0.0 },
+            radius: 4.0,
+            start_angle: 0.3,
+            sweep: 1.5,
+            segments: 32,
+        },
+        Shape::Rectangle {
+            id: 4,
+            a: Point { x: 60.0, y: 0.0 },
+            b: Point { x: 70.0, y: 6.0 },
+        },
+        Shape::Polygon {
+            id: 5,
+            center: Point { x: 80.0, y: 0.0 },
+            radius: 4.0,
+            sides: 6,
+            rotation: 0.0,
+        },
+        Shape::Capsule {
+            id: 6,
+            from: Point { x: 90.0, y: 0.0 },
+            to: Point { x: 100.0, y: 0.0 },
+            width: 4.0,
+            arc_segments: 16,
+        },
+        Shape::Ellipse {
+            id: 7,
+            center: Point { x: 110.0, y: 0.0 },
+            rx: 6.0,
+            ry: 3.0,
+            rotation: 10.0,
+            segments: 64,
+        },
+        Shape::Point {
+            id: 8,
+            at: Point { x: 120.0, y: 0.0 },
+        },
+        Shape::Spline {
+            id: 9,
+            mode: crate::spline::SplineMode::Fit,
+            points: vec![
+                Point { x: 130.0, y: 0.0 },
+                Point { x: 135.0, y: 5.0 },
+                Point { x: 140.0, y: -2.0 },
+            ],
+            closed: false,
+        },
+    ]
+}
+
+#[test]
+fn linear_pattern_copies_each_kind_with_one_undo_step() {
+    let shapes = pattern_sources();
+    for id in 1..=9 {
+        let mut doc = Document::from_shapes(shapes.clone());
+        let index = doc
+            .linear_pattern(&[id], 3, pt(0.0, 20.0), 1, pt(0.0, 20.0))
+            .unwrap();
+        let pattern = doc.patterns[index].clone();
+        assert_eq!(pattern.instances.len(), 2);
+        assert_eq!(doc.shapes.len(), shapes.len() + 2);
+        let source = shapes[id as usize - 1].center();
+        let copy = pattern_shape(&doc, pattern.instances[1][0]);
+        assert!(near(copy.center(), pt(source.x, source.y + 40.0)));
+        assert_patterned(&doc);
+        assert!(doc.undo());
+        assert_eq!(doc.shapes, shapes);
+        assert!(doc.patterns.is_empty());
+    }
+}
+
+#[test]
+fn linear_pattern_grid_places_rows_and_columns() {
+    let mut doc = Document::from_shapes(pattern_sources());
+    let index = doc
+        .linear_pattern(&[2, 1], 3, pt(10.0, 0.0), 2, pt(0.0, 15.0))
+        .unwrap();
+    let pattern = doc.patterns[index].clone();
+    assert_eq!(pattern.sources, vec![2, 1]);
+    assert_eq!(pattern.instances.len(), 5);
+    assert_eq!(pattern.rows(), 2);
+    // Cell 4 is row 1, column 1.
+    let circle = pattern_shape(&doc, pattern.instances[3][0]);
+    assert!(near(circle.center(), pt(40.0, 15.0)));
+    assert_patterned(&doc);
+    assert_eq!(doc.selected_ids().len(), 2);
+}
+
+#[test]
+fn circular_pattern_rotates_each_kind_about_its_center() {
+    let shapes = pattern_sources();
+    let origin = pt(0.0, 0.0);
+    for id in 1..=9 {
+        let mut doc = Document::from_shapes(shapes.clone());
+        let index = doc.circular_pattern(&[id], 4, 360.0, origin, None).unwrap();
+        let pattern = doc.patterns[index].clone();
+        assert_eq!(pattern.instances.len(), 3);
+        // Full circle: 90 degree steps.
+        assert!((pattern.cell_angle(1) - 90.0).abs() < 1e-5);
+        let source = shapes[id as usize - 1].center();
+        let half = pattern_shape(&doc, pattern.instances[1][0]).center();
+        assert!(near(half, pt(-source.x, -source.y)), "{half:?}");
+        assert_patterned(&doc);
+        assert!(doc.undo());
+        assert_eq!(doc.shapes, shapes);
+    }
+    // An open arc includes both ends: 3 cells over 90 degrees step by 45.
+    let mut doc = Document::from_shapes(shapes.clone());
+    let index = doc.circular_pattern(&[2], 3, 90.0, origin, None).unwrap();
+    assert!((doc.patterns[index].cell_angle(2) - 90.0).abs() < 1e-5);
+    let last = pattern_shape(&doc, doc.patterns[index].instances[1][0]);
+    assert!(near(last.center(), pt(0.0, 30.0)));
+}
+
+#[test]
+fn circular_pattern_follows_a_referenced_center() {
+    let mut doc = Document::from_shapes(pattern_sources());
+    // Rotate the line about the sketch point (id 8).
+    let index = doc
+        .circular_pattern(&[1], 2, 360.0, pt(0.0, 0.0), Some((8, 0)))
+        .unwrap();
+    assert!(near(
+        doc.pattern_center(&doc.patterns[index]).unwrap(),
+        pt(120.0, 0.0)
+    ));
+    doc.select_only(Some(8));
+    assert!(doc.move_selected(pt(0.0, 10.0)));
+    assert!(near(
+        doc.pattern_center(&doc.patterns[index]).unwrap(),
+        pt(120.0, 10.0)
+    ));
+    assert_patterned(&doc);
+    // A copy cannot be its own center.
+    let copy = doc.patterns[index].instances[0][0];
+    let mut bad = doc.patterns[index].clone();
+    bad.kind = PatternKind::Circular {
+        center: pt(0.0, 0.0),
+        center_anchor: Some((copy, 0)),
+        angle: 360.0,
+    };
+    doc.patterns.clear();
+    assert!(doc.load_pattern(bad).is_err());
+}
+
+#[test]
+fn pattern_source_edit_propagates_to_every_instance() {
+    let mut doc = Document::from_shapes(pattern_sources());
+    doc.linear_pattern(&[2, 5], 4, pt(0.0, 12.0), 1, pt(0.0, 20.0))
+        .unwrap();
+    doc.circular_pattern(&[4], 3, 120.0, pt(0.0, 0.0), None)
+        .unwrap();
+    doc.select_only(Some(2));
+    assert!(doc.move_selected(pt(3.0, -1.0)));
+    doc.select_only(Some(2));
+    doc.set_dimension(DimensionField::CircleDiameter, 14.0)
+        .unwrap();
+    doc.select_only(Some(5));
+    assert!(doc.move_selected(pt(-2.0, 2.0)));
+    doc.select_only(Some(4));
+    assert!(doc.move_selected(pt(1.0, 1.0)));
+    assert_patterned(&doc);
+    let copy = pattern_shape(&doc, doc.patterns[0].instances[2][0]);
+    assert!(matches!(copy, Shape::Circle { radius, .. } if (radius - 7.0).abs() < 1e-4));
+    assert!(near(copy.center(), pt(33.0, 35.0)));
+}
+
+#[test]
+fn pattern_count_and_spacing_edits_keep_surviving_copies() {
+    let mut doc = Document::from_shapes(pattern_sources());
+    doc.linear_pattern(&[2], 3, pt(10.0, 0.0), 1, pt(0.0, 20.0))
+        .unwrap();
+    let first = doc.patterns[0].instances[0][0];
+    let before = doc.shapes.len();
+    // Grow to a 4x2 grid with new spacing.
+    doc.edit_linear_pattern(0, 4, pt(8.0, 0.0), 2, pt(0.0, 9.0))
+        .unwrap();
+    assert_eq!(doc.patterns[0].instances.len(), 7);
+    assert_eq!(doc.patterns[0].instances[0][0], first);
+    assert_eq!(doc.shapes.len(), before + 5);
+    assert_patterned(&doc);
+    assert!(near(
+        pattern_shape(&doc, doc.patterns[0].instances[6][0]).center(),
+        pt(54.0, 9.0)
+    ));
+    // Shrink back; removed copies are deleted. Undo restores the grid.
+    doc.edit_linear_pattern(0, 2, pt(8.0, 0.0), 1, pt(0.0, 9.0))
+        .unwrap();
+    assert_eq!(doc.patterns[0].instances.len(), 1);
+    assert_eq!(doc.shapes.len(), before - 1);
+    assert!(doc.undo());
+    assert_eq!(doc.patterns[0].instances.len(), 7);
+    // Circular count / angle edits.
+    doc.circular_pattern(&[1], 6, 360.0, pt(0.0, 0.0), None)
+        .unwrap();
+    doc.edit_circular_pattern(1, 3, 180.0, pt(0.0, 0.0))
+        .unwrap();
+    assert_eq!(doc.patterns[1].instances.len(), 2);
+    assert!((doc.patterns[1].cell_angle(2) - 180.0).abs() < 1e-5);
+    assert_patterned(&doc);
+    // Invalid sizes and already patterned sources are rejected.
+    assert!(
+        doc.edit_circular_pattern(1, 1, 180.0, pt(0.0, 0.0))
+            .is_err()
+    );
+    assert!(
+        doc.linear_pattern(&[3], 40, pt(1.0, 0.0), 1, pt(0.0, 1.0))
+            .is_err()
+    );
+    assert!(
+        doc.linear_pattern(&[2], 3, pt(1.0, 0.0), 1, pt(0.0, 1.0))
+            .is_err()
+    );
+}
+
+#[test]
+fn deleting_a_pattern_member_drops_the_pattern_like_the_web() {
+    let mut doc = Document::from_shapes(pattern_sources());
+    doc.linear_pattern(&[2], 3, pt(10.0, 0.0), 1, pt(0.0, 20.0))
+        .unwrap();
+    let copies = doc.patterns[0].instances.clone();
+    doc.select_only(Some(copies[0][0]));
+    assert!(doc.delete_selected());
+    assert!(doc.patterns.is_empty());
+    // The other copy stays as free geometry.
+    assert!(doc.shapes.iter().any(|s| s.id() == copies[1][0]));
+    assert!(doc.undo());
+    assert_eq!(doc.patterns.len(), 1);
+    doc.select_only(Some(2));
+    assert!(doc.delete_selected());
+    assert!(doc.patterns.is_empty());
+    assert_eq!(doc.shapes.len(), pattern_sources().len() + 1);
+}

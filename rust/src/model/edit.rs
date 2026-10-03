@@ -10,12 +10,19 @@ impl Document {
         let Some(id) = self.selected else {
             return false;
         };
-        let Some(index) = self.shapes.iter().position(|shape| shape.id() == id) else {
+        if !self.shapes.iter().any(|shape| shape.id() == id) {
             return false;
-        };
+        }
         self.history.push(self.snapshot());
         self.future.clear();
-        self.shapes.remove(index);
+        self.remove_shape_and_relations(id);
+        self.selected = None;
+        true
+    }
+
+    /// Remove shape `id` and every relation that refers to it (no undo step).
+    pub(super) fn remove_shape_and_relations(&mut self, id: u32) {
+        self.shapes.retain(|shape| shape.id() != id);
         self.equal_lines
             .retain(|target, source| *target != id && *source != id);
         self.line_relations
@@ -47,6 +54,7 @@ impl Document {
         self.concentric
             .retain(|target, source| *target != id && *source != id);
         self.forget_symmetry(id);
+        self.forget_patterns(id);
         self.construction.remove(&id);
         self.axis_constraints.remove(&id);
         self.point_links
@@ -55,8 +63,6 @@ impl Document {
             .retain(|(shape_id, _), _| *shape_id != id);
         self.fixed_anchors
             .retain(|(shape_id, _), _| *shape_id != id);
-        self.selected = None;
-        true
     }
 
     pub fn split_selected_line(&mut self, click: Point) -> Result<u32, String> {

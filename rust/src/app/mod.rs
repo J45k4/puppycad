@@ -1,6 +1,7 @@
 mod corner;
 mod input;
 mod panels;
+mod pattern;
 mod project_panel;
 mod solid;
 mod view_sketch;
@@ -9,6 +10,7 @@ mod view_sketch;
 mod tests;
 
 use corner::*;
+use pattern::*;
 use project_panel::*;
 use solid::*;
 
@@ -208,6 +210,9 @@ pub(crate) struct App {
     /// Lines of the corner whose fillet/chamfer prompt is open.
     corner_pair: Option<(u32, u32)>,
     corner_values: CornerValues,
+    /// Linear/circular pattern prompt in progress.
+    pattern_prompt: Option<PatternPrompt>,
+    pattern_values: PatternValues,
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
@@ -221,6 +226,8 @@ enum Pick {
     Symmetry { axis: u32, first: Option<Point> },
     /// Mirror tool: click the mirror line for these shapes.
     Mirror { sources: Vec<u32> },
+    /// Circular pattern: click the rotation center for these shapes.
+    PatternCenter { sources: Vec<u32> },
 }
 
 struct DimensionEdit {
@@ -260,6 +267,8 @@ enum EditField {
     FilletRadius,
     ChamferFirst,
     ChamferSecond,
+    /// One step of the linear/circular pattern prompt.
+    PatternValue,
 }
 
 impl Default for App {
@@ -297,6 +306,8 @@ impl Default for App {
             corner_pick: None,
             corner_pair: None,
             corner_values: CornerValues::default(),
+            pattern_prompt: None,
+            pattern_values: PatternValues::default(),
             analysis: Default::default(),
         }
     }
@@ -511,6 +522,9 @@ impl App {
                         "Mirror: click a line to mirror across  |  Esc to cancel".into()
                     }
                 };
+            }
+            Some(Pick::PatternCenter { sources }) => {
+                self.status_message = self.pattern_center_click(sources, world);
             }
             None => {}
         }
@@ -768,6 +782,8 @@ impl App {
             "MIRROR [SHIFT I]",
             "FILLET [SHIFT W]",
             "CHAMFER [SHIFT H]",
+            "LIN PATTERN [SHIFT Z]",
+            "CIRC PATTERN [SHIFT U]",
         ]
         .into_iter()
         .enumerate()
