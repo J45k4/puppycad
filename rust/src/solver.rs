@@ -10,7 +10,10 @@
 //!
 //! * [`Problem::params`] is the parameter vector. The bridge in `model.rs`
 //!   (`Document::solve_constraints`) adds two parameters per anchor point
-//!   (line endpoints, sketch points, circle/arc centers) and one per radius.
+//!   (line endpoints, sketch points, curve centers, spline handles), one per
+//!   radius or ellipse semi-axis, ellipse rotation (degrees), and arc start
+//!   and sweep angles (radians). Spline point relations add an auxiliary
+//!   curve parameter in segment units.
 //!   Dimension values may also be parameters ([`Value::Param`]) so a dimension
 //!   can be left free and measured by the solve; the document currently passes
 //!   driving values as [`Value::Const`].
@@ -18,14 +21,16 @@
 //!   kind (fixed anchor, coincident endpoint/point, horizontal, vertical, line
 //!   length, line rotation, equal length, parallel, perpendicular, collinear,
 //!   signed angle, midpoint and point-on-line, radius, equal radius, radius
-//!   difference, concentric, point-on-circle).
+//!   difference, concentric, point-on-circle) plus [`Curve`] relations:
+//!   finite point-on-curve (segment, sweep and spline span penalties), curve
+//!   midpoint, fixed curve points, Normal, smooth-join endpoint tangency, and
+//!   internal and external tangency (contacts kept inside arc sweeps).
 //! * [`Soft`] terms express user intent: stay close to the post-edit geometry,
 //!   keep each line's first endpoint more strongly than its second one, and
 //!   keep unconstrained line lengths. They are what made the hand-written
 //!   propagation "anchor the first endpoint"; here they are weights.
 //! * Locked parameters are constants. The document locks the anchors the user
-//!   just edited and every entity that participates in a relation the solver
-//!   does not model (those keep their hand-written propagation).
+//!   just edited, and curve sizes and angles that no relation may change.
 //!
 //! Solving is Levenberg–Marquardt with central-difference Jacobians, run as a
 //! short continuation: soft terms are first solved together with heavily
@@ -60,7 +65,43 @@ pub struct CircleVar {
     pub radius: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Circular arc: a circle plus start angle and signed sweep (radians).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArcVar {
+    pub circle: CircleVar,
+    pub start: usize,
+    pub sweep: usize,
+}
+
+/// Ellipse or elliptic arc: center, semi-axes, rotation in degrees and, for
+/// an elliptic arc, parametric start angle and signed sweep (radians).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EllipseVar {
+    pub center: PointVar,
+    pub rx: usize,
+    pub ry: usize,
+    pub rotation: usize,
+    pub arc: Option<(usize, usize)>,
+}
+
+/// Spline through (fit) or controlled by (control) its point handles.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplineVar {
+    pub points: Vec<PointVar>,
+    pub control: bool,
+    pub closed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Curve {
+    Line(LineVar),
+    Circle(CircleVar),
+    Arc(ArcVar),
+    Ellipse(EllipseVar),
+    Spline(SplineVar),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Constraint {
     Fixed {
         point: PointVar,
@@ -111,6 +152,60 @@ pub enum Constraint {
     PointOnCircle {
         point: PointVar,
         circle: CircleVar,
+    },
+    /// Parameter equals a value (driving sweep, axis and rotation values).
+    Equal {
+        var: usize,
+        value: Value,
+    },
+    /// Two parameters are equal.
+    SameValue(usize, usize),
+    /// Point lies on a finite curve (segment, sweep, or spline span).
+    /// `param` is an auxiliary spline parameter in segment units.
+    PointOnCurve {
+        point: PointVar,
+        curve: Curve,
+        param: Option<usize>,
+    },
+    /// Point is the parametric midpoint of an arc or elliptic arc.
+    CurveMidpoint {
+        point: PointVar,
+        curve: Curve,
+    },
+    /// The curve point at `fraction` of its sweep (arcs) or turn (full
+    /// ellipses) stays at `at`.
+    FixedOnCurve {
+        curve: Curve,
+        fraction: f64,
+        at: (f64, f64),
+    },
+    /// Line endpoint lies on the curve and the line follows its normal there.
+    Normal {
+        line: LineVar,
+        endpoint: u8,
+        curve: Curve,
+        param: Option<usize>,
+    },
+    /// Smooth join: the arc's tangent at `endpoint` (0 start, 1 end) follows
+    /// the line direction; signs record which way the join turns.
+    EndpointTangent {
+        line: LineVar,
+        arc: ArcVar,
+        endpoint: u8,
+        line_sign: f64,
+        sweep_sign: f64,
+    },
+    /// Inner circle/arc touches outer circle/arc from inside.
+    InternalTangent {
+        outer: Curve,
+        inner: Curve,
+    },
+    /// Two curves touch from outside. For a line and a round or elliptic
+    /// curve, `side` is the side of the line the curve stays on.
+    ExternalTangent {
+        first: Curve,
+        second: Curve,
+        side: f64,
     },
 }
 
@@ -178,6 +273,7 @@ impl Problem {
         let mut out = Vec::new();
         for constraint in &self.constraints {
             residual(constraint, params, &mut out);
+            curve_residual(constraint, params, &mut out);
         }
         out
     }
@@ -294,7 +390,7 @@ impl Problem {
         let mut lambda = 1e-3;
         let n = free.len();
         for iteration in 0..options.max_iterations {
-            if hard_weight.is_none() && current.sqrt() <= options.tolerance * 1e-2 {
+            if hard_weight.is_none() && current.sqrt() <= options.tolerance * 1e-8 {
                 return iteration;
             }
             let r = self.objective(params, hard_weight);
@@ -489,6 +585,76 @@ impl Constraint {
                 point(&mut out, p);
                 circle(&mut out, c);
             }
+            Constraint::Equal { var, value: v } => {
+                out.push(var);
+                value(&mut out, v);
+            }
+            Constraint::SameValue(a, b) => out.extend([a, b]),
+            Constraint::PointOnCurve {
+                point: p,
+                ref curve,
+                param,
+            } => {
+                point(&mut out, p);
+                curve_vars(&mut out, curve);
+                out.extend(param);
+            }
+            Constraint::CurveMidpoint {
+                point: p,
+                ref curve,
+            } => {
+                point(&mut out, p);
+                curve_vars(&mut out, curve);
+            }
+            Constraint::FixedOnCurve { ref curve, .. } => curve_vars(&mut out, curve),
+            Constraint::Normal {
+                line: l,
+                ref curve,
+                param,
+                ..
+            } => {
+                line(&mut out, l);
+                curve_vars(&mut out, curve);
+                out.extend(param);
+            }
+            Constraint::EndpointTangent { line: l, arc, .. } => {
+                line(&mut out, l);
+                curve_vars(&mut out, &Curve::Arc(arc));
+            }
+            Constraint::InternalTangent {
+                outer: ref a,
+                inner: ref b,
+            }
+            | Constraint::ExternalTangent {
+                first: ref a,
+                second: ref b,
+                ..
+            } => {
+                curve_vars(&mut out, a);
+                curve_vars(&mut out, b);
+            }
+        }
+        fn curve_vars(out: &mut Vec<usize>, curve: &Curve) {
+            match curve {
+                Curve::Line(l) => line(out, *l),
+                Curve::Circle(c) => circle(out, *c),
+                Curve::Arc(a) => {
+                    circle(out, a.circle);
+                    out.extend([a.start, a.sweep]);
+                }
+                Curve::Ellipse(e) => {
+                    point(out, e.center);
+                    out.extend([e.rx, e.ry, e.rotation]);
+                    if let Some((start, sweep)) = e.arc {
+                        out.extend([start, sweep]);
+                    }
+                }
+                Curve::Spline(s) => {
+                    for &p in &s.points {
+                        point(out, p);
+                    }
+                }
+            }
         }
         out
     }
@@ -678,7 +844,7 @@ fn dot(a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
-    match *constraint {
+    match constraint.clone() {
         Constraint::Fixed { point, at } => {
             let (x, y) = pt(p, point);
             out.extend([x - at.0, y - at.1]);
@@ -725,10 +891,10 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             out.extend([x - (ax + bx) * 0.5, y - (ay + by) * 0.5]);
         }
         Constraint::PointOnLine { point, line } => {
-            let (x, y) = pt(p, point);
-            let (ax, ay) = pt(p, line.a);
-            out.push(cross((x - ax, y - ay), unit(p, line)));
+            on_curve(p, pt(p, point), &Curve::Line(line), None, out);
         }
+        Constraint::Equal { var, value: v } => out.push(p[var] - value(p, v)),
+        Constraint::SameValue(a, b) => out.push(p[a] - p[b]),
         Constraint::Radius { circle, value: v } => out.push(p[circle.radius] - value(p, v)),
         Constraint::EqualRadius(first, second) => out.push(p[first.radius] - p[second.radius]),
         Constraint::RadiusDifference {
@@ -746,6 +912,389 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             let (cx, cy) = pt(p, circle.center);
             out.push((x - cx).hypot(y - cy) - p[circle.radius]);
         }
+        _ => {}
+    }
+}
+
+use std::f64::consts::{PI, TAU};
+
+/// Center, radius and optional (start, sweep) of a circle or arc.
+type Round = ((f64, f64), f64, Option<(f64, f64)>);
+
+fn round(p: &[f64], curve: &Curve) -> Option<Round> {
+    match curve {
+        Curve::Circle(c) => Some((pt(p, c.center), p[c.radius], None)),
+        Curve::Arc(a) => Some((
+            pt(p, a.circle.center),
+            p[a.circle.radius],
+            Some((p[a.start], p[a.sweep])),
+        )),
+        _ => None,
+    }
+}
+
+/// Angle outside a sweep (0 when inside or the sweep is a full turn).
+fn sweep_excess(angle: f64, arc: Option<(f64, f64)>) -> f64 {
+    let Some((start, sweep)) = arc else {
+        return 0.0;
+    };
+    if sweep.abs() >= TAU - 1e-9 {
+        return 0.0;
+    }
+    let traveled = if sweep >= 0.0 {
+        (angle - start).rem_euclid(TAU)
+    } else {
+        (start - angle).rem_euclid(TAU)
+    };
+    // A small tolerance keeps contacts placed exactly on an end stable.
+    let limit = sweep.abs() + 1e-9;
+    if traveled <= limit {
+        0.0
+    } else {
+        (traveled - limit).min(TAU - traveled)
+    }
+}
+
+struct Ellipse {
+    center: (f64, f64),
+    rx: f64,
+    ry: f64,
+    sin: f64,
+    cos: f64,
+    arc: Option<(f64, f64)>,
+}
+
+impl Ellipse {
+    fn new(p: &[f64], e: &EllipseVar) -> Self {
+        let (sin, cos) = p[e.rotation].to_radians().sin_cos();
+        Self {
+            center: pt(p, e.center),
+            rx: p[e.rx],
+            ry: p[e.ry],
+            sin,
+            cos,
+            arc: e.arc.map(|(start, sweep)| (p[start], p[sweep])),
+        }
+    }
+
+    fn at(&self, angle: f64) -> (f64, f64) {
+        let (y, x) = angle.sin_cos();
+        let (lx, ly) = (self.rx * x, self.ry * y);
+        (
+            self.center.0 + lx * self.cos - ly * self.sin,
+            self.center.1 + lx * self.sin + ly * self.cos,
+        )
+    }
+
+    fn local(&self, point: (f64, f64)) -> (f64, f64) {
+        let dx = point.0 - self.center.0;
+        let dy = point.1 - self.center.1;
+        (
+            dx * self.cos + dy * self.sin,
+            -dx * self.sin + dy * self.cos,
+        )
+    }
+
+    fn parameter(&self, point: (f64, f64)) -> f64 {
+        let (u, v) = self.local(point);
+        (v / self.ry).atan2(u / self.rx)
+    }
+
+    /// Outward (unnormalized) normal at a point on the ellipse.
+    fn normal(&self, point: (f64, f64)) -> (f64, f64) {
+        let (u, v) = self.local(point);
+        let (x, y) = (u / (self.rx * self.rx), v / (self.ry * self.ry));
+        (x * self.cos - y * self.sin, x * self.sin + y * self.cos)
+    }
+
+    /// Support extent along a unit normal and the support point offset.
+    fn support(&self, normal: (f64, f64)) -> (f64, (f64, f64)) {
+        let nx = normal.0 * self.cos + normal.1 * self.sin;
+        let ny = -normal.0 * self.sin + normal.1 * self.cos;
+        let extent = ((self.rx * nx).powi(2) + (self.ry * ny).powi(2))
+            .sqrt()
+            .max(1e-12);
+        let x = self.rx * self.rx * nx / extent;
+        let y = self.ry * self.ry * ny / extent;
+        (
+            extent,
+            (x * self.cos - y * self.sin, x * self.sin + y * self.cos),
+        )
+    }
+
+    fn scale(&self) -> f64 {
+        (self.rx.abs() + self.ry.abs()) * 0.5
+    }
+}
+
+fn spline_curves(p: &[f64], spline: &SplineVar) -> Option<Vec<[(f64, f64); 4]>> {
+    let points: Vec<_> = spline.points.iter().map(|&point| pt(p, point)).collect();
+    crate::spline::beziers_f64(spline.control, &points, spline.closed)
+}
+
+type SplineSample = ((f64, f64), (f64, f64), f64);
+
+/// Point and derivative on a spline at `u` in segment units, and how far `u`
+/// lies outside an open spline's range.
+fn spline_at(p: &[f64], spline: &SplineVar, u: f64) -> Option<SplineSample> {
+    let curves = spline_curves(p, spline)?;
+    let n = curves.len() as f64;
+    let (u, excess) = if spline.closed {
+        (u.rem_euclid(n), 0.0)
+    } else {
+        (u.clamp(0.0, n), (-u).max(0.0) + (u - n).max(0.0))
+    };
+    let index = (u.floor() as usize).min(curves.len() - 1);
+    let t = u - index as f64;
+    let c = curves[index];
+    let s = 1.0 - t;
+    let mix = |a: f64, b: f64, c2: f64, d: f64| {
+        s * s * s * a + 3.0 * s * s * t * b + 3.0 * s * t * t * c2 + t * t * t * d
+    };
+    let slope = |a: f64, b: f64, c2: f64, d: f64| {
+        3.0 * s * s * (b - a) + 6.0 * s * t * (c2 - b) + 3.0 * t * t * (d - c2)
+    };
+    Some((
+        (
+            mix(c[0].0, c[1].0, c[2].0, c[3].0),
+            mix(c[0].1, c[1].1, c[2].1, c[3].1),
+        ),
+        (
+            slope(c[0].0, c[1].0, c[2].0, c[3].0),
+            slope(c[0].1, c[1].1, c[2].1, c[3].1),
+        ),
+        excess,
+    ))
+}
+
+/// Residuals that keep `point` on a finite curve (segment, sweep, or open
+/// spline span); returns the curve normal there (unnormalized).
+fn on_curve(
+    p: &[f64],
+    point: (f64, f64),
+    curve: &Curve,
+    param: Option<usize>,
+    out: &mut Vec<f64>,
+) -> (f64, f64) {
+    let (x, y) = point;
+    match curve {
+        Curve::Line(line) => {
+            let (ax, ay) = pt(p, line.a);
+            let (dx, dy) = delta(p, *line);
+            let length = dx.hypot(dy).max(1e-12);
+            let s = ((x - ax) * dx + (y - ay) * dy) / (length * length);
+            out.push(cross((x - ax, y - ay), (dx / length, dy / length)));
+            out.push(((-s).max(0.0) + (s - 1.0).max(0.0)) * length);
+            (-dy, dx)
+        }
+        Curve::Circle(_) | Curve::Arc(_) => {
+            let (center, radius, arc) = round(p, curve).unwrap();
+            let (dx, dy) = (x - center.0, y - center.1);
+            out.push(dx.hypot(dy) - radius);
+            if arc.is_some() {
+                out.push(sweep_excess(dy.atan2(dx), arc) * radius);
+            }
+            (dx, dy)
+        }
+        Curve::Ellipse(e) => {
+            let e = Ellipse::new(p, e);
+            let (u, v) = e.local(point);
+            out.push(((u / e.rx).hypot(v / e.ry) - 1.0) * e.rx.abs().min(e.ry.abs()));
+            if e.arc.is_some() {
+                out.push(sweep_excess(e.parameter(point), e.arc) * e.scale());
+            }
+            e.normal(point)
+        }
+        Curve::Spline(spline) => {
+            let u = param.map_or(0.0, |i| p[i]);
+            let Some((at, derivative, excess)) = spline_at(p, spline, u) else {
+                out.extend([f64::NAN, f64::NAN, f64::NAN]);
+                return (0.0, 0.0);
+            };
+            let scale = derivative.0.hypot(derivative.1).max(1e-9);
+            out.extend([x - at.0, y - at.1, excess * scale]);
+            (-derivative.1, derivative.0)
+        }
+    }
+}
+
+/// Point at `fraction` of a curve: along a segment or sweep, around a full
+/// circle or ellipse, or across a spline's segments.
+pub fn curve_at(p: &[f64], curve: &Curve, fraction: f64) -> Option<(f64, f64)> {
+    match curve {
+        Curve::Line(line) => {
+            let (ax, ay) = pt(p, line.a);
+            let (dx, dy) = delta(p, *line);
+            Some((ax + dx * fraction, ay + dy * fraction))
+        }
+        Curve::Circle(_) | Curve::Arc(_) => {
+            let (center, radius, arc) = round(p, curve)?;
+            let (start, sweep) = arc.unwrap_or((0.0, TAU));
+            let angle = start + sweep * fraction;
+            Some((
+                center.0 + radius * angle.cos(),
+                center.1 + radius * angle.sin(),
+            ))
+        }
+        Curve::Ellipse(e) => {
+            let e = Ellipse::new(p, e);
+            let (start, sweep) = e.arc.unwrap_or((0.0, TAU));
+            Some(e.at(start + sweep * fraction))
+        }
+        Curve::Spline(spline) => {
+            let n = spline_curves(p, spline)?.len() as f64;
+            spline_at(p, spline, n * fraction).map(|(at, _, _)| at)
+        }
+    }
+}
+
+/// Spline parameter (segment units) of the sampled point closest to `target`.
+pub fn spline_parameter(p: &[f64], spline: &SplineVar, target: (f64, f64)) -> f64 {
+    let Some(curves) = spline_curves(p, spline) else {
+        return 0.0;
+    };
+    let samples = curves.len() * 64;
+    let distance = |u: f64| {
+        spline_at(p, spline, u).map_or(f64::INFINITY, |(at, _, _)| {
+            (at.0 - target.0).hypot(at.1 - target.1)
+        })
+    };
+    let mut best = (0.0, f64::INFINITY);
+    for i in 0..=samples {
+        let u = i as f64 / 64.0;
+        let d = distance(u);
+        if d < best.1 {
+            best = (u, d);
+        }
+    }
+    let (mut left, mut right) = (best.0 - 1.0 / 64.0, best.0 + 1.0 / 64.0);
+    if !spline.closed {
+        left = left.max(0.0);
+        right = right.min(curves.len() as f64);
+    }
+    for _ in 0..48 {
+        let a = left + (right - left) / 3.0;
+        let b = right - (right - left) / 3.0;
+        if distance(a) <= distance(b) {
+            right = b;
+        } else {
+            left = a;
+        }
+    }
+    (left + right) * 0.5
+}
+
+fn curve_residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
+    match constraint {
+        Constraint::PointOnCurve {
+            point,
+            curve,
+            param,
+        } => {
+            on_curve(p, pt(p, *point), curve, *param, out);
+        }
+        Constraint::CurveMidpoint { point, curve } => {
+            let (x, y) = pt(p, *point);
+            let (mx, my) = curve_at(p, curve, 0.5).unwrap_or((f64::NAN, f64::NAN));
+            out.extend([x - mx, y - my]);
+        }
+        Constraint::FixedOnCurve {
+            curve,
+            fraction,
+            at,
+        } => {
+            let (x, y) = curve_at(p, curve, *fraction).unwrap_or((f64::NAN, f64::NAN));
+            out.extend([x - at.0, y - at.1]);
+        }
+        Constraint::Normal {
+            line,
+            endpoint,
+            curve,
+            param,
+        } => {
+            let (end, other) = if *endpoint == 0 {
+                (line.a, line.b)
+            } else {
+                (line.b, line.a)
+            };
+            let end = pt(p, end);
+            let other = pt(p, other);
+            let normal = on_curve(p, end, curve, *param, out);
+            let direction = (other.0 - end.0, other.1 - end.1);
+            let angle = cross(normal, direction).atan2(dot(normal, direction));
+            out.push((angle + PI * 0.5).rem_euclid(PI) - PI * 0.5);
+        }
+        Constraint::EndpointTangent {
+            line,
+            arc,
+            endpoint,
+            line_sign,
+            sweep_sign,
+        } => {
+            let (ux, uy) = unit(p, *line);
+            let radial_sign = -line_sign * sweep_sign;
+            let target = (ux * radial_sign).atan2(-uy * radial_sign);
+            let angle = p[arc.start] + if *endpoint == 0 { 0.0 } else { p[arc.sweep] };
+            out.push(wrap(angle - target) * p[arc.circle.radius]);
+        }
+        Constraint::InternalTangent { outer, inner } => {
+            let (Some((oc, or, oarc)), Some((ic, ir, iarc))) = (round(p, outer), round(p, inner))
+            else {
+                return;
+            };
+            let (dx, dy) = (ic.0 - oc.0, ic.1 - oc.1);
+            let angle = dy.atan2(dx);
+            out.extend([
+                dx.hypot(dy) - (or - ir),
+                sweep_excess(angle, oarc) * or,
+                sweep_excess(angle, iarc) * ir,
+            ]);
+        }
+        Constraint::ExternalTangent {
+            first,
+            second,
+            side,
+        } => {
+            if let (Some((c1, r1, arc1)), Some((c2, r2, arc2))) =
+                (round(p, first), round(p, second))
+            {
+                let (dx, dy) = (c2.0 - c1.0, c2.1 - c1.1);
+                let angle = dy.atan2(dx);
+                out.extend([
+                    dx.hypot(dy) - (r1 + r2),
+                    sweep_excess(angle, arc1) * r1,
+                    sweep_excess(angle + PI, arc2) * r2,
+                ]);
+                return;
+            }
+            let (line, other) = match (first, second) {
+                (Curve::Line(line), other) | (other, Curve::Line(line)) => (*line, other),
+                _ => return,
+            };
+            let (ax, ay) = pt(p, line.a);
+            let (ux, uy) = unit(p, line);
+            let normal = (-uy, ux);
+            match other {
+                Curve::Circle(_) | Curve::Arc(_) => {
+                    let (center, radius, arc) = round(p, other).unwrap();
+                    let signed = dot((center.0 - ax, center.1 - ay), normal);
+                    let angle = (-side * normal.1).atan2(-side * normal.0);
+                    out.extend([signed - side * radius, sweep_excess(angle, arc) * radius]);
+                }
+                Curve::Ellipse(e) => {
+                    let e = Ellipse::new(p, e);
+                    let signed = dot((e.center.0 - ax, e.center.1 - ay), normal);
+                    let (extent, support) = e.support(normal);
+                    let contact = (e.center.0 - side * support.0, e.center.1 - side * support.1);
+                    out.extend([
+                        signed - side * extent,
+                        sweep_excess(e.parameter(contact), e.arc) * e.scale(),
+                    ]);
+                }
+                _ => {}
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1071,5 +1620,176 @@ mod tests {
         );
         assert_eq!(analysis.dof, 7);
         assert!(!analysis.conflicting() && analysis.redundant());
+    }
+
+    fn arc(problem: &mut Problem, c: (f64, f64), r: f64, start: f64, sweep: f64) -> ArcVar {
+        ArcVar {
+            circle: circle(problem, c, r, true),
+            start: problem.param(start, true),
+            sweep: problem.param(sweep, true),
+        }
+    }
+
+    #[test]
+    fn point_on_finite_curves_stays_on_segment_and_sweep() {
+        let mut problem = Problem::default();
+        let l = line(&mut problem, (0.0, 0.0), (10.0, 0.0), true);
+        problem.locked[l.b.x] = true;
+        problem.locked[l.b.y] = true;
+        let a = arc(&mut problem, (0.0, 0.0), 5.0, 0.0, PI * 0.5);
+        let on_line = problem.point(14.0, 3.0, false);
+        let on_arc = problem.point(-6.0, -1.0, false);
+        problem.constraints = vec![
+            Constraint::PointOnCurve {
+                point: on_line,
+                curve: Curve::Line(l),
+                param: None,
+            },
+            Constraint::PointOnCurve {
+                point: on_arc,
+                curve: Curve::Arc(a),
+                param: None,
+            },
+        ];
+        soft_keep_all(&mut problem);
+        let p = solved(&problem).params;
+        close(p[on_line.y], 0.0);
+        assert!(p[on_line.x] <= 10.0 + 1e-5);
+        close(p[on_arc.x].hypot(p[on_arc.y]), 5.0);
+        let angle = p[on_arc.y].atan2(p[on_arc.x]);
+        assert!((-1e-5..=PI * 0.5 + 1e-5).contains(&angle), "{angle}");
+    }
+
+    #[test]
+    fn ellipse_and_spline_point_on_curve_and_midpoint() {
+        let mut problem = Problem::default();
+        let center = problem.point(0.0, 0.0, true);
+        let ellipse = EllipseVar {
+            center,
+            rx: problem.param(8.0, true),
+            ry: problem.param(4.0, true),
+            rotation: problem.param(30.0, true),
+            arc: Some((problem.param(0.0, true), problem.param(PI, true))),
+        };
+        let on = problem.point(1.0, 9.0, false);
+        let mid = problem.point(0.0, 0.0, false);
+        let spline = SplineVar {
+            points: [(0.0, 0.0), (10.0, 5.0), (20.0, 0.0)]
+                .into_iter()
+                .map(|(x, y)| problem.point(x, y, true))
+                .collect(),
+            control: false,
+            closed: false,
+        };
+        let on_spline = problem.point(12.0, 9.0, false);
+        let u = spline_parameter(&problem.params, &spline, (12.0, 9.0));
+        let u = problem.param(u, false);
+        problem.constraints = vec![
+            Constraint::PointOnCurve {
+                point: on,
+                curve: Curve::Ellipse(ellipse),
+                param: None,
+            },
+            Constraint::CurveMidpoint {
+                point: mid,
+                curve: Curve::Ellipse(ellipse),
+            },
+            Constraint::PointOnCurve {
+                point: on_spline,
+                curve: Curve::Spline(spline.clone()),
+                param: Some(u),
+            },
+        ];
+        soft_keep_all(&mut problem);
+        let p = solved(&problem).params;
+        let e = Ellipse::new(&p, &ellipse);
+        let (lu, lv) = e.local(pt(&p, on));
+        close((lu / 8.0).hypot(lv / 4.0), 1.0);
+        let expected = e.at(PI * 0.5);
+        close(p[mid.x], expected.0);
+        close(p[mid.y], expected.1);
+        let (at, _, _) = spline_at(&p, &spline, p[u]).unwrap();
+        close(p[on_spline.x], at.0);
+        close(p[on_spline.y], at.1);
+        assert!((0.0..=2.0).contains(&p[u]));
+    }
+
+    #[test]
+    fn tangency_and_normal_relations() {
+        let mut problem = Problem::default();
+        let outer = circle(&mut problem, (0.0, 0.0), 10.0, true);
+        let inner = circle(&mut problem, (1.0, 1.0), 3.0, false);
+        problem.locked[inner.radius] = true;
+        let other = circle(&mut problem, (20.0, 3.0), 4.0, false);
+        problem.locked[other.radius] = true;
+        let base = line(&mut problem, (-20.0, -20.0), (20.0, -20.0), true);
+        problem.locked[base.b.x] = true;
+        problem.locked[base.b.y] = true;
+        let touching = circle(&mut problem, (0.0, -10.0), 2.0, false);
+        problem.locked[touching.radius] = true;
+        let normal = line(&mut problem, (8.0, 3.0), (15.0, 5.0), false);
+        problem.constraints = vec![
+            Constraint::InternalTangent {
+                outer: Curve::Circle(outer),
+                inner: Curve::Circle(inner),
+            },
+            Constraint::ExternalTangent {
+                first: Curve::Circle(outer),
+                second: Curve::Circle(other),
+                side: 1.0,
+            },
+            Constraint::ExternalTangent {
+                first: Curve::Line(base),
+                second: Curve::Circle(touching),
+                side: 1.0,
+            },
+            Constraint::Normal {
+                line: normal,
+                endpoint: 0,
+                curve: Curve::Circle(outer),
+                param: None,
+            },
+        ];
+        soft_keep_all(&mut problem);
+        let p = solved(&problem).params;
+        close(p[inner.center.x].hypot(p[inner.center.y]), 7.0);
+        close(p[other.center.x].hypot(p[other.center.y]), 14.0);
+        close(p[touching.center.y], -18.0);
+        close(p[normal.a.x].hypot(p[normal.a.y]), 10.0);
+        close(cross(unit(&p, normal), (p[normal.a.x], p[normal.a.y])), 0.0);
+    }
+
+    #[test]
+    fn arc_endpoint_relations_move_the_sweep() {
+        let mut problem = Problem::default();
+        let center = problem.point(0.0, 0.0, true);
+        let radius = problem.param(5.0, true);
+        let a = ArcVar {
+            circle: CircleVar { center, radius },
+            start: problem.param(0.3, false),
+            sweep: problem.param(1.0, false),
+        };
+        let l = line(&mut problem, (0.0, 0.0), (0.0, 10.0), true);
+        problem.locked[l.b.x] = true;
+        problem.locked[l.b.y] = true;
+        problem.constraints = vec![
+            Constraint::EndpointTangent {
+                line: l,
+                arc: a,
+                endpoint: 0,
+                line_sign: 1.0,
+                sweep_sign: 1.0,
+            },
+            Constraint::FixedOnCurve {
+                curve: Curve::Arc(a),
+                fraction: 1.0,
+                at: (0.0, 5.0),
+            },
+        ];
+        soft_keep_all(&mut problem);
+        let p = solved(&problem).params;
+        // Upward line, counter-clockwise arc: the start radial points +x.
+        close(wrap(p[a.start]), 0.0);
+        close(p[a.start] + p[a.sweep], PI * 0.5);
     }
 }

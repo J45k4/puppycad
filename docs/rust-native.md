@@ -145,8 +145,13 @@ Perpendicular targets.
 
 `rust/src/solver.rs` is a least-squares solver ported from the structure of
 `src/sketch-solver.ts`. Every anchor coordinate (line endpoints, sketch points,
-circle and arc centers) and every circle or arc radius is a parameter; each
-relation contributes a residual. Levenberg–Marquardt with numeric Jacobians
+curve centers, spline handles), every circle or arc radius, ellipse semi-axes
+and rotation, and arc start and sweep angles are parameters; each relation
+contributes a residual. Point-on-curve and Normal relations on a spline add an
+auxiliary curve parameter. A curve keeps its size and its angles unless a
+relation or driving value may change them (Equal, radial distance, shared
+ellipses, radius, axis, sweep or rotation dimensions, smooth joins, fixed arc
+or axis endpoints), so tangency and point relations move curves rigidly. Levenberg–Marquardt with numeric Jacobians
 first solves the relations together with soft "stay close" weights and then
 solves the relations alone, damped by those weights. A solve reports its
 residual norm and whether it converged.
@@ -154,26 +159,34 @@ residual norm and whether it converged.
 Moves, drags, dimension edits, scale, rotate, and creating a relation all apply
 the edit, solve, and then either commit everything as one undo step or roll the
 edit back. The edited shape (or, for a length or rotation edit, the line's first
-endpoint) is held exactly. The remaining intent is a cascade: relation sources
+endpoint) is held exactly; an edited shape that is the target of a
+projecting relation (point-on-curve, Normal, tangency, smooth join) is instead
+held as a strong preference, so the relation snaps it back onto its source.
+The remaining intent is a cascade: relation sources
 stay put and only targets move; if that fails, sources may move but keep their
 first endpoint; if that fails too, only the edited geometry is held. Targets
 rotate or stretch about their first endpoint, and direction targets keep their
 length when nothing else sets it. A solution that collapses a line is rejected.
 
-Solver-backed relations: horizontal and vertical, line length and line rotation
-dimensions, Equal lines, Parallel, Perpendicular, Collinear, signed Angle,
-endpoint coincidence between a line and a sketch point, fixed line endpoints,
-points and circle/arc centers, Midpoint and point-on-curve on a line,
-point-on-curve on a circle, circle and arc radius and diameter dimensions,
-Equal radius, radial distance, and Concentric between circles and arcs.
+Every relation is solver-backed: horizontal and vertical, line length and line
+rotation dimensions, Equal lines, Parallel, Perpendicular, Collinear, signed
+Angle, endpoint coincidence between a sketch point and a line or spline end,
+fixed line endpoints, points, centers, spline handles, and arc, elliptic arc
+and ellipse axis endpoints, Midpoint on lines, arcs and elliptic arcs,
+point-on-curve on lines, circles, arcs, ellipses, elliptic arcs and splines,
+Normal and smooth-join (endpoint) tangency, internal tangency between circles
+and arcs, external tangency between circles and arcs and between a line and a
+circle, arc, ellipse or elliptic arc, circle and arc radius and diameter
+dimensions, Equal radius, radial distance, shared and Equal ellipses, ellipse
+axis, rotation and sweep dimensions of related curves, and Concentric between
+any circular or elliptic curves. Point-on-curve keeps the point on the finite
+segment, sweep, or spline span, and tangency keeps the contact inside an arc's
+sweep. No relation is hand-propagated any more.
 
-Still hand-propagated: normal and endpoint tangency, internal and external
-tangency, Midpoint and point-on-curve on arcs, ellipses, and splines, point
-links to spline ends, shared and Equal ellipses, concentric pairs that include
-an ellipse, and fixed arc endpoints. Shapes in these relations are constants in
-the solve, so an edit that would need them to move is rejected. Rotating a
-direction target and rotating axis-constrained lines by other than quarter turns
-stay blocked.
+Rotating a direction target now turns its source with it; Equal ellipses can
+be scaled; splines with linked end points can be moved, scaled, rotated, and
+have their end handles edited or dragged, carrying the points along. Rotating
+axis-constrained lines by other than quarter turns stays blocked.
 
 **Anchor dragging.** A selected shape shows small squares on its draggable
 anchors: line endpoints, sketch points, circle and arc centers, all four
@@ -188,9 +201,10 @@ length moves on a circle around the other end, and coincident points follow.
 A dragged line endpoint keeps the other endpoint in place. For the other
 shapes the anchor edit keeps driving width, height, radius, and rotation
 dimensions (the corner or vertex slides along them), then re-solves like a
-whole-shape drag. Release commits one undo step, Esc cancels. A fixed anchor
-(or any fixed anchor on a non-line shape) refuses to drag, and shapes in the
-still hand-propagated relations above fall back to whole-shape dragging.
+whole-shape drag (all relations, including tangency and shared ellipses,
+follow). Release commits one undo step, Esc cancels. A fixed anchor
+(or any fixed anchor on a non-line shape) refuses to drag; every relation
+the shape takes part in follows through the solver.
 
 #### Degrees of freedom and diagnostics
 
@@ -200,10 +214,11 @@ it relation by relation (two-pass Gram–Schmidt), and reports the rank, the
 remaining degrees of freedom, which parameters are fully determined, and for
 each relation whether it is satisfied, conflicting (residual above tolerance at
 the current geometry) or redundant (adds no rank after earlier relations).
-`Document::analyze_constraints` runs it over every line, sketch point, circle
-and arc in the sketch (other shape kinds, and shapes held constant by
-hand-propagated relations, are not counted; an arc's sweep is not a solver
-parameter). A free line has 4 DOF, a point 2, a circle 3.
+`Document::analyze_constraints` runs it over every solver-modeled shape: lines,
+sketch points, circles, arcs, ellipses, elliptic arcs and splines (rectangles,
+polygons and slots are not counted). A free line has 4 DOF, a point 2, a circle
+3, an arc 5 (center, radius, start, sweep), an ellipse 5 (center, axes,
+rotation), an elliptic arc 7, a spline 2 per handle.
 
 In the sketch view the header's right edge shows **DOF n** (green at 0),
 **OVER-CONSTRAINED** (purple) when a relation is redundant, or **CONFLICT**

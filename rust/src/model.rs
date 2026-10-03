@@ -1772,18 +1772,6 @@ impl Document {
         Ok(enabled)
     }
 
-    /// Point links to splines are still hand-propagated, so transforms that
-    /// would break them stay blocked.
-    fn has_non_line_point_link(&self, id: u32) -> bool {
-        self.point_links.iter().any(|(&(curve, _), &point)| {
-            (curve == id || point == id)
-                && !self
-                    .shapes
-                    .iter()
-                    .any(|shape| shape.id() == curve && matches!(shape, Shape::Line { .. }))
-        })
-    }
-
     fn has_fixed_anchor(&self, id: u32) -> bool {
         self.fixed_anchors
             .keys()
@@ -2041,12 +2029,6 @@ impl Document {
         else {
             return Err("Select a spline point".into());
         };
-        if !closed
-            && ((handle == 0 && self.point_links.contains_key(&(id, 0)))
-                || (handle + 1 == points.len() && self.point_links.contains_key(&(id, 1))))
-        {
-            return Err("Spline endpoint is linked to a point".into());
-        }
         let mut changed = points.clone();
         let point = changed.get_mut(handle).ok_or("Spline point is missing")?;
         if x_axis {
@@ -2058,13 +2040,13 @@ impl Document {
         if changed == *points {
             return Ok(());
         }
-        let before = self.snapshot();
+        self.history.push(self.snapshot());
+        self.future.clear();
         if let Shape::Spline { points, .. } = &mut self.shapes[index] {
             *points = changed;
         }
-        self.history.push(before);
-        self.future.clear();
-        Ok(())
+        // Linked points and curve relations follow the edited handle.
+        self.solve_or_rollback(&[Pin::Anchor(id, handle)])
     }
 
     pub fn set_selected_point_coordinate(
@@ -2143,15 +2125,6 @@ impl Document {
             .is_some_and(|partner| self.has_fixed_anchor(partner))
         {
             return false;
-        }
-        if let Shape::Spline { ref points, .. } = original {
-            if self.point_links.keys().any(|(curve_id, _)| *curve_id == id)
-                && self
-                    .selected_spline_point
-                    .is_none_or(|index| index == 0 || index + 1 == points.len())
-            {
-                return false;
-            }
         }
         self.drag = Some(DragState {
             id,
@@ -2233,14 +2206,6 @@ impl Document {
                 next = projected;
             }
         }
-        let Some((next, tangent_dependent)) = self.circular_tangent_adjustment(drag.id, next)
-        else {
-            return false;
-        };
-        let Some((next, midpoint_dependents)) = self.point_constraint_adjustment(drag.id, next)
-        else {
-            return false;
-        };
         let Some(index) = self.shapes.iter().position(|shape| shape.id() == drag.id) else {
             return false;
         };
@@ -2249,81 +2214,7 @@ impl Document {
         }
         let frame_before = self.shapes.clone();
         self.shapes[index] = next;
-        if let Some((target_index, target)) = tangent_dependent {
-            self.shapes[target_index] = target;
-        }
-        for (target_index, target) in midpoint_dependents {
-            self.shapes[target_index] = target;
-        }
-        if let Some(partner_id) = self.concentric_partner(drag.id) {
-            if let Some(original) = drag
-                .before
-                .shapes
-                .iter()
-                .find(|shape| shape.id() == partner_id)
-            {
-                if let Some(partner) = self
-                    .shapes
-                    .iter_mut()
-                    .find(|shape| shape.id() == partner_id)
-                {
-                    *partner = original.translated(delta);
-                }
-            }
-        }
-        if matches!(drag.original, Shape::Point { .. }) {
-            for (&(line_id, endpoint), &point_id) in &self.point_links {
-                if point_id != drag.id {
-                    continue;
-                }
-                let Some(original) = drag
-                    .before
-                    .shapes
-                    .iter()
-                    .find(|shape| shape.id() == line_id)
-                else {
-                    continue;
-                };
-                if let (
-                    Some(Shape::Line { a, b, .. }),
-                    Shape::Line {
-                        a: old_a, b: old_b, ..
-                    },
-                ) = (
-                    self.shapes.iter_mut().find(|shape| shape.id() == line_id),
-                    original,
-                ) {
-                    if endpoint == 0 {
-                        *a = Point {
-                            x: old_a.x + delta.x,
-                            y: old_a.y + delta.y,
-                        };
-                    } else {
-                        *b = Point {
-                            x: old_b.x + delta.x,
-                            y: old_b.y + delta.y,
-                        };
-                    }
-                }
-                if let (
-                    Some(Shape::Spline { points, .. }),
-                    Shape::Spline {
-                        points: old_points, ..
-                    },
-                ) = (
-                    self.shapes.iter_mut().find(|shape| shape.id() == line_id),
-                    original,
-                ) {
-                    let target = if endpoint == 0 { 0 } else { points.len() - 1 };
-                    points[target] = Point {
-                        x: old_points[target].x + delta.x,
-                        y: old_points[target].y + delta.y,
-                    };
-                }
-            }
-        }
         let id = drag.id;
-        self.sync_shared_ellipse_from(id);
         if self.solve_constraints(&[Pin::Shape(id)]).is_err() {
             self.shapes = frame_before;
             return false;
@@ -2722,19 +2613,12 @@ impl Document {
                 y: a.y + length.copysign(if b.y == a.y { 1.0 } else { b.y - a.y }),
             },
         };
-        let next_shape = Shape::Line { id, a, b: next };
-        let (next_shape, midpoint_dependents) = self
-            .point_constraint_adjustment(id, next_shape)
-            .ok_or("Midpoint relation cannot follow axis change")?;
         self.history.push(self.snapshot());
         self.future.clear();
         // Keep the fixed or linked second end as the solver's initial guess
         // when it cannot move; the solve then decides how the line aligns.
         if !self.fixed_anchors.contains_key(&(id, 1)) && !self.point_links.contains_key(&(id, 1)) {
-            self.shapes[index] = next_shape;
-            for (target_index, target) in midpoint_dependents {
-                self.shapes[target_index] = target;
-            }
+            self.shapes[index] = Shape::Line { id, a, b: next };
         }
         self.axis_constraints.insert(id, axis);
         self.solve_or_rollback(&[Pin::Anchor(id, 0)])?;
@@ -2791,14 +2675,6 @@ impl Document {
         if !next_b.x.is_finite() || !next_b.y.is_finite() {
             return Err("Equal line length is out of range".into());
         }
-        let next_shape = Shape::Line {
-            id: target_id,
-            a: *a,
-            b: next_b,
-        };
-        let (_, midpoint_dependents) = self
-            .point_constraint_adjustment(target_id, next_shape)
-            .ok_or("Midpoint relation cannot follow Equal")?;
         self.history.push(self.snapshot());
         self.future.clear();
         if !self.fixed_anchors.contains_key(&(target_id, 1))
@@ -2806,9 +2682,6 @@ impl Document {
         {
             if let Shape::Line { b, .. } = &mut self.shapes[target_index] {
                 *b = next_b;
-            }
-            for (target_index, target) in midpoint_dependents {
-                self.shapes[target_index] = target;
             }
         }
         self.equal_lines.insert(target_id, source_id);
@@ -3090,22 +2963,6 @@ impl Document {
         }
         self.equal_radii.insert(target_id, source_id);
         Ok(true)
-    }
-
-    fn radius_difference_target(&self, source_id: u32, source_radius: f32) -> Option<(usize, f32)> {
-        let (&target_id, &(_, difference)) = self
-            .radius_differences
-            .iter()
-            .find(|(_, relation)| relation.0 == source_id)?;
-        let target_radius = source_radius - difference;
-        if !target_radius.is_finite() || target_radius <= 1e-6 {
-            return None;
-        }
-        let index = self
-            .shapes
-            .iter()
-            .position(|shape| shape.id() == target_id && matches!(shape, Shape::Circle { .. }))?;
-        Some((index, target_radius))
     }
 
     pub fn toggle_radius_difference_with(&mut self, source_id: u32) -> Result<bool, String> {
@@ -3519,58 +3376,6 @@ impl Document {
         None
     }
 
-    fn internal_tangent_dependent(&self, id: u32, updated: &Shape) -> Option<(usize, Shape)> {
-        let (&inner_id, &outer_id) = self
-            .internal_tangents
-            .iter()
-            .find(|(_, outer)| **outer == id)?;
-        debug_assert_eq!(outer_id, id);
-        let index = self
-            .shapes
-            .iter()
-            .position(|shape| shape.id() == inner_id)?;
-        let next = Self::internal_tangent_target(updated, &self.shapes[index])?;
-        Some((index, next))
-    }
-
-    fn circular_tangent_adjustment(
-        &self,
-        id: u32,
-        next: Shape,
-    ) -> Option<(Shape, Option<(usize, Shape)>)> {
-        if let Some(&outer_id) = self.internal_tangents.get(&id) {
-            let outer = self.shapes.iter().find(|shape| shape.id() == outer_id)?;
-            return Some((Self::internal_tangent_target(outer, &next)?, None));
-        }
-        if self.internal_tangents.values().any(|outer| *outer == id) {
-            let (index, dependent) = self.internal_tangent_dependent(id, &next)?;
-            if self.has_fixed_anchor(self.shapes[index].id()) {
-                return None;
-            }
-            return Some((next, Some((index, dependent))));
-        }
-        if let Some(&source_id) = self.external_tangents.get(&id) {
-            let source = self.shapes.iter().find(|shape| shape.id() == source_id)?;
-            return Some((Self::external_tangent_target(source, &next)?, None));
-        }
-        if let Some((&target_id, _)) = self
-            .external_tangents
-            .iter()
-            .find(|(_, source)| **source == id)
-        {
-            let index = self
-                .shapes
-                .iter()
-                .position(|shape| shape.id() == target_id)?;
-            if self.has_fixed_anchor(target_id) {
-                return None;
-            }
-            let dependent = Self::external_tangent_target(&next, &self.shapes[index])?;
-            return Some((next, Some((index, dependent))));
-        }
-        Some((next, None))
-    }
-
     fn internal_tangent_member(&self, id: u32) -> bool {
         self.internal_tangents.contains_key(&id)
             || self.internal_tangents.values().any(|source| *source == id)
@@ -3834,188 +3639,6 @@ impl Document {
                 b: contact,
             }
         })
-    }
-
-    pub fn endpoint_tangent_target(
-        line: &Shape,
-        arc: &Shape,
-        endpoint: u8,
-        line_sign: i8,
-        sweep_sign: i8,
-    ) -> Option<Shape> {
-        let Shape::Line { a, b, .. } = line else {
-            return None;
-        };
-        let Shape::Arc {
-            id,
-            center,
-            radius,
-            sweep,
-            segments,
-            ..
-        } = arc
-        else {
-            return None;
-        };
-        if endpoint > 1
-            || ![-1, 1].contains(&line_sign)
-            || ![-1, 1].contains(&sweep_sign)
-            || sweep.signum() != sweep_sign as f64
-        {
-            return None;
-        }
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let length = (dx * dx + dy * dy).sqrt();
-        if !length.is_finite() || length <= 1e-6 {
-            return None;
-        }
-        let ux = dx / length;
-        let uy = dy / length;
-        let radial_sign = -(line_sign as f32) * (sweep_sign as f32);
-        let radial = Point {
-            x: -uy * radial_sign,
-            y: ux * radial_sign,
-        };
-        let endpoint_angle = (radial.y as f64).atan2(radial.x as f64);
-        let start_angle = if endpoint == 0 {
-            endpoint_angle
-        } else {
-            endpoint_angle - sweep
-        };
-        Some(Shape::Arc {
-            id: *id,
-            center: *center,
-            radius: *radius,
-            start_angle,
-            sweep: *sweep,
-            segments: *segments,
-        })
-    }
-
-    fn point_constraint_adjustment(
-        &self,
-        id: u32,
-        next: Shape,
-    ) -> Option<(Shape, Vec<(usize, Shape)>)> {
-        if let Some(&source_id) = self.midpoint_links.get(&id) {
-            let source = self.shapes.iter().find(|shape| shape.id() == source_id)?;
-            let midpoint = Self::curve_midpoint(source)?;
-            return match next {
-                Shape::Point { id, .. } => Some((Shape::Point { id, at: midpoint }, Vec::new())),
-                _ => None,
-            };
-        }
-        if let Some(&source_id) = self.point_curve_links.get(&id) {
-            let source = self.shapes.iter().find(|shape| shape.id() == source_id)?;
-            return match next {
-                Shape::Point { id, at } => Some((
-                    Shape::Point {
-                        id,
-                        at: Self::closest_curve_point(source, at)?,
-                    },
-                    Vec::new(),
-                )),
-                _ => None,
-            };
-        }
-        if let Some(&(source_id, endpoint)) = self.normal_links.get(&id) {
-            let source = self.shapes.iter().find(|shape| shape.id() == source_id)?;
-            return Some((
-                Self::normal_line_target(source, &next, endpoint)?,
-                Vec::new(),
-            ));
-        }
-        if let Some(&(source_id, endpoint, line_sign, sweep_sign)) = self.endpoint_tangents.get(&id)
-        {
-            let source = self.shapes.iter().find(|shape| shape.id() == source_id)?;
-            return Some((
-                Self::endpoint_tangent_target(source, &next, endpoint, line_sign, sweep_sign)?,
-                Vec::new(),
-            ));
-        }
-        let mut dependents = Vec::new();
-        for (&target_id, &source_id) in &self.midpoint_links {
-            if source_id != id {
-                continue;
-            }
-            let midpoint = Self::curve_midpoint(&next)?;
-            let index = self
-                .shapes
-                .iter()
-                .position(|shape| shape.id() == target_id)?;
-            if self.has_fixed_anchor(target_id) {
-                return None;
-            }
-            dependents.push((
-                index,
-                Shape::Point {
-                    id: target_id,
-                    at: midpoint,
-                },
-            ));
-        }
-        for (&target_id, &source_id) in &self.point_curve_links {
-            if source_id != id {
-                continue;
-            }
-            let index = self
-                .shapes
-                .iter()
-                .position(|shape| shape.id() == target_id)?;
-            let Shape::Point { at, .. } = self.shapes[index] else {
-                return None;
-            };
-            if self.has_fixed_anchor(target_id) {
-                return None;
-            }
-            dependents.push((
-                index,
-                Shape::Point {
-                    id: target_id,
-                    at: Self::closest_curve_point(&next, at)?,
-                },
-            ));
-        }
-        for (&target_id, &(source_id, endpoint)) in &self.normal_links {
-            if source_id != id {
-                continue;
-            }
-            let index = self
-                .shapes
-                .iter()
-                .position(|shape| shape.id() == target_id)?;
-            if self.has_fixed_anchor(target_id) {
-                return None;
-            }
-            dependents.push((
-                index,
-                Self::normal_line_target(&next, &self.shapes[index], endpoint)?,
-            ));
-        }
-        for (&target_id, &(source_id, endpoint, line_sign, sweep_sign)) in &self.endpoint_tangents {
-            if source_id != id {
-                continue;
-            }
-            let index = self
-                .shapes
-                .iter()
-                .position(|shape| shape.id() == target_id)?;
-            if self.has_fixed_anchor(target_id) {
-                return None;
-            }
-            dependents.push((
-                index,
-                Self::endpoint_tangent_target(
-                    &next,
-                    &self.shapes[index],
-                    endpoint,
-                    line_sign,
-                    sweep_sign,
-                )?,
-            ));
-        }
-        Some((next, dependents))
     }
 
     pub fn toggle_point_on_curve_with(&mut self, source_id: u32) -> Result<bool, String> {
@@ -4378,65 +4001,6 @@ impl Document {
             group.push(root);
         }
         group
-    }
-
-    fn sync_shared_ellipse_from(&mut self, id: u32) {
-        let partners = self.shared_ellipse_partners(id);
-        if partners.is_empty() {
-            return;
-        }
-        let Some((center, rx, ry, rotation)) = self
-            .shapes
-            .iter()
-            .find(|shape| shape.id() == id)
-            .and_then(|shape| match shape {
-                Shape::Ellipse {
-                    center,
-                    rx,
-                    ry,
-                    rotation,
-                    ..
-                }
-                | Shape::EllipticArc {
-                    center,
-                    rx,
-                    ry,
-                    rotation,
-                    ..
-                } => Some((*center, *rx, *ry, *rotation)),
-                _ => None,
-            })
-        else {
-            return;
-        };
-        for partner in self
-            .shapes
-            .iter_mut()
-            .filter(|shape| partners.contains(&shape.id()))
-        {
-            match partner {
-                Shape::Ellipse {
-                    center: other_center,
-                    rx: other_rx,
-                    ry: other_ry,
-                    rotation: other_rotation,
-                    ..
-                }
-                | Shape::EllipticArc {
-                    center: other_center,
-                    rx: other_rx,
-                    ry: other_ry,
-                    rotation: other_rotation,
-                    ..
-                } => {
-                    *other_center = center;
-                    *other_rx = rx;
-                    *other_ry = ry;
-                    *other_rotation = rotation;
-                }
-                _ => {}
-            }
-        }
     }
 
     pub fn toggle_concentric_with(&mut self, source_id: u32) -> Result<bool, String> {
@@ -6110,54 +5674,9 @@ impl Document {
                 next = projected;
             }
         }
-        let Some((next, tangent_dependent)) = self.circular_tangent_adjustment(next.id(), next)
-        else {
-            return false;
-        };
-        let Some((next, midpoint_dependents)) = self.point_constraint_adjustment(next.id(), next)
-        else {
-            return false;
-        };
         self.history.push(self.snapshot());
         self.future.clear();
         self.shapes[index] = next;
-        if let Some((target_index, target)) = tangent_dependent {
-            self.shapes[target_index] = target;
-        }
-        for (target_index, target) in midpoint_dependents {
-            self.shapes[target_index] = target;
-        }
-        self.sync_shared_ellipse_from(self.shapes[index].id());
-        if let Some(partner_id) = self.concentric_partner(self.shapes[index].id()) {
-            if let Some(partner) = self
-                .shapes
-                .iter_mut()
-                .find(|shape| shape.id() == partner_id)
-            {
-                *partner = partner.translated(delta);
-            }
-        }
-        if matches!(self.shapes[index], Shape::Point { .. }) {
-            for (&(line_id, endpoint), &point_id) in &self.point_links {
-                if point_id != self.shapes[index].id() {
-                    continue;
-                }
-                if let Some(Shape::Line { a, b, .. }) =
-                    self.shapes.iter_mut().find(|shape| shape.id() == line_id)
-                {
-                    let target = if endpoint == 0 { a } else { b };
-                    target.x += delta.x;
-                    target.y += delta.y;
-                }
-                if let Some(Shape::Spline { points, .. }) =
-                    self.shapes.iter_mut().find(|shape| shape.id() == line_id)
-                {
-                    let target = if endpoint == 0 { 0 } else { points.len() - 1 };
-                    points[target].x += delta.x;
-                    points[target].y += delta.y;
-                }
-            }
-        }
         let id = self.shapes[index].id();
         self.solve_or_rollback(&[Pin::Shape(id)]).is_ok()
     }
@@ -6171,12 +5690,6 @@ impl Document {
         };
         let source = &self.shapes[index];
         if !copy && self.midpoint_links.contains_key(&source.id()) {
-            return false;
-        }
-        if !copy
-            && (self.equal_ellipses.contains_key(&source.id())
-                || self.equal_ellipses.values().any(|id| *id == source.id()))
-        {
             return false;
         }
         if !copy && self.has_fixed_anchor(source.id()) {
@@ -6212,9 +5725,6 @@ impl Document {
         {
             return false;
         }
-        if !copy && self.has_non_line_point_link(source.id()) {
-            return false;
-        }
         let Some(mut scaled) = source.scaled_about(factor, center) else {
             return false;
         };
@@ -6233,45 +5743,6 @@ impl Document {
                     scaled = projected;
                 }
             }
-        }
-        let tangent_dependent = if copy {
-            None
-        } else {
-            let Some((adjusted, dependent)) = self.circular_tangent_adjustment(source.id(), scaled)
-            else {
-                return false;
-            };
-            scaled = adjusted;
-            dependent
-        };
-        let midpoint_dependents = if copy {
-            Vec::new()
-        } else {
-            let Some((adjusted, dependents)) =
-                self.point_constraint_adjustment(source.id(), scaled)
-            else {
-                return false;
-            };
-            scaled = adjusted;
-            dependents
-        };
-        let radial_target = if !copy {
-            if let Shape::Circle { radius, .. } = scaled {
-                self.radius_difference_target(source.id(), radius)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if !copy
-            && self
-                .radius_differences
-                .values()
-                .any(|(source_id, _)| *source_id == source.id())
-            && radial_target.is_none()
-        {
-            return false;
         }
         if scaled == *source {
             return false;
@@ -6312,32 +5783,7 @@ impl Document {
             self.selected = Some(new_id);
             self.next_id = self.next_id.saturating_add(1);
         } else {
-            if let Some(partner_id) = self.concentric_partner(id) {
-                let delta = Point {
-                    x: scaled.center().x - source.center().x,
-                    y: scaled.center().y - source.center().y,
-                };
-                if let Some(partner) = self
-                    .shapes
-                    .iter_mut()
-                    .find(|shape| shape.id() == partner_id)
-                {
-                    *partner = partner.translated(delta);
-                }
-            }
             self.shapes[index] = scaled;
-            if let Some((target_index, target)) = tangent_dependent {
-                self.shapes[target_index] = target;
-            }
-            for (target_index, target) in midpoint_dependents {
-                self.shapes[target_index] = target;
-            }
-            if let Some((target_index, target_radius)) = radial_target {
-                if let Shape::Circle { radius, .. } = &mut self.shapes[target_index] {
-                    *radius = target_radius;
-                }
-            }
-            self.sync_shared_ellipse_from(id);
             for (key, value) in dimensions {
                 self.driving_dimensions.insert(key, value);
             }
@@ -6364,9 +5810,6 @@ impl Document {
             return false;
         }
         let source = &self.shapes[index];
-        if !copy && self.line_relations.contains_key(&source.id()) {
-            return false;
-        }
         if !copy && self.has_fixed_anchor(source.id()) {
             return false;
         }
@@ -6396,27 +5839,8 @@ impl Document {
         {
             return false;
         }
-        if !copy && self.has_non_line_point_link(source.id()) {
-            return false;
-        }
         let Some(rotated) = source.rotated_about(degrees, center) else {
             return false;
-        };
-        let (rotated, tangent_dependent) = if copy {
-            (rotated, None)
-        } else {
-            let Some(adjusted) = self.circular_tangent_adjustment(source.id(), rotated) else {
-                return false;
-            };
-            adjusted
-        };
-        let (rotated, midpoint_dependents) = if copy {
-            (rotated, Vec::new())
-        } else {
-            let Some(adjusted) = self.point_constraint_adjustment(source.id(), rotated) else {
-                return false;
-            };
-            adjusted
         };
         if !copy && rotated == *source {
             return false;
@@ -6477,27 +5901,7 @@ impl Document {
             self.selected = Some(id);
             self.next_id = self.next_id.saturating_add(1);
         } else {
-            if let Some(partner_id) = self.concentric_partner(source_id) {
-                let delta = Point {
-                    x: rotated.center().x - source.center().x,
-                    y: rotated.center().y - source.center().y,
-                };
-                if let Some(partner) = self
-                    .shapes
-                    .iter_mut()
-                    .find(|shape| shape.id() == partner_id)
-                {
-                    *partner = partner.translated(delta);
-                }
-            }
             self.shapes[index] = rotated;
-            if let Some((target_index, target)) = tangent_dependent {
-                self.shapes[target_index] = target;
-            }
-            for (target_index, target) in midpoint_dependents {
-                self.shapes[target_index] = target;
-            }
-            self.sync_shared_ellipse_from(source_id);
             if let Some(axis) = axis_after_rotation {
                 self.axis_constraints.insert(source_id, axis);
             }
@@ -6787,24 +6191,6 @@ impl Document {
             }
             _ => return Err("dimension does not apply to selected geometry".into()),
         }
-        let (next, tangent_dependent) = self
-            .circular_tangent_adjustment(id, next)
-            .ok_or("Internal tangent has no valid contact after this edit")?;
-        let (next, midpoint_dependents) = self
-            .point_constraint_adjustment(id, next)
-            .ok_or("Midpoint relation cannot follow this edit")?;
-        if matches!(
-            field,
-            DimensionField::RectangleWidth
-                | DimensionField::RectangleHeight
-                | DimensionField::Rotation
-        ) && self.shared_ellipse_partners(id).into_iter().any(|partner| {
-            self.fixed_anchors
-                .keys()
-                .any(|(shape_id, anchor)| *shape_id == partner && *anchor > 0)
-        }) {
-            return Err("Shared ellipse partner has a fixed endpoint or axis".into());
-        }
         if matches!(
             field,
             DimensionField::RectangleWidth
@@ -6817,90 +6203,12 @@ impl Document {
         {
             return Err("Shared ellipse partner already has a driving dimension".into());
         }
-        let equal_radius_target =
-            if matches!(
-                field,
-                DimensionField::CircleDiameter | DimensionField::CurveRadius
-            ) && matches!(self.shapes[index], Shape::Circle { .. } | Shape::Arc { .. })
-            {
-                self.equal_radii
-                    .iter()
-                    .find_map(|(&target, &source)| (source == id).then_some(target))
-            } else {
-                None
-            };
-        let new_radius = if field == DimensionField::CircleDiameter {
-            value * 0.5
-        } else {
-            value
-        };
-        let radius_difference_target = if field == DimensionField::CircleDiameter
-            && matches!(self.shapes[index], Shape::Circle { .. })
-        {
-            let dependent = self.radius_difference_target(id, new_radius);
-            if self
-                .radius_differences
-                .values()
-                .any(|(source, _)| *source == id)
-                && dependent.is_none()
-            {
-                return Err("Radial distance would make target radius invalid".into());
-            }
-            dependent
-        } else {
-            None
-        };
-        let equal_ellipse_target = if matches!(
-            field,
-            DimensionField::RectangleWidth | DimensionField::RectangleHeight
-        ) && matches!(
-            self.shapes[index],
-            Shape::Ellipse { .. } | Shape::EllipticArc { .. }
-        ) {
-            self.equal_ellipses
-                .iter()
-                .find_map(|(&target, &source)| (source == id).then_some(target))
-                .map(|target_id| {
-                    self.shapes
-                        .iter()
-                        .position(|shape| shape.id() == target_id)
-                        .ok_or("Equal ellipse target is missing")
-                })
-                .transpose()?
-        } else {
-            None
-        };
-        if next != self.shapes[index] || self.driving_dimensions.get(&(id, field)) != Some(&value)
-            || tangent_dependent.as_ref().is_some_and(|(target_index, target)| self.shapes[*target_index] != *target)
-            || midpoint_dependents.iter().any(|(target_index, target)| self.shapes[*target_index] != *target)
-            || equal_radius_target.is_some_and(|target_id| self.shapes.iter().any(|shape| shape.id() == target_id && matches!(shape, Shape::Circle { radius, .. } | Shape::Arc { radius, .. } if (*radius - new_radius).abs() > 1e-6)))
-            || radius_difference_target.is_some_and(|(target_index, target_radius)| matches!(self.shapes[target_index], Shape::Circle { radius, .. } if (radius - target_radius).abs() > 1e-6))
-            || equal_ellipse_target.is_some_and(|target_index| match (&self.shapes[target_index], field) {
-                (Shape::Ellipse { rx, .. } | Shape::EllipticArc { rx, .. }, DimensionField::RectangleWidth) => (*rx - value * 0.5).abs() > 1e-6,
-                (Shape::Ellipse { ry, .. } | Shape::EllipticArc { ry, .. }, DimensionField::RectangleHeight) => (*ry - value * 0.5).abs() > 1e-6,
-                _ => false,
-            }) {
+        // Relation partners (Equal, radial distance, tangency, shared
+        // ellipses, ...) follow through the solver.
+        if next != self.shapes[index] || self.driving_dimensions.get(&(id, field)) != Some(&value) {
             self.history.push(self.snapshot());
             self.future.clear();
             self.shapes[index] = next;
-            if let Some((target_index, target)) = tangent_dependent { self.shapes[target_index] = target; }
-            for (target_index, target) in midpoint_dependents { self.shapes[target_index] = target; }
-            self.sync_shared_ellipse_from(id);
-            if let Some(target_id) = equal_radius_target {
-                let target = self.shapes.iter_mut().find(|shape| shape.id() == target_id).ok_or("Equal target is missing")?;
-                if let Shape::Circle { radius, .. } | Shape::Arc { radius, .. } = target { *radius = new_radius; }
-                else { return Err("Equal target is not circular".into()); }
-            }
-            if let Some((target_index, target_radius)) = radius_difference_target {
-                if let Shape::Circle { radius, .. } = &mut self.shapes[target_index] { *radius = target_radius; }
-            }
-            if let Some(target_index) = equal_ellipse_target {
-                match (&mut self.shapes[target_index], field) {
-                    (Shape::Ellipse { rx, .. } | Shape::EllipticArc { rx, .. }, DimensionField::RectangleWidth) => *rx = value * 0.5,
-                    (Shape::Ellipse { ry, .. } | Shape::EllipticArc { ry, .. }, DimensionField::RectangleHeight) => *ry = value * 0.5,
-                    _ => return Err("Equal target is not elliptical".into()),
-                }
-            }
             self.driving_dimensions.insert((id, field), value);
             let pin = if matches!(self.shapes[index], Shape::Line { .. }) {
                 Pin::Anchor(id, 0)
@@ -6948,72 +6256,323 @@ impl SketchAnalysis {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum SolverEntity {
     Line(solver::LineVar),
     Point(solver::PointVar),
     Circle(solver::CircleVar),
+    Arc(solver::ArcVar),
+    Ellipse(solver::EllipseVar),
+    Spline(solver::SplineVar),
+}
+
+impl SolverEntity {
+    fn curve(&self) -> Option<solver::Curve> {
+        Some(match self {
+            Self::Line(line) => solver::Curve::Line(*line),
+            Self::Circle(circle) => solver::Curve::Circle(*circle),
+            Self::Arc(arc) => solver::Curve::Arc(*arc),
+            Self::Ellipse(ellipse) => solver::Curve::Ellipse(*ellipse),
+            Self::Spline(spline) => solver::Curve::Spline(spline.clone()),
+            Self::Point(_) => return None,
+        })
+    }
+
+    fn center(&self) -> Option<solver::PointVar> {
+        match self {
+            Self::Circle(circle) => Some(circle.center),
+            Self::Arc(arc) => Some(arc.circle.center),
+            Self::Ellipse(ellipse) => Some(ellipse.center),
+            _ => None,
+        }
+    }
+}
+
+/// Builds solver parameters for document shapes on demand.
+struct SolverBuilder<'a> {
+    shapes: &'a [Shape],
+    pins: &'a HashSet<Pin>,
+    /// Pinned shapes that are relation targets: the edit is kept as a strong
+    /// preference so the relation can project the shape back onto its source.
+    softened: &'a HashSet<u32>,
+    /// Lines whose second endpoint follows a relation (weak second endpoint).
+    dependents: &'a HashSet<u32>,
+    /// Curves whose radius or axes a relation may change; other curves keep
+    /// their size, so tangency and point relations move them rigidly.
+    sized: &'a HashSet<u32>,
+    /// Curves whose sweep or rotation a relation may change.
+    angled: &'a HashSet<u32>,
+    /// Anchor being dragged: a strong soft target instead of a hard pin.
+    drag: Option<(u32, usize)>,
+    problem: solver::Problem,
+    entities: HashMap<u32, SolverEntity>,
+}
+
+impl SolverBuilder<'_> {
+    fn param(&mut self, value: f64, locked: bool, weight: f64) -> usize {
+        let var = self.problem.param(value, locked);
+        self.problem
+            .soft
+            .push(solver::Soft::Target { var, value, weight });
+        var
+    }
+
+    fn entity(&mut self, id: u32) -> Option<SolverEntity> {
+        use solver::{ArcVar, CircleVar, EllipseVar, LineVar, PointVar, SplineVar};
+        if let Some(found) = self.entities.get(&id) {
+            return Some(found.clone());
+        }
+        let shape = self.shapes.iter().find(|shape| shape.id() == id)?.clone();
+        let softened = self.softened.contains(&id);
+        let shape_locked = !softened && self.pins.contains(&Pin::Shape(id));
+        let (position, size) = if softened { (10.0, 100.0) } else { (1.0, 0.5) };
+        let pins = self.pins;
+        let anchor_locked = |index| shape_locked || pins.contains(&Pin::Anchor(id, index));
+        let size_locked = shape_locked || !self.sized.contains(&id);
+        let angle_locked = shape_locked || !self.angled.contains(&id);
+        let drag = self.drag;
+        let point = |builder: &mut Self, at: Point, index: usize, weight: f64| {
+            let weight = if drag == Some((id, index)) {
+                1e3
+            } else {
+                weight * position
+            };
+            PointVar {
+                x: builder.param(at.x as f64, anchor_locked(index), weight),
+                y: builder.param(at.y as f64, anchor_locked(index), weight),
+            }
+        };
+        let created = match shape {
+            // Relation targets rotate/stretch about their first endpoint;
+            // other lines (relation sources, free lines) hold both ends.
+            Shape::Line { a, b, .. } => {
+                let weak = if self.dependents.contains(&id) {
+                    1e-3
+                } else {
+                    1.0
+                };
+                SolverEntity::Line(LineVar {
+                    a: point(self, a, 0, 1.0),
+                    b: point(self, b, 1, weak),
+                })
+            }
+            Shape::Point { at, .. } => SolverEntity::Point(point(self, at, 0, 1.0)),
+            Shape::Circle { center, radius, .. } => {
+                let center = point(self, center, 0, 1.0);
+                let radius = self.param(radius as f64, size_locked, size);
+                SolverEntity::Circle(CircleVar { center, radius })
+            }
+            Shape::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep,
+                ..
+            } => {
+                let center = point(self, center, 0, 1.0);
+                let angular = (radius as f64).max(1.0) * position;
+                let radius = self.param(radius as f64, size_locked, size);
+                SolverEntity::Arc(ArcVar {
+                    circle: CircleVar { center, radius },
+                    start: self.param(start_angle, angle_locked, angular),
+                    sweep: self.param(sweep, angle_locked, angular * 10.0),
+                })
+            }
+            Shape::Ellipse {
+                center,
+                rx,
+                ry,
+                rotation,
+                ..
+            }
+            | Shape::EllipticArc {
+                center,
+                rx,
+                ry,
+                rotation,
+                ..
+            } => {
+                let scale = ((rx + ry) as f64 * 0.5).max(1.0) * position;
+                let center = point(self, center, 0, 1.0);
+                let rx = self.param(rx as f64, size_locked, size);
+                let ry = self.param(ry as f64, size_locked, size);
+                let rotation = self.param(
+                    rotation as f64,
+                    angle_locked,
+                    scale * std::f64::consts::PI / 180.0 * 10.0,
+                );
+                let arc = match shape {
+                    Shape::EllipticArc {
+                        start_angle, sweep, ..
+                    } => Some((
+                        self.param(start_angle, angle_locked, scale),
+                        self.param(sweep, angle_locked, scale * 10.0),
+                    )),
+                    _ => None,
+                };
+                SolverEntity::Ellipse(EllipseVar {
+                    center,
+                    rx,
+                    ry,
+                    rotation,
+                    arc,
+                })
+            }
+            Shape::Spline {
+                mode,
+                ref points,
+                closed,
+                ..
+            } => SolverEntity::Spline(SplineVar {
+                points: points
+                    .iter()
+                    .enumerate()
+                    .map(|(index, &at)| point(self, at, index, 1.0))
+                    .collect(),
+                control: mode == SplineMode::Control,
+                closed,
+            }),
+            _ => return None,
+        };
+        self.entities.insert(id, created.clone());
+        Some(created)
+    }
+
+    fn line(&mut self, id: u32) -> Option<solver::LineVar> {
+        match self.entity(id)? {
+            SolverEntity::Line(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    fn point(&mut self, id: u32) -> Option<solver::PointVar> {
+        match self.entity(id)? {
+            SolverEntity::Point(point) => Some(point),
+            _ => None,
+        }
+    }
+
+    /// Circle or arc (radius relations treat both alike).
+    fn circle(&mut self, id: u32) -> Option<solver::CircleVar> {
+        match self.entity(id)? {
+            SolverEntity::Circle(circle) => Some(circle),
+            SolverEntity::Arc(arc) => Some(arc.circle),
+            _ => None,
+        }
+    }
+
+    fn ellipse(&mut self, id: u32) -> Option<solver::EllipseVar> {
+        match self.entity(id)? {
+            SolverEntity::Ellipse(ellipse) => Some(ellipse),
+            _ => None,
+        }
+    }
+
+    fn curve(&mut self, id: u32) -> Option<solver::Curve> {
+        self.entity(id)?.curve()
+    }
+
+    /// Auxiliary spline parameter for a point that must lie on `curve`.
+    fn curve_param(&mut self, curve: &solver::Curve, near: solver::PointVar) -> Option<usize> {
+        let solver::Curve::Spline(spline) = curve else {
+            return None;
+        };
+        let p = &self.problem.params;
+        let u = solver::spline_parameter(p, spline, (p[near.x], p[near.y]));
+        Some(self.param(u, false, 1e-3))
+    }
 }
 
 impl SolverEntity {
     fn vars(&self) -> Vec<usize> {
-        match *self {
+        match self {
             SolverEntity::Line(l) => vec![l.a.x, l.a.y, l.b.x, l.b.y],
             SolverEntity::Point(p) => vec![p.x, p.y],
             SolverEntity::Circle(c) => vec![c.center.x, c.center.y, c.radius],
+            SolverEntity::Arc(a) => vec![
+                a.circle.center.x,
+                a.circle.center.y,
+                a.circle.radius,
+                a.start,
+                a.sweep,
+            ],
+            SolverEntity::Ellipse(e) => {
+                let mut vars = vec![e.center.x, e.center.y, e.rx, e.ry, e.rotation];
+                if let Some((start, sweep)) = e.arc {
+                    vars.extend([start, sweep]);
+                }
+                vars
+            }
+            SolverEntity::Spline(s) => s.points.iter().flat_map(|p| [p.x, p.y]).collect(),
         }
     }
 }
 
 impl Document {
-    /// Shapes the solver must treat as constants because they participate in
-    /// a relation that is still hand-propagated.
-    fn solver_locked_shapes(&self) -> HashSet<u32> {
-        let kind = |id: u32| self.shapes.iter().find(|shape| shape.id() == id);
-        let is_line = |id: u32| matches!(kind(id), Some(Shape::Line { .. }));
-        let is_round = |id: u32| matches!(kind(id), Some(Shape::Circle { .. } | Shape::Arc { .. }));
-        let mut locked = HashSet::new();
-        for (&target, &(source, _)) in &self.normal_links {
-            locked.extend([target, source]);
-        }
-        for (&target, &(source, ..)) in &self.endpoint_tangents {
-            locked.extend([target, source]);
-        }
-        for (&a, &b) in self.internal_tangents.iter().chain(&self.external_tangents) {
-            locked.extend([a, b]);
-        }
-        for (&point, &source) in &self.midpoint_links {
-            if !is_line(source) {
-                locked.extend([point, source]);
+    /// Curves whose size (radius, axes) and whose angles (sweep, rotation)
+    /// some relation or driving value may change during a solve.
+    fn solver_free_curve_parameters(&self) -> (HashSet<u32>, HashSet<u32>) {
+        let mut sized: HashSet<u32> = self
+            .equal_radii
+            .iter()
+            .chain(self.equal_ellipses.iter())
+            .chain(self.shared_ellipses.iter())
+            .flat_map(|(&a, &b)| [a, b])
+            .chain(
+                self.radius_differences
+                    .iter()
+                    .flat_map(|(&target, &(source, _))| [target, source]),
+            )
+            .collect();
+        let mut angled: HashSet<u32> = self
+            .shared_ellipses
+            .iter()
+            .flat_map(|(&a, &b)| [a, b])
+            .chain(self.endpoint_tangents.keys().copied())
+            .collect();
+        for &(id, field) in self.driving_dimensions.keys() {
+            match field {
+                DimensionField::CircleDiameter
+                | DimensionField::CurveRadius
+                | DimensionField::RectangleWidth
+                | DimensionField::RectangleHeight => {
+                    sized.insert(id);
+                }
+                DimensionField::ArcSweep | DimensionField::Rotation => {
+                    angled.insert(id);
+                }
+                _ => {}
             }
         }
-        for (&point, &source) in &self.point_curve_links {
-            if !is_line(source) && !matches!(kind(source), Some(Shape::Circle { .. })) {
-                locked.extend([point, source]);
+        for &(id, index) in self.fixed_anchors.keys() {
+            if index > 0 {
+                sized.insert(id);
+                angled.insert(id);
             }
         }
-        for (&(curve, _), &point) in &self.point_links {
-            if !is_line(curve) {
-                locked.insert(point);
-            }
-        }
-        for (&a, &b) in &self.concentric {
-            if !is_round(a) || !is_round(b) {
-                locked.extend([a, b]);
-            }
-        }
-        for &(id, anchor) in self.fixed_anchors.keys() {
-            if anchor > 0 && matches!(kind(id), Some(Shape::Arc { .. } | Shape::Circle { .. })) {
-                locked.insert(id);
-            }
-        }
-        locked
+        (sized, angled)
     }
 
-    /// Re-solve every solver-backed relation after an edit. Pinned shapes and
-    /// anchors stay exactly where the edit put them; everything else moves as
-    /// little as possible. Intent is applied as a priority cascade that keeps
-    /// the old directed propagation where it still works:
+    /// Shapes that are the target of a relation that projects them onto
+    /// their source. When such a shape is the edited one, its pin is softened
+    /// so the relation can pull it back (the old "snap the target" behavior).
+    fn projected_targets(&self) -> HashSet<u32> {
+        self.point_curve_links
+            .keys()
+            .chain(self.normal_links.keys())
+            .chain(self.endpoint_tangents.keys())
+            .chain(self.internal_tangents.keys())
+            .chain(self.external_tangents.keys())
+            .copied()
+            .collect()
+    }
+
+    /// Re-solve every relation after an edit. Pinned shapes and anchors stay
+    /// exactly where the edit put them (pinned targets of projecting
+    /// relations such as point-on-curve or tangency are kept as a strong
+    /// preference instead); everything else moves as little as possible.
+    /// Intent is applied as a priority cascade that keeps the old directed
+    /// propagation where it still works:
     ///
     /// 1. relation sources (shapes that are not the target of a directed
     ///    relation or a point link) stay put and only targets move;
@@ -7030,9 +6589,11 @@ impl Document {
             .chain(self.radius_differences.keys())
             .chain(self.concentric.keys())
             .chain(self.midpoint_links.keys())
-            .chain(self.point_curve_links.keys())
+            .chain(self.equal_ellipses.keys())
+            .chain(self.shared_ellipses.keys())
             .chain(self.point_links.values())
             .copied()
+            .chain(self.projected_targets())
             .collect();
         let sources: Vec<u32> = self
             .shapes
@@ -7085,19 +6646,21 @@ impl Document {
     /// analysis) instead of only those that take part in a relation.
     /// `drag` is an anchor that follows the cursor as a strong soft target
     /// instead of a hard pin, so it slides along what the relations allow.
+    /// `drag` is an anchor that follows the cursor as a strong soft target
+    /// instead of a hard pin, so it slides along what the relations allow.
     fn build_problem(
         &self,
         pins: &HashSet<Pin>,
         everything: bool,
         drag: Option<(u32, usize)>,
     ) -> (solver::Problem, HashMap<u32, SolverEntity>) {
-        use solver::{CircleVar, Constraint, LineVar, Problem, Soft, Value};
-        let locked_shapes = self.solver_locked_shapes();
+        use solver::{Constraint, Curve, Soft, Value};
         let dependents: HashSet<u32> = self
             .equal_lines
             .keys()
             .chain(self.line_relations.keys())
             .chain(self.axis_constraints.keys())
+            .chain(self.normal_links.keys())
             .copied()
             .chain(
                 self.driving_dimensions
@@ -7108,104 +6671,45 @@ impl Document {
                     .map(|(id, _)| *id),
             )
             .collect();
-        let shapes = &self.shapes;
-        let mut problem = Problem::default();
-        let mut entities: HashMap<u32, SolverEntity> = HashMap::new();
-        let mut keep_length: HashSet<u32> = HashSet::new();
-        let entity = |problem: &mut Problem,
-                      entities: &mut HashMap<u32, SolverEntity>,
-                      id: u32|
-         -> Option<SolverEntity> {
-            if let Some(found) = entities.get(&id) {
-                return Some(*found);
-            }
-            let shape = shapes.iter().find(|shape| shape.id() == id)?;
-            let shape_locked = locked_shapes.contains(&id) || pins.contains(&Pin::Shape(id));
-            let anchor_locked = |index| shape_locked || pins.contains(&Pin::Anchor(id, index));
-            let point = |problem: &mut Problem, at: Point, index: usize, weight: f64| {
-                let weight = if drag == Some((id, index)) {
-                    1e3
-                } else {
-                    weight
-                };
-                let var = problem.point(at.x as f64, at.y as f64, anchor_locked(index));
-                for (v, value) in [(var.x, at.x), (var.y, at.y)] {
-                    problem.soft.push(Soft::Target {
-                        var: v,
-                        value: value as f64,
-                        weight,
-                    });
-                }
-                var
-            };
-            let created = match *shape {
-                // Relation targets rotate/stretch about their first endpoint;
-                // other lines (relation sources, free lines) hold both ends.
-                Shape::Line { a, b, .. } => SolverEntity::Line(LineVar {
-                    a: point(problem, a, 0, 1.0),
-                    b: point(
-                        problem,
-                        b,
-                        1,
-                        if dependents.contains(&id) { 1e-3 } else { 1.0 },
-                    ),
-                }),
-                Shape::Point { at, .. } => SolverEntity::Point(point(problem, at, 0, 1.0)),
-                Shape::Circle { center, radius, .. } | Shape::Arc { center, radius, .. } => {
-                    let center = point(problem, center, 0, 1.0);
-                    let var = problem.param(radius as f64, shape_locked);
-                    problem.soft.push(Soft::Target {
-                        var,
-                        value: radius as f64,
-                        weight: 0.5,
-                    });
-                    SolverEntity::Circle(CircleVar {
-                        center,
-                        radius: var,
-                    })
-                }
-                _ => return None,
-            };
-            entities.insert(id, created);
-            Some(created)
+        let (mut sized, mut angled) = self.solver_free_curve_parameters();
+        if everything {
+            // DOF analysis counts every curve parameter as free.
+            sized.extend(self.shapes.iter().map(Shape::id));
+            angled.extend(self.shapes.iter().map(Shape::id));
+        }
+        let projected = self.projected_targets();
+        let softened: HashSet<u32> = pins
+            .iter()
+            .filter_map(|pin| match pin {
+                Pin::Shape(id) if projected.contains(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let mut b = SolverBuilder {
+            shapes: &self.shapes,
+            pins,
+            softened: &softened,
+            drag,
+            dependents: &dependents,
+            sized: &sized,
+            angled: &angled,
+            problem: solver::Problem::default(),
+            entities: HashMap::new(),
         };
+        let mut keep_length: HashSet<u32> = HashSet::new();
         let mut constraints = Vec::new();
-        macro_rules! line {
-            ($id:expr) => {
-                match entity(&mut problem, &mut entities, $id) {
-                    Some(SolverEntity::Line(line)) => Some(line),
-                    _ => None,
-                }
-            };
-        }
-        macro_rules! circle {
-            ($id:expr) => {
-                match entity(&mut problem, &mut entities, $id) {
-                    Some(SolverEntity::Circle(circle)) => Some(circle),
-                    _ => None,
-                }
-            };
-        }
-        macro_rules! point {
-            ($id:expr) => {
-                match entity(&mut problem, &mut entities, $id) {
-                    Some(SolverEntity::Point(point)) => Some(point),
-                    _ => None,
-                }
-            };
-        }
         let is_line = |id: u32| {
-            shapes
+            self.shapes
                 .iter()
                 .any(|shape| shape.id() == id && matches!(shape, Shape::Line { .. }))
         };
         if everything {
-            for shape in shapes {
-                entity(&mut problem, &mut entities, shape.id());
+            for shape in &self.shapes {
+                b.entity(shape.id());
             }
         }
         for (&id, &axis) in &self.axis_constraints {
-            if let Some(line) = line!(id) {
+            if let Some(line) = b.line(id) {
                 keep_length.insert(id);
                 constraints.push(match axis {
                     AxisConstraint::Horizontal => Constraint::Horizontal(line),
@@ -7214,12 +6718,12 @@ impl Document {
             }
         }
         for (&target, &source) in &self.equal_lines {
-            if let (Some(t), Some(s)) = (line!(target), line!(source)) {
+            if let (Some(t), Some(s)) = (b.line(target), b.line(source)) {
                 constraints.push(Constraint::EqualLength(s, t));
             }
         }
         for (&target, &(source, kind)) in &self.line_relations {
-            let (Some(t), Some(s)) = (line!(target), line!(source)) else {
+            let (Some(t), Some(s)) = (b.line(target), b.line(source)) else {
                 continue;
             };
             keep_length.extend([target, source]);
@@ -7238,7 +6742,7 @@ impl Document {
             let value = value as f64;
             match field {
                 DimensionField::LineLength => {
-                    if let Some(line) = line!(id) {
+                    if let Some(line) = b.line(id) {
                         constraints.push(Constraint::Length {
                             line,
                             value: Value::Const(value),
@@ -7246,7 +6750,7 @@ impl Document {
                     }
                 }
                 DimensionField::Rotation if is_line(id) => {
-                    if let Some(line) = line!(id) {
+                    if let Some(line) = b.line(id) {
                         keep_length.insert(id);
                         constraints.push(Constraint::Rotation {
                             line,
@@ -7255,7 +6759,7 @@ impl Document {
                     }
                 }
                 DimensionField::CircleDiameter | DimensionField::CurveRadius => {
-                    if let Some(circle) = circle!(id) {
+                    if let Some(circle) = b.circle(id) {
                         let value = if field == DimensionField::CircleDiameter {
                             value * 0.5
                         } else {
@@ -7271,42 +6775,112 @@ impl Document {
             }
         }
         for (&(curve, endpoint), &point_id) in &self.point_links {
-            if !is_line(curve) {
-                continue;
-            }
-            if let (Some(line), Some(point)) = (line!(curve), point!(point_id)) {
-                let end = if endpoint == 0 { line.a } else { line.b };
+            let end = match b.entity(curve) {
+                Some(SolverEntity::Line(line)) => Some(if endpoint == 0 { line.a } else { line.b }),
+                Some(SolverEntity::Spline(spline)) if !spline.closed => {
+                    if endpoint == 0 {
+                        spline.points.first().copied()
+                    } else {
+                        spline.points.last().copied()
+                    }
+                }
+                _ => None,
+            };
+            if let (Some(end), Some(point)) = (end, b.point(point_id)) {
                 constraints.push(Constraint::Coincident(end, point));
             }
         }
         for (&point_id, &source) in &self.midpoint_links {
-            if is_line(source) {
-                if let (Some(line), Some(point)) = (line!(source), point!(point_id)) {
-                    constraints.push(Constraint::Midpoint { point, line });
-                }
-            }
+            let (Some(curve), Some(point)) = (b.curve(source), b.point(point_id)) else {
+                continue;
+            };
+            constraints.push(match curve {
+                Curve::Line(line) => Constraint::Midpoint { point, line },
+                curve => Constraint::CurveMidpoint { point, curve },
+            });
         }
         for (&point_id, &source) in &self.point_curve_links {
-            if is_line(source) {
-                if let (Some(line), Some(point)) = (line!(source), point!(point_id)) {
-                    constraints.push(Constraint::PointOnLine { point, line });
-                }
-            } else if shapes
-                .iter()
-                .any(|shape| shape.id() == source && matches!(shape, Shape::Circle { .. }))
-            {
-                if let (Some(circle), Some(point)) = (circle!(source), point!(point_id)) {
-                    constraints.push(Constraint::PointOnCircle { point, circle });
-                }
+            let (Some(curve), Some(point)) = (b.curve(source), b.point(point_id)) else {
+                continue;
+            };
+            let param = b.curve_param(&curve, point);
+            constraints.push(Constraint::PointOnCurve {
+                point,
+                curve,
+                param,
+            });
+        }
+        for (&target, &(source, endpoint)) in &self.normal_links {
+            let (Some(line), Some(curve)) = (b.line(target), b.curve(source)) else {
+                continue;
+            };
+            keep_length.insert(target);
+            let param = b.curve_param(&curve, if endpoint == 0 { line.a } else { line.b });
+            constraints.push(Constraint::Normal {
+                line,
+                endpoint,
+                curve,
+                param,
+            });
+        }
+        for (&target, &(source, endpoint, line_sign, sweep_sign)) in &self.endpoint_tangents {
+            if let (Some(SolverEntity::Arc(arc)), Some(line)) = (b.entity(target), b.line(source)) {
+                keep_length.insert(source);
+                constraints.push(Constraint::EndpointTangent {
+                    line,
+                    arc,
+                    endpoint,
+                    line_sign: line_sign as f64,
+                    sweep_sign: sweep_sign as f64,
+                });
             }
         }
+        for (&inner, &outer) in &self.internal_tangents {
+            if let (Some(outer), Some(inner)) = (b.curve(outer), b.curve(inner)) {
+                constraints.push(Constraint::InternalTangent { outer, inner });
+            }
+        }
+        for (&target, &source) in &self.external_tangents {
+            let (Some(first), Some(second)) = (b.curve(source), b.curve(target)) else {
+                continue;
+            };
+            // The curve stays on the side of the line it is on now.
+            let p = &b.problem.params;
+            let side = match (&first, &second) {
+                (Curve::Line(line), other) | (other, Curve::Line(line)) => {
+                    let center = match other {
+                        Curve::Circle(circle) => Some(circle.center),
+                        Curve::Arc(arc) => Some(arc.circle.center),
+                        Curve::Ellipse(ellipse) => Some(ellipse.center),
+                        _ => None,
+                    };
+                    center.map_or(1.0, |c| {
+                        let (dx, dy) = (p[line.b.x] - p[line.a.x], p[line.b.y] - p[line.a.y]);
+                        let signed = (p[c.x] - p[line.a.x]) * -dy + (p[c.y] - p[line.a.y]) * dx;
+                        if signed < 0.0 { -1.0 } else { 1.0 }
+                    })
+                }
+                _ => 1.0,
+            };
+            if matches!(first, Curve::Line(_)) {
+                keep_length.insert(source);
+            }
+            if matches!(second, Curve::Line(_)) {
+                keep_length.insert(target);
+            }
+            constraints.push(Constraint::ExternalTangent {
+                first,
+                second,
+                side,
+            });
+        }
         for (&target, &source) in &self.equal_radii {
-            if let (Some(t), Some(s)) = (circle!(target), circle!(source)) {
+            if let (Some(t), Some(s)) = (b.circle(target), b.circle(source)) {
                 constraints.push(Constraint::EqualRadius(s, t));
             }
         }
         for (&target, &(source, difference)) in &self.radius_differences {
-            if let (Some(t), Some(s)) = (circle!(target), circle!(source)) {
+            if let (Some(t), Some(s)) = (b.circle(target), b.circle(source)) {
                 constraints.push(Constraint::RadiusDifference {
                     source: s,
                     target: t,
@@ -7315,27 +6889,94 @@ impl Document {
             }
         }
         for (&target, &source) in &self.concentric {
-            if let (Some(t), Some(s)) = (circle!(target), circle!(source)) {
-                constraints.push(Constraint::Concentric(s, t));
+            let t = b.entity(target).and_then(|found| found.center());
+            let s = b.entity(source).and_then(|found| found.center());
+            if let (Some(t), Some(s)) = (t, s) {
+                constraints.push(Constraint::Coincident(s, t));
             }
         }
+        for (&target, &source) in &self.equal_ellipses {
+            if let (Some(t), Some(s)) = (b.ellipse(target), b.ellipse(source)) {
+                constraints.push(Constraint::SameValue(s.rx, t.rx));
+                constraints.push(Constraint::SameValue(s.ry, t.ry));
+            }
+        }
+        for (&target, &root) in &self.shared_ellipses {
+            if let (Some(t), Some(s)) = (b.ellipse(target), b.ellipse(root)) {
+                constraints.extend([
+                    Constraint::Coincident(s.center, t.center),
+                    Constraint::SameValue(s.rx, t.rx),
+                    Constraint::SameValue(s.ry, t.ry),
+                    Constraint::SameValue(s.rotation, t.rotation),
+                ]);
+            }
+        }
+        // Angular and axis dimensions of curves that already take part in a
+        // relation (curves outside relations keep their direct edits).
+        for (&(id, field), &value) in &self.driving_dimensions {
+            let value = value as f64;
+            let constraint = match (b.entities.get(&id), field) {
+                (Some(SolverEntity::Arc(arc)), DimensionField::ArcSweep) => Constraint::Equal {
+                    var: arc.sweep,
+                    value: Value::Const(value.to_radians()),
+                },
+                (Some(SolverEntity::Ellipse(e)), DimensionField::ArcSweep) => match e.arc {
+                    Some((_, sweep)) => Constraint::Equal {
+                        var: sweep,
+                        value: Value::Const(value.to_radians()),
+                    },
+                    None => continue,
+                },
+                (Some(SolverEntity::Ellipse(e)), DimensionField::RectangleWidth) => {
+                    Constraint::Equal {
+                        var: e.rx,
+                        value: Value::Const(value * 0.5),
+                    }
+                }
+                (Some(SolverEntity::Ellipse(e)), DimensionField::RectangleHeight) => {
+                    Constraint::Equal {
+                        var: e.ry,
+                        value: Value::Const(value * 0.5),
+                    }
+                }
+                (Some(SolverEntity::Ellipse(e)), DimensionField::Rotation) => Constraint::Equal {
+                    var: e.rotation,
+                    value: Value::Const(value),
+                },
+                _ => continue,
+            };
+            constraints.push(constraint);
+        }
         // Fixed anchors constrain only shapes that already take part in a
-        // solver-backed relation; isolated shapes keep their edit guards.
+        // relation; isolated shapes keep their edit guards.
         for (&(id, index), &at) in &self.fixed_anchors {
-            let Some(&found) = entities.get(&id) else {
+            let Some(found) = b.entities.get(&id).cloned() else {
                 continue;
             };
-            let anchor = match (found, index) {
+            let at = (at.x as f64, at.y as f64);
+            let anchor = match (&found, index) {
                 (SolverEntity::Line(line), 0) => Some(line.a),
                 (SolverEntity::Line(line), 1) => Some(line.b),
-                (SolverEntity::Point(point), 0) => Some(point),
-                (SolverEntity::Circle(circle), 0) => Some(circle.center),
+                (SolverEntity::Point(point), 0) => Some(*point),
+                (SolverEntity::Spline(spline), index) => spline.points.get(index).copied(),
+                (found, 0) => found.center(),
                 _ => None,
             };
             if let Some(point) = anchor {
-                constraints.push(Constraint::Fixed {
-                    point,
-                    at: (at.x as f64, at.y as f64),
+                constraints.push(Constraint::Fixed { point, at });
+                continue;
+            }
+            let fraction = match (&found, index) {
+                (SolverEntity::Arc(_), 1 | 2) => (index - 1) as f64,
+                (SolverEntity::Ellipse(e), 1 | 2) if e.arc.is_some() => (index - 1) as f64,
+                (SolverEntity::Ellipse(e), 1..=4) if e.arc.is_none() => (index - 1) as f64 / 4.0,
+                _ => continue,
+            };
+            if let Some(curve) = found.curve() {
+                constraints.push(Constraint::FixedOnCurve {
+                    curve,
+                    fraction,
+                    at,
                 });
             }
         }
@@ -7349,24 +6990,28 @@ impl Document {
                     .contains_key(&(*id, DimensionField::LineLength))
         });
         for id in keep_length {
-            if let Some(SolverEntity::Line(line)) = entities.get(&id) {
-                let p = &problem.params;
+            if let Some(SolverEntity::Line(line)) = b.entities.get(&id) {
+                let p = &b.problem.params;
                 let length = (p[line.b.x] - p[line.a.x]).hypot(p[line.b.y] - p[line.a.y]);
-                problem.soft.push(Soft::KeepLength {
+                b.problem.soft.push(Soft::KeepLength {
                     line: *line,
                     length,
                     weight: 1.0,
                 });
             }
         }
+        let SolverBuilder {
+            mut problem,
+            entities,
+            ..
+        } = b;
         problem.constraints = constraints;
         (problem, entities)
     }
 
     /// Degrees-of-freedom and relation diagnostics for the current geometry.
-    /// Covers lines, points, circles and arcs (arc sweep is not a solver
-    /// parameter); shapes in hand-propagated relations are treated as fixed
-    /// and excluded from the count. Run once per committed edit.
+    /// Covers every solver-modeled shape: lines, points, circles, arcs,
+    /// ellipses, elliptic arcs and splines. Run once per committed edit.
     pub fn analyze_constraints(&self) -> SketchAnalysis {
         let (problem, entities) = self.build_problem(&HashSet::new(), true, None);
         let analysis = problem.analyze(&problem.params, 1e-3);
@@ -7390,10 +7035,9 @@ impl Document {
             };
             target.extend(constraint.vars().into_iter().map(|var| owner[var]));
         }
-        let locked = self.solver_locked_shapes();
         for (&id, found) in &entities {
             let vars = found.vars();
-            if !locked.contains(&id) && vars.iter().all(|&var| analysis.fixed[var]) {
+            if vars.iter().all(|&var| analysis.fixed[var]) {
                 result.fully_constrained.insert(id);
             }
         }
@@ -7425,10 +7069,39 @@ impl Document {
         if p.iter().any(|value| !(value.abs() < f32::MAX as f64)) {
             return Err("Solved geometry is out of range".into());
         }
+        // Round-off below the solve tolerance around zero is stored as zero.
+        let p: Vec<f64> = p
+            .iter()
+            .map(|&v| if v.abs() < 1e-9 { 0.0 } else { v })
+            .collect();
+        let p = &p;
+        let read = |var: solver::PointVar| Point {
+            x: p[var.x] as f32,
+            y: p[var.y] as f32,
+        };
         for found in entities.values() {
             match found {
                 SolverEntity::Circle(circle) if p[circle.radius] <= 1e-6 => {
                     return Err("Solved radius is not positive".into());
+                }
+                SolverEntity::Arc(arc)
+                    if p[arc.circle.radius] <= 1e-6
+                        || p[arc.sweep].abs() <= 1e-9
+                        || p[arc.sweep].abs() >= std::f64::consts::TAU =>
+                {
+                    return Err("Solved arc is invalid".into());
+                }
+                SolverEntity::Ellipse(e) if p[e.rx] <= 1e-6 || p[e.ry] <= 1e-6 => {
+                    return Err("Solved ellipse axes are not positive".into());
+                }
+                SolverEntity::Spline(spline) => {
+                    let points: Vec<Point> = spline.points.iter().map(|&v| read(v)).collect();
+                    let mode = if spline.control {
+                        SplineMode::Control
+                    } else {
+                        SplineMode::Fit
+                    };
+                    spline::beziers(mode, &points, spline.closed)?;
                 }
                 // Direction residuals are trivially met by a collapsed line;
                 // treat that as a conflict rather than a solution.
@@ -7440,10 +7113,7 @@ impl Document {
                 _ => {}
             }
         }
-        let read = |var: solver::PointVar| Point {
-            x: p[var.x] as f32,
-            y: p[var.y] as f32,
-        };
+
         for shape in &mut self.shapes {
             let Some(found) = entities.get(&shape.id()) else {
                 continue;
@@ -7454,12 +7124,63 @@ impl Document {
                     *b = read(line.b);
                 }
                 (Shape::Point { at, .. }, SolverEntity::Point(point)) => *at = read(*point),
-                (
-                    Shape::Circle { center, radius, .. } | Shape::Arc { center, radius, .. },
-                    SolverEntity::Circle(circle),
-                ) => {
+                (Shape::Circle { center, radius, .. }, SolverEntity::Circle(circle)) => {
                     *center = read(circle.center);
                     *radius = p[circle.radius] as f32;
+                }
+                (
+                    Shape::Arc {
+                        center,
+                        radius,
+                        start_angle,
+                        sweep,
+                        ..
+                    },
+                    SolverEntity::Arc(arc),
+                ) => {
+                    *center = read(arc.circle.center);
+                    *radius = p[arc.circle.radius] as f32;
+                    *start_angle = p[arc.start];
+                    *sweep = p[arc.sweep];
+                }
+                (
+                    Shape::Ellipse {
+                        center,
+                        rx,
+                        ry,
+                        rotation,
+                        ..
+                    },
+                    SolverEntity::Ellipse(e),
+                ) => {
+                    *center = read(e.center);
+                    *rx = p[e.rx] as f32;
+                    *ry = p[e.ry] as f32;
+                    *rotation = p[e.rotation] as f32;
+                }
+                (
+                    Shape::EllipticArc {
+                        center,
+                        rx,
+                        ry,
+                        rotation,
+                        start_angle,
+                        sweep,
+                        ..
+                    },
+                    SolverEntity::Ellipse(e),
+                ) => {
+                    *center = read(e.center);
+                    *rx = p[e.rx] as f32;
+                    *ry = p[e.ry] as f32;
+                    *rotation = p[e.rotation] as f32;
+                    if let Some((start, arc_sweep)) = e.arc {
+                        *start_angle = p[start];
+                        *sweep = p[arc_sweep];
+                    }
+                }
+                (Shape::Spline { points, .. }, SolverEntity::Spline(spline)) => {
+                    *points = spline.points.iter().map(|&v| read(v)).collect();
                 }
                 _ => {}
             }
@@ -7573,8 +7294,8 @@ impl Document {
         )
     }
 
-    /// Start dragging one anchor. Refused for fixed anchors and for shapes
-    /// whose relations are still hand-propagated.
+    /// Start dragging one anchor. Refused for fixed anchors; every relation
+    /// the shape takes part in follows through the solver.
     pub fn begin_anchor_drag(&mut self, id: u32, index: usize, start: Point) -> bool {
         let Some(original) = self.shapes.iter().find(|shape| shape.id() == id).cloned() else {
             return false;
@@ -7590,26 +7311,7 @@ impl Document {
         } else {
             self.has_fixed_anchor(id)
         };
-        if fixed
-            || self.solver_locked_shapes().contains(&id)
-            || self.has_non_line_point_link(id)
-            || self.normal_links.contains_key(&id)
-            || self.endpoint_tangents.contains_key(&id)
-            || self
-                .endpoint_tangents
-                .values()
-                .any(|(source, ..)| *source == id)
-        {
-            return false;
-        }
-        if !Self::solver_shape(&original)
-            && (self.equal_ellipses.contains_key(&id)
-                || self.equal_ellipses.values().any(|source| *source == id)
-                || !self.shared_ellipse_partners(id).is_empty()
-                || self.concentric_partner(id).is_some()
-                || self.midpoint_links.values().any(|source| *source == id)
-                || self.point_curve_links.values().any(|source| *source == id))
-        {
+        if fixed {
             return false;
         }
         self.selected = Some(id);
@@ -7777,20 +7479,8 @@ impl Document {
             return false;
         };
         let solver_shape = Self::solver_shape(&next);
-        let Some((next, tangent_dependent)) = self.circular_tangent_adjustment(id, next) else {
-            return false;
-        };
-        let Some((next, midpoint_dependents)) = self.point_constraint_adjustment(id, next) else {
-            return false;
-        };
         let frame_before = self.shapes.clone();
         self.shapes[position] = next;
-        if let Some((target_index, shape)) = tangent_dependent {
-            self.shapes[target_index] = shape;
-        }
-        for (target_index, shape) in midpoint_dependents {
-            self.shapes[target_index] = shape;
-        }
         let solved = if solver_shape {
             self.solve_anchor_drag(id, index, target)
         } else {
@@ -9356,8 +9046,17 @@ mod tests {
         assert_eq!(doc.point_links.get(&(spline_id, 1)), Some(&2));
         doc.selected = Some(spline_id);
         doc.selected_spline_point = Some(0);
-        assert!(doc.set_selected_spline_coordinate(true, 2.0).is_err());
-        assert!(!doc.begin_drag(start));
+        // Editing a linked end handle carries the point along.
+        assert_eq!(doc.set_selected_spline_coordinate(true, 2.0), Ok(()));
+        assert_eq!(doc.shapes[0].center(), Point { x: 2.0, y: 0.0 });
+        assert!(doc.undo());
+        assert_eq!(doc.shapes[0].center(), start);
+        doc.selected = Some(spline_id);
+        doc.selected_spline_point = Some(0);
+        assert!(doc.begin_drag(start));
+        assert!(doc.drag_to(Point { x: 1.0, y: 4.0 }));
+        assert_eq!(doc.shapes[0].center(), Point { x: 1.0, y: 4.0 });
+        assert!(doc.cancel_drag());
         doc.selected = Some(1);
         assert!(doc.move_selected(Point { x: 2.0, y: 3.0 }));
         assert!(
@@ -10163,7 +9862,37 @@ mod tests {
                 LineRelationKind::Perpendicular => (b.x - a.x).abs() < 1e-4,
                 LineRelationKind::Angle(_) => unreachable!(),
             });
-            assert!(!doc.rotate_selected(30.0, Point { x: 0.0, y: 0.0 }, false));
+            // Rotating the target turns the source with it.
+            assert!(doc.rotate_selected(30.0, Point { x: 0.0, y: 0.0 }, false));
+            let (Shape::Line { a: sa, b: sb, .. }, Shape::Line { a: ta, b: tb, .. }) =
+                (&doc.shapes[0], &doc.shapes[1])
+            else {
+                panic!()
+            };
+            let source = (
+                (sb.x - sa.x) / sa.distance(*sb),
+                (sb.y - sa.y) / sa.distance(*sb),
+            );
+            let target = (
+                (tb.x - ta.x) / ta.distance(*tb),
+                (tb.y - ta.y) / ta.distance(*tb),
+            );
+            let cross = source.0 * target.1 - source.1 * target.0;
+            let dot = source.0 * target.0 + source.1 * target.1;
+            assert!(match kind {
+                LineRelationKind::Perpendicular => dot.abs() < 1e-4,
+                _ => cross.abs() < 1e-4,
+            });
+            assert!(
+                (target.1.atan2(target.0).to_degrees()
+                    - match kind {
+                        LineRelationKind::Perpendicular => 120.0,
+                        _ => 30.0,
+                    })
+                .abs()
+                    < 1e-3
+            );
+            assert!(doc.undo());
             doc.selected = Some(1);
             assert!(doc.rotate_selected(45.0, Point { x: 0.0, y: 0.0 }, false));
             let Shape::Line {
@@ -13130,6 +12859,59 @@ mod tests {
     }
 
     #[test]
+    fn constraint_analysis_counts_curve_parameters() {
+        let doc = Document::from_shapes(vec![
+            Shape::Ellipse {
+                id: 1,
+                center: pt(0.0, 0.0),
+                rx: 10.0,
+                ry: 5.0,
+                rotation: 0.0,
+                segments: 32,
+            },
+            Shape::Arc {
+                id: 2,
+                center: pt(30.0, 0.0),
+                radius: 5.0,
+                start_angle: 0.0,
+                sweep: 1.0,
+                segments: 16,
+            },
+        ]);
+        // Ellipse: center, rx, ry, rotation; arc: center, radius, start, sweep.
+        assert_eq!(doc.analyze_constraints().dof, 10);
+    }
+
+    #[test]
+    fn dragging_circle_center_keeps_external_tangency() {
+        let mut doc = Document::from_shapes(vec![
+            Shape::Line {
+                id: 1,
+                a: pt(-50.0, 0.0),
+                b: pt(50.0, 0.0),
+            },
+            Shape::Circle {
+                id: 2,
+                center: pt(0.0, 5.0),
+                radius: 5.0,
+                segments: 32,
+            },
+        ]);
+        doc.external_tangents.insert(2, 1);
+        assert!(doc.begin_anchor_drag(2, 0, pt(0.0, 5.0)));
+        assert!(doc.drag_to(pt(10.0, 8.0)));
+        assert!(doc.finish_drag());
+        let Shape::Circle { center, radius, .. } = doc.shapes[1] else {
+            panic!("expected a circle");
+        };
+        let (a, b) = line_ends(&doc, 0);
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let distance = ((center.x - a.x) * dy - (center.y - a.y) * dx).abs() / dx.hypot(dy);
+        assert!((distance - radius).abs() < 1e-2, "{distance} vs {radius}");
+        assert!(center.x > 5.0);
+    }
+
+    #[test]
     fn revision_changes_on_commit_and_undo() {
         let mut doc = Document::default();
         let start = doc.revision();
@@ -13270,5 +13052,147 @@ mod tests {
         };
         assert!((radius - 20.0).abs() < 1e-4);
         assert!((rotation - 90.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn point_on_line_stays_on_the_finite_segment() {
+        let mut doc = Document::from_shapes(vec![
+            Shape::Line {
+                id: 1,
+                a: Point { x: 0.0, y: 0.0 },
+                b: Point { x: 20.0, y: 0.0 },
+            },
+            Shape::Point {
+                id: 2,
+                at: Point { x: 18.0, y: 3.0 },
+            },
+        ]);
+        doc.selected = Some(2);
+        assert_eq!(doc.toggle_point_on_curve_with(1), Ok(true));
+        doc.selected = Some(1);
+        assert_eq!(doc.set_dimension(DimensionField::LineLength, 10.0), Ok(()));
+        let at = doc.shapes[1].center();
+        assert!(at.y.abs() < 1e-4 && at.x <= 10.0 + 1e-4, "{at:?}");
+    }
+
+    #[test]
+    fn equal_ellipse_scale_and_spline_point_links_follow_transforms() {
+        let ellipse = |id, x| Shape::Ellipse {
+            id,
+            center: Point { x, y: 0.0 },
+            rx: 10.0,
+            ry: 5.0,
+            rotation: 0.0,
+            segments: 64,
+        };
+        let mut doc = Document::from_shapes(vec![ellipse(1, 0.0), ellipse(2, 40.0)]);
+        doc.selected = Some(2);
+        assert_eq!(doc.toggle_equal_ellipse_with(1), Ok(true));
+        doc.selected = Some(1);
+        assert!(doc.scale_selected(2.0, Point { x: 0.0, y: 0.0 }, false));
+        assert!(matches!(
+            doc.shapes[1],
+            Shape::Ellipse { rx, ry, center, .. }
+                if (rx - 20.0).abs() < 1e-4 && (ry - 10.0).abs() < 1e-4 && center.x == 40.0
+        ));
+        assert!(doc.undo());
+        assert!(matches!(doc.shapes[1], Shape::Ellipse { rx: 10.0, .. }));
+
+        let mut doc = Document::default();
+        let start = Point { x: 0.0, y: 0.0 };
+        assert!(doc.add_point(start));
+        let spline = doc
+            .add_spline(
+                SplineMode::Fit,
+                vec![start, Point { x: 10.0, y: 8.0 }, Point { x: 20.0, y: 0.0 }],
+                false,
+            )
+            .unwrap();
+        assert_eq!(doc.point_links.get(&(spline, 0)), Some(&1));
+        doc.selected = Some(spline);
+        assert!(doc.rotate_selected(90.0, Point { x: 10.0, y: 0.0 }, false));
+        assert!(doc.shapes[0].center().distance(Point { x: 10.0, y: -10.0 }) < 1e-4);
+        assert!(doc.scale_selected(0.5, Point { x: 10.0, y: 0.0 }, false));
+        assert!(doc.shapes[0].center().distance(Point { x: 10.0, y: -5.0 }) < 1e-4);
+    }
+
+    #[test]
+    fn curve_relations_follow_through_the_solver() {
+        // Point on an arc stays inside the sweep when the arc turns.
+        let mut doc = Document::from_shapes(vec![
+            Shape::Arc {
+                id: 1,
+                center: Point { x: 0.0, y: 0.0 },
+                radius: 10.0,
+                start_angle: 0.0,
+                sweep: std::f64::consts::FRAC_PI_2,
+                segments: 32,
+            },
+            Shape::Point {
+                id: 2,
+                at: Point { x: 1.0, y: 9.0 },
+            },
+        ]);
+        doc.selected = Some(2);
+        assert_eq!(doc.toggle_point_on_curve_with(1), Ok(true));
+        doc.selected = Some(1);
+        assert!(doc.rotate_selected(-60.0, Point { x: 0.0, y: 0.0 }, false));
+        let at = doc.shapes[1].center();
+        let angle = (at.y as f64).atan2(at.x as f64);
+        assert!(((at.x.hypot(at.y)) - 10.0).abs() < 1e-3);
+        assert!(
+            (-std::f64::consts::FRAC_PI_3 - 1e-4..=std::f64::consts::FRAC_PI_6 + 1e-4)
+                .contains(&angle),
+            "{angle}"
+        );
+
+        // Smooth join: turning the line turns the arc's start with it.
+        let mut doc = Document::from_shapes(vec![
+            Shape::Line {
+                id: 1,
+                a: Point { x: 10.0, y: -10.0 },
+                b: Point { x: 10.0, y: 0.0 },
+            },
+            Shape::Arc {
+                id: 2,
+                center: Point { x: 0.0, y: 0.0 },
+                radius: 10.0,
+                start_angle: 0.0,
+                sweep: 1.0,
+                segments: 32,
+            },
+        ]);
+        doc.endpoint_tangents.insert(2, (1, 0, 1, 1));
+        doc.selected = Some(1);
+        assert!(doc.rotate_selected(30.0, Point { x: 10.0, y: 0.0 }, false));
+        let Shape::Arc { start_angle, .. } = doc.shapes[1] else {
+            panic!()
+        };
+        assert!(
+            (start_angle - 30f64.to_radians()).abs() < 1e-4,
+            "{start_angle}"
+        );
+
+        // Shared ellipse pieces and an ellipse concentric partner follow.
+        let mut doc = Document::from_shapes(vec![
+            Shape::Ellipse {
+                id: 1,
+                center: Point { x: 0.0, y: 0.0 },
+                rx: 10.0,
+                ry: 5.0,
+                rotation: 0.0,
+                segments: 64,
+            },
+            Shape::Circle {
+                id: 2,
+                center: Point { x: 0.0, y: 0.0 },
+                radius: 2.0,
+                segments: 32,
+            },
+        ]);
+        doc.concentric.insert(2, 1);
+        doc.selected = Some(1);
+        assert!(doc.move_selected(Point { x: 3.0, y: 4.0 }));
+        assert_eq!(doc.shapes[1].center(), Point { x: 3.0, y: 4.0 });
     }
 }
