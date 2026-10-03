@@ -58,6 +58,45 @@ multi-selection), click-to-edit values (Enter applies, Esc cancels), the
 Move / Scale / Rotate tabs, prompts of the active tool, and **SKETCH
 VARIABLES** when nothing is selected.
 
+**Quick actions (NEXT).** A band at the bottom of the Properties column
+lists the most likely next commands for the current state
+(`app/quick_actions.rs`): label, shortcut chip and a dimmed reason. Click a
+row or press **Ctrl+1..7** (registered commands "Run quick action n") to run
+row n. Seven rows when the column is at least 760 px tall, otherwise four.
+Every row is a registry command whose availability predicate passes right
+now; the list is rebuilt only when the sketch revision, feature count, view,
+drafts, selection, hover target or assembly state change. **Ctrl+Shift+N**
+toggles the band; the choice is saved as `quick_actions` in `settings.json`.
+On short windows the band covers the lowest Properties rows (the transform
+tabs); hide it to reach them. Rules, in priority order:
+
+- read-only project: **Open project** (reason `Read only: <why>`), then the
+  rules below;
+- assembly: Insert part, Mate, Export STL, Close assembly; instance selected:
+  Mate, Fasten to world, Delete instance;
+- extrude / revolve / edge finish prompt open: **Commit** (Enter), Flip (F),
+  End condition (E), Cancel (Esc); Flip and End condition only for extrude;
+- 3D, edges selected: Chamfer, Fillet, Measure; face selected: Sketch on
+  face, Measure, Project into sketch; open face sketch with a profile:
+  Extrude face sketch; nothing selected: Sketch on face, New sketch on TOP,
+  Suppress, Roll back here, Export STL, Assembly view, Back to sketch;
+- sketch extruded (locked): **Finish sketch**, Tab to 3D, New sketch;
+- dimension selected: Make reference / driving, Delete dimension, Deselect;
+- selected line + hovered line: Parallel, Perpendicular, Equal;
+- empty sketch: Draw rectangle / circle / line, New sketch on another plane;
+- conflicting constraints: "Fix conflict - see red rows" (Undo) first;
+- closed profile: **Finish sketch**, Extrude, Add dimension ("n DOF
+  remaining" while under-constrained), Revolve;
+- open geometry only: Line (continue or close), Add dimension, Fit, Finish
+  sketch (Select tool with nothing selected, which is what Esc leaves);
+- padding to at least three rows: Search commands, Keyboard shortcuts, Save.
+
+**Finish sketch** (Ctrl+Enter, sketch view): with a body in the part it
+opens the 3D view; with a closed profile and no body yet it opens the
+extrude prompt; otherwise it stays and says "Sketch has no closed profile to
+extrude - draw a closed shape or press X to extrude". **Ctrl+O** opens the
+Projects page.
+
 **Status bar.** Message on the left (truncated with `...`; long messages get
 more room), GEOMETRY / CONSTR / POINTS selection filters, `AUTO` and `GLY`
 toggles, a two-line block with cursor coordinates in display units, the
@@ -71,6 +110,7 @@ apply live and are written to `settings.json`:
 
 ```json
 { "units": "mm", "grid_mm": 1.0, "theme": "dark", "ui_scale": null,
+  "quick_actions": true,
   "window": { "width": 1280, "height": 800, "x": 0, "y": 0 } }
 ```
 
@@ -82,6 +122,7 @@ apply live and are written to `settings.json`:
 - `ui_scale` (`null` = monitor factor rounded to 1.0/1.5/2.0, or 1.0, 1.5,
   2.0): `Layout::scaled` divides the surface by it, so layout coordinates are
   logical units; font pixels snap to whole physical pixels.
+- `quick_actions`: show the NEXT band (Ctrl+Shift+N toggles).
 - `window`: logical size and position, saved on close.
 
 Invalid fields fall back to the defaults.
@@ -730,6 +771,11 @@ duplicate bindings within a context.
 | `Shift+0` | Edge fillet | any view |
 | palette / MORE | Measure two selected elements | any view |
 | palette / MORE | Delete selected feature | 3D preview |
+| `Ctrl+Enter` | Finish sketch | sketch |
+| `Enter` | Commit | extrude / revolve prompt open |
+| `F` | Flip direction | extrude / revolve prompt open |
+| `E` | Cycle end condition | extrude / revolve prompt open |
+| `Esc` | Cancel | extrude / revolve prompt open |
 
 ### View
 
@@ -747,6 +793,14 @@ duplicate bindings within a context.
 | `Ctrl+,` | Settings | any view |
 | palette / MORE | Fit all (3D view) | any view |
 | palette / MORE | Toggle perspective / orthographic | any view |
+| `Ctrl+Shift+N` | Toggle quick actions | any view |
+| `Ctrl+1` | Run quick action 1 | any view |
+| `Ctrl+2` | Run quick action 2 | any view |
+| `Ctrl+3` | Run quick action 3 | any view |
+| `Ctrl+4` | Run quick action 4 | any view |
+| `Ctrl+5` | Run quick action 5 | any view |
+| `Ctrl+6` | Run quick action 6 | any view |
+| `Ctrl+7` | Run quick action 7 | any view |
 
 ### Project
 
@@ -783,6 +837,7 @@ duplicate bindings within a context.
 | `Ctrl+E` | Export binary STL | any view |
 | `Ctrl+Shift+E` | Export ASCII STL | any view |
 | `Ctrl+Alt+E` | Export 3MF | any view |
+| `Ctrl+O` | Open project | any view |
 
 ## Code layout
 
@@ -818,7 +873,7 @@ Binary (`rust/src/main.rs` parses arguments and runs the event loop):
 
 - `app/mod.rs` `App` state, layout, painting; `input.rs` mouse/keyboard
   (`App::handle_window_event`, `App::handle_key`); `commands.rs` command
-  registry; `palette.rs`; `shortcut_overlay.rs`; `history.rs` cross-view
+  registry; `palette.rs`; `quick_actions.rs` NEXT band and Finish sketch; `shortcut_overlay.rs`; `history.rs` cross-view
   undo and HISTORY panel
 - `app/panels.rs` toolbar and Properties; `project_panel.rs` breadcrumbs and
   projects page; `status.rs` status bar, tooltips, toolbar glyphs;

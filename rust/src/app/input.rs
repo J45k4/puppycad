@@ -137,6 +137,10 @@ impl App {
             }
             self.more_open = false;
         }
+        if self.quick_actions_click(layout, point) {
+            self.redraw();
+            return;
+        }
         if self.assembly.is_some() {
             self.assembly_click(layout, point);
             self.redraw();
@@ -937,6 +941,15 @@ impl App {
                 || self.shortcut_overlay_key(code)
                 || self.settings_key(code)
             {
+                self.redraw();
+                return;
+            }
+            if self.projects_page.is_none()
+                && self.name_edit.is_none()
+                && self.editing.is_none()
+                && let Some(command) = self.quick_action_chord(code)
+            {
+                self.run_command(command);
                 self.redraw();
                 return;
             }

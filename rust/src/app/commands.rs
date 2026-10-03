@@ -64,6 +64,8 @@ pub(super) enum Scope {
     BodyPick,
     /// The assembly view is open; its bindings replace the view-wide ones.
     Assembly,
+    /// An extrude / revolve / edge finish prompt is open.
+    Draft,
 }
 
 impl Scope {
@@ -88,6 +90,7 @@ impl Scope {
                 | Scope::DimensionSelected
                 | Scope::BodyPick
                 | Scope::Assembly
+                | Scope::Draft
         )
     }
 }
@@ -211,6 +214,20 @@ pub(super) enum Cmd {
     ToggleProjection,
     ArmMate,
     FastenInstance,
+    FinishSketch,
+    OpenProject,
+    DraftCommit,
+    DraftFlip,
+    DraftEndCondition,
+    DraftCancel,
+    ToggleQuickActions,
+    QuickAction1,
+    QuickAction2,
+    QuickAction3,
+    QuickAction4,
+    QuickAction5,
+    QuickAction6,
+    QuickAction7,
 }
 
 pub(super) struct Command {
@@ -1172,6 +1189,118 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Assembly,
         App::assembly_cancel,
     ),
+    cmd(
+        Cmd::FinishSketch,
+        "Finish sketch",
+        "Ctrl+Enter",
+        C::Solid,
+        S::Sketch,
+        App::finish_sketch,
+    ),
+    cmd(
+        Cmd::OpenProject,
+        "Open project",
+        "Ctrl+O",
+        C::File,
+        S::Any,
+        App::open_projects_page,
+    ),
+    cmd(
+        Cmd::DraftCommit,
+        "Commit",
+        "Enter",
+        C::Solid,
+        S::Draft,
+        |app| app.draft_key(KeyCode::Enter),
+    ),
+    cmd(
+        Cmd::DraftFlip,
+        "Flip direction",
+        "F",
+        C::Solid,
+        S::Draft,
+        |app| app.draft_key(KeyCode::KeyF),
+    ),
+    cmd(
+        Cmd::DraftEndCondition,
+        "Cycle end condition",
+        "E",
+        C::Solid,
+        S::Draft,
+        |app| app.draft_key(KeyCode::KeyE),
+    ),
+    cmd(
+        Cmd::DraftCancel,
+        "Cancel",
+        "Esc",
+        C::Solid,
+        S::Draft,
+        |app| app.draft_key(KeyCode::Escape),
+    ),
+    cmd(
+        Cmd::ToggleQuickActions,
+        "Toggle quick actions",
+        "Ctrl+Shift+N",
+        C::View,
+        S::Any,
+        App::toggle_quick_actions,
+    ),
+    cmd(
+        Cmd::QuickAction1,
+        "Run quick action 1",
+        "Ctrl+1",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(0),
+    ),
+    cmd(
+        Cmd::QuickAction2,
+        "Run quick action 2",
+        "Ctrl+2",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(1),
+    ),
+    cmd(
+        Cmd::QuickAction3,
+        "Run quick action 3",
+        "Ctrl+3",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(2),
+    ),
+    cmd(
+        Cmd::QuickAction4,
+        "Run quick action 4",
+        "Ctrl+4",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(3),
+    ),
+    cmd(
+        Cmd::QuickAction5,
+        "Run quick action 5",
+        "Ctrl+5",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(4),
+    ),
+    cmd(
+        Cmd::QuickAction6,
+        "Run quick action 6",
+        "Ctrl+6",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(5),
+    ),
+    cmd(
+        Cmd::QuickAction7,
+        "Run quick action 7",
+        "Ctrl+7",
+        C::View,
+        S::Any,
+        |app| app.run_quick_action(6),
+    ),
 ];
 
 /// MORE menu rows (index = `Layout::more_item` slot) and their labels.
@@ -1252,6 +1381,7 @@ pub(crate) fn shortcuts_markdown() -> String {
                 Scope::DimensionSelected => "dimension selected",
                 Scope::BodyPick => "picking an up-to body",
                 Scope::Assembly => "assembly view",
+                Scope::Draft => "extrude / revolve prompt open",
             }
             .to_string();
             if command.edits {
@@ -1299,6 +1429,17 @@ impl App {
 
     /// Whether a command can run in the current state (palette dimming).
     pub(super) fn command_available(&self, command: &Command) -> bool {
+        let draft_open = self.extrude_draft.is_some()
+            || self
+                .revolve_draft
+                .as_ref()
+                .is_some_and(|d| d.axis.is_some())
+            || self.edge_pick.is_some();
+        if command.scope == Scope::Draft {
+            return draft_open
+                && (self.extrude_draft.is_some()
+                    || !matches!(command.id, Cmd::DraftFlip | Cmd::DraftEndCondition));
+        }
         if self.assembly.is_some() {
             return matches!(command.scope, Scope::Any | Scope::Assembly)
                 && !matches!(
@@ -1324,7 +1465,7 @@ impl App {
             }
             Scope::DimensionSelected => !self.solid_preview && self.selected_dimension.is_some(),
             Scope::BodyPick => self.body_pick,
-            Scope::Assembly => false,
+            Scope::Assembly | Scope::Draft => false,
         };
         let selection = !command.needs_selection
             || !self.document.selected_ids().is_empty()
@@ -1350,6 +1491,8 @@ impl App {
                 KeyCode::Slash if plain_shift => Cmd::ShortcutOverlay,
                 KeyCode::F1 => Cmd::ShortcutOverlay,
                 KeyCode::KeyB if ctrl => Cmd::AssemblyView,
+                KeyCode::KeyN if ctrl && shift => Cmd::ToggleQuickActions,
+                KeyCode::KeyO if ctrl => Cmd::OpenProject,
                 KeyCode::KeyM if !ctrl => Cmd::MoreMenu,
                 KeyCode::KeyI if !ctrl && !shift => Cmd::InsertInstance,
                 KeyCode::KeyJ if !ctrl && !shift => Cmd::MateInstances,
@@ -1368,6 +1511,11 @@ impl App {
             });
         }
         Some(match code {
+            KeyCode::KeyN if ctrl && shift => Cmd::ToggleQuickActions,
+            KeyCode::KeyO if ctrl => Cmd::OpenProject,
+            KeyCode::Enter | KeyCode::NumpadEnter if ctrl && !self.solid_preview => {
+                Cmd::FinishSketch
+            }
             KeyCode::KeyB if ctrl => Cmd::AssemblyView,
             KeyCode::KeyK if ctrl => Cmd::CommandPalette,
             KeyCode::Comma if ctrl => Cmd::Settings,
@@ -1533,7 +1681,7 @@ impl App {
             .map(Shape::id)
     }
 
-    fn selected_shape_matches(&self, accept: fn(&Shape) -> bool) -> bool {
+    pub(super) fn selected_shape_matches(&self, accept: fn(&Shape) -> bool) -> bool {
         self.document
             .selected
             .and_then(|id| self.document.shapes.iter().find(|shape| shape.id() == id))

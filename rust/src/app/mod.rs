@@ -12,6 +12,7 @@ mod panels;
 mod pattern;
 mod project_panel;
 mod projection;
+mod quick_actions;
 mod settings;
 mod shortcut_overlay;
 mod solid;
@@ -29,6 +30,8 @@ mod history_tests;
 mod input_tests;
 #[cfg(test)]
 mod projection_tests;
+#[cfg(test)]
+mod quick_actions_tests;
 #[cfg(test)]
 mod settings_tests;
 #[cfg(test)]
@@ -49,6 +52,7 @@ use palette::*;
 use pattern::*;
 use project_panel::*;
 use projection::*;
+use quick_actions::*;
 use settings::*;
 #[cfg(test)]
 use shortcut_overlay::*;
@@ -387,6 +391,8 @@ pub(crate) struct App {
     history_open: bool,
     /// Open assembly view (replaces the sketch / part views while open).
     assembly: Option<AssemblyView>,
+    /// NEXT suggestions keyed by the state they were built from.
+    quick_cache: QuickCache,
 }
 
 /// What the pointer is over in Select mode.
@@ -542,6 +548,7 @@ impl Default for App {
             edge_pick: None,
             history_open: false,
             assembly: None,
+            quick_cache: Default::default(),
         }
     }
 }
@@ -1075,6 +1082,7 @@ impl App {
         if self.assembly.is_some() {
             self.paint_assembly(&mut painter, layout);
             self.paint_assembly_panels(&mut painter, layout);
+            self.paint_quick_actions(&mut painter, layout);
             self.paint_more_menu(&mut painter, layout);
             self.paint_context_menu(&mut painter);
             self.paint_settings(&mut painter, layout);
@@ -1114,6 +1122,7 @@ impl App {
             self.paint_revolve_axis_prompt(&mut painter, layout);
         }
         self.paint_panels(&mut painter, layout);
+        self.paint_quick_actions(&mut painter, layout);
         self.paint_history_panel(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
         self.paint_context_menu(&mut painter);

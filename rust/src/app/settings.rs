@@ -229,6 +229,8 @@ pub(crate) struct Settings {
     /// `None`: monitor scale factor rounded to 1.0/1.5/2.0.
     pub ui_scale: Option<f32>,
     pub window: Option<WindowGeometry>,
+    /// Show the NEXT quick actions section in the Properties column.
+    pub quick_actions: bool,
 }
 
 impl Default for Settings {
@@ -239,6 +241,7 @@ impl Default for Settings {
             theme: Theme::Dark,
             ui_scale: None,
             window: None,
+            quick_actions: true,
         }
     }
 }
@@ -312,6 +315,9 @@ impl Settings {
             .get("ui_scale")
             .and_then(|v| v.as_f64())
             .map(round_ui_scale);
+        if let Some(quick_actions) = map.get("quick_actions").and_then(|v| v.as_bool()) {
+            settings.quick_actions = quick_actions;
+        }
         if let Some(window) = map.get("window").and_then(|v| v.as_object()) {
             let number = |key: &str| window.get(key).and_then(|v| v.as_f64());
             if let (Some(width), Some(height), Some(x), Some(y)) =
@@ -340,6 +346,7 @@ impl Settings {
             self.ui_scale
                 .map_or(serde_json::Value::Null, |scale| serde_json::json!(scale)),
         );
+        map.insert("quick_actions".into(), self.quick_actions.into());
         if let Some(window) = self.window {
             map.insert(
                 "window".into(),
@@ -467,7 +474,7 @@ impl App {
         self.document.grid_step = self.settings.grid_mm;
     }
 
-    fn save_settings(&mut self) {
+    pub(super) fn save_settings(&mut self) {
         if let Err(error) = self.settings.save() {
             self.status_message = format!("Settings not saved: {error}");
         }
