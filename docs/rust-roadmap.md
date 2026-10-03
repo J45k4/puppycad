@@ -31,7 +31,7 @@ constraints, and conflicts are diagnosed.
    intuitive.
 3. (Done) Port `src/sketch-redundancy.ts`: DOF count, over-constrained and conflicting
    relation diagnostics, shown in the header and as per-entity colors.
-4. Dragging under constraints: a temporary target for the dragged anchor,
+4. (Done) Dragging under constraints: a temporary target for the dragged anchor,
    solved every frame.
 5. Remove restrictions the solver makes unnecessary (90-degree-only rotation of
    constrained lines, Equal blocking split/trim/scale, and similar).

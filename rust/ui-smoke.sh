@@ -2913,3 +2913,38 @@ cp /tmp/native-normal.pcad /out/rust-native-normal.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Drag a single line endpoint: the other end stays, the dragged anchor is
+# drawn as a filled square while the button is held.
+./target/debug/puppycad /tmp/native-anchor-drag.pcad >/tmp/puppycad-anchor-drag.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-anchor-drag.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-anchor-drag.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" l
+xdotool mousemove 430 360 click 1
+xdotool mousemove 630 360 click 1
+xdotool key --window "$window_id" v
+xdotool mousemove 530 360 click 1
+xdotool mousemove 630 360 mousedown 1
+xdotool mousemove 610 330
+xdotool mousemove 600 250
+sleep 0.5
+import -window root /out/rust-native-anchor-drag.png
+xdotool mouseup 1
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test -s /tmp/native-anchor-drag.pcad
+cp /tmp/native-anchor-drag.pcad /out/rust-native-anchor-drag.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

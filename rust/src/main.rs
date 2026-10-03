@@ -2175,6 +2175,49 @@ impl App {
         }
     }
 
+    /// Small squares on the selected shape's draggable anchors; the hovered
+    /// or dragged one is filled.
+    fn paint_anchor_handles(&self, painter: &mut Painter, layout: Layout) {
+        if self.document.tool != Tool::Select || self.read_only() {
+            return;
+        }
+        let Some(id) = self.document.selected else {
+            return;
+        };
+        let origin = self.viewport_origin();
+        let active = self.document.dragged_anchor().or_else(|| {
+            (!self.document.dragging() && layout.viewport.contains(self.cursor.x, self.cursor.y))
+                .then(|| {
+                    self.document
+                        .anchor_at(self.document.screen_to_world(self.cursor, origin))
+                })
+                .flatten()
+        });
+        for (index, point) in self.document.drag_anchors(id) {
+            let at = self.document.world_to_screen(point, origin);
+            if !layout.viewport.contains(at.x, at.y) {
+                continue;
+            }
+            if active == Some((id, index)) {
+                let rect = Rect {
+                    x: at.x - 5.0,
+                    y: at.y - 5.0,
+                    w: 10.0,
+                    h: 10.0,
+                };
+                painter.rect(rect, ACCENT);
+            } else {
+                let rect = Rect {
+                    x: at.x - 3.5,
+                    y: at.y - 3.5,
+                    w: 7.0,
+                    h: 7.0,
+                };
+                painter.outline(rect, 1.5, ACCENT);
+            }
+        }
+    }
+
     fn paint_shapes(&self, painter: &mut Painter, layout: Layout) {
         let origin = self.viewport_origin();
         for shape in &self.document.shapes {
@@ -2185,6 +2228,7 @@ impl App {
                 self.document.selected == Some(shape.id()),
             );
         }
+        self.paint_anchor_handles(painter, layout);
         if let Some(start) = self.document.draft_start {
             if layout.viewport.contains(self.cursor.x, self.cursor.y) {
                 let raw_end = self.document.screen_to_world(self.cursor, origin);
