@@ -364,6 +364,18 @@ fn clicking_a_dashed_edge_projects_only_that_edge() {
 }
 
 #[test]
+fn dashed_reference_edges_snap_where_drawn_geometry_crosses_them() {
+    let mut document = Document::default();
+    document.reference_edges = vec![(p(-50.0, 0.0), p(50.0, 0.0))];
+    document.tool = Tool::Line;
+    document.draft_start = Some(p(10.0, -20.0));
+    assert!(document.finish_draft(p(10.0, 20.0)));
+    let snap = document.snap_point(p(10.3, 0.2), false, true).unwrap();
+    assert_eq!(snap.kind, model::SnapKind::Intersection);
+    assert!(snap.point.distance(p(10.0, 0.0)) < 1e-4);
+}
+
+#[test]
 fn context_menu_offers_project_into_sketch_on_edges_and_faces() {
     let path = copy_fixture("extruded-rectangle");
     let mut app = App::with_project(&path).unwrap();

@@ -389,6 +389,22 @@ impl Document {
                     }
                 }
             }
+            // Dashed reference edges cross drawn geometry too.
+            for &(a, b) in &self.reference_edges {
+                let edge = Shape::Line { id: u32::MAX, a, b };
+                for shape in &self.shapes {
+                    for point in finite_intersections(shape, &edge) {
+                        let d = raw.distance(point);
+                        if d <= distance {
+                            best = Some(SnapResult {
+                                point,
+                                kind: SnapKind::Intersection,
+                            });
+                            distance = d;
+                        }
+                    }
+                }
+            }
             let origin = Point { x: 0.0, y: 0.0 };
             if raw.distance(origin) < distance {
                 return Some(SnapResult {
