@@ -385,7 +385,7 @@ impl Problem {
         let mut lambda = 1e-3;
         let n = free.len();
         for iteration in 0..options.max_iterations {
-            if hard_weight.is_none() && current.sqrt() <= options.tolerance * 1e-2 {
+            if hard_weight.is_none() && current.sqrt() <= options.tolerance * 1e-8 {
                 return iteration;
             }
             let r = self.objective(params, hard_weight);
