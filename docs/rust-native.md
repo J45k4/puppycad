@@ -229,7 +229,8 @@ arcs, ellipses, elliptic arcs and splines (anchor pairs, equal radii or axes,
 mirrored arc start and ellipse rotation, negated sweeps) are solver residuals
 too. The only hand-propagated relation is a mirror copy of a rectangle,
 polygon or slot, which is regenerated from its source and axis after every
-solve.
+solve. Pattern copies (see **Patterns**) are likewise regenerated from their
+sources after every solve, for every shape kind.
 
 Rotating a direction target now turns its source with it; Equal ellipses can
 be scaled; splines with linked end points can be moved, scaled, rotated, and
@@ -373,6 +374,26 @@ clicked line: it adds a mirror copy linked by a `mirror` relation, as one
 undo step (a corner rectangle's copy is a rotated rectangle, as in the web
 app). The mirror line must be an existing line. Deleting the line, the source
 or the copy removes the relation.
+**Patterns.** Select one or more shapes (click, Shift+click or box select) and
+press **Shift+Z** or **MORE → LIN PATTERN**: Properties prompts for COUNT
+(cells per row, source included), SPACING X / Y (mm), ROWS (1 for a single
+row) and, for a grid, ROW SPACING X / Y; Enter keeps the shown value. The copies
+are linked by a web `linearPattern` relation (`step`, `columns`, `rowStep`).
+**Shift+U** or **MORE → CIRC PATTERN** prompts for COUNT (source included) and
+ANGLE (default 360), then waits for a click on the center: a sketch point, line
+end or curve center under the cursor becomes a referenced center
+(`centerAnchor`, the pattern follows it), a click on the origin uses the
+origin, anywhere else uses that point. Full circles step by angle/count, open
+arcs by angle/(count-1) and include both ends, as in the web app. Each pattern
+is one undo step, copies keep the source's construction flag, and Project rows
+show `[PAT]`. Copies follow the source: editing, moving or dimensioning a
+source updates every copy (copies themselves are not independently editable).
+With a pattern member selected, Shift+Z / Shift+U reopen the prompts with the
+pattern's current values and edit that pattern (copies of surviving cells are
+kept, removed cells are deleted). Deleting the source, a copy or the
+referenced center removes the pattern relation and leaves the remaining
+copies as free geometry, matching the web app. Patterns hold 2-32 cells and at
+most 64 copies; skipped instances are not supported.
 Rotating a constrained line is supported in 90-degree increments, which swaps
 horizontal and vertical when appropriate.
 Web projects that store line length, rectangle width or height, horizontal, or
@@ -483,6 +504,7 @@ Library crate (`rust/src/lib.rs`):
   selection, drafting, undo), `shapes.rs` (`Point`, `Shape` and per-shape
   geometry), `relations.rs` (fixed anchors and relation toggles),
   `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
+  `pattern.rs` (linked linear/grid and circular patterns),
   `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
   shared with split/trim),
   `dimensions.rs` (`set_dimension`), `selection.rs` (multi-selection,
@@ -500,6 +522,7 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   `input.rs` (mouse/keyboard handling and the `winit` handler),
   `panels.rs` (toolbar and properties panels, dimension editing),
   `corner.rs` (fillet/chamfer gestures and prompts),
+  `pattern.rs` (linear/circular pattern prompts and center pick),
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
   preview projection, dragging and painting), `view_sketch.rs` (sketch grid
   and shape painting), `tests.rs`.
@@ -543,6 +566,14 @@ regions from one sketch and checks their saved profile IDs.
 A mirror scenario draws a line and a circle, mirrors the circle across the line
 with Shift+I (`rust-native-mirror.png`: both circle rows show `[SYM]`), and
 checks that the saved project holds a web `mirror` relation.
+A pattern scenario box-selects a circle and makes a 3x1 linear pattern with
+Shift+Z (`rust-native-pattern-linear.png`), then rotates a line six times about
+a sketch point with Shift+U (`rust-native-pattern-circular.png`: a six-spoke
+star around the point, every row `[PAT]`), and checks the saved
+`linearPattern`, `circularPattern` and `centerAnchor` fields. The
+`rust/fixtures/patterns.pcad` fixture (a 3x2 circle grid and a four-way line
+pattern about a referenced point) is opened by both the Rust round-trip test
+and `test/rust-roundtrip.test.ts`.
 It also creates and renames a second part, switches between parts, renames a
 sketch, and saves geometry in both parts. A two-body scenario creates extrusions
 on Top and Front sketches, saves their graph, and exports both STLs.

@@ -49,7 +49,8 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 3. Mirror and the symmetry constraint (**done**: `rust/src/model/symmetry.rs`;
    Shift+S symmetry gesture, Shift+I / MORE → MIRROR).
 4. Offset, single and chain.
-5. Linear and circular patterns.
+5. Linear and circular patterns (**done**: `rust/src/model/pattern.rs`;
+   Shift+Z / MORE → LIN PATTERN, Shift+U / MORE → CIRC PATTERN).
 6. Tangent arc and smooth join.
 7. Remaining spline constraints.
 8. Box selection, Shift multi-select, selection filters. **Done.**
