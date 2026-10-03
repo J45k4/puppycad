@@ -592,7 +592,12 @@ impl App {
                 if active {
                     painter.rect(row, ACTIVE_ROW);
                 }
-                let name = project.part_name_at(*part_index).unwrap_or("Part");
+                let kind = if project.part_name_at(*part_index).is_some() {
+                    "PART"
+                } else {
+                    "ASM"
+                };
+                let name = project.item_name_at(*part_index).unwrap_or("Part");
                 let display_name = if name.chars().count() > 13 {
                     format!("{}...", name.chars().take(13).collect::<String>())
                 } else {
@@ -601,7 +606,11 @@ impl App {
                 painter.text(
                     row.x + 9.0,
                     row.y + 9.0,
-                    &format!("{} PART / {}", if active { ">" } else { "v" }, display_name),
+                    &format!(
+                        "{} {kind} / {}",
+                        if active { ">" } else { "v" },
+                        display_name
+                    ),
                     1.0,
                     if active { TEXT } else { MUTED },
                 );

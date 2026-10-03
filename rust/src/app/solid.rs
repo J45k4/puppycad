@@ -319,13 +319,18 @@ impl App {
         button: MouseButton,
     ) -> bool {
         self.solid_drag = None;
-        if !self.solid_preview
+        if (!self.solid_preview && self.assembly.is_none())
             || self.projects_page.is_some()
             || !layout.viewport.contains(point.x, point.y)
         {
             return false;
         }
-        let Some((scene, projector)) = self.solid_projector(layout) else {
+        let projected = if self.assembly.is_some() {
+            self.assembly_projector(layout)
+        } else {
+            self.solid_projector(layout)
+        };
+        let Some((scene, projector)) = projected else {
             return false;
         };
         self.solid_drag = match button {

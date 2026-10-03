@@ -28,7 +28,9 @@ impl App {
             let world = self.document.screen_to_world(next, self.viewport_origin());
             self.document.drag_to(world);
         }
-        if self.solid_preview {
+        if self.assembly.is_some() {
+            self.update_assembly_hover();
+        } else if self.solid_preview {
             self.update_face_hover();
         }
         let hover_changed = self.update_hover() | self.update_tooltip_hover();
@@ -122,6 +124,11 @@ impl App {
                 }
             }
             self.more_open = false;
+        }
+        if self.assembly.is_some() {
+            self.assembly_click(layout, point);
+            self.redraw();
+            return;
         }
         if self.edge_pick.is_some() && layout.viewport.contains(point.x, point.y) {
             self.toggle_edge_at(layout, point);
@@ -337,7 +344,7 @@ impl App {
         let part_rows = self.part_rows();
         for (row_index, target) in part_rows.iter().enumerate() {
             if layout.part_row(row_index).contains(point.x, point.y) {
-                self.switch_part_to(*target);
+                self.open_project_row(*target);
                 self.redraw();
                 return;
             }
@@ -823,7 +830,7 @@ impl App {
                     };
                     self.scroll_projects_page(rows, self.layout());
                     self.redraw();
-                } else if self.solid_preview
+                } else if (self.solid_preview || self.assembly.is_some())
                     && self
                         .layout()
                         .viewport
@@ -904,6 +911,10 @@ impl App {
                         .select_project_row(-(project_page_visible_rows(layout) as isize), layout),
                     _ => {}
                 }
+                self.redraw();
+                return;
+            }
+            if self.assembly.is_some() && self.assembly_prompt_key(code, event.text.as_deref()) {
                 self.redraw();
                 return;
             }
