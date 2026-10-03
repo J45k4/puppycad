@@ -117,7 +117,8 @@ pub fn binary_stl(header: &str, triangles: &[[Vertex; 3]]) -> Vec<u8> {
 /// boolean results when cuts/joins merged extrusions.
 pub fn project_bodies(project: &ProjectFile) -> Result<Vec<Body>, String> {
     let solids = project
-        .extrusion_previews()
+        .active_extrusion_previews()
+        .filter(|solids| !solids.is_empty())
         .ok_or("No supported solid to export")?;
     match project.evaluated_solids() {
         Some(meshes) if meshes.len() < solids.len() => Ok(meshes

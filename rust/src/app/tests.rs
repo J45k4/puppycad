@@ -1170,3 +1170,95 @@ fn solid_and_view_keys_resolve_through_the_registry() {
     app.run_command(Cmd::ToggleGlyphs);
     assert_ne!(app.show_glyphs, glyphs);
 }
+
+#[test]
+fn feature_tree_keys_are_undoable_steps() {
+    let mut app = App::with_project(Path::new("fixtures/feature-tree.pcad")).unwrap();
+    let layout = Layout::new(1280.0, 800.0);
+    let volume = |app: &App| -> f64 {
+        app.project
+            .as_ref()
+            .unwrap()
+            .evaluated_solids()
+            .unwrap()
+            .iter()
+            .map(Manifold::volume)
+            .sum()
+    };
+    let start = volume(&app);
+    // Clicking the second feature row selects it.
+    let row = app.feature_row(layout, 1);
+    assert!(app.click_feature_tree(
+        layout,
+        Point {
+            x: row.x + 5.0,
+            y: row.y + 5.0
+        }
+    ));
+    assert_eq!(app.selected_solid, 1);
+    app.toggle_selected_suppressed();
+    assert!(!app.project.as_ref().unwrap().feature_suppressed(1));
+    assert!(volume(&app) < start);
+    app.solid_undo_step(false);
+    assert!(app.project.as_ref().unwrap().feature_suppressed(1));
+    // The join cannot move before its body.
+    app.selected_solid = 2;
+    app.move_selected_feature(-1);
+    assert_eq!(app.selected_solid, 1);
+    app.move_selected_feature(-1);
+    assert_eq!(app.selected_solid, 1);
+    assert!(app.status_message.contains("Feature tree"));
+    // Drag the ROLLBACK row above the second feature.
+    let bar = app.rollback_row(layout);
+    assert!(app.click_feature_tree(
+        layout,
+        Point {
+            x: bar.x + 5.0,
+            y: bar.y + 5.0
+        }
+    ));
+    assert!(app.rollback_drag);
+    app.rollback_drag = false;
+    app.drop_rollback(app.feature_row(layout, 1).y);
+    assert_eq!(app.project.as_ref().unwrap().rollback_index(), Some(1));
+    app.move_rollback(1);
+    assert_eq!(app.project.as_ref().unwrap().rollback_index(), Some(2));
+    app.solid_undo_step(false);
+    app.solid_undo_step(false);
+    assert_eq!(app.project.as_ref().unwrap().rollback_index(), None);
+}
+
+#[test]
+fn returning_to_the_solid_view_re_evaluates_edited_sketches() {
+    let mut app = App::with_project(Path::new("fixtures/feature-tree.pcad")).unwrap();
+    let volume = |app: &App| -> f64 {
+        app.project
+            .as_ref()
+            .unwrap()
+            .evaluated_solids()
+            .unwrap()
+            .iter()
+            .map(Manifold::volume)
+            .sum()
+    };
+    let start = volume(&app);
+    let project = app.project.as_mut().unwrap();
+    // Sketch 2 feeds the join (50 x 50 boss, 15 mm above the block).
+    app.document = project.switch_sketch(1, &app.document).unwrap();
+    app.solid_preview = false;
+    let evaluations = project.feature_evaluations();
+    let mut boss = Document::default();
+    boss.tool = Tool::Rectangle;
+    boss.draft_start = Some(Point { x: 20.0, y: 20.0 });
+    assert!(boss.finish_draft(Point { x: 80.0, y: 80.0 }));
+    app.document = boss;
+    assert!((volume(&app) - start).abs() < 1.0, "not synced before Tab");
+    app.toggle_solid_view();
+    assert!(app.solid_preview);
+    assert!((volume(&app) - start - 15.0 * (3600.0 - 2500.0)).abs() < 1.0);
+    // The body and the suppressed cut before the join stay cached.
+    assert_eq!(
+        app.project.as_ref().unwrap().feature_evaluations() - evaluations,
+        1
+    );
+}

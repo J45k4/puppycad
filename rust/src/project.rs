@@ -16,7 +16,9 @@ use crate::model::{
 use crate::spline::{self, SplineMode};
 
 mod face;
+mod features;
 pub use face::{FaceDescriptor, FaceRef, Frame};
+pub use features::{FeatureKind, FeatureStatus};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
     let (Shape::Line { a: a0, b: a1, .. }, Shape::Line { a: b0, b: b1, .. }) = (source, target)
@@ -277,6 +279,8 @@ pub struct ProjectFile {
     metadata_dirty: bool,
     /// Serialized project as of the last open or save, for unsaved-change checks.
     clean_value: Value,
+    /// Memoized per-feature evaluation results.
+    feature_cache: features::FeatureCache,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -392,6 +396,7 @@ struct SketchWorkspace {
     original_entities: HashMap<u32, Value>,
 }
 
+#[derive(Clone)]
 pub struct SolidPreview {
     pub name: String,
     pub profile: Vec<Point>,
@@ -1106,8 +1111,10 @@ fn segment_loop_profiles(shapes: &[&Shape]) -> Option<Vec<Vec<Point>>> {
 
 impl ProjectFile {
     pub fn extrusion_preview(&self) -> Option<SolidPreview> {
-        let mut previews = self.extrusion_previews()?;
-        (previews.len() == 1).then(|| previews.remove(0))
+        let tree = self.evaluate_tree()?;
+        (tree.previews.len() == 1 && tree.statuses[0].is_active())
+            .then(|| tree.previews.into_iter().next())
+            .flatten()
     }
 
     pub fn extrusion_previews(&self) -> Option<Vec<SolidPreview>> {
@@ -1178,60 +1185,11 @@ impl ProjectFile {
         self.evaluate_extrusions().map(|(_, bodies)| bodies)
     }
 
-    /// Evaluate every extrusion in order: per-feature tool solids (with
-    /// resolved start and depth) and the resulting Boolean bodies.
+    /// Evaluate the feature tree (`features.rs`): one tool solid per
+    /// feature (placeholders for inactive ones) and the Boolean bodies.
     fn evaluate_extrusions(&self) -> Option<(Vec<SolidPreview>, Vec<Manifold>)> {
-        let nodes = self
-            .value
-            .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
-            .as_array()?;
-        if nodes
-            .iter()
-            .any(|node| node.get("type").and_then(Value::as_str) == Some("chamfer"))
-        {
-            return None;
-        }
-        let extrudes = self.extrude_nodes()?;
-        if extrudes.is_empty() {
-            return None;
-        }
-        let mut previews = Vec::new();
-        let mut bodies: Vec<Manifold> = Vec::new();
-        let mut body_ids: Vec<String> = Vec::new();
-        for node in extrudes {
-            let operation = node.get("operation")?.as_str()?;
-            let mut options = extrude_options(node).ok()?;
-            // A cut from a face sketch runs into the body (against the face
-            // normal) by default; new bodies and joins grow outward. Flip
-            // inverts that default.
-            if operation == "cut" && self.is_face_sketch(node) {
-                options.flip = !options.flip;
-            }
-            let mut preview = self.preview_for_extrude(node)?;
-            resolve_extent(&mut preview, &options, &bodies, &body_ids)?;
-            let tool = crate::stl::manifold_from_solid(&preview).ok()?;
-            match operation {
-                "newBody" => {
-                    bodies.push(tool);
-                    body_ids.push(node.get("id")?.as_str()?.to_string());
-                }
-                "cut" | "join" => {
-                    let previous = bodies.last_mut()?;
-                    let result = if operation == "cut" {
-                        previous.difference(&tool)
-                    } else {
-                        previous.union(&tool)
-                    };
-                    if result.status() != ManifoldError::NoError || result.is_empty() {
-                        return None;
-                    }
-                    *previous = result;
-                }
-                _ => return None,
-            }
-            previews.push(preview);
-        }
-        Some((previews, bodies))
+        self.evaluate_tree()
+            .map(|tree| (tree.previews, tree.bodies))
     }
 
     fn preview_for_extrude(&self, extrude: &Value) -> Option<SolidPreview> {
@@ -1303,6 +1261,7 @@ impl ProjectFile {
         {
             return Err("this extrusion cannot be edited natively".into());
         }
+        let errors = self.feature_error_count();
         let nodes = self
             .value
             .pointer_mut(&format!("/items/{}/data/cad/nodes", self.part_index))
@@ -1315,7 +1274,7 @@ impl ProjectFile {
             .ok_or("extrusion node is missing")?;
         let old_depth = extrude["depth"].clone();
         extrude["depth"] = json!(depth);
-        if self.evaluated_solids().is_none() {
+        if !self.no_new_errors(errors) {
             self.value
                 .pointer_mut(&format!("/items/{}/data/cad/nodes", self.part_index))
                 .and_then(Value::as_array_mut)
@@ -1342,6 +1301,7 @@ impl ProjectFile {
         {
             return Err("this extrusion cannot be edited natively".into());
         }
+        let errors = self.feature_error_count();
         let path = format!("/items/{}/data/cad/nodes", self.part_index);
         let nodes = self
             .value
@@ -1358,9 +1318,7 @@ impl ProjectFile {
         let old = nodes[position].clone();
         write_extrude_options(&mut nodes[position], options);
         let error = extrude_options(&nodes[position]).err();
-        if error.is_none()
-            && self.extrusion_options_error().is_none()
-            && self.evaluated_solids().is_some()
+        if error.is_none() && self.extrusion_options_error().is_none() && self.no_new_errors(errors)
         {
             return Ok(());
         }
@@ -1410,7 +1368,7 @@ impl ProjectFile {
             return Err("extrusion order changed".into());
         }
         let old = std::mem::replace(slot, node);
-        if self.evaluated_solids().is_some() {
+        if self.feature_error_count().is_some() {
             return Ok(());
         }
         *self
@@ -1499,6 +1457,7 @@ impl ProjectFile {
         if !data["cad"]["rootNodeIds"].is_array() || !data["tree"]["orderedNodeIds"].is_array() {
             return Err("project graph or tree is invalid".into());
         }
+        let rollback = self.rollback_index();
         self.value["items"][self.part_index]["data"]["cad"]["nodes"]
             .as_array_mut()
             .expect("nodes checked above")
@@ -1509,6 +1468,9 @@ impl ProjectFile {
                 .and_then(Value::as_array_mut)
                 .expect("lists checked above")
                 .retain(|entry| entry.as_str() != Some(&id));
+        }
+        if let Some(rollback) = rollback.filter(|&rollback| rollback > index) {
+            self.set_rollback_index(Some(rollback - 1))?;
         }
         if !self.has_any_extrusion()
             && self.read_only_reason.as_deref() == Some("solid features need native support")
@@ -1590,7 +1552,11 @@ impl ProjectFile {
         if !matches!(operation, "newBody" | "cut" | "join") {
             return Err("unsupported extrusion operation".into());
         }
-        if operation != "newBody" && self.evaluated_solids().is_none() {
+        if operation != "newBody"
+            && self
+                .evaluated_solids()
+                .is_none_or(|bodies| bodies.is_empty())
+        {
             return Err("cut and join require an existing solid".into());
         }
         if let Some(reason) = &self.read_only_reason {
@@ -1648,18 +1614,30 @@ impl ProjectFile {
             }
             index += 1;
         };
+        // New features go at the end of the tree, so the rollback bar is
+        // cleared; it is restored when creation fails.
+        let rollback = self.rollback_index();
+        self.set_rollback_index(None)?;
+        let errors = self.feature_error_count();
+        let nodes = self
+            .value
+            .pointer_mut(&format!("/items/{}/data/cad/nodes", self.part_index))
+            .and_then(Value::as_array_mut)
+            .ok_or("project CAD graph changed unexpectedly")?;
         nodes.push(json!({"id":id,"type":"extrude","name":format!("Extrusion {index}"),"sketchId":sketch_id,"profileId":profile_id,"operation":operation,"depth":depth}));
         write_extrude_options(nodes.last_mut().expect("just pushed"), options);
         if let Err(error) = extrude_options(nodes.last().expect("just pushed")) {
             nodes.pop();
+            self.set_rollback_index(rollback)?;
             return Err(error);
         }
-        if self.evaluated_solids().is_none() {
+        if !self.no_new_errors(errors) {
             self.value
                 .pointer_mut(&format!("/items/{}/data/cad/nodes", self.part_index))
                 .and_then(Value::as_array_mut)
                 .expect("nodes checked above")
                 .pop();
+            self.set_rollback_index(rollback)?;
             return Err(match options.end {
                 EndCondition::ThroughAll | EndCondition::UpToBody(_) => {
                     "the end condition does not reach a body in that direction".into()
@@ -3224,6 +3202,7 @@ impl ProjectFile {
             parked_parts: HashMap::new(),
             metadata_dirty: false,
             clean_value: Value::Null,
+            feature_cache: Default::default(),
         };
         if project.read_only_reason.as_deref() == Some("solid features need native support")
             && let Some(error) = project.extrusion_options_error()
@@ -3231,7 +3210,9 @@ impl ProjectFile {
             project.read_only_reason = Some(format!("extrusion options: {error}"));
         }
         if project.read_only_reason.as_deref() == Some("solid features need native support")
-            && project.evaluated_solids().is_some()
+            // Inputs the native evaluator cannot resolve at open keep the
+            // part read-only; errors that arise from native edits do not.
+            && project.feature_error_count() == Some(0)
             && project.face_sketches_resolve()
             && project.all_extrusions_registered()
             && ["features", "solidSteps", "solids"].iter().all(|key| {
@@ -10253,3 +10234,6 @@ mod extrude_option_tests;
 #[cfg(test)]
 #[path = "project/face_tests.rs"]
 mod face_tests;
+#[cfg(test)]
+#[path = "project/features_tests.rs"]
+mod features_tests;

@@ -393,6 +393,7 @@ impl App {
         self.split_circle_start = None;
         self.document.selected = None;
         self.document.selected_spline_point = None;
+        self.sync_sketch_to_project();
         let has_solids = self
             .project
             .as_ref()

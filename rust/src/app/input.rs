@@ -352,25 +352,11 @@ impl App {
                 }
             }
         }
-        let solid_count = self
-            .project
-            .as_ref()
-            .and_then(ProjectFile::extrusion_previews)
-            .map_or(0, |solids| solids.len());
-        for index in 0..solid_count {
-            if layout
-                .solid_row(index, part_rows.len(), self.sketch_count())
-                .contains(point.x, point.y)
-            {
-                self.selected_solid = index;
-                self.solid_preview = true;
-                self.editing = None;
-                self.status_message =
-                    format!("Selected extrusion {}  |  Delete to remove", index + 1);
-                self.redraw();
-                return;
-            }
+        if self.click_feature_tree(layout, point) {
+            self.redraw();
+            return;
         }
+        let solid_count = self.tree_row_count();
         for (index, shape) in self.document.shapes.iter().enumerate() {
             if layout
                 .row(index + solid_count, part_rows.len(), self.sketch_count())
@@ -778,6 +764,9 @@ impl App {
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
                 (ElementState::Pressed, MouseButton::Left) => self.handle_left_press(),
                 (ElementState::Released, MouseButton::Left) => {
+                    if std::mem::take(&mut self.rollback_drag) {
+                        self.drop_rollback(self.cursor.y);
+                    }
                     if let Some(start) = self.box_start.take() {
                         self.finish_box_select(start, self.cursor);
                     }

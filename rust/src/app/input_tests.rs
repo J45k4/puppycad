@@ -602,3 +602,29 @@ fn ui_colors_are_distinct() {
         }
     }
 }
+
+#[test]
+fn feature_tree_keys_go_through_the_registry() {
+    let mut app = App::with_project(std::path::Path::new("fixtures/feature-tree.pcad")).unwrap();
+    app.solid_preview = true;
+    app.selected_solid = 1;
+    let suppressed = app.project.as_ref().unwrap().feature_suppressed(1);
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::KeyH);
+    assert_ne!(
+        app.project.as_ref().unwrap().feature_suppressed(1),
+        suppressed
+    );
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::BracketLeft);
+    assert_eq!(app.project.as_ref().unwrap().rollback_index(), Some(2));
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::BracketRight);
+    assert_eq!(app.project.as_ref().unwrap().rollback_index(), None);
+}
+
+#[test]
+fn ctrl_comma_toggles_settings() {
+    let mut app = App::default();
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::Comma);
+    assert!(app.settings_open);
+    key(&mut app, KeyCode::Escape);
+    assert!(!app.settings_open);
+}

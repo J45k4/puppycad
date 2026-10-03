@@ -29,10 +29,11 @@ impl ExtrudeDraft {
     }
 }
 
-/// One undoable change of an existing extrusion node.
-pub(super) struct SolidUndo {
-    pub(super) index: usize,
-    pub(super) node: Value,
+/// One undoable solid change: an edit of one extrusion node, or a feature
+/// tree edit (reorder, suppress, rollback) restored from a snapshot.
+pub(super) enum SolidUndo {
+    Node { index: usize, node: Value },
+    Tree { snapshot: Value, selected: usize },
 }
 
 /// Blind -> Symmetric -> Through all -> Up to body -> Blind. Through all and
@@ -203,7 +204,7 @@ impl App {
         };
         self.status_message = match project.set_extrusion_options_at(index, &options) {
             Ok(()) => {
-                self.solid_undo.push(SolidUndo { index, node });
+                self.solid_undo.push(SolidUndo::Node { index, node });
                 self.solid_redo.clear();
                 format!(
                     "{}{}  |  Ctrl+Z to undo  |  Ctrl+S to save",
@@ -223,7 +224,7 @@ impl App {
             .extrude_node_snapshot(index)
             .ok_or("extrusion node is missing")?;
         project.set_extrusion_depth_at(index, depth)?;
-        self.solid_undo.push(SolidUndo { index, node });
+        self.solid_undo.push(SolidUndo::Node { index, node });
         self.solid_redo.clear();
         Ok(())
     }
@@ -247,7 +248,7 @@ impl App {
             && self
                 .solid_undo
                 .last()
-                .is_some_and(|undo| undo.index == index)
+                .is_some_and(|undo| matches!(undo, SolidUndo::Node { index: i, .. } if *i == index))
         {
             self.status_message
                 .push_str("  |  U then click a body to change the target");
@@ -347,16 +348,39 @@ impl App {
         let Some(project) = self.project.as_mut() else {
             return;
         };
-        let Some(current) = project.extrude_node_snapshot(step.index) else {
+        let (index, node) = match step {
+            SolidUndo::Node { index, node } => (index, node),
+            SolidUndo::Tree { snapshot, selected } => {
+                let current = project.feature_tree_snapshot();
+                self.status_message = match project.restore_feature_tree(snapshot) {
+                    Ok(()) => {
+                        to.push(SolidUndo::Tree {
+                            snapshot: current,
+                            selected: self.selected_solid,
+                        });
+                        self.selected_solid = selected;
+                        if redo {
+                            "Redo feature tree edit"
+                        } else {
+                            "Undo feature tree edit"
+                        }
+                        .into()
+                    }
+                    Err(error) => format!("Undo: {error}"),
+                };
+                return;
+            }
+        };
+        let Some(current) = project.extrude_node_snapshot(index) else {
             return;
         };
-        self.status_message = match project.restore_extrude_node(step.index, step.node) {
+        self.status_message = match project.restore_extrude_node(index, node) {
             Ok(()) => {
-                to.push(SolidUndo {
-                    index: step.index,
+                to.push(SolidUndo::Node {
+                    index,
                     node: current,
                 });
-                self.selected_solid = step.index;
+                self.selected_solid = index;
                 if redo {
                     "Redo extrusion edit"
                 } else {

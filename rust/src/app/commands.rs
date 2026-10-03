@@ -176,6 +176,11 @@ pub(super) enum Cmd {
     ExportAsciiStl,
     Export3mf,
     Settings,
+    FeatureUp,
+    FeatureDown,
+    SuppressFeature,
+    RollbackUp,
+    RollbackDown,
 }
 
 pub(super) struct Command {
@@ -931,6 +936,46 @@ pub(super) static COMMANDS: &[Command] = &[
         |app| app.export_3mf(),
     ),
     cmd(
+        Cmd::FeatureUp,
+        "Move feature up",
+        "Ctrl+Up",
+        C::Solid,
+        S::Solid,
+        |app| app.move_selected_feature(-1),
+    ),
+    cmd(
+        Cmd::FeatureDown,
+        "Move feature down",
+        "Ctrl+Down",
+        C::Solid,
+        S::Solid,
+        |app| app.move_selected_feature(1),
+    ),
+    cmd(
+        Cmd::SuppressFeature,
+        "Suppress / unsuppress feature",
+        "Ctrl+H",
+        C::Solid,
+        S::Solid,
+        |app| app.toggle_selected_suppressed(),
+    ),
+    cmd(
+        Cmd::RollbackUp,
+        "Roll back one feature",
+        "Ctrl+[",
+        C::Solid,
+        S::Solid,
+        |app| app.move_rollback(-1),
+    ),
+    cmd(
+        Cmd::RollbackDown,
+        "Roll forward one feature",
+        "Ctrl+]",
+        C::Solid,
+        S::Solid,
+        |app| app.move_rollback(1),
+    ),
+    cmd(
         Cmd::Settings,
         "Settings",
         "Ctrl+,",
@@ -1086,6 +1131,11 @@ impl App {
         Some(match code {
             KeyCode::KeyK if ctrl => Cmd::CommandPalette,
             KeyCode::Comma if ctrl => Cmd::Settings,
+            KeyCode::ArrowUp if ctrl && self.solid_preview => Cmd::FeatureUp,
+            KeyCode::ArrowDown if ctrl && self.solid_preview => Cmd::FeatureDown,
+            KeyCode::KeyH if ctrl && self.solid_preview => Cmd::SuppressFeature,
+            KeyCode::BracketLeft if ctrl && self.solid_preview => Cmd::RollbackUp,
+            KeyCode::BracketRight if ctrl && self.solid_preview => Cmd::RollbackDown,
             KeyCode::KeyP if ctrl && shift => Cmd::CommandPalette,
             KeyCode::Slash if plain_shift => Cmd::ShortcutOverlay,
             KeyCode::F1 => Cmd::ShortcutOverlay,
@@ -1254,23 +1304,7 @@ impl App {
     }
 
     fn toggle_solid_preview(&mut self) {
-        if self
-            .project
-            .as_ref()
-            .and_then(ProjectFile::extrusion_previews)
-            .is_some()
-        {
-            self.solid_preview = !self.solid_preview;
-            if !self.solid_preview {
-                self.refresh_reference_edges();
-            }
-            self.status_message = if self.solid_preview {
-                "3D extrusion preview  |  Tab: sketch"
-            } else {
-                "Sketch view  |  Tab: 3D preview"
-            }
-            .into();
-        }
+        self.toggle_solid_view();
     }
 
     fn copy_selected_key(&mut self) {
