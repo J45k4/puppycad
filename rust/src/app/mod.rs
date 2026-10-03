@@ -1008,28 +1008,14 @@ impl App {
         {
             self.paint_revolve_draft(&mut painter, layout);
         } else if self.solid_preview {
-            if let Some(solids) = self
+            if self
                 .project
                 .as_ref()
                 .and_then(ProjectFile::active_extrusion_previews)
+                .is_some()
                 && let Some((scene, projector)) = self.solid_projector(layout)
             {
-                if scene.bodies < solids.len()
-                    || self
-                        .project
-                        .as_ref()
-                        .is_some_and(ProjectFile::has_extension_features)
-                {
-                    self.paint_boolean_preview(
-                        &mut painter,
-                        layout,
-                        &scene,
-                        &projector,
-                        scene.bodies,
-                    );
-                } else {
-                    self.paint_solid_preview(&mut painter, layout, &solids, &projector);
-                }
+                self.paint_boolean_preview(&mut painter, layout, &scene, &projector, scene.bodies);
                 if self.edge_pick.is_some() {
                     self.paint_edge_pick(&mut painter, layout, &projector);
                 } else {

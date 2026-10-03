@@ -626,6 +626,12 @@ preview shows supported bodies together. Press **Shift+X** on a later closed
 reference-plane sketch to cut its 50 mm extrusion from the most recent body.
 Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion with
 that body. The shaded preview and STL export use the evaluated Boolean mesh.
+Every body (plain extrusions, cut/join results, revolve, loft and edge
+finish results) is drawn the same way: each triangle is lit per face normal
+by a key light from the upper right plus ambient and a weak head-on fill, and
+sharp edges (adjacent face normals more than 20° apart, the same edges an
+edge finish picks) are drawn as dark lines, with pieces hidden behind the
+mesh left out, so holes and chamfer bevels read clearly.
 The Project panel lists each solid feature in tree order (see Feature
 tree); select the cut or join feature to edit its depth or delete it. Earlier features with dependent cuts or
 joins cannot be deleted in isolation. Revolve, loft and edge chamfer/fillet

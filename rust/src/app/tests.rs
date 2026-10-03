@@ -1402,3 +1402,37 @@ fn loft_takes_profiles_from_two_sketches() {
     assert_eq!(features[0].operation, "join");
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn bodies_are_lit_per_face_and_carry_sharp_edges() {
+    let path = temp_project("shading");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(
+        &mut app,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 20.0, y: 20.0 },
+    );
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 10.0, 0)
+        .unwrap();
+    app.solid_preview = true;
+    let (scene, projector) = app.solid_projector(Layout::new(1280.0, 800.0)).unwrap();
+    assert_eq!(scene.edges.len(), 12, "a box has twelve sharp edges");
+    let shades = [
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+    ]
+    .map(|normal| projector.shade(normal));
+    for (i, a) in shades.iter().enumerate() {
+        for b in &shades[i + 1..] {
+            let difference: f32 = (0..3).map(|c| (a[c] - b[c]).abs()).sum();
+            assert!(difference > 0.05, "faces at right angles read apart");
+        }
+    }
+    let _ = app.paint();
+    let _ = std::fs::remove_file(path);
+}

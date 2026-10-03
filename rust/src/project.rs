@@ -18,7 +18,7 @@ use crate::spline::{self, SplineMode};
 mod face;
 mod features;
 pub use face::{FaceDescriptor, FaceRef, Frame};
-pub use features::{EdgeRef, FeatureInfo, FinishKind, SolidEdge, Tri};
+pub use features::{EdgeRef, FeatureInfo, FinishKind, SolidEdge, Tri, sharp_edges};
 pub use features::{FeatureKind, FeatureStatus};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
