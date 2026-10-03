@@ -78,6 +78,18 @@ impl App {
                 self.redraw();
                 return;
             }
+            for (index, kind) in [(13, CornerKind::Fillet), (14, CornerKind::Chamfer)] {
+                if layout.more_item(index).contains(point.x, point.y) {
+                    if self.read_only() {
+                        self.status_message =
+                            "READ ONLY: this sketch has unsupported native features".into();
+                    } else {
+                        self.start_corner_pick(kind);
+                    }
+                    self.redraw();
+                    return;
+                }
+            }
             for (index, tool) in [Tool::Point, Tool::Polygon, Tool::Slot]
                 .into_iter()
                 .enumerate()
@@ -310,6 +322,10 @@ impl App {
         };
         if self.read_only() && self.document.tool != Tool::Select {
             self.status_message = "READ ONLY: this sketch has unsupported native features".into();
+            self.redraw();
+            return;
+        }
+        if self.document.tool == Tool::Select && !self.read_only() && self.corner_pick_click() {
             self.redraw();
             return;
         }
@@ -602,7 +618,26 @@ impl ApplicationHandler for App {
                             KeyCode::Enter | KeyCode::NumpadEnter => self.finish_dimension_edit(),
                             KeyCode::Escape => {
                                 self.editing = None;
+                                self.corner_pair = None;
                                 self.status_message = "Dimension edit cancelled".into();
+                            }
+                            KeyCode::Tab
+                                if self.editing.as_ref().is_some_and(|edit| {
+                                    matches!(
+                                        edit.field,
+                                        EditField::ChamferFirst | EditField::ChamferSecond
+                                    )
+                                }) =>
+                            {
+                                self.toggle_chamfer_mode();
+                                if let Some(edit) = &mut self.editing {
+                                    edit.field = EditField::ChamferFirst;
+                                    edit.buffer.clear();
+                                }
+                                self.status_message = format!(
+                                    "Chamfer mode: {}  |  type the first setback in mm",
+                                    self.corner_values.mode.name()
+                                );
                             }
                             KeyCode::Backspace => {
                                 if let Some(editing) = &mut self.editing {
@@ -871,6 +906,20 @@ impl ApplicationHandler for App {
                                 }
                                 Err(error) => format!("Extend: {error}"),
                             };
+                        }
+                        KeyCode::KeyW | KeyCode::KeyH
+                            if self.modifiers.shift_key()
+                                && self.document.tool != Tool::CenterArc
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.read_only()
+                                && !self.solid_preview =>
+                        {
+                            self.corner_key(if code == KeyCode::KeyW {
+                                CornerKind::Fillet
+                            } else {
+                                CornerKind::Chamfer
+                            });
                         }
                         KeyCode::KeyH | KeyCode::KeyJ
                             if !self.read_only()
@@ -1370,6 +1419,7 @@ impl ApplicationHandler for App {
                         }
                         KeyCode::Escape => {
                             self.split_circle_start = None;
+                            self.corner_pick = None;
                             self.spline_points.clear();
                             if self.document.cancel_drag() {
                                 self.status_message = "Move cancelled".into();
