@@ -4852,7 +4852,7 @@ fn curve_relations_follow_through_the_solver() {
             segments: 32,
         },
     ]);
-    doc.endpoint_tangents.insert(2, (1, 0, 1, 1));
+    doc.endpoint_tangents.insert((2, 0), (1, 1, 1));
     doc.selected = Some(1);
     assert!(doc.rotate_selected(30.0, Point { x: 10.0, y: 0.0 }, false));
     let Shape::Arc { start_angle, .. } = doc.shapes[1] else {
@@ -5267,4 +5267,246 @@ fn symmetry_gesture_links_two_existing_shapes_of_the_same_kind() {
     ]);
     assert!(doc.toggle_mirror_relation(2, 3, 1).is_err());
     assert!(doc.toggle_mirror_relation(1, 2, 1).is_err());
+}
+
+fn corner_lines(angle_degrees: f32, gap: f32) -> Document {
+    let angle = angle_degrees.to_radians();
+    Document::from_shapes(vec![
+        Shape::Line {
+            id: 1,
+            a: Point { x: 40.0, y: 0.0 },
+            b: Point { x: 0.0, y: 0.0 },
+        },
+        Shape::Line {
+            id: 2,
+            a: Point {
+                x: gap * angle.cos() - gap * 0.3,
+                y: gap * angle.sin(),
+            },
+            b: Point {
+                x: 40.0 * angle.cos(),
+                y: 40.0 * angle.sin(),
+            },
+        },
+    ])
+}
+
+fn line_points(doc: &Document, id: u32) -> (Point, Point) {
+    match doc.shapes.iter().find(|shape| shape.id() == id) {
+        Some(Shape::Line { a, b, .. }) => (*a, *b),
+        other => panic!("not a line: {other:?}"),
+    }
+}
+
+fn assert_fillet(doc: &Document, arc: u32, radius: f32) {
+    let Some(Shape::Arc {
+        center,
+        radius: r,
+        start_angle,
+        sweep,
+        ..
+    }) = doc.shapes.iter().find(|shape| shape.id() == arc).cloned()
+    else {
+        panic!("missing arc")
+    };
+    assert!((r - radius).abs() < 1e-3, "{r}");
+    for (line, line_end, arc_end) in [(1, 1u8, 0u8), (2, 0u8, 1u8)] {
+        let (a, b) = line_points(doc, line);
+        let joint = if line_end == 0 { a } else { b };
+        let phi = start_angle + if arc_end == 0 { 0.0 } else { sweep };
+        let on_arc = Point {
+            x: center.x + r * phi.cos() as f32,
+            y: center.y + r * phi.sin() as f32,
+        };
+        assert!(on_arc.distance(joint) < 1e-3, "{on_arc:?} {joint:?}");
+        // Tangent: the radius at the joint is perpendicular to the line.
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let (rx, ry) = (joint.x - center.x, joint.y - center.y);
+        assert!((dx * rx + dy * ry).abs() / dx.hypot(dy) < 1e-3);
+        // The center sits at `radius` from the infinite line.
+        let distance = ((center.x - a.x) * dy - (center.y - a.y) * dx).abs() / dx.hypot(dy);
+        assert!((distance - radius).abs() < 1e-3, "{distance}");
+        assert_eq!(
+            doc.endpoint_joins.get(&(line, line_end)),
+            Some(&(arc, arc_end))
+        );
+        assert!(doc.endpoint_tangents.contains_key(&(arc, arc_end)));
+    }
+    assert_eq!(
+        doc.driving_dimensions
+            .get(&(arc, DimensionField::CurveRadius)),
+        Some(&radius)
+    );
+    assert!(doc.analyze_constraints().conflicting.is_empty());
+}
+
+#[test]
+fn fillet_rounds_acute_right_and_obtuse_corners() {
+    for angle in [35.0, 90.0, 140.0] {
+        let mut doc = corner_lines(angle, 0.0);
+        let arc = doc.fillet_lines(1, 2, 5.0).unwrap();
+        assert_fillet(&doc, arc, 5.0);
+        assert_eq!(doc.selected, Some(arc));
+    }
+}
+
+#[test]
+fn fillet_accepts_nearly_touching_endpoints() {
+    let mut doc = corner_lines(90.0, 0.4);
+    let arc = doc.fillet_lines(1, 2, 4.0).unwrap();
+    assert_fillet(&doc, arc, 4.0);
+    // Both lines were trimmed back from their intersection.
+    let (_, end) = line_points(&doc, 1);
+    assert!(end.x > 3.0 && end.y.abs() < 1e-4, "{end:?}");
+}
+
+#[test]
+fn fillet_radius_is_driving_and_undo_restores() {
+    let mut doc = corner_lines(90.0, 0.0);
+    let before = doc.shapes.clone();
+    let arc = doc.fillet_lines(1, 2, 5.0).unwrap();
+    doc.set_dimension(DimensionField::CurveRadius, 8.0).unwrap();
+    assert_fillet(&doc, arc, 8.0);
+    assert!(doc.undo());
+    assert!(doc.undo());
+    assert_eq!(doc.shapes, before);
+    assert!(doc.endpoint_joins.is_empty() && doc.endpoint_tangents.is_empty());
+}
+
+#[test]
+fn fillet_and_chamfer_reject_bad_corners() {
+    let mut doc = Document::from_shapes(vec![
+        Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 10.0, y: 0.0 },
+        },
+        Shape::Line {
+            id: 2,
+            a: Point { x: 10.0, y: 0.0 },
+            b: Point { x: 20.0, y: 0.0 },
+        },
+        Shape::Line {
+            id: 3,
+            a: Point { x: 0.0, y: 50.0 },
+            b: Point { x: 10.0, y: 80.0 },
+        },
+    ]);
+    assert!(
+        doc.fillet_lines(1, 2, 1.0)
+            .unwrap_err()
+            .contains("parallel")
+    );
+    assert!(doc.fillet_lines(1, 3, 1.0).unwrap_err().contains("corner"));
+    assert!(
+        doc.chamfer_lines(1, 2, ChamferMode::TwoDistances, 1.0, 1.0)
+            .is_err()
+    );
+    assert!(
+        doc.chamfer_lines(1, 3, ChamferMode::TwoDistances, 1.0, 1.0)
+            .is_err()
+    );
+    let mut doc = corner_lines(90.0, 0.0);
+    assert!(
+        doc.fillet_lines(1, 2, 50.0)
+            .unwrap_err()
+            .contains("too large")
+    );
+    assert!(doc.fillet_lines(1, 1, 2.0).is_err());
+    assert!(doc.fillet_lines(1, 2, -2.0).is_err());
+    assert_eq!(doc.shapes.len(), 2);
+    assert!(!doc.undo());
+}
+
+#[test]
+fn chamfer_two_distances_and_distance_angle() {
+    let mut doc = corner_lines(90.0, 0.0);
+    let line = doc
+        .chamfer_lines(1, 2, ChamferMode::TwoDistances, 3.0, 6.0)
+        .unwrap();
+    assert!(line_points(&doc, 1).1.distance(Point { x: 3.0, y: 0.0 }) < 1e-4);
+    let (a, _) = line_points(&doc, 2);
+    assert!(a.distance(Point { x: 0.0, y: 6.0 }) < 1e-4, "{a:?}");
+    let (c0, c1) = line_points(&doc, line);
+    assert!(c0.distance(Point { x: 3.0, y: 0.0 }) < 1e-4);
+    assert!(c1.distance(Point { x: 0.0, y: 6.0 }) < 1e-4);
+    assert_eq!(doc.endpoint_joins.get(&(1, 1)), Some(&(line, 0)));
+    assert_eq!(doc.endpoint_joins.get(&(2, 0)), Some(&(line, 1)));
+    let (first, second, _) = doc.chamfer_measure(line).unwrap();
+    assert!((first - 3.0).abs() < 1e-4 && (second - 6.0).abs() < 1e-4);
+    // Editing the driving setbacks re-solves the corner.
+    doc.set_chamfer(ChamferMode::TwoDistances, 4.0, 4.0)
+        .unwrap();
+    let (first, second, _) = doc.chamfer_measure(line).unwrap();
+    assert!(
+        (first - 4.0).abs() < 1e-3 && (second - 4.0).abs() < 1e-3,
+        "{first} {second}"
+    );
+    assert!(doc.undo());
+    assert!(doc.undo());
+    assert_eq!(doc.shapes.len(), 2);
+    assert!(doc.chamfers.is_empty());
+
+    // 45 degrees on a right corner gives equal setbacks.
+    let line = doc
+        .chamfer_lines(1, 2, ChamferMode::DistanceAngle, 5.0, 45.0)
+        .unwrap();
+    let (first, second, angle) = doc.chamfer_measure(line).unwrap();
+    assert!((first - 5.0).abs() < 1e-4 && (second - 5.0).abs() < 1e-4);
+    assert!((angle - 45.0).abs() < 1e-3, "{angle}");
+    doc.set_chamfer(ChamferMode::DistanceAngle, 5.0, 30.0)
+        .unwrap();
+    let (_, _, angle) = doc.chamfer_measure(line).unwrap();
+    assert!((angle - 30.0).abs() < 1e-2, "{angle}");
+
+    // Obtuse corner: the angle still follows the web formula.
+    let mut doc = corner_lines(120.0, 0.0);
+    let line = doc
+        .chamfer_lines(1, 2, ChamferMode::DistanceAngle, 5.0, 30.0)
+        .unwrap();
+    let (_, _, angle) = doc.chamfer_measure(line).unwrap();
+    assert!((angle - 30.0).abs() < 1e-3, "{angle}");
+    let mut doc = corner_lines(90.0, 0.0);
+    assert!(
+        doc.chamfer_lines(1, 2, ChamferMode::DistanceAngle, 5.0, 95.0)
+            .is_err()
+    );
+}
+
+#[test]
+fn fillet_keeps_far_relations_and_drops_corner_relations() {
+    let mut shapes = corner_lines(90.0, 0.0).shapes;
+    shapes.push(Shape::Point {
+        id: 3,
+        at: Point { x: 40.0, y: 0.0 },
+    });
+    let mut doc = Document::from_shapes(shapes);
+    doc.point_links.insert((1, 0), 3);
+    doc.fixed_anchors.insert((1, 1), Point { x: 0.0, y: 0.0 });
+    doc.axis_constraints.insert(1, AxisConstraint::Horizontal);
+    doc.driving_dimensions
+        .insert((1, DimensionField::LineLength), 40.0);
+    let arc = doc.fillet_lines(1, 2, 5.0).unwrap();
+    assert_eq!(doc.point_links.get(&(1, 0)), Some(&3));
+    assert!(!doc.fixed_anchors.contains_key(&(1, 1)));
+    assert!(doc.axis_constraints.contains_key(&1));
+    assert!(
+        !doc.driving_dimensions
+            .contains_key(&(1, DimensionField::LineLength))
+    );
+    assert_fillet(&doc, arc, 5.0);
+    // Splitting a filleted line keeps the arc joined to the retained piece.
+    doc.selected = Some(1);
+    let piece = doc.split_selected_line(Point { x: 20.0, y: 0.0 }).unwrap();
+    assert_eq!(doc.endpoint_joins.get(&(piece, 1)), Some(&(arc, 0)));
+    assert_eq!(doc.point_links.get(&(1, 0)), Some(&3));
+}
+
+#[test]
+fn filleted_corner_follows_a_moved_line() {
+    let mut doc = corner_lines(90.0, 0.0);
+    let arc = doc.fillet_lines(1, 2, 5.0).unwrap();
+    doc.selected = Some(2);
+    assert!(doc.move_selected(Point { x: -3.0, y: 0.0 }));
+    assert_fillet(&doc, arc, 5.0);
 }

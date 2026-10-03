@@ -1,3 +1,4 @@
+mod corner;
 mod input;
 mod panels;
 mod project_panel;
@@ -7,6 +8,7 @@ mod view_sketch;
 #[cfg(test)]
 mod tests;
 
+use corner::*;
 use project_panel::*;
 use solid::*;
 
@@ -21,8 +23,8 @@ use crate::renderer::{Color, Painter, Rect, Renderer};
 use crate::view3d::{self, OrbitView};
 use manifold_rust::manifold::Manifold;
 use model::{
-    AxisConstraint, DimensionField, Document, LineRelationKind, Point, Shape, SketchAnalysis,
-    SnapKind, Tool,
+    AxisConstraint, ChamferMode, DimensionField, Document, LineRelationKind, Point, Shape,
+    SketchAnalysis, SnapKind, Tool,
 };
 use project::{
     EntryKind, ProjectFile, ProjectSummary, SketchPlane, SolidPreview, list_projects,
@@ -186,6 +188,11 @@ pub(crate) struct App {
     split_circle_start: Option<(u32, Point)>,
     spline_points: Vec<Point>,
     projects_page: Option<ProjectsPage>,
+    /// MORE → FILLET/CHAMFER waiting for the corner's lines to be clicked.
+    corner_pick: Option<CornerKind>,
+    /// Lines of the corner whose fillet/chamfer prompt is open.
+    corner_pair: Option<(u32, u32)>,
+    corner_values: CornerValues,
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
@@ -235,6 +242,9 @@ enum EditField {
     PointY,
     RelationAngle,
     RadialDifference,
+    FilletRadius,
+    ChamferFirst,
+    ChamferSecond,
 }
 
 impl Default for App {
@@ -267,6 +277,9 @@ impl Default for App {
             split_circle_start: None,
             spline_points: Vec::new(),
             projects_page: None,
+            corner_pick: None,
+            corner_pair: None,
+            corner_values: CornerValues::default(),
             analysis: Default::default(),
         }
     }
@@ -624,8 +637,13 @@ impl App {
     }
 
     fn layout(&self) -> Layout {
-        let size = self.window.as_ref().expect("window exists").inner_size();
-        Layout::new(size.width as f32, size.height as f32)
+        // Headless (tests): the default window size.
+        self.window
+            .as_ref()
+            .map_or(Layout::new(1280.0, 800.0), |window| {
+                let size = window.inner_size();
+                Layout::new(size.width as f32, size.height as f32)
+            })
     }
 
     fn redraw(&self) {
@@ -731,6 +749,8 @@ impl App {
             "FIT SPLINE",
             "CTRL SPLINE",
             "MIRROR [SHIFT I]",
+            "FILLET [SHIFT W]",
+            "CHAMFER [SHIFT H]",
         ]
         .into_iter()
         .enumerate()

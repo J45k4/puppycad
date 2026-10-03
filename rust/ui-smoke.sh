@@ -2986,3 +2986,53 @@ cp /tmp/native-mirror.pcad /out/rust-native-mirror.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Fillet one corner with Shift+W and chamfer another with Shift+H
+# (distance-angle mode via Tab), then save the web relations.
+./target/debug/puppycad /tmp/native-fillet.pcad >/tmp/puppycad-fillet.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-fillet.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-fillet.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+for segment in "330 250 480 250" "480 250 480 450" "560 250 760 250" "760 250 760 450"; do
+    set -- $segment
+    xdotool key --window "$window_id" l
+    xdotool mousemove "$1" "$2" click 1
+    xdotool mousemove "$3" "$4" click 1
+done
+xdotool key --window "$window_id" v
+xdotool mousemove 400 250 click 1
+xdotool mousemove 480 380
+xdotool key --window "$window_id" shift+w
+xdotool type --clearmodifiers '40'
+xdotool key Return
+sleep 0.5
+import -window root /out/rust-native-fillet.png
+xdotool mousemove 650 250 click 1
+xdotool mousemove 760 380
+xdotool key --window "$window_id" shift+h
+xdotool key --window "$window_id" Tab
+xdotool type --clearmodifiers '50'
+xdotool key Return
+xdotool type --clearmodifiers '30'
+xdotool key Return
+sleep 0.5
+import -window root /out/rust-native-chamfer.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"type": "endpointTangent"' /tmp/native-fillet.pcad
+grep -q '"type": "chamfer"' /tmp/native-fillet.pcad
+grep -q '"mode": "distance-angle"' /tmp/native-fillet.pcad
+cp /tmp/native-fillet.pcad /out/rust-native-fillet.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

@@ -212,6 +212,25 @@ pub enum Constraint {
         line_sign: f64,
         sweep_sign: f64,
     },
+    /// Arc endpoint (0 start, 1 end) lies on `point`.
+    ArcEndpoint {
+        arc: ArcVar,
+        endpoint: u8,
+        point: PointVar,
+    },
+    /// Chamfer setbacks: the `a_end`/`b_end` endpoints of two lines sit
+    /// `first`/`second` from the intersection of the two lines. With
+    /// `angle`, `second` is the angle in degrees between line `a` (towards
+    /// the corner) and the chamfer, and the second setback follows from it.
+    Chamfer {
+        a: LineVar,
+        a_end: u8,
+        b: LineVar,
+        b_end: u8,
+        first: f64,
+        second: f64,
+        angle: bool,
+    },
     /// Inner circle/arc touches outer circle/arc from inside.
     InternalTangent {
         outer: Curve,
@@ -651,6 +670,14 @@ impl Constraint {
             Constraint::EndpointTangent { line: l, arc, .. } => {
                 line(&mut out, l);
                 curve_vars(&mut out, &Curve::Arc(arc));
+            }
+            Constraint::ArcEndpoint { arc, point: q, .. } => {
+                curve_vars(&mut out, &Curve::Arc(arc));
+                point(&mut out, q);
+            }
+            Constraint::Chamfer { a, b, .. } => {
+                line(&mut out, a);
+                line(&mut out, b);
             }
             Constraint::InternalTangent {
                 outer: ref a,
@@ -1290,6 +1317,56 @@ fn curve_residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             let target = (ux * radial_sign).atan2(-uy * radial_sign);
             let angle = p[arc.start] + if *endpoint == 0 { 0.0 } else { p[arc.sweep] };
             out.push(wrap(angle - target) * p[arc.circle.radius]);
+        }
+        Constraint::ArcEndpoint {
+            arc,
+            endpoint,
+            point,
+        } => {
+            let angle = p[arc.start] + if *endpoint == 0 { 0.0 } else { p[arc.sweep] };
+            let (cx, cy) = pt(p, arc.circle.center);
+            let r = p[arc.circle.radius];
+            let (x, y) = pt(p, *point);
+            out.extend([cx + r * angle.cos() - x, cy + r * angle.sin() - y]);
+        }
+        Constraint::Chamfer {
+            a,
+            a_end,
+            b,
+            b_end,
+            first,
+            second,
+            angle,
+        } => {
+            let ends = |line: LineVar, end: u8| {
+                if end == 0 {
+                    (pt(p, line.a), pt(p, line.b))
+                } else {
+                    (pt(p, line.b), pt(p, line.a))
+                }
+            };
+            let (an, af) = ends(*a, *a_end);
+            let (bn, bf) = ends(*b, *b_end);
+            let da = (an.0 - af.0, an.1 - af.1);
+            let db = (bn.0 - bf.0, bn.1 - bf.1);
+            let denominator = cross(da, db);
+            if denominator.abs() < 1e-12 {
+                out.extend([1.0, 1.0]);
+                return;
+            }
+            let t = cross((bf.0 - af.0, bf.1 - af.1), db) / denominator;
+            let corner = (af.0 + da.0 * t, af.1 + da.1 * t);
+            let distance = |q: (f64, f64)| (q.0 - corner.0).hypot(q.1 - corner.1);
+            let second = if *angle {
+                let u = (af.0 - corner.0, af.1 - corner.1);
+                let v = (bf.0 - corner.0, bf.1 - corner.1);
+                let theta = cross(u, v).abs().atan2(dot(u, v));
+                let alpha = second.to_radians();
+                first * alpha.sin() / (alpha + theta).sin()
+            } else {
+                *second
+            };
+            out.extend([distance(an) - first, distance(bn) - second]);
         }
         Constraint::InternalTangent { outer, inner } => {
             let (Some((oc, or, oarc)), Some((ic, ir, iarc))) = (round(p, outer), round(p, inner))

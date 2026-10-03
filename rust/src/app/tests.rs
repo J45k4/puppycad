@@ -428,3 +428,69 @@ fn default_3d_view_shows_top_and_both_positive_sides() {
     let bottom = projector.screen(view3d::add(projector.center, [0.0, 0.0, -10.0]));
     assert!(top[1] < bottom[1], "CAD +Z is up on screen");
 }
+
+#[test]
+fn fillet_and_chamfer_prompts_use_defaults_and_modes() {
+    let line = |id, a: (f32, f32), b: (f32, f32)| Shape::Line {
+        id,
+        a: Point { x: a.0, y: a.1 },
+        b: Point { x: b.0, y: b.1 },
+    };
+    let mut app = App {
+        document: Document::from_shapes(vec![
+            line(1, (40.0, 0.0), (0.0, 0.0)),
+            line(2, (0.0, 0.0), (0.0, 40.0)),
+            line(3, (100.0, 0.0), (60.0, 0.0)),
+            line(4, (60.0, 0.0), (60.0, 40.0)),
+        ]),
+        ..App::default()
+    };
+    let hover = |app: &mut App, at: Point| {
+        app.cursor = app.document.world_to_screen(at, app.viewport_origin());
+    };
+    // Shift+W without a hovered second line only explains the gesture.
+    app.document.selected = Some(1);
+    hover(&mut app, Point { x: 30.0, y: 30.0 });
+    app.corner_key(CornerKind::Fillet);
+    assert!(app.editing.is_none());
+    hover(&mut app, Point { x: 0.0, y: 20.0 });
+    app.corner_key(CornerKind::Fillet);
+    assert!(matches!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(EditField::FilletRadius)
+    ));
+    app.finish_dimension_edit();
+    assert!(
+        app.document
+            .shapes
+            .iter()
+            .any(|s| matches!(s, Shape::Arc { radius, .. } if *radius == 5.0))
+    );
+
+    // MORE -> CHAMFER: click both lines, Tab to distance-angle, keep defaults.
+    app.document.selected = None;
+    app.start_corner_pick(CornerKind::Chamfer);
+    hover(&mut app, Point { x: 80.0, y: 0.0 });
+    assert!(app.corner_pick_click());
+    assert_eq!(app.document.selected, Some(3));
+    hover(&mut app, Point { x: 60.0, y: 20.0 });
+    assert!(app.corner_pick_click());
+    assert!(matches!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(EditField::ChamferFirst)
+    ));
+    app.toggle_chamfer_mode();
+    app.editing.as_mut().unwrap().buffer = "4".into();
+    app.finish_dimension_edit();
+    assert!(matches!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(EditField::ChamferSecond)
+    ));
+    app.finish_dimension_edit();
+    let chamfer = app.document.selected.unwrap();
+    let spec = app.document.chamfers[&chamfer];
+    assert_eq!(
+        (spec.mode, spec.first, spec.second),
+        (ChamferMode::DistanceAngle, 4.0, 45.0)
+    );
+}

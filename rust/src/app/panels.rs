@@ -115,6 +115,9 @@ impl App {
             return;
         };
         self.status_message = match edit.field {
+            EditField::FilletRadius | EditField::ChamferFirst | EditField::ChamferSecond => {
+                self.finish_corner_edit(edit.field, &edit.buffer)
+            }
             EditField::ExtrusionDepth => match edit.buffer.parse::<f32>() {
                 Ok(depth) => match self
                     .project
@@ -1365,7 +1368,10 @@ impl App {
                 | EditField::PointX
                 | EditField::PointY
                 | EditField::RelationAngle
-                | EditField::RadialDifference => 0,
+                | EditField::RadialDifference
+                | EditField::FilletRadius
+                | EditField::ChamferFirst
+                | EditField::ChamferSecond => 0,
             };
             let field_y = match edit.field {
                 EditField::MoveX => layout.right.y + 365.0,
@@ -1400,7 +1406,17 @@ impl App {
             painter.text(
                 field.x + 8.0,
                 field.y + 7.0,
-                &if matches!(edit.field, EditField::PolygonSides) {
+                &if matches!(edit.field, EditField::FilletRadius) {
+                    format!("FILLET R > {}_ mm", edit.buffer)
+                } else if matches!(edit.field, EditField::ChamferFirst) {
+                    format!("CHAMFER D1 > {}_ mm", edit.buffer)
+                } else if matches!(edit.field, EditField::ChamferSecond) {
+                    if self.corner_values.mode == ChamferMode::DistanceAngle {
+                        format!("CHAMFER ANGLE > {}_ deg", edit.buffer)
+                    } else {
+                        format!("CHAMFER D2 > {}_ mm", edit.buffer)
+                    }
+                } else if matches!(edit.field, EditField::PolygonSides) {
                     format!("> {}_ sides", edit.buffer)
                 } else if matches!(edit.field, EditField::ScaleFactor) {
                     format!("> {}_ factor", edit.buffer)
@@ -1412,6 +1428,31 @@ impl App {
                     format!("> {}_ mm", edit.buffer)
                 },
                 1.25,
+                TEXT,
+            );
+        }
+        if let Some(edit) = &self.editing
+            && matches!(
+                edit.field,
+                EditField::ChamferFirst | EditField::ChamferSecond
+            )
+        {
+            let row = Rect {
+                x: layout.right.x + 10.0,
+                y: layout.right.y + 135.0,
+                w: layout.right.w - 20.0,
+                h: 25.0,
+            };
+            painter.rect(row, PANEL_LIGHT);
+            painter.outline(row, 1.0, BORDER);
+            painter.text(
+                row.x + 8.0,
+                row.y + 7.0,
+                match self.corner_values.mode {
+                    ChamferMode::TwoDistances => "MODE: TWO SETBACKS [TAB]",
+                    ChamferMode::DistanceAngle => "MODE: DISTANCE-ANGLE [TAB]",
+                },
+                1.1,
                 TEXT,
             );
         }

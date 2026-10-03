@@ -9,7 +9,10 @@ use std::{
 use manifold_rust::{manifold::Manifold, types::Error as ManifoldError};
 use serde_json::{Value, json};
 
-use crate::model::{AxisConstraint, DimensionField, Document, LineRelationKind, Point, Shape};
+use crate::model::{
+    AxisConstraint, ChamferMode, ChamferSpec, DimensionField, Document, LineRelationKind, Point,
+    Shape,
+};
 use crate::spline::{self, SplineMode};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
@@ -1553,6 +1556,198 @@ impl ProjectFile {
                                     .is_some()
                             {
                                 read_only_reason = Some("duplicate fixed point relation".into());
+                            }
+                            continue;
+                        }
+                        let graph_shape = |graph_id: Option<&str>| -> Option<u32> {
+                            let graph_id = graph_id?;
+                            entity_ids
+                                .iter()
+                                .find_map(|(id, value)| (value == graph_id).then_some(*id))
+                        };
+                        let end_index = |point: Option<&str>| match point {
+                            Some("p0") => Some(0u8),
+                            Some("p1") => Some(1u8),
+                            _ => None,
+                        };
+                        if relation.get("type").and_then(Value::as_str) == Some("endpointTangent") {
+                            let arc = graph_shape(
+                                relation.pointer("/a/entityId").and_then(Value::as_str),
+                            );
+                            let endpoint =
+                                end_index(relation.pointer("/a/point").and_then(Value::as_str));
+                            let line = graph_shape(relation.get("b").and_then(Value::as_str));
+                            let sign = |key: &str| {
+                                relation
+                                    .pointer(&format!("/orientation/{key}"))
+                                    .and_then(Value::as_f64)
+                                    .map(|value| if value < 0.0 { -1i8 } else { 1i8 })
+                            };
+                            let shape = |id: Option<u32>| {
+                                id.and_then(|id| {
+                                    document.shapes.iter().find(|shape| shape.id() == id)
+                                })
+                            };
+                            match (
+                                shape(arc),
+                                endpoint,
+                                shape(line),
+                                sign("lineSign"),
+                                sign("sweepSign"),
+                            ) {
+                                (
+                                    Some(Shape::Arc { id: arc, .. }),
+                                    Some(endpoint),
+                                    Some(Shape::Line { id: line, .. }),
+                                    Some(line_sign),
+                                    Some(sweep_sign),
+                                ) if relation.get("id").and_then(Value::as_str).is_some()
+                                    && !document
+                                        .endpoint_tangents
+                                        .contains_key(&(*arc, endpoint)) =>
+                                {
+                                    document
+                                        .endpoint_tangents
+                                        .insert((*arc, endpoint), (*line, line_sign, sweep_sign));
+                                }
+                                _ => {
+                                    read_only_reason =
+                                        Some("unsupported smooth join relation".into());
+                                }
+                            }
+                            continue;
+                        }
+                        if relation.get("type").and_then(Value::as_str) == Some("chamfer") {
+                            let line =
+                                graph_shape(relation.get("chamferId").and_then(Value::as_str));
+                            let side = |key: &str| {
+                                graph_shape(
+                                    relation
+                                        .pointer(&format!("/{key}/entityId"))
+                                        .and_then(Value::as_str),
+                                )
+                                .zip(end_index(
+                                    relation
+                                        .pointer(&format!("/{key}/point"))
+                                        .and_then(Value::as_str),
+                                ))
+                            };
+                            let first = relation.get("value").and_then(Value::as_f64);
+                            let second = relation
+                                .get("secondValue")
+                                .and_then(Value::as_f64)
+                                .or(first);
+                            let mode = match relation.get("mode").and_then(Value::as_str) {
+                                None => Some(ChamferMode::TwoDistances),
+                                Some(name) => ChamferMode::from_name(name),
+                            };
+                            let is_line = |id: u32| {
+                                document.shapes.iter().any(|shape| {
+                                    shape.id() == id && matches!(shape, Shape::Line { .. })
+                                })
+                            };
+                            match (line, side("a"), side("b"), first, second, mode) {
+                                (
+                                    Some(line),
+                                    Some(a),
+                                    Some(b),
+                                    Some(first),
+                                    Some(second),
+                                    Some(mode),
+                                ) if [line, a.0, b.0].into_iter().all(is_line)
+                                    && first.is_finite()
+                                    && second.is_finite()
+                                    && first > 0.0
+                                    && second > 0.0
+                                    && relation.get("id").and_then(Value::as_str).is_some()
+                                    && relation.get("expression").is_none()
+                                    && relation.get("reference") != Some(&Value::Bool(true))
+                                    && !document.chamfers.contains_key(&line) =>
+                                {
+                                    document.chamfers.insert(
+                                        line,
+                                        ChamferSpec {
+                                            a,
+                                            b,
+                                            first: first as f32,
+                                            second: second as f32,
+                                            mode,
+                                        },
+                                    );
+                                }
+                                _ => {
+                                    read_only_reason = Some("unsupported chamfer relation".into());
+                                }
+                            }
+                            continue;
+                        }
+                        if relation.get("type").and_then(Value::as_str) == Some("coincident")
+                            && relation.pointer("/a/point").and_then(Value::as_str)
+                                != Some("center")
+                            && relation.pointer("/b/point").and_then(Value::as_str)
+                                != Some("center")
+                        {
+                            let side = |key: &str| {
+                                let id = graph_shape(
+                                    relation
+                                        .pointer(&format!("/{key}/entityId"))
+                                        .and_then(Value::as_str),
+                                )?;
+                                let end = end_index(
+                                    relation
+                                        .pointer(&format!("/{key}/point"))
+                                        .and_then(Value::as_str),
+                                )?;
+                                let shape =
+                                    document.shapes.iter().find(|shape| shape.id() == id)?;
+                                let at = match shape {
+                                    Shape::Line { a, b, .. } => {
+                                        if end == 0 {
+                                            *a
+                                        } else {
+                                            *b
+                                        }
+                                    }
+                                    Shape::Arc {
+                                        center,
+                                        radius,
+                                        start_angle,
+                                        sweep,
+                                        ..
+                                    } => {
+                                        let angle =
+                                            start_angle + if end == 0 { 0.0 } else { *sweep };
+                                        Point {
+                                            x: center.x + radius * angle.cos() as f32,
+                                            y: center.y + radius * angle.sin() as f32,
+                                        }
+                                    }
+                                    _ => return None,
+                                };
+                                Some(((id, end), at, matches!(shape, Shape::Line { .. })))
+                            };
+                            let join = side("a").zip(side("b")).and_then(|(a, b)| {
+                                if a.1.distance(b.1) > 1e-3 || a.0.0 == b.0.0 {
+                                    return None;
+                                }
+                                [(a, b), (b, a)].into_iter().find_map(|(key, value)| {
+                                    (key.2 && !document.endpoint_joins.contains_key(&key.0))
+                                        .then_some((key.0, value.0))
+                                })
+                            });
+                            match join {
+                                Some((key, value))
+                                    if relation.get("id").and_then(Value::as_str).is_some()
+                                        && relation.get("reference")
+                                            != Some(&Value::Bool(true))
+                                        && relation.get("expression").is_none() =>
+                                {
+                                    document.endpoint_joins.insert(key, value);
+                                }
+                                _ => {
+                                    read_only_reason =
+                                        Some("unsupported sketch coincidence relation".into());
+                                }
                             }
                             continue;
                         }
@@ -3286,6 +3481,84 @@ fn serialize_sketches(
                 }
                 return false;
             }
+            let resolve_id = |id: Option<&str>| -> Option<u32> {
+                let id = id?;
+                old_graph_shape_ids
+                    .get(id)
+                    .or_else(|| graph_shape_ids.get(id))
+                    .copied()
+            };
+            let end_index = |point: Option<&str>| match point {
+                Some("p0") => Some(0u8),
+                Some("p1") => Some(1u8),
+                _ => None,
+            };
+            let anchor_of = |relation: &Value, key: &str| {
+                resolve_id(
+                    relation
+                        .pointer(&format!("/{key}/entityId"))
+                        .and_then(Value::as_str),
+                )
+                .zip(end_index(
+                    relation
+                        .pointer(&format!("/{key}/point"))
+                        .and_then(Value::as_str),
+                ))
+            };
+            if kind == "endpointTangent" {
+                let arc = anchor_of(relation, "a");
+                let line = resolve_id(relation.get("b").and_then(Value::as_str));
+                if let Some((arc, line)) = arc.zip(line)
+                    && let Some(&(stored, line_sign, sweep_sign)) =
+                        document.endpoint_tangents.get(&arc)
+                    && stored == line
+                    && let Some((arc_id, line_id)) = next_ids.get(&arc.0).zip(next_ids.get(&line))
+                {
+                    relation["a"]["entityId"] = json!(arc_id);
+                    relation["b"] = json!(line_id);
+                    relation["orientation"] =
+                        json!({"lineSign": line_sign, "sweepSign": sweep_sign});
+                    return true;
+                }
+                return false;
+            }
+            if kind == "chamfer" {
+                let line = resolve_id(relation.get("chamferId").and_then(Value::as_str));
+                if let Some(line) = line
+                    && let Some(spec) = document.chamfers.get(&line)
+                    && anchor_of(relation, "a") == Some(spec.a)
+                    && anchor_of(relation, "b") == Some(spec.b)
+                    && let (Some(line_id), Some(a_id), Some(b_id)) = (
+                        next_ids.get(&line),
+                        next_ids.get(&spec.a.0),
+                        next_ids.get(&spec.b.0),
+                    )
+                {
+                    relation["chamferId"] = json!(line_id);
+                    relation["a"]["entityId"] = json!(a_id);
+                    relation["b"]["entityId"] = json!(b_id);
+                    relation["value"] = json!(spec.first);
+                    relation["secondValue"] = json!(spec.second);
+                    relation["mode"] = json!(spec.mode.name());
+                    return true;
+                }
+                return false;
+            }
+            if kind == "coincident"
+                && relation.pointer("/a/point").and_then(Value::as_str) != Some("center")
+                && relation.pointer("/b/point").and_then(Value::as_str) != Some("center")
+            {
+                if let Some((a, b)) = anchor_of(relation, "a").zip(anchor_of(relation, "b"))
+                    && (document.endpoint_joins.get(&a) == Some(&b)
+                        || document.endpoint_joins.get(&b) == Some(&a))
+                    && let Some((a_id, b_id)) = next_ids.get(&a.0).zip(next_ids.get(&b.0))
+                {
+                    relation["a"]["entityId"] = json!(a_id);
+                    relation["b"]["entityId"] = json!(b_id);
+                    return true;
+                }
+                return false;
+            }
             if kind == "coincident" {
                 let read = |side: &str| -> Option<(u32, &str)> {
                     let id = relation.get(side)?.get("entityId")?.as_str()?;
@@ -3484,6 +3757,101 @@ fn serialize_sketches(
             relations.push(json!({"id":relation_id,"type":"coincident",
                 "a":{"entityId":line_graph_id,"point":anchor},
                 "b":{"entityId":point_graph_id,"point":"center"}}));
+        }
+        let anchor_name = |end: u8| if end == 0 { "p0" } else { "p1" };
+        let mut joins: Vec<_> = document.endpoint_joins.iter().collect();
+        joins.sort_by_key(|(key, value)| (**key, **value));
+        for (&(line, line_end), &(other, other_end)) in joins {
+            let line_id = next_ids
+                .get(&line)
+                .ok_or("coincidence references deleted line")?;
+            let other_id = next_ids
+                .get(&other)
+                .ok_or("coincidence references deleted curve")?;
+            let (a, b) = (anchor_name(line_end), anchor_name(other_end));
+            if relations.iter().any(|relation| {
+                relation["type"] == "coincident"
+                    && ((relation["a"]["entityId"] == *line_id
+                        && relation["a"]["point"] == a
+                        && relation["b"]["entityId"] == *other_id
+                        && relation["b"]["point"] == b)
+                        || (relation["b"]["entityId"] == *line_id
+                            && relation["b"]["point"] == a
+                            && relation["a"]["entityId"] == *other_id
+                            && relation["a"]["point"] == b))
+            }) {
+                continue;
+            }
+            let base = format!("native-join-{line_id}-{a}-{other_id}-{b}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(json!({"id":relation_id,"type":"coincident",
+                "a":{"entityId":line_id,"point":a},
+                "b":{"entityId":other_id,"point":b}}));
+        }
+        let mut tangents: Vec<_> = document.endpoint_tangents.iter().collect();
+        tangents.sort_by_key(|(key, _)| **key);
+        for (&(arc, end), &(line, line_sign, sweep_sign)) in tangents {
+            let arc_id = next_ids
+                .get(&arc)
+                .ok_or("smooth join references deleted arc")?;
+            let line_id = next_ids
+                .get(&line)
+                .ok_or("smooth join references deleted line")?;
+            let point = anchor_name(end);
+            if relations.iter().any(|relation| {
+                relation["type"] == "endpointTangent"
+                    && relation["a"]["entityId"] == *arc_id
+                    && relation["a"]["point"] == point
+            }) {
+                continue;
+            }
+            let base = format!("native-tangent-{arc_id}-{point}-{line_id}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(json!({"id":relation_id,"type":"endpointTangent",
+                "a":{"entityId":arc_id,"point":point},"b":line_id,
+                "orientation":{"lineSign":line_sign,"sweepSign":sweep_sign}}));
+        }
+        let mut chamfers: Vec<_> = document.chamfers.iter().collect();
+        chamfers.sort_by_key(|(line, _)| **line);
+        for (&line, spec) in chamfers {
+            let line_id = next_ids
+                .get(&line)
+                .ok_or("chamfer references deleted line")?;
+            let a_id = next_ids
+                .get(&spec.a.0)
+                .ok_or("chamfer references deleted line")?;
+            let b_id = next_ids
+                .get(&spec.b.0)
+                .ok_or("chamfer references deleted line")?;
+            if relations
+                .iter()
+                .any(|relation| relation["type"] == "chamfer" && relation["chamferId"] == *line_id)
+            {
+                continue;
+            }
+            let base = format!("native-chamfer-{line_id}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(
+                json!({"id":relation_id,"type":"chamfer","chamferId":line_id,
+                "a":{"entityId":a_id,"point":anchor_name(spec.a.1)},
+                "b":{"entityId":b_id,"point":anchor_name(spec.b.1)},
+                "value":spec.first,"secondValue":spec.second,"mode":spec.mode.name()}),
+            );
         }
         let mut equal: Vec<_> = document
             .equal_lines
@@ -5679,6 +6047,96 @@ mod tests {
                 .len(),
             1
         );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fillet_and_chamfer_round_trip_as_web_relations() {
+        let path = test_path("fillet-chamfer");
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        document.tool = crate::model::Tool::Line;
+        for (from, to) in [
+            ((40.0, 0.0), (0.0, 0.0)),
+            ((0.0, 0.0), (0.0, 40.0)),
+            ((100.0, 0.0), (60.0, 0.0)),
+            ((60.0, 0.0), (60.0, 40.0)),
+        ] {
+            document.draft_start = Some(Point {
+                x: from.0,
+                y: from.1,
+            });
+            assert!(document.finish_draft(Point { x: to.0, y: to.1 }));
+        }
+        let arc = document.fillet_lines(1, 2, 5.0).unwrap();
+        let chamfer = document
+            .chamfer_lines(3, 4, ChamferMode::DistanceAngle, 4.0, 45.0)
+            .unwrap();
+        project.save(&document).unwrap();
+        let (mut reopened, mut loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(reopened.read_only_reason(), None);
+        assert_eq!(loaded.shapes.len(), 6);
+        assert_eq!(loaded.endpoint_joins, document.endpoint_joins);
+        assert_eq!(loaded.endpoint_tangents, document.endpoint_tangents);
+        assert_eq!(loaded.chamfers, document.chamfers);
+        assert_eq!(
+            loaded
+                .driving_dimensions
+                .get(&(arc, DimensionField::CurveRadius)),
+            Some(&5.0)
+        );
+        let relations = |project: &ProjectFile| {
+            project.value["items"][0]["data"]["cad"]["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|node| node["type"] == "sketch")
+                .unwrap()["relations"]
+                .as_array()
+                .unwrap()
+                .clone()
+        };
+        let saved = relations(&reopened);
+        let count = |kind: &str| saved.iter().filter(|r| r["type"] == kind).count();
+        assert_eq!(count("coincident"), 4);
+        assert_eq!(count("endpointTangent"), 2);
+        assert_eq!(count("chamfer"), 1);
+        assert_eq!(count("radius"), 1);
+        let chamfer_relation = saved.iter().find(|r| r["type"] == "chamfer").unwrap();
+        assert_eq!(chamfer_relation["mode"], "distance-angle");
+        assert_eq!(chamfer_relation["secondValue"], 45.0);
+        assert!(saved
+            .iter()
+            .any(|r| r["type"] == "endpointTangent" && r["orientation"]["lineSign"].is_number()));
+        // Edit the driving radius and chamfer after reopening; ids stay put.
+        loaded.selected = Some(arc);
+        loaded
+            .set_dimension(DimensionField::CurveRadius, 7.0)
+            .unwrap();
+        loaded.selected = Some(chamfer);
+        loaded
+            .set_chamfer(ChamferMode::TwoDistances, 3.0, 6.0)
+            .unwrap();
+        reopened.save(&loaded).unwrap();
+        let (again, geometry) = ProjectFile::open(&path).unwrap();
+        assert_eq!(again.read_only_reason(), None);
+        assert_eq!(
+            geometry.chamfers.get(&chamfer).map(|spec| spec.mode),
+            Some(ChamferMode::TwoDistances)
+        );
+        let ids = |list: &[Value]| {
+            let mut ids: Vec<String> = list
+                .iter()
+                .filter(|r| r["type"] != "radius")
+                .map(|r| r["id"].as_str().unwrap().to_string())
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(&relations(&again)), ids(&saved));
+        assert!(matches!(
+            geometry.shapes.iter().find(|shape| shape.id() == arc),
+            Some(Shape::Arc { radius, .. }) if (radius - 7.0).abs() < 1e-3
+        ));
         fs::remove_file(path).unwrap();
     }
 
