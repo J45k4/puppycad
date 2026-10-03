@@ -4,118 +4,85 @@ This is the working plan for turning the native app in [`rust/`](../rust/) into
 a complete CAD editor. [`rust-native.md`](rust-native.md) documents what works
 today; [`sketch-parity.md`](sketch-parity.md) is the feature bar the web app
 already meets. Phases are ordered by dependency: the solver unblocks almost
-everything after it.
+everything after it. Each item shows its final status.
 
 ## Phase 0 — Land and stabilize
 
 1. Commit `rust/` and its docs on the `rust` branch. **Done.**
-2. CI: build and test the Rust workspace on every push, plus the Docker UI
-   smoke (`rust/ui-smoke.sh`).
-3. Cross-loader round-trip test (**done**: `rust/tests/roundtrip.rs`, `test/rust-roundtrip.test.ts`): every `rust/fixtures/*.pcad` and every project
-   the native app saves must load in the TypeScript `src/project-file.ts`
-   loader, and web-saved projects that use only supported features must load
-   natively. This is the only guard against format drift between the two apps.
+2. CI: build, test, fmt, blocking clippy and the Docker UI smoke
+   (`.github/workflows/rust.yml`). **Done.**
+3. Cross-loader round trip (`rust/tests/roundtrip.rs`,
+   `test/rust-roundtrip.test.ts`, `--roundtrip`). **Done.**
 
 ## Phase 1 — Constraint solver
 
-Every relation in `rust/src/model.rs` currently has hand-written propagation.
-Replace it with a general solver so relations compose, dragging works under
-constraints, and conflicts are diagnosed.
-
-1. (Done) `rust/src/solver.rs`: parameters are every anchor coordinate and dimension
-   value; one residual function per relation kind; Gauss–Newton /
-   Levenberg–Marquardt with numeric Jacobians. Port the structure of
-   `src/sketch-solver.ts` so results match the web app.
-2. (Done for solver-backed relations) Edits become mutate → solve → commit as one undo step. Keep the current
-   "anchor the first endpoint" behavior as soft weights so solved results stay
-   intuitive.
-3. (Done) Port `src/sketch-redundancy.ts`: DOF count, over-constrained and conflicting
-   relation diagnostics, shown in the header and as per-entity colors.
-4. (Done) Dragging under constraints: a temporary target for the dragged anchor,
-   solved every frame.
-5. (Done for relation propagation: every relation kind is solver-backed; rotating
-   direction targets, scaling Equal ellipses and transforming splines with
-   linked points are allowed) Remove restrictions the solver makes unnecessary (90-degree-only rotation of
-   constrained lines, Equal blocking split/trim/scale, and similar).
+1. `rust/src/solver.rs`, Levenberg–Marquardt port of `src/sketch-solver.ts`. **Done.**
+2. Edits as mutate → solve → commit, one undo step. **Done.**
+3. DOF and conflict/redundancy diagnostics (`src/sketch-redundancy.ts`). **Done.**
+4. Dragging anchors under constraints, solved every frame. **Done.**
+5. Remove restrictions the solver makes unnecessary. **Partial:** pattern
+   copies are regenerated rather than solved; H/V lines rotate only by
+   quarter turns; Equal lines cannot be split, trimmed or extended.
 
 ## Phase 2 — Sketch tool parity
 
-Each item is ported from the matching `src/sketch-*.ts` together with its tests.
-
-1. (Done) Dimensions drawn in the viewport with click-to-edit labels; point
-   distance / X / Y dimensions; driving vs. reference; expressions and sketch
-   variables (`sketch-value.ts`, `sketch-variables.ts`).
-2. (Done for line-line corners, matching the web scope) Fillet and chamfer.
-3. Mirror and the symmetry constraint (**done**: `rust/src/model/symmetry.rs`;
-   Shift+S symmetry gesture, Shift+I / MORE → MIRROR).
-4. Offset, single and chain (**done**: `rust/src/model/offset.rs`; Shift+U /
-   MORE → OFFSET; lines, circles, arcs, rectangles, polygons, slots and mitered
-   line chains, matching the
-   web scope).
-5. Linear and circular patterns (**done**: `rust/src/model/pattern.rs`;
-   Shift+Z / MORE → LIN PATTERN, `;` / MORE → CIRC PATTERN).
-6. Tangent arc and smooth join (**done**: `rust/src/model/tangent.rs`; `,` /
-   MORE → TANGENT ARC, `.` smooth join, web `smoothJoin`).
-7. Remaining spline constraints (**done** to the web scope: fixed,
-   point-on-curve, Normal, coincidence, symmetry, smooth join and tangent-arc
-   attachment on fit and control splines, remapped by split/trim).
+1. Canvas dimensions, point dimensions, reference, expressions, variables. **Done.**
+2. Fillet and chamfer (line-line, the web scope). **Done.**
+3. Mirror and symmetry. **Done.**
+4. Offset, single and mitered chain (the web scope). **Done.**
+5. Linear and circular patterns. **Partial:** no skipped instances, at most 64 copies.
+6. Tangent arc and smooth join. **Done.**
+7. Spline constraints to the web scope. **Done.**
 8. Box selection, Shift multi-select, selection filters. **Done.**
 
 ## Phase 3 — Solid modeling
 
-1. (Done) Extrude options: direction, symmetric, through-all, up-to-body; preview
-   before commit (end condition, flip, up-to-body pick, ghost preview with a
-   DEPTH prompt; see `rust-native.md`).
-2. Sketch on a planar face: face picking in the 3D view, with the plane frame
-   derived as `src/solid-model.ts` does so files stay web-compatible.
-   (**done**: `rust/src/project/face.rs`; hover a face and press **4** or
-   MORE → SKETCH ON FACE, **5** toggles the supporting-body context, X /
-   Shift+X / Shift+J extrude along the face normal.)
-3. Revolve, loft (`loft.ts`), edge fillet and chamfer (`edge-finish.ts`), all
-   through `manifold-rust`. (**done**: `rust/src/project/features.rs`; keys
-   8 revolve, 9 / Shift+9 loft, 0 / Shift+0 edge chamfer / fillet, all
-   `FeatureKind` variants of the feature tree, stored as native
-   extension nodes `revolve`, `loft`, `edgeFinish`; see `rust-native.md`.)
-4. Feature tree with reorder, suppress and rollback; re-evaluation when an
-   upstream sketch changes. (**done**: `rust/src/project/features.rs`;
-   Ctrl+Up/Down reorder, Ctrl+H suppress, ROLLBACK row drag or Ctrl+[ / ],
-   per-feature evaluation cache; see `rust-native.md`.)
-5. Export: binary STL, then 3MF or STEP (**done** for binary/ASCII STL and 3MF:
-   `rust/src/stl.rs`, `rust/src/threemf.rs`, `puppycad --export`; STEP is still
-   open).
+1. Extrude options and ghost preview. **Done.**
+2. Sketch on a planar face, web-compatible frames. **Done.**
+3. Revolve, loft, edge fillet and chamfer. **Partial:** stored as native
+   extension nodes the web ignores; edge finishes only on straight edges
+   between planar faces; web `chamfer` nodes open read-only.
+4. Feature tree: reorder, suppress, rollback, cached re-evaluation. **Done.**
+5. Export. **Partial:** binary/ASCII STL and 3MF done; STEP missing.
 
 ## Phase 4 — Assembly
 
-(Done: `rust/src/assembly.rs`, `rust/src/assembly/solver.rs`,
-`rust/src/app/assembly.rs`; see Assemblies in `rust-native.md`.) Instances,
-connector frames, all five web mate kinds (fasten solved exactly like
-`assembly-solver.ts`; revolute, slider, planar and ball by least squares,
-servos driving revolute angles), the assembly view with per-instance
-selection, Properties, insert/delete, a face-to-face mate gesture, undo, and
-per-instance STL / one-object-per-instance 3MF export. Partial: connectors
-and mates cannot be edited after creation, edge axes and world connectors
-cannot be picked in the UI, servo angles are not editable, and `--export`
-does not export assemblies.
+1. Instances, connectors, all five mate kinds, servos, solver. **Done.**
+2. Assembly view, insert/delete, face-to-face mate gesture, undo, export. **Done.**
+3. Editing connectors and mates after creation, edge axes, world
+   connectors, servo angles, mate limits, `--export`. **Partial:** not started.
 
 ## Phase 5 — Editor UX
 
-1. (Done) Searchable command palette and a shortcut overlay: command
-   registry in `rust/src/app/commands.rs`, Ctrl+K / Ctrl+Shift+P palette,
-   ? / F1 cheat sheet, `puppycad --print-shortcuts`.
-2. (Done) Hover pre-highlight, relation glyphs beside entities, inference
-   hints while placing.
-3. (Done) Undo history panel (Ctrl+Shift+H), labelled undo steps, one
-   undo history across the sketch and 3D views, selection restored on undo.
-4. (Done) Toolbar icons, tooltips with shortcuts, status bar with cursor
-   coordinates, DOF and snap mode.
-5. (Done) Settings: units, grid size, theme; persisted window layout.
-6. (Done) Keep the pixel font; add a UI scale factor for HiDPI.
+1. Command palette and shortcut overlay. **Done.**
+2. Hover pre-highlight, relation glyphs, inference hints. **Done.**
+3. Undo history panel, cross-view undo. **Done.**
+4. Toolbar icons, tooltips, status bar. **Done.**
+5. Settings: units, grid, theme, window layout. **Done.**
+6. Pixel font kept, UI scale for HiDPI. **Done.**
 
 ## Phase 6 — Code health (continuous)
 
-1. (Done) Split `model.rs` and `main.rs` into modules by concern; clippy is
-   clean with `--all-targets` and blocking in CI.
-2. (Done) Unit tests for `renderer.rs` (`Painter` geometry and text) and
-   for input handling (`app/input_tests.rs` drives `App` headlessly).
-3. Restructure `rust-native.md` into sections and add a Native column to
-   `sketch-parity.md`.
+1. Split `model.rs` and `main.rs` into modules; clippy clean and blocking. **Done.**
+2. Unit tests for `renderer.rs` and input handling. **Done.**
+3. Restructure `rust-native.md`; Native column in `sketch-parity.md`. **Done.**
+
+## Remaining work
+
+Consolidated from the Known gaps in [`rust-native.md`](rust-native.md#known-gaps):
+
+- STEP export.
+- Web-side support for native extensions: extrude end conditions and flip,
+  suppression and rollback, revolve, loft and edge finish nodes, instance
+  names, and solving non-fasten mates.
+- Native support for web `chamfer` graph nodes (topology edges).
+- Pattern copies solved instead of regenerated; skipped instances, more copies.
+- Assembly mate and connector editing, edge axes, world connectors, servo
+  angle editing, mate limits, assemblies in `--export`.
+- Inferred midpoint and intersection relations from snaps.
+- Lifting the Equal/offset split-trim-extend block and quarter-turn rotation
+  of H/V lines.
+- Diameter circle tool; edge finishes on curved edges.
+- Web-wide gaps shared by both apps: conics, text, curved-edge fillets,
+  ellipse/spline offset, closed control splines, curvature constraints.
+- Pattern prompts in the display unit.
