@@ -173,7 +173,24 @@ links to spline ends, shared and Equal ellipses, concentric pairs that include
 an ellipse, and fixed arc endpoints. Shapes in these relations are constants in
 the solve, so an edit that would need them to move is rejected. Rotating a
 direction target and rotating axis-constrained lines by other than quarter turns
-stay blocked; dragging still moves whole shapes rather than single anchors.
+stay blocked.
+
+**Anchor dragging.** A selected shape shows small squares on its draggable
+anchors: line endpoints, sketch points, circle and arc centers, all four
+rectangle corners, rotated-rectangle corners, ellipse axis points, polygon
+vertices, and slot cap centers (spline handles keep their own circles). The
+hovered or dragged anchor is filled. Left-dragging an anchor (same 7 px pick
+radius as spline handles) moves only that anchor; dragging elsewhere on the
+shape still moves the whole shape. For lines, points, circles, and arcs the
+anchor becomes a strong soft target that is re-solved every frame with every
+hard relation, so it slides along what they allow: a line end with a driving
+length moves on a circle around the other end, and coincident points follow.
+A dragged line endpoint keeps the other endpoint in place. For the other
+shapes the anchor edit keeps driving width, height, radius, and rotation
+dimensions (the corner or vertex slides along them), then re-solves like a
+whole-shape drag. Release commits one undo step, Esc cancels. A fixed anchor
+(or any fixed anchor on a non-line shape) refuses to drag, and shapes in the
+still hand-propagated relations above fall back to whole-shape dragging.
 
 Press **K** with a shape selected to toggle construction geometry. Its tree row
 and viewport outline dim, the flag persists in the web project graph, and

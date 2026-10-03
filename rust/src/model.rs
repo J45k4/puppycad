@@ -1402,6 +1402,8 @@ struct DragState {
     original: Shape,
     before: DocumentState,
     spline_point: Option<usize>,
+    /// Single anchor being dragged (see `Document::drag_anchors`).
+    anchor: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -1953,6 +1955,10 @@ impl Document {
 
     pub fn select_at(&mut self, point: Point) {
         let tolerance = 7.0 / self.zoom.max(0.2);
+        if self.anchor_at(point).is_some() {
+            self.selected_spline_point = None;
+            return;
+        }
         if let Some(Shape::Spline { points, .. }) = self
             .selected
             .and_then(|id| self.shapes.iter().find(|shape| shape.id() == id))
@@ -2089,6 +2095,16 @@ impl Document {
         let Some(id) = self.selected else {
             return false;
         };
+        if let Some((anchor_id, index)) = self.anchor_at(start) {
+            // Anchors that cannot be dragged on their own fall back to
+            // moving the whole shape.
+            if self.begin_anchor_drag(anchor_id, index, start) {
+                return true;
+            }
+            if self.fixed_anchors.contains_key(&(anchor_id, index)) {
+                return false;
+            }
+        }
         let Some(original) = self.shapes.iter().find(|shape| shape.id() == id).cloned() else {
             return false;
         };
@@ -2126,6 +2142,7 @@ impl Document {
             original,
             before: self.snapshot(),
             spline_point: self.selected_spline_point,
+            anchor: None,
         });
         true
     }
@@ -2144,6 +2161,9 @@ impl Document {
         };
         if !delta.x.is_finite() || !delta.y.is_finite() {
             return false;
+        }
+        if let Some(index) = drag.anchor {
+            return self.drag_anchor_to(index, point);
         }
         let mut next = if drag.start.distance(point) > 2.0 / self.zoom {
             if let (
@@ -6996,7 +7016,7 @@ impl Document {
                 1 => tier_pins.extend(sources.iter().map(|&id| Pin::Anchor(id, 0))),
                 _ => {}
             }
-            match self.solve_once(&tier_pins) {
+            match self.solve_once(&tier_pins, None) {
                 Ok(()) => return Ok(()),
                 Err(message) => error = message,
             }
@@ -7005,7 +7025,13 @@ impl Document {
         Err(error)
     }
 
-    fn solve_once(&mut self, pins: &HashSet<Pin>) -> Result<(), String> {
+    /// `drag` is an anchor that follows the cursor as a strong soft target
+    /// instead of a hard pin, so it slides along what the relations allow.
+    fn solve_once(
+        &mut self,
+        pins: &HashSet<Pin>,
+        drag: Option<(u32, usize)>,
+    ) -> Result<(), String> {
         use solver::{CircleVar, Constraint, LineVar, PointVar, Problem, Soft, Value};
         let locked_shapes = self.solver_locked_shapes();
         let dependents: HashSet<u32> = self
@@ -7038,6 +7064,11 @@ impl Document {
             let shape_locked = locked_shapes.contains(&id) || pins.contains(&Pin::Shape(id));
             let anchor_locked = |index| shape_locked || pins.contains(&Pin::Anchor(id, index));
             let point = |problem: &mut Problem, at: Point, index: usize, weight: f64| {
+                let weight = if drag == Some((id, index)) {
+                    1e3
+                } else {
+                    weight
+                };
                 let var = problem.point(at.x as f64, at.y as f64, anchor_locked(index));
                 for (v, value) in [(var.x, at.x), (var.y, at.y)] {
                     problem.soft.push(Soft::Target {
@@ -7338,6 +7369,403 @@ impl Document {
             return Err(error);
         }
         Ok(())
+    }
+}
+
+/// Single-anchor dragging. Anchor indices match `fixed_anchor_position`
+/// where both exist; axis-aligned rectangles add the two derived corners as
+/// indices 2 and 3.
+impl Document {
+    fn shape_anchors(shape: &Shape) -> Vec<(usize, Point)> {
+        match *shape {
+            Shape::Line { a, b, .. } | Shape::Capsule { from: a, to: b, .. } => {
+                vec![(0, a), (1, b)]
+            }
+            Shape::Point { at, .. } => vec![(0, at)],
+            Shape::Circle { center, .. } | Shape::Arc { center, .. } => vec![(0, center)],
+            Shape::Rectangle { a, b, .. } => vec![
+                (0, a),
+                (1, b),
+                (2, Point { x: a.x, y: b.y }),
+                (3, Point { x: b.x, y: a.y }),
+            ],
+            Shape::RotatedRectangle {
+                center,
+                width,
+                height,
+                rotation,
+                ..
+            } => {
+                let corners = Shape::rotated_rectangle_corners(center, width, height, rotation);
+                (1..=4).map(|i| (i, corners[(i + 1) % 4])).collect()
+            }
+            Shape::Ellipse {
+                center,
+                rx,
+                ry,
+                rotation,
+                ..
+            } => (1..=4)
+                .map(|i| {
+                    let fraction = (i - 1) as f32 / 4.0;
+                    (i, Shape::ellipse_point(center, rx, ry, rotation, fraction))
+                })
+                .collect(),
+            Shape::Polygon {
+                center,
+                radius,
+                sides,
+                rotation,
+                ..
+            } => (1..=sides as usize)
+                .map(|i| {
+                    let at = Shape::polygon_vertex(center, radius, sides, rotation, (i - 1) as u8);
+                    (i, at)
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Draggable anchors of shape `id` in world coordinates.
+    pub fn drag_anchors(&self, id: u32) -> Vec<(usize, Point)> {
+        self.shapes
+            .iter()
+            .find(|shape| shape.id() == id)
+            .map(Self::shape_anchors)
+            .unwrap_or_default()
+    }
+
+    /// Anchor of the selected shape under `point`, using the spline handle
+    /// pick radius.
+    pub fn anchor_at(&self, point: Point) -> Option<(u32, usize)> {
+        let id = self.selected?;
+        let tolerance = 7.0 / self.zoom.max(0.2);
+        self.drag_anchors(id)
+            .into_iter()
+            .map(|(index, at)| (index, at.distance(point)))
+            .filter(|(_, distance)| *distance <= tolerance)
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .map(|(index, _)| (id, index))
+    }
+
+    /// Shape id and anchor index of the anchor drag in progress.
+    pub fn dragged_anchor(&self) -> Option<(u32, usize)> {
+        self.drag
+            .as_ref()
+            .and_then(|drag| drag.anchor.map(|index| (drag.id, index)))
+    }
+
+    fn solver_shape(shape: &Shape) -> bool {
+        matches!(
+            shape,
+            Shape::Line { .. } | Shape::Point { .. } | Shape::Circle { .. } | Shape::Arc { .. }
+        )
+    }
+
+    /// Start dragging one anchor. Refused for fixed anchors and for shapes
+    /// whose relations are still hand-propagated.
+    pub fn begin_anchor_drag(&mut self, id: u32, index: usize, start: Point) -> bool {
+        let Some(original) = self.shapes.iter().find(|shape| shape.id() == id).cloned() else {
+            return false;
+        };
+        if !Self::shape_anchors(&original)
+            .iter()
+            .any(|(anchor, _)| *anchor == index)
+        {
+            return false;
+        }
+        let fixed = if matches!(original, Shape::Line { .. }) {
+            self.fixed_anchors.contains_key(&(id, index))
+        } else {
+            self.has_fixed_anchor(id)
+        };
+        if fixed
+            || self.solver_locked_shapes().contains(&id)
+            || self.has_non_line_point_link(id)
+            || self.normal_links.contains_key(&id)
+            || self.endpoint_tangents.contains_key(&id)
+            || self
+                .endpoint_tangents
+                .values()
+                .any(|(source, ..)| *source == id)
+        {
+            return false;
+        }
+        if !Self::solver_shape(&original)
+            && (self.equal_ellipses.contains_key(&id)
+                || self.equal_ellipses.values().any(|source| *source == id)
+                || !self.shared_ellipse_partners(id).is_empty()
+                || self.concentric_partner(id).is_some()
+                || self.midpoint_links.values().any(|source| *source == id)
+                || self.point_curve_links.values().any(|source| *source == id))
+        {
+            return false;
+        }
+        self.selected = Some(id);
+        self.selected_spline_point = None;
+        self.drag = Some(DragState {
+            id,
+            start,
+            original,
+            before: self.snapshot(),
+            spline_point: None,
+            anchor: Some(index),
+        });
+        true
+    }
+
+    fn driving(&self, id: u32, field: DimensionField) -> Option<f32> {
+        self.driving_dimensions.get(&(id, field)).copied()
+    }
+
+    /// `shape` with anchor `index` moved to `target`. Driving dimensions of
+    /// non-solver shapes are kept: the anchor slides along what they allow.
+    fn with_anchor(&self, shape: &Shape, index: usize, target: Point) -> Option<Shape> {
+        let id = shape.id();
+        let mut next = shape.clone();
+        let along = |moving: f32, opposite: f32, length: Option<f32>| match length {
+            Some(length) => opposite + if moving >= opposite { length } else { -length },
+            None => moving,
+        };
+        match &mut next {
+            Shape::Line { a, b, .. } | Shape::Capsule { from: a, to: b, .. } => {
+                *(if index == 0 { a } else { b }) = target;
+            }
+            Shape::Point { at, .. } => *at = target,
+            Shape::Circle { center, .. } | Shape::Arc { center, .. } => *center = target,
+            Shape::Rectangle { a, b, .. } => {
+                let width = self.driving(id, DimensionField::RectangleWidth);
+                let height = self.driving(id, DimensionField::RectangleHeight);
+                // Which of a/b owns the dragged corner's x and y.
+                let (x_on_a, y_on_a) = match index {
+                    0 => (true, true),
+                    1 => (false, false),
+                    2 => (true, false),
+                    _ => (false, true),
+                };
+                if x_on_a {
+                    a.x = along(target.x, b.x, width);
+                } else {
+                    b.x = along(target.x, a.x, width);
+                }
+                if y_on_a {
+                    a.y = along(target.y, b.y, height);
+                } else {
+                    b.y = along(target.y, a.y, height);
+                }
+                if (a.x - b.x).abs() <= 1e-4 || (a.y - b.y).abs() <= 1e-4 {
+                    return None;
+                }
+            }
+            Shape::RotatedRectangle {
+                center,
+                width,
+                height,
+                rotation,
+                ..
+            } => {
+                let corners = Shape::rotated_rectangle_corners(*center, *width, *height, *rotation);
+                let corner = (index + 1) % 4;
+                let opposite = corners[(corner + 2) % 4];
+                let (sx, sy) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)][corner];
+                let (s, c) = rotation.to_radians().sin_cos();
+                let (dx, dy) = (target.x - opposite.x, target.y - opposite.y);
+                let new_width = self
+                    .driving(id, DimensionField::RectangleWidth)
+                    .unwrap_or((dx * c + dy * s) * sx);
+                let new_height = self
+                    .driving(id, DimensionField::RectangleHeight)
+                    .unwrap_or((-dx * s + dy * c) * sy);
+                if new_width <= 1e-4 || new_height <= 1e-4 {
+                    return None;
+                }
+                let (hx, hy) = (sx * new_width * 0.5, sy * new_height * 0.5);
+                *center = Point {
+                    x: opposite.x + c * hx - s * hy,
+                    y: opposite.y + s * hx + c * hy,
+                };
+                *width = new_width;
+                *height = new_height;
+            }
+            Shape::Ellipse {
+                center,
+                rx,
+                ry,
+                rotation,
+                ..
+            } => {
+                let (dx, dy) = (target.x - center.x, target.y - center.y);
+                let quarter = (index - 1) as f32 * 90.0;
+                let distance = if let Some(fixed) = self.driving(id, DimensionField::Rotation) {
+                    *rotation = fixed;
+                    let (s, c) = (fixed + quarter).to_radians().sin_cos();
+                    dx * c + dy * s
+                } else {
+                    *rotation = dy.atan2(dx).to_degrees() - quarter;
+                    dx.hypot(dy)
+                };
+                let (axis, field) = if index % 2 == 1 {
+                    (rx, DimensionField::RectangleWidth)
+                } else {
+                    (ry, DimensionField::RectangleHeight)
+                };
+                if self.driving(id, field).is_none() {
+                    if distance <= 1e-4 {
+                        return None;
+                    }
+                    *axis = distance;
+                }
+            }
+            Shape::Polygon {
+                center,
+                radius,
+                sides,
+                rotation,
+                ..
+            } => {
+                let (dx, dy) = (target.x - center.x, target.y - center.y);
+                if self.driving(id, DimensionField::CurveRadius).is_none() {
+                    let distance = dx.hypot(dy);
+                    if distance <= 1e-4 {
+                        return None;
+                    }
+                    *radius = distance;
+                }
+                if self.driving(id, DimensionField::Rotation).is_none() {
+                    *rotation =
+                        dy.atan2(dx).to_degrees() - (index - 1) as f32 * 360.0 / *sides as f32;
+                }
+            }
+            _ => return None,
+        }
+        Some(next)
+    }
+
+    fn drag_anchor_to(&mut self, index: usize, point: Point) -> bool {
+        let Some(drag) = &self.drag else {
+            return false;
+        };
+        let id = drag.id;
+        let Some(&(_, origin)) = Self::shape_anchors(&drag.original)
+            .iter()
+            .find(|(anchor, _)| *anchor == index)
+        else {
+            return false;
+        };
+        let target = Point {
+            x: origin.x + point.x - drag.start.x,
+            y: origin.y + point.y - drag.start.y,
+        };
+        if !target.x.is_finite() || !target.y.is_finite() {
+            return false;
+        }
+        let Some(position) = self.shapes.iter().position(|shape| shape.id() == id) else {
+            return false;
+        };
+        let Some(next) = self.with_anchor(&self.shapes[position], index, target) else {
+            return false;
+        };
+        let solver_shape = Self::solver_shape(&next);
+        let Some((next, tangent_dependent)) = self.circular_tangent_adjustment(id, next) else {
+            return false;
+        };
+        let Some((next, midpoint_dependents)) = self.point_constraint_adjustment(id, next) else {
+            return false;
+        };
+        let frame_before = self.shapes.clone();
+        self.shapes[position] = next;
+        if let Some((target_index, shape)) = tangent_dependent {
+            self.shapes[target_index] = shape;
+        }
+        for (target_index, shape) in midpoint_dependents {
+            self.shapes[target_index] = shape;
+        }
+        let solved = if solver_shape {
+            self.solve_anchor_drag(id, index, target)
+        } else {
+            self.solve_constraints(&[Pin::Shape(id)])
+        };
+        if solved.is_err() {
+            self.shapes = frame_before;
+            return false;
+        }
+        self.shapes != frame_before
+    }
+
+    fn relation_sources(&self) -> Vec<u32> {
+        let followers: HashSet<u32> = self
+            .equal_lines
+            .keys()
+            .chain(self.line_relations.keys())
+            .chain(self.equal_radii.keys())
+            .chain(self.radius_differences.keys())
+            .chain(self.concentric.keys())
+            .chain(self.midpoint_links.keys())
+            .chain(self.point_curve_links.keys())
+            .chain(self.point_links.values())
+            .copied()
+            .collect();
+        self.shapes
+            .iter()
+            .map(Shape::id)
+            .filter(|id| !followers.contains(id))
+            .collect()
+    }
+
+    /// Solve with the dragged anchor as a strong soft target. A line keeps
+    /// its other endpoint. Other relation sources are held first; when that
+    /// stops the anchor from following, they are released.
+    fn solve_anchor_drag(&mut self, id: u32, index: usize, target: Point) -> Result<(), String> {
+        let mut explicit = HashSet::new();
+        if matches!(
+            self.shapes.iter().find(|shape| shape.id() == id),
+            Some(Shape::Line { .. })
+        ) {
+            explicit.insert(Pin::Anchor(id, 1 - index));
+        }
+        let distance = |document: &Self| {
+            document
+                .drag_anchors(id)
+                .into_iter()
+                .find(|(anchor, _)| *anchor == index)
+                .map_or(f32::INFINITY, |(_, at)| at.distance(target))
+        };
+        let start = self.shapes.clone();
+        let mut held = explicit.clone();
+        held.extend(
+            self.relation_sources()
+                .into_iter()
+                .filter(|source| *source != id)
+                .map(Pin::Shape),
+        );
+        let first = self
+            .solve_once(&held, Some((id, index)))
+            .map(|()| (self.shapes.clone(), distance(self)));
+        if let Ok((_, gap)) = &first {
+            if *gap <= 1e-3 {
+                return Ok(());
+            }
+        }
+        self.shapes = start.clone();
+        let second = self
+            .solve_once(&explicit, Some((id, index)))
+            .map(|()| (self.shapes.clone(), distance(self)));
+        let best = match (first, second) {
+            (Ok(a), Ok(b)) => Ok(if b.1 + 1e-4 < a.1 { b } else { a }),
+            (Ok(a), Err(_)) => Ok(a),
+            (Err(_), second) => second,
+        };
+        match best {
+            Ok((shapes, _)) => {
+                self.shapes = shapes;
+                Ok(())
+            }
+            Err(error) => {
+                self.shapes = start;
+                Err(error)
+            }
+        }
     }
 }
 
@@ -12177,10 +12605,12 @@ mod tests {
         }]);
         doc.selected = Some(1);
         doc.set_dimension(DimensionField::LineLength, 10.0).unwrap();
-        assert!(doc.begin_drag(Point { x: 0.0, y: 0.0 }));
-        assert!(!doc.drag_to(Point { x: 1.0, y: 0.0 }));
-        assert!(doc.drag_to(Point { x: 10.0, y: -5.0 }));
-        assert!(doc.drag_to(Point { x: 12.0, y: -5.0 }));
+        // Grab the line body, outside the endpoint anchor pick radius.
+        doc.zoom = 4.0;
+        assert!(doc.begin_drag(Point { x: 3.0, y: 4.0 }));
+        assert!(!doc.drag_to(Point { x: 3.0, y: 4.0 }));
+        assert!(doc.drag_to(Point { x: 13.0, y: -1.0 }));
+        assert!(doc.drag_to(Point { x: 15.0, y: -1.0 }));
         assert!(doc.finish_drag());
         assert!(matches!(
             doc.shapes[0],
@@ -12513,10 +12943,20 @@ mod tests {
         doc.driving_dimensions
             .insert((1, DimensionField::LineLength), 10.0);
         doc.selected = Some(2);
-        // Dragging the point is held exactly; the fixed, dimensioned line
-        // cannot reach it, so the frame is rejected...
+        // Dragging the point is a soft target: the fixed, dimensioned line
+        // cannot reach it, so the point slides on the length circle...
         assert!(doc.begin_drag(Point { x: 10.0, y: 0.0 }));
-        assert!(!doc.drag_to(Point { x: 10.0, y: 6.0 }));
+        assert!(doc.drag_to(Point { x: 10.0, y: 6.0 }));
+        let (a, b) = line_ends(&doc, 0);
+        assert!(a.distance(Point { x: 0.0, y: 0.0 }) < 1e-4);
+        assert!((a.distance(b) - 10.0).abs() < 1e-3);
+        let scale = 10.0 / 10.0f32.hypot(6.0);
+        assert!(
+            b.distance(Point {
+                x: 10.0 * scale,
+                y: 6.0 * scale
+            }) < 1e-2
+        );
         assert!(doc.cancel_drag());
         // ...while the point-coordinate edit along the circle is accepted.
         doc.selected = Some(2);
@@ -12528,5 +12968,136 @@ mod tests {
         let (a, b) = line_ends(&doc, 0);
         assert_eq!(a, Point { x: 0.0, y: 0.0 });
         assert!(b.distance(Point { x: 10.0, y: 6.0 }) < 1e-4);
+    }
+
+    #[test]
+    fn dragging_line_endpoint_with_length_dimension_moves_on_circle() {
+        let mut doc = Document::from_shapes(vec![Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 10.0, y: 0.0 },
+        }]);
+        doc.driving_dimensions
+            .insert((1, DimensionField::LineLength), 10.0);
+        doc.selected = Some(1);
+        assert_eq!(doc.anchor_at(Point { x: 10.0, y: 1.0 }), Some((1, 1)));
+        let before = doc.shapes.clone();
+        assert!(doc.begin_drag(Point { x: 10.0, y: 0.0 }));
+        for target in [Point { x: 5.0, y: 5.0 }, Point { x: 0.0, y: 20.0 }] {
+            assert!(doc.drag_to(target));
+            let (a, b) = line_ends(&doc, 0);
+            assert!(a.distance(Point { x: 0.0, y: 0.0 }) < 1e-4);
+            assert!((a.distance(b) - 10.0).abs() < 1e-3);
+            // The end lands where the cursor direction meets the circle.
+            let scale = 10.0 / target.x.hypot(target.y);
+            let expected = Point {
+                x: target.x * scale,
+                y: target.y * scale,
+            };
+            assert!(b.distance(expected) < 1e-2, "{b:?} vs {expected:?}");
+        }
+        assert!(doc.finish_drag());
+        assert!(doc.undo());
+        assert_eq!(doc.shapes, before);
+        // Esc restores the frame-zero geometry.
+        doc.selected = Some(1);
+        assert!(doc.begin_drag(Point { x: 10.0, y: 0.0 }));
+        assert!(doc.drag_to(Point { x: 0.0, y: 10.0 }));
+        assert!(doc.cancel_drag());
+        assert_eq!(doc.shapes, before);
+    }
+
+    #[test]
+    fn dragging_coincident_line_endpoint_carries_linked_point() {
+        let mut doc = Document::from_shapes(vec![
+            Shape::Line {
+                id: 1,
+                a: Point { x: 0.0, y: 0.0 },
+                b: Point { x: 10.0, y: 0.0 },
+            },
+            Shape::Point {
+                id: 2,
+                at: Point { x: 10.0, y: 0.0 },
+            },
+        ]);
+        doc.point_links.insert((1, 1), 2);
+        doc.selected = Some(1);
+        assert!(doc.begin_drag(Point { x: 10.0, y: 0.0 }));
+        assert!(doc.drag_to(Point { x: 12.0, y: 7.0 }));
+        assert!(doc.finish_drag());
+        let (a, b) = line_ends(&doc, 0);
+        assert_eq!(a, Point { x: 0.0, y: 0.0 });
+        assert!(b.distance(Point { x: 12.0, y: 7.0 }) < 1e-3);
+        let Shape::Point { at, .. } = doc.shapes[1] else {
+            panic!("expected a point");
+        };
+        assert!(at.distance(b) < 1e-3);
+        assert!(doc.undo());
+        assert_eq!(line_ends(&doc, 0).1, Point { x: 10.0, y: 0.0 });
+    }
+
+    #[test]
+    fn fixed_line_endpoint_refuses_anchor_drag() {
+        let mut doc = Document::from_shapes(vec![Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 10.0, y: 0.0 },
+        }]);
+        doc.fixed_anchors.insert((1, 1), Point { x: 10.0, y: 0.0 });
+        doc.selected = Some(1);
+        assert!(!doc.begin_anchor_drag(1, 1, Point { x: 10.0, y: 0.0 }));
+        assert!(!doc.begin_drag(Point { x: 10.0, y: 0.0 }));
+        assert!(!doc.dragging());
+        // The free end still drags while the fixed end stays.
+        assert!(doc.begin_drag(Point { x: 0.0, y: 0.0 }));
+        assert!(doc.drag_to(Point { x: -3.0, y: 4.0 }));
+        assert!(doc.finish_drag());
+        assert_eq!(line_ends(&doc, 0).1, Point { x: 10.0, y: 0.0 });
+        assert_eq!(line_ends(&doc, 0).0, Point { x: -3.0, y: 4.0 });
+    }
+
+    #[test]
+    fn shape_anchor_drags_respect_driving_dimensions() {
+        let mut doc = Document::from_shapes(vec![
+            Shape::Rectangle {
+                id: 1,
+                a: Point { x: 0.0, y: 0.0 },
+                b: Point { x: 10.0, y: 5.0 },
+            },
+            Shape::Polygon {
+                id: 2,
+                center: Point { x: 50.0, y: 0.0 },
+                radius: 10.0,
+                sides: 6,
+                rotation: 0.0,
+            },
+        ]);
+        doc.driving_dimensions
+            .insert((1, DimensionField::RectangleWidth), 10.0);
+        doc.selected = Some(1);
+        // Corner (b.x, a.y): width is held, height follows the cursor.
+        assert!(doc.begin_drag(Point { x: 10.0, y: 0.0 }));
+        assert!(doc.drag_to(Point { x: 14.0, y: -3.0 }));
+        assert!(doc.finish_drag());
+        assert_eq!(
+            doc.shapes[0],
+            Shape::Rectangle {
+                id: 1,
+                a: Point { x: 0.0, y: -3.0 },
+                b: Point { x: 10.0, y: 5.0 },
+            }
+        );
+        doc.selected = Some(2);
+        assert!(doc.begin_drag(Point { x: 60.0, y: 0.0 }));
+        assert!(doc.drag_to(Point { x: 50.0, y: 20.0 }));
+        assert!(doc.finish_drag());
+        let Shape::Polygon {
+            radius, rotation, ..
+        } = doc.shapes[1]
+        else {
+            panic!("expected a polygon");
+        };
+        assert!((radius - 20.0).abs() < 1e-4);
+        assert!((rotation - 90.0).abs() < 1e-3);
     }
 }
