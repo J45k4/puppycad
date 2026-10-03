@@ -334,6 +334,9 @@ impl App {
                 return;
             }
         }
+        if layout.left.contains(point.x, point.y) && point.y < layout.left.y + PANEL_ROWS_TOP {
+            return;
+        }
         let part_rows = self.part_rows();
         for (row_index, target) in part_rows.iter().enumerate() {
             if layout.part_row(row_index).contains(point.x, point.y) {
@@ -823,6 +826,15 @@ impl App {
                     };
                     self.scroll_projects_page(rows, self.layout());
                     self.redraw();
+                } else if self.layout().left.contains(self.cursor.x, self.cursor.y) {
+                    let rows = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => -y,
+                        MouseScrollDelta::PixelDelta(position) => {
+                            -position.y as f32 / PANEL_ROW_STEP
+                        }
+                    };
+                    self.scroll_panel(rows);
+                    self.redraw();
                 } else if self.solid_preview
                     && self
                         .layout()
@@ -874,6 +886,11 @@ impl App {
     }
 
     pub(super) fn handle_key(&mut self, event: KeyPress) {
+        self.handle_key_press(event);
+        self.follow_panel_selection();
+    }
+
+    fn handle_key_press(&mut self, event: KeyPress) {
         if let PhysicalKey::Code(code) = event.physical_key {
             if self.palette_key(code, event.text.as_deref())
                 || self.shortcut_overlay_key(code)

@@ -101,6 +101,8 @@ struct Layout {
     /// UI scale: physical pixels per layout unit. Every rect is in logical
     /// units; `physical` multiplies by this.
     scale: f32,
+    /// Pixels the Project panel rows are scrolled up by.
+    panel_scroll: f32,
 }
 
 const MORE_COLUMN_ROWS: usize = 18;
@@ -164,6 +166,7 @@ impl Layout {
                 h: bottom_height,
             },
             scale: 1.0,
+            panel_scroll: 0.0,
         }
     }
 
@@ -218,7 +221,7 @@ impl Layout {
     fn part_row(self, index: usize) -> Rect {
         Rect {
             x: 12.0,
-            y: self.left.y + 43.0 + index as f32 * 35.0,
+            y: self.left.y + 43.0 + index as f32 * 35.0 - self.panel_scroll,
             w: self.left.w - 24.0,
             h: 31.0,
         }
@@ -233,7 +236,8 @@ impl Layout {
             x: 12.0,
             y: self.left.y
                 + 87.0
-                + (part_count + sketch_count.saturating_sub(1) + index) as f32 * 35.0,
+                + (part_count + sketch_count.saturating_sub(1) + index) as f32 * 35.0
+                - self.panel_scroll,
             w: self.left.w - 24.0,
             h: 31.0,
         }
@@ -329,6 +333,10 @@ pub(crate) struct App {
     settings_open: bool,
     /// Active UI scale and the monitor's rounded scale factor.
     ui_scale: f32,
+    /// Project panel scroll in pixels (clamped in `layout`).
+    panel_scroll: f32,
+    /// Row last scrolled into view: (3D view, feature, sketch).
+    panel_followed: (bool, usize, usize),
     monitor_scale: f32,
     status_cache: std::cell::RefCell<StatusCache>,
     /// Hovered toolbar button / MORE row and when the hover began.
@@ -477,6 +485,8 @@ impl Default for App {
             settings: Settings::default(),
             settings_open: false,
             ui_scale: 1.0,
+            panel_scroll: 0.0,
+            panel_followed: (false, 0, 0),
             monitor_scale: 1.0,
             status_cache: Default::default(),
             tip_hover: None,
@@ -933,12 +943,17 @@ impl App {
 
     fn layout(&self) -> Layout {
         // Headless (tests): the default window size.
-        self.window
+        let base = self
+            .window
             .as_ref()
             .map_or(Layout::new(1280.0, 800.0), |window| {
                 let size = window.inner_size();
                 Layout::scaled(size.width as f32, size.height as f32, self.ui_scale)
-            })
+            });
+        Layout {
+            panel_scroll: self.panel_scroll.clamp(0.0, self.max_panel_scroll(base)),
+            ..base
+        }
     }
 
     fn redraw(&self) {

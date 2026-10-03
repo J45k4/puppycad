@@ -585,8 +585,8 @@ impl App {
         if let Some(project) = &self.project {
             for (index, part_index) in part_rows.iter().enumerate() {
                 let row = layout.part_row(index);
-                if row.y + row.h >= layout.bottom.y {
-                    break;
+                if !Self::panel_row_shown(layout, row) {
+                    continue;
                 }
                 let active = *part_index == project.active_part_index();
                 if active {
@@ -609,8 +609,8 @@ impl App {
         }
         for index in 0..self.sketch_count() {
             let row = layout.sketch_row(index, part_rows.len());
-            if row.y + row.h >= layout.bottom.y {
-                break;
+            if !Self::panel_row_shown(layout, row) {
+                continue;
             }
             let active = self
                 .project
@@ -650,15 +650,13 @@ impl App {
         let tree_rows = self.tree_row_count();
         let selected_ids = self.document.selected_ids();
         for (index, shape) in self.document.shapes.iter().enumerate() {
-            if layout
-                .row(index + tree_rows, part_rows.len(), self.sketch_count())
-                .y
-                + 31.0
-                >= layout.bottom.y
-            {
+            let row = layout.row(index + tree_rows, part_rows.len(), self.sketch_count());
+            if row.y + row.h >= layout.bottom.y {
                 break;
             }
-            let row = layout.row(index + tree_rows, part_rows.len(), self.sketch_count());
+            if !Self::panel_row_shown(layout, row) {
+                continue;
+            }
             if selected_ids.contains(&shape.id()) {
                 painter.rect(row, ACTIVE_ROW);
             }

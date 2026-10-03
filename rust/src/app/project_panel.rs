@@ -84,6 +84,12 @@ pub(super) fn project_page_visible_rows(layout: Layout) -> usize {
 }
 
 /// Shortens `text` to `max` characters, keeping the end (for paths) or the start.
+/// Project panel rows start below the PROJECT heading; rows scrolled
+/// above this are hidden and not clickable.
+pub(super) const PANEL_ROWS_TOP: f32 = 40.0;
+/// Pixels one wheel notch scrolls the Project panel (one row).
+pub(super) const PANEL_ROW_STEP: f32 = 35.0;
+
 pub(super) fn clip_text(text: &str, max: usize, keep_end: bool) -> String {
     let count = text.chars().count();
     if count <= max || max < 4 {
@@ -109,6 +115,57 @@ pub(super) struct ProjectsPage {
 }
 
 impl App {
+    /// Project panel rows below the parts: sketches, features + ROLLBACK, shapes.
+    fn panel_row_total(&self) -> usize {
+        self.part_rows().len()
+            + self.sketch_count().max(1)
+            + self.tree_row_count()
+            + self.document.shapes.len()
+    }
+
+    /// How far the Project panel can scroll before its last row is at the bottom.
+    pub(super) fn max_panel_scroll(&self, layout: Layout) -> f32 {
+        let content = 43.0 + self.panel_row_total() as f32 * PANEL_ROW_STEP;
+        (content - (layout.bottom.y - layout.left.y) + 8.0).max(0.0)
+    }
+
+    /// Wheel over the Project panel: `rows` positive scrolls down.
+    pub(super) fn scroll_panel(&mut self, rows: f32) {
+        let max = self.max_panel_scroll(self.layout());
+        self.panel_scroll = (self.layout().panel_scroll + rows * PANEL_ROW_STEP).clamp(0.0, max);
+    }
+
+    /// True when a Project panel row at this rect is drawn (not scrolled
+    /// under the heading or past the status bar).
+    pub(super) fn panel_row_shown(layout: Layout, row: Rect) -> bool {
+        row.y >= layout.left.y + PANEL_ROWS_TOP && row.y + row.h < layout.bottom.y
+    }
+
+    /// After a key press: when the selected feature (3D view) or the active
+    /// sketch changed, scroll its row into view.
+    pub(super) fn follow_panel_selection(&mut self) {
+        let active_sketch = self.project.as_ref().map_or(0, ProjectFile::active_sketch);
+        let key = (self.solid_preview, self.selected_solid, active_sketch);
+        if key == self.panel_followed {
+            return;
+        }
+        self.panel_followed = key;
+        let layout = self.layout();
+        let row = if self.solid_preview && self.tree_row_count() > 0 {
+            self.feature_row(layout, self.selected_solid)
+        } else {
+            layout.sketch_row(active_sketch, self.part_rows().len())
+        };
+        let top = layout.left.y + PANEL_ROWS_TOP;
+        let bottom = layout.bottom.y - 4.0;
+        let max = self.max_panel_scroll(layout);
+        if row.y < top {
+            self.panel_scroll = (layout.panel_scroll - (top - row.y)).clamp(0.0, max);
+        } else if row.y + row.h > bottom {
+            self.panel_scroll = (layout.panel_scroll + (row.y + row.h - bottom)).clamp(0.0, max);
+        }
+    }
+
     pub(super) fn breadcrumbs(&self, layout: Layout) -> Vec<(Crumb, String, Rect)> {
         let mut segments = vec![(Crumb::Projects, "Projects".to_string())];
         if self.projects_page.is_some() {

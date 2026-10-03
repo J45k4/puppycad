@@ -221,7 +221,7 @@ impl App {
         let statuses = project.feature_statuses();
         for index in 0..total {
             let row = self.feature_row(layout, index);
-            if row.y + row.h >= layout.bottom.y {
+            if !Self::panel_row_shown(layout, row) {
                 continue;
             }
             let active = self.solid_preview && self.selected_solid == index;
@@ -254,7 +254,7 @@ impl App {
             );
         }
         let row = self.rollback_row(layout);
-        if row.y + row.h < layout.bottom.y {
+        if Self::panel_row_shown(layout, row) || self.rollback_drag {
             let y = if self.rollback_drag {
                 self.cursor.y.clamp(row.y - 200.0, row.y + 200.0) - row.h * 0.5
             } else {

@@ -628,3 +628,43 @@ fn ctrl_comma_toggles_settings() {
     key(&mut app, KeyCode::Escape);
     assert!(!app.settings_open);
 }
+
+#[test]
+fn project_panel_scrolls_and_follows_the_selected_feature() {
+    let mut app = App::with_project(std::path::Path::new("fixtures/feature-tree.pcad")).unwrap();
+    app.solid_preview = false;
+    for index in 0..30 {
+        app.document.add_point(Point {
+            x: index as f32 * 3.0,
+            y: 50.0,
+        });
+    }
+    assert!(app.document.shapes.len() >= 30);
+    let layout = app.layout();
+    assert_eq!(layout.panel_scroll, 0.0);
+    move_to(
+        &mut app,
+        Point {
+            x: 60.0,
+            y: layout.left.y + 200.0,
+        },
+    );
+    wheel(&mut app, -100.0);
+    let scrolled = app.layout();
+    assert!(scrolled.panel_scroll > 0.0);
+    assert_eq!(scrolled.panel_scroll, app.max_panel_scroll(scrolled));
+    assert!(!App::panel_row_shown(
+        scrolled,
+        app.feature_row(scrolled, 0)
+    ));
+    app.solid_preview = true;
+    app.selected_solid = 0;
+    key(&mut app, KeyCode::BracketRight);
+    let followed = app.layout();
+    assert!(App::panel_row_shown(
+        followed,
+        app.feature_row(followed, app.selected_solid)
+    ));
+    wheel(&mut app, 100.0);
+    assert_eq!(app.layout().panel_scroll, 0.0);
+}

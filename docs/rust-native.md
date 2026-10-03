@@ -755,7 +755,10 @@ Each part's solid features (`FeatureKind`: extrusions — new body, cut, join
 ordered list. The Project panel shows one row per feature in that order, then a
 **ROLLBACK** row. Row glyphs: `[S]` and dim text for suppressed features, red
 `[!]` for features in error (clicking the row shows the reason in the status
-bar), dim text for features after the rollback bar.
+bar), dim text for features after the rollback bar. When the rows do not
+fit, the mouse wheel over the Project panel scrolls them (one row per notch);
+after a key changes the selected feature (or the active sketch) its row is
+scrolled into view.
 
 With a feature row selected in the 3D view:
 
