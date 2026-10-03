@@ -6687,3 +6687,87 @@ fn pattern_copies_do_not_add_degrees_of_freedom() {
     assert_eq!(analysis.dof, 0);
     assert_eq!(analysis.fully_constrained.len(), 6);
 }
+
+#[test]
+fn rectangles_polygons_and_slots_offset_and_follow_their_source() {
+    let mut doc = Document::from_shapes(vec![
+        Shape::Rectangle {
+            id: 1,
+            a: pt(0.0, 0.0),
+            b: pt(10.0, 6.0),
+        },
+        Shape::Polygon {
+            id: 2,
+            center: pt(40.0, 0.0),
+            radius: 5.0,
+            sides: 6,
+            rotation: 0.0,
+        },
+        Shape::Capsule {
+            id: 3,
+            from: pt(0.0, 30.0),
+            to: pt(10.0, 30.0),
+            width: 4.0,
+            arc_segments: 8,
+        },
+        Shape::RotatedRectangle {
+            id: 4,
+            center: pt(40.0, 30.0),
+            width: 8.0,
+            height: 4.0,
+            rotation: 30.0,
+        },
+    ]);
+    let mut copies = Vec::new();
+    for id in 1..=4 {
+        doc.selected = Some(id);
+        copies.push(doc.offset_selected(2.0).unwrap()[0]);
+    }
+    let find = |doc: &Document, id: u32| doc.shapes.iter().find(|s| s.id() == id).unwrap().clone();
+    assert_eq!(
+        find(&doc, copies[0]),
+        Shape::Rectangle {
+            id: copies[0],
+            a: pt(-2.0, -2.0),
+            b: pt(12.0, 8.0),
+        }
+    );
+    let Shape::Polygon { radius, .. } = find(&doc, copies[1]) else {
+        panic!("expected a polygon");
+    };
+    let expected = 5.0 + 2.0 / (std::f32::consts::PI / 6.0).cos();
+    assert!((radius - expected).abs() < 1e-4);
+    assert!(
+        matches!(find(&doc, copies[2]), Shape::Capsule { width, .. } if (width - 8.0).abs() < 1e-4)
+    );
+    assert!(matches!(
+        find(&doc, copies[3]),
+        Shape::RotatedRectangle { width, height, .. }
+            if (width - 12.0).abs() < 1e-4 && (height - 8.0).abs() < 1e-4
+    ));
+    // Moving and resizing the sources drags the copies along.
+    doc.selected = Some(1);
+    assert!(doc.move_selected(pt(5.0, 5.0)));
+    assert_eq!(
+        find(&doc, copies[0]),
+        Shape::Rectangle {
+            id: copies[0],
+            a: pt(3.0, 3.0),
+            b: pt(17.0, 13.0),
+        }
+    );
+    doc.selected = Some(2);
+    assert_eq!(doc.set_dimension(DimensionField::CurveRadius, 8.0), Ok(()));
+    let Shape::Polygon { radius, .. } = find(&doc, copies[1]) else {
+        panic!("expected a polygon");
+    };
+    assert!((radius - (expected + 3.0)).abs() < 1e-3, "{radius}");
+    // Each offset counts as a constrained copy.
+    assert_eq!(doc.analyze_constraints().dof, 4 + 3 + 5 + 5);
+    // A changed distance regenerates the copy.
+    doc.selected = Some(copies[2]);
+    assert_eq!(doc.set_offset_distance(1.0), Ok(()));
+    assert!(
+        matches!(find(&doc, copies[2]), Shape::Capsule { width, .. } if (width - 6.0).abs() < 1e-4)
+    );
+}

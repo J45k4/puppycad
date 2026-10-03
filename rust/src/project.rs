@@ -5701,6 +5701,16 @@ fn offset_geometry_matches(expected: &Shape, actual: &Shape) -> bool {
                 && (start_angle - t).abs() < 1e-6
                 && (sweep - v).abs() < 1e-6
         }
+        // Rectangles, polygons and slots keep their kind.
+        (expected, actual)
+            if std::mem::discriminant(expected) == std::mem::discriminant(actual) =>
+        {
+            let (p, q) = (expected.snap_points(), actual.snap_points());
+            p.len() == q.len()
+                && p.iter()
+                    .zip(&q)
+                    .all(|(p, q)| p.point.distance(q.point) < 1e-3)
+        }
         _ => false,
     }
 }
@@ -8444,6 +8454,60 @@ mod tests {
         assert_eq!(loaded.offsets.get(&copy), Some(&(5, -2.0)));
         assert_eq!(loaded.offsets.get(&8), Some(&(7, -6.0)));
         assert_eq!(loaded.offset_chains.len(), 1);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn outline_offsets_round_trip_as_web_offsets() {
+        let path = test_path("offset-outline");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/offset.pcad");
+        fs::copy(&fixture, &path).unwrap();
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        let base = 1000;
+        document.shapes.extend([
+            Shape::Rectangle {
+                id: base,
+                a: Point { x: 100.0, y: 0.0 },
+                b: Point { x: 110.0, y: 6.0 },
+            },
+            Shape::Polygon {
+                id: base + 1,
+                center: Point { x: 150.0, y: 0.0 },
+                radius: 5.0,
+                sides: 6,
+                rotation: 0.0,
+            },
+            Shape::Capsule {
+                id: base + 2,
+                from: Point { x: 100.0, y: 40.0 },
+                to: Point { x: 120.0, y: 40.0 },
+                width: 4.0,
+                arc_segments: 8,
+            },
+        ]);
+        let mut copies = Vec::new();
+        for id in base..base + 3 {
+            document.selected = Some(id);
+            copies.push(document.offset_selected(1.5).unwrap()[0]);
+        }
+        project.save(&document).unwrap();
+        let (reopened, loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(reopened.read_only_reason(), None);
+        assert_eq!(copies.len(), 3);
+        // Ids are renumbered on load; match the outline offsets by value.
+        let kind = |id: u32| {
+            let shape = loaded.shapes.iter().find(|s| s.id() == id).unwrap();
+            std::mem::discriminant(shape)
+        };
+        let outlines: Vec<_> = loaded
+            .offsets
+            .iter()
+            .filter(|(_, (_, distance))| *distance == 1.5)
+            .collect();
+        assert_eq!(outlines.len(), 3);
+        for (&target, &(source, _)) in outlines {
+            assert_eq!(kind(target), kind(source));
+        }
         fs::remove_file(path).unwrap();
     }
 

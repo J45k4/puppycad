@@ -165,11 +165,16 @@ lengths) are removed; relations at the far ends and line-wide relations stay.
 Split and Trim move fillet/chamfer joins to the retained piece. Native
 rectangle corners and curved edges are not supported (the web app does not
 support them either).
-**Offset**: select a line, circle or arc and press **Shift+U** (or pick
+**Offset**: select a line, circle, arc, rectangle, rotated rectangle,
+polygon or slot and press **Shift+U** (or pick
 **MORE → OFFSET**). Type a signed distance in the Properties prompt and press
 Enter; an empty prompt keeps the last distance (5 mm by default). As in the
 web app, positive distances move a line to the left of its direction and grow
-circles and arcs; negative distances go the other way. The copy is linked to
+circles, arcs and closed outlines (a rectangle's width and height grow by twice
+the distance, a slot's width likewise, a polygon's circumradius by
+`distance / cos(pi / sides)` so its edges move by the distance); negative
+distances go the other way. Outline copies keep their kind, so web files with
+offsets of these shapes now open editable. The copy is linked to
 its source by the web `offset` relation (`a` source, `b` copy, signed
 `value`). When the selected line joins other lines end to end (shared
 endpoints, with or without coincident links, through vertices where exactly
@@ -337,7 +342,9 @@ arcs, ellipses, elliptic arcs and splines (anchor pairs, equal radii or axes,
 mirrored arc start and ellipse rotation, negated sweeps) are solver residuals
 too, as are offsets (a line copy at a signed distance to the left of its
 source, concentric circles and arcs with a radius difference and equal
-angles, and a mitered line chain offset that also keeps its sources joined).
+angles, outline copies with the same center, cap centers and rotation and
+grown sizes, and a mitered line chain offset that also keeps its sources
+joined).
 Rectangles, rotated rectangles, regular polygons and slots are solver
 entities too (`solver::ShapeVar`): a corner rectangle is its two corner
 points, a rotated rectangle its center, half-axes and rotation, a polygon its

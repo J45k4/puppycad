@@ -450,6 +450,15 @@ pub enum Constraint {
         target: ShapeVar,
         axis: LineVar,
     },
+    /// `target` is `source` offset outward by `distance` (the web `offset`
+    /// relation for rectangles, polygons and slots): same center or cap
+    /// centers and rotation, sizes grown by the distance (a polygon's
+    /// circumradius by `distance / cos(pi / sides)`).
+    OffsetShape {
+        source: ShapeVar,
+        target: ShapeVar,
+        distance: f64,
+    },
     /// Shape anchor `index` (see [`shape_anchor`]) stays at `at`.
     AnchorAt {
         shape: ShapeVar,
@@ -1004,6 +1013,10 @@ impl Constraint {
                 out.extend(target.vars());
                 line(&mut out, axis);
             }
+            Constraint::OffsetShape { source, target, .. } => {
+                out.extend(source.vars());
+                out.extend(target.vars());
+            }
             Constraint::AnchorAt { shape, .. } => out.extend(shape.vars()),
             Constraint::AnchorOn {
                 shape, point: q, ..
@@ -1402,6 +1415,91 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
                 other_sizes[1] - sizes[1],
                 wrap_period(other_rotation + rotation - 2.0 * dy.atan2(dx), period),
             ]);
+        }
+        Constraint::OffsetShape {
+            source,
+            target,
+            distance,
+        } => {
+            use ShapeVar as S;
+            match (source, target) {
+                (S::Rectangle { a, b }, S::Rectangle { a: c, b: e }) => {
+                    let ((ax, ay), (bx, by)) = (pt(p, a), pt(p, b));
+                    let (sx, sy) = ((bx - ax).signum(), (by - ay).signum());
+                    let ((cx, cy), (ex, ey)) = (pt(p, c), pt(p, e));
+                    out.extend([
+                        cx - (ax - sx * distance),
+                        cy - (ay - sy * distance),
+                        ex - (bx + sx * distance),
+                        ey - (by + sy * distance),
+                    ]);
+                }
+                (
+                    S::RotatedRectangle {
+                        center,
+                        half_width,
+                        half_height,
+                        rotation,
+                    },
+                    S::RotatedRectangle {
+                        center: c,
+                        half_width: w,
+                        half_height: h,
+                        rotation: r,
+                    },
+                ) => {
+                    let ((ax, ay), (bx, by)) = (pt(p, center), pt(p, c));
+                    out.extend([
+                        bx - ax,
+                        by - ay,
+                        p[w] - p[half_width] - distance,
+                        p[h] - p[half_height] - distance,
+                        wrap_period((p[r] - p[rotation]).to_radians(), TAU),
+                    ]);
+                }
+                (
+                    S::Polygon {
+                        center,
+                        radius,
+                        rotation,
+                        sides,
+                    },
+                    S::Polygon {
+                        center: c,
+                        radius: q,
+                        rotation: r,
+                        ..
+                    },
+                ) => {
+                    let ((ax, ay), (bx, by)) = (pt(p, center), pt(p, c));
+                    let grow = distance / (PI / sides.max(3) as f64).cos();
+                    out.extend([
+                        bx - ax,
+                        by - ay,
+                        p[q] - p[radius] - grow,
+                        wrap_period((p[r] - p[rotation]).to_radians(), TAU),
+                    ]);
+                }
+                (
+                    S::Slot { a, b, width },
+                    S::Slot {
+                        a: c,
+                        b: e,
+                        width: w,
+                    },
+                ) => {
+                    let ((ax, ay), (bx, by)) = (pt(p, a), pt(p, b));
+                    let ((cx, cy), (ex, ey)) = (pt(p, c), pt(p, e));
+                    out.extend([
+                        cx - ax,
+                        cy - ay,
+                        ex - bx,
+                        ey - by,
+                        p[w] - p[width] - 2.0 * distance,
+                    ]);
+                }
+                _ => {}
+            }
         }
         Constraint::AnchorAt { shape, index, at } => {
             if let Some((x, y)) = shape_anchor(p, &shape, index) {
