@@ -62,13 +62,17 @@ VARIABLES** when nothing is selected.
 lists the most likely next commands for the current state
 (`app/quick_actions.rs`): label, shortcut chip and a dimmed reason. Click a
 row or press **Ctrl+1..7** (registered commands "Run quick action n") to run
-row n. Seven rows when the column is at least 760 px tall, otherwise four.
-Every row is a registry command whose availability predicate passes right
-now; the list is rebuilt only when the sketch revision, feature count, view,
-drafts, selection, hover target or assembly state change. **Ctrl+Shift+N**
-toggles the band; the choice is saved as `quick_actions` in `settings.json`.
-On short windows the band covers the lowest Properties rows (the transform
-tabs); hide it to reach them. Rules, in priority order:
+row n. The band has a fixed height: seven rows when the column is at least
+760 px tall, otherwise four (the default 1280x800 window). Properties ends
+above it instead of being covered: its lower part scrolls (see
+*Properties scrolling* below). Every row is a registry command whose
+availability predicate passes right now; the list is rebuilt only when the
+sketch revision, feature count, view, drafts, selection, hover target (kind
+and id: sketch shape, 3D face / edge, not every pointer move) or assembly
+state change. Sketch closed-profile detection is cached per revision and
+shared with the viewport paint. **Ctrl+Shift+N** toggles the band; the
+choice is saved as `quick_actions` in `settings.json`. Labels use " - "
+(the pixel font has no em dash). Rules, in priority order:
 
 - read-only project: **Open project** (reason `Read only: <why>`), then the
   rules below;
@@ -76,12 +80,19 @@ tabs); hide it to reach them. Rules, in priority order:
   Mate, Fasten to world, Delete instance;
 - extrude / revolve / edge finish prompt open: **Commit** (Enter), Flip (F),
   End condition (E), Cancel (Esc); Flip and End condition only for extrude;
-- 3D, edges selected: Chamfer, Fillet, Measure; face selected: Sketch on
-  face, Measure, Project into sketch; open face sketch with a profile:
-  Extrude face sketch; nothing selected: Sketch on face, New sketch on TOP,
-  Suppress, Roll back here, Export STL, Assembly view, Back to sketch;
+- 3D, edges selected: Chamfer, Fillet ("n edges selected"), Measure; face
+  selected: Sketch on face, Measure, Project into sketch; open face sketch
+  with a profile: Extrude face sketch; nothing selected: Chamfer when an
+  edge is hovered ("1 edge hovered"), Sketch on face (reason
+  "Sketch on face - <face name>" over a face, else "hover a face first"),
+  New sketch on TOP, **Edit depth** / **Edit value** (command "Edit feature
+  value": opens the Properties prompt for the selected feature's depth, or
+  a revolve angle / edge finish size), **Reorder feature** (two or more
+  features; Ctrl+Up / Ctrl+Down, the row runs Ctrl+Up), Suppress, Roll back
+  here, Export STL, Assembly view, Back to sketch;
 - sketch extruded (locked): **Finish sketch**, Tab to 3D, New sketch;
-- dimension selected: Make reference / driving, Delete dimension, Deselect;
+- dimension selected: **Edit dimension value** (opens its value prompt),
+  Make reference / driving, Delete dimension, Deselect;
 - selected line + hovered line: Parallel, Perpendicular, Equal;
 - empty sketch: Draw rectangle / circle / line, New sketch on another plane;
 - conflicting constraints: "Fix conflict - see red rows" (Undo) first;
@@ -90,6 +101,14 @@ tabs); hide it to reach them. Rules, in priority order:
 - open geometry only: Line (continue or close), Add dimension, Fit, Finish
   sketch (Select tool with nothing selected, which is what Esc leaves);
 - padding to at least three rows: Search commands, Keyboard shortcuts, Save.
+
+**Properties scrolling.** The Properties rows down to 340 px below the
+column top (name, dimensions, point / spline coordinates, angle / offset
+fields) never move. Rows below that (variables past the fifth, Move / Copy,
+Scale / Rotate) scroll inside the space above the NEXT band: the mouse wheel
+over Properties scrolls them, starting to edit a field there scrolls it
+into view, and selecting another entity scrolls back to the top. With NEXT
+hidden Properties uses the whole column.
 
 **Finish sketch** (Ctrl+Enter, sketch view): with a body in the part it
 opens the 3D view; with a closed profile and no body yet it opens the
@@ -750,6 +769,7 @@ duplicate bindings within a context.
 | `R` | Toggle driving / reference | dimension selected, selection |
 | `Shift+B` | Angle to hovered line | sketch, editable, selection |
 | `Shift+D` | Radial distance to hovered circle | sketch, editable, selection |
+| palette / MORE | Edit dimension value | dimension selected, selection |
 
 ### Solid
 
@@ -783,6 +803,7 @@ duplicate bindings within a context.
 | palette / MORE | Measure two selected elements | any view |
 | palette / MORE | Delete selected feature | 3D preview |
 | `Ctrl+Enter` | Finish sketch | sketch |
+| palette / MORE | Edit feature value | 3D preview |
 | `Enter` | Commit | extrude / revolve prompt open |
 | `F` | Flip direction | extrude / revolve prompt open |
 | `E` | Cycle end condition | extrude / revolve prompt open |

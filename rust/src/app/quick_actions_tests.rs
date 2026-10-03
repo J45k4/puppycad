@@ -267,3 +267,245 @@ fn assembly_and_dimension_states_offer_their_commands() {
     }
     let _ = std::fs::remove_file(path);
 }
+
+/// Small primitives (rows, glyph pixels) drawn inside the Properties column
+/// whose bottom reaches below `bottom`.
+fn props_rows_below(app: &App, layout: Layout, bottom: f32) -> usize {
+    let mut painter = Painter::new(layout.top.w, layout.bottom.y + layout.bottom.h);
+    painter.set_scroll_region(App::props_region(layout));
+    app.paint_panels(&mut painter, layout);
+    app.props_extent.set(painter.scroll_extent());
+    painter
+        .logical_triangles()
+        .iter()
+        .filter(|tri| {
+            let min_x = tri.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+            let min_y = tri.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+            let max_y = tri.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+            min_x > layout.right.x + 2.0
+                && max_y - min_y < 40.0
+                && max_y > bottom + 0.5
+                && min_y < layout.right.y + layout.right.h
+        })
+        .count()
+}
+
+fn selected_rectangle_app(name: &str) -> (App, PathBuf) {
+    let path = temp_path(name);
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(&mut app);
+    let id = app.document.shapes[0].id();
+    app.document.selected = Some(id);
+    (app, path)
+}
+
+#[test]
+fn next_band_never_overlaps_a_visible_properties_row() {
+    let (mut app, path) = selected_rectangle_app("overlap");
+    let layout = app.layout();
+    let (band, _) = app.quick_band(layout).unwrap();
+    assert_eq!(band.y, layout.props_bottom);
+    // Fixed height: header + 4 rows on the 800 px window.
+    assert_eq!(band.h, App::quick_band_height(layout));
+    assert_eq!(props_rows_below(&app, layout, band.y), 0);
+    // The transform rows below the band are reachable by scrolling.
+    let max = app.max_props_scroll(app.layout());
+    assert!(max > 100.0, "{max}");
+    app.scroll_props(100.0);
+    let scrolled = app.layout();
+    assert_eq!(scrolled.props_scroll, max);
+    assert_eq!(props_rows_below(&app, scrolled, band.y), 0);
+    // Top rows stay put; a click on the scrolled part maps to its row.
+    let top = Point {
+        x: layout.right.x + 50.0,
+        y: layout.right.y + 120.0,
+    };
+    assert_eq!(App::props_point(scrolled, top), top);
+    let lower = Point {
+        x: top.x,
+        y: layout.right.y + 400.0,
+    };
+    assert_eq!(App::props_point(scrolled, lower).y, lower.y + max);
+    // Hidden NEXT: Properties gets the whole column again.
+    app.settings.quick_actions = false;
+    let hidden = app.layout();
+    assert_eq!(hidden.props_bottom, hidden.right.y + hidden.right.h);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn properties_scroll_keeps_the_edited_row_visible() {
+    let (mut app, path) = selected_rectangle_app("follow");
+    let layout = app.layout();
+    props_rows_below(&app, layout, layout.props_bottom);
+    for field in [EditField::ScaleFactor, EditField::MoveX, EditField::CenterY] {
+        app.editing = Some(DimensionEdit {
+            field,
+            buffer: String::new(),
+        });
+        app.follow_props_edit();
+        let layout = app.layout();
+        let top = app.edit_field_top(layout, field).unwrap() - layout.props_scroll;
+        assert!(top >= layout.right.y + PROPS_SCROLL_TOP);
+        assert!(top + 25.0 <= layout.props_bottom, "{top}");
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+fn click_at(app: &mut App, x: f32, y: f32) {
+    app.pointer_moved(Point { x, y });
+    app.handle_left_press();
+    app.document.finish_drag();
+    let _ = app.paint();
+}
+
+/// The UI smoke "author splines" steps, headless, with NEXT shown.
+#[test]
+fn smoke_author_splines_sequence_places_both_splines() {
+    let path = temp_path("splines");
+    let mut app = App::with_project(&path).unwrap();
+    assert!(app.settings.quick_actions);
+    key_with(&mut app, ModifiersState::SHIFT, KeyCode::KeyG);
+    click_at(&mut app, 1150.0, 63.0);
+    click_at(&mut app, 1150.0, 508.0);
+    assert_eq!(app.document.tool, Tool::FitSpline);
+    for (x, y) in [
+        (420.0, 330.0),
+        (520.0, 330.0),
+        (520.0, 430.0),
+        (420.0, 430.0),
+    ] {
+        click_at(&mut app, x, y);
+    }
+    key_with(&mut app, ModifiersState::SHIFT, KeyCode::Enter);
+    click_at(&mut app, 1150.0, 63.0);
+    click_at(&mut app, 1150.0, 544.0);
+    assert_eq!(app.document.tool, Tool::ControlSpline);
+    for (x, y) in [
+        (690.0, 380.0),
+        (730.0, 300.0),
+        (790.0, 460.0),
+        (840.0, 380.0),
+    ] {
+        click_at(&mut app, x, y);
+    }
+    assert!(
+        app.status_message.contains("4 points"),
+        "{}",
+        app.status_message
+    );
+    // Profile detection is cached per revision (paint and NEXT share it).
+    assert!(std::rc::Rc::ptr_eq(
+        &app.sketch_profiles(),
+        &app.sketch_profiles()
+    ));
+    key_with(&mut app, ModifiersState::empty(), KeyCode::Enter);
+    let splines = app
+        .document
+        .shapes
+        .iter()
+        .filter(|s| matches!(s, Shape::Spline { .. }))
+        .count();
+    assert_eq!(splines, 2, "{}", app.status_message);
+    let _ = std::fs::remove_file(path);
+}
+
+fn face_hover(label: &str) -> Option<FaceHover> {
+    Some(FaceHover {
+        face: None,
+        label: label.into(),
+        outline: Vec::new(),
+    })
+}
+
+#[test]
+fn hovering_in_3d_updates_row_one_once_per_hover_change() {
+    let (mut app, path) = block_app("hover");
+    let first = app.quick_suggestions();
+    assert_eq!(first[0].cmd, Cmd::SketchOnFace);
+    assert_eq!(first[0].reason, "hover a face first");
+    let builds = app.quick_builds.get();
+    app.hovered_face = face_hover("Top face");
+    app.topo_hover = Some(TopoRef::Face(0));
+    let items = app.quick_suggestions();
+    assert_eq!(items[0].reason, "Sketch on face - Top face");
+    assert_eq!(app.quick_builds.get(), builds + 1);
+    // More pointer moves over the same face: no rebuild.
+    for _ in 0..5 {
+        app.hovered_face = face_hover("Top face");
+        let _ = app.quick_suggestions();
+    }
+    assert_eq!(app.quick_builds.get(), builds + 1);
+    // Another face: exactly one more rebuild.
+    app.hovered_face = face_hover("Side face");
+    app.topo_hover = Some(TopoRef::Face(1));
+    assert_eq!(
+        app.quick_suggestions()[0].reason,
+        "Sketch on face - Side face"
+    );
+    let _ = app.quick_suggestions();
+    assert_eq!(app.quick_builds.get(), builds + 2);
+    // Hovered edge: rebuild once; Chamfer leads when it can run.
+    app.hovered_face = None;
+    app.topo_hover = Some(TopoRef::Edge(0));
+    let items = app.quick_suggestions();
+    assert_eq!(app.quick_builds.get(), builds + 3);
+    if app.command_available(command(Cmd::EdgeChamfer)) {
+        assert_eq!(items[0].cmd, Cmd::EdgeChamfer);
+        assert!(items[0].reason.starts_with("1 edge hovered"));
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn feature_and_dimension_states_offer_edit_and_reorder_rows() {
+    let (mut app, path) = block_app("rows");
+    app.settings.quick_actions = false;
+    let items = app.quick_suggestions();
+    let edit = items
+        .iter()
+        .find(|item| item.cmd == Cmd::EditFeatureValue)
+        .expect("Edit depth row");
+    assert_eq!(edit.label, "Edit depth");
+    assert!(!items.iter().any(|item| item.cmd == Cmd::FeatureUp));
+    assert_all_available(&app);
+    app.run_command(Cmd::EditFeatureValue);
+    assert!(matches!(
+        app.editing.as_ref().map(|edit| edit.field),
+        Some(EditField::ExtrusionDepth)
+    ));
+    app.editing = None;
+    // A second feature: the reorder row appears with its Ctrl+Up chip.
+    app.solid_preview = false;
+    app.run_command(Cmd::SketchFront);
+    draw_rectangle(&mut app);
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 5.0, 0)
+        .unwrap();
+    app.solid_preview = true;
+    let items = app.quick_suggestions();
+    let reorder = items
+        .iter()
+        .find(|item| item.cmd == Cmd::FeatureUp)
+        .expect("Reorder row");
+    assert_eq!(reorder.label, "Reorder feature");
+    assert_eq!(reorder.shortcut, "Ctrl+Up");
+    let _ = std::fs::remove_file(path);
+    // Sketch with a selected dimension: Edit dimension value first.
+    let path = temp_path("dim-edit");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(&mut app);
+    let id = app.document.shapes[0].id();
+    app.selected_dimension = Some(DimensionKey::Field(id, DimensionField::RectangleWidth));
+    let items = app.quick_suggestions();
+    assert_eq!(items[0].cmd, Cmd::EditDimensionValue);
+    assert_eq!(items[0].label, "Edit dimension value");
+    app.run_quick_action(0);
+    assert!(app.editing.is_some());
+    for item in items.iter() {
+        assert!(!item.label.contains('—') && !item.reason.contains('—'));
+    }
+    let _ = std::fs::remove_file(path);
+}

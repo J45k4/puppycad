@@ -854,6 +854,27 @@ impl App {
 
     /// Current constraint diagnostics, recomputed only when the document
     /// revision changed and no drag is in progress.
+    /// `profiles_from_document` for the current revision, cached.
+    pub(super) fn sketch_profiles(&self) -> SketchProfiles {
+        let revision = self.document.revision();
+        if let Some((at, profiles)) = &*self.profiles.borrow()
+            && *at == revision
+        {
+            return profiles.clone();
+        }
+        let profiles = std::rc::Rc::new(profiles_from_document(&self.document));
+        *self.profiles.borrow_mut() = Some((revision, profiles.clone()));
+        profiles
+    }
+
+    /// True when the sketch has at least one closed profile.
+    pub(super) fn sketch_closed(&self) -> bool {
+        self.sketch_profiles()
+            .as_ref()
+            .as_ref()
+            .is_some_and(|p| !p.is_empty())
+    }
+
     pub(super) fn sketch_analysis(&self) -> std::cell::Ref<'_, SketchAnalysis> {
         {
             let mut cache = self.analysis.borrow_mut();

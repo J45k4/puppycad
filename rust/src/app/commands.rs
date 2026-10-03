@@ -215,6 +215,8 @@ pub(super) enum Cmd {
     ArmMate,
     FastenInstance,
     FinishSketch,
+    EditFeatureValue,
+    EditDimensionValue,
     OpenProject,
     DraftCommit,
     DraftFlip,
@@ -1197,6 +1199,25 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Sketch,
         App::finish_sketch,
     ),
+    cmd(
+        Cmd::EditFeatureValue,
+        "Edit feature value",
+        "",
+        C::Solid,
+        S::Solid,
+        App::edit_feature_value,
+    ),
+    Command {
+        needs_selection: true,
+        ..cmd(
+            Cmd::EditDimensionValue,
+            "Edit dimension value",
+            "",
+            C::Dimension,
+            S::DimensionSelected,
+            App::edit_selected_dimension,
+        )
+    },
     cmd(
         Cmd::OpenProject,
         "Open project",

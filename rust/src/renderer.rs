@@ -35,6 +35,23 @@ pub struct Painter {
     scale: f32,
     /// Theme substitution: a color equal to `.0` is drawn as `.1`.
     remap: Vec<(Color, Color)>,
+    /// Scrolled part of a panel: see [`ScrollRegion`].
+    scroll: Option<ScrollRegion>,
+    /// Lowest unscrolled y drawn inside the scroll region so far.
+    scroll_extent: f32,
+}
+
+/// Primitives inside the column (`x >= left`, unscrolled `y` in
+/// `from..=until`) move up by `offset` and are dropped when they then leave
+/// `from..=bottom`; everything else stays put (the fixed top of a panel,
+/// other panels, the status bar).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollRegion {
+    pub left: f32,
+    pub from: f32,
+    pub until: f32,
+    pub offset: f32,
+    pub bottom: f32,
 }
 
 impl Painter {
@@ -45,7 +62,55 @@ impl Painter {
             vertices: Vec::new(),
             scale: 1.0,
             remap: Vec::new(),
+            scroll: None,
+            scroll_extent: 0.0,
         }
+    }
+
+    /// Start (Some) or end (None) a scrolled panel region.
+    pub fn set_scroll_region(&mut self, region: Option<ScrollRegion>) {
+        self.scroll = region;
+        self.scroll_extent = 0.0;
+    }
+
+    /// Lowest unscrolled y drawn in the current scroll region.
+    pub fn scroll_extent(&self) -> f32 {
+        self.scroll_extent
+    }
+
+    /// Apply the scroll region to a primitive's y coordinates; false when
+    /// the primitive is clipped away.
+    fn place(&mut self, min_x: f32, ys: &mut [f32]) -> bool {
+        let Some(region) = self.scroll else {
+            return true;
+        };
+        let min = ys.iter().copied().fold(f32::INFINITY, f32::min);
+        let max = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        if min < region.from || max > region.until || min_x < region.left {
+            return true;
+        }
+        self.scroll_extent = self.scroll_extent.max(max);
+        for y in ys.iter_mut() {
+            *y -= region.offset;
+        }
+        min - region.offset >= region.from - 0.5 && max - region.offset <= region.bottom + 0.5
+    }
+
+    /// Triangles in logical coordinates (tests inspect what was drawn).
+    #[cfg(test)]
+    pub fn logical_triangles(&self) -> Vec<[[f32; 2]; 3]> {
+        self.vertices
+            .chunks(3)
+            .map(|tri| {
+                let point = |i: usize| {
+                    [
+                        (tri[i].position[0] + 1.0) * 0.5 * self.width,
+                        (1.0 - tri[i].position[1]) * 0.5 * self.height,
+                    ]
+                };
+                [point(0), point(1), point(2)]
+            })
+            .collect()
     }
 
     /// UI scale factor: coordinates stay logical (the whole logical canvas
@@ -78,18 +143,26 @@ impl Painter {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             return;
         }
-        let a = self.vertex(rect.x, rect.y, color);
-        let b = self.vertex(rect.x + rect.w, rect.y, color);
-        let c = self.vertex(rect.x + rect.w, rect.y + rect.h, color);
-        let d = self.vertex(rect.x, rect.y + rect.h, color);
+        let mut ys = [rect.y, rect.y + rect.h];
+        if !self.place(rect.x, &mut ys) {
+            return;
+        }
+        let a = self.vertex(rect.x, ys[0], color);
+        let b = self.vertex(rect.x + rect.w, ys[0], color);
+        let c = self.vertex(rect.x + rect.w, ys[1], color);
+        let d = self.vertex(rect.x, ys[1], color);
         self.vertices.extend_from_slice(&[a, b, c, a, c, d]);
     }
 
     pub fn triangle(&mut self, a: [f32; 2], b: [f32; 2], c: [f32; 2], color: Color) {
+        let mut ys = [a[1], b[1], c[1]];
+        if !self.place(a[0].min(b[0]).min(c[0]), &mut ys) {
+            return;
+        }
         self.vertices.extend_from_slice(&[
-            self.vertex(a[0], a[1], color),
-            self.vertex(b[0], b[1], color),
-            self.vertex(c[0], c[1], color),
+            self.vertex(a[0], ys[0], color),
+            self.vertex(b[0], ys[1], color),
+            self.vertex(c[0], ys[2], color),
         ]);
     }
 
@@ -102,10 +175,14 @@ impl Painter {
         }
         let nx = -dy / length * thickness * 0.5;
         let ny = dx / length * thickness * 0.5;
-        let a = self.vertex(ax + nx, ay + ny, color);
-        let b = self.vertex(bx + nx, by + ny, color);
-        let c = self.vertex(bx - nx, by - ny, color);
-        let d = self.vertex(ax - nx, ay - ny, color);
+        let mut ys = [ay + ny, by + ny, by - ny, ay - ny];
+        if !self.place((ax - nx.abs()).min(bx - nx.abs()), &mut ys) {
+            return;
+        }
+        let a = self.vertex(ax + nx, ys[0], color);
+        let b = self.vertex(bx + nx, ys[1], color);
+        let c = self.vertex(bx - nx, ys[2], color);
+        let d = self.vertex(ax - nx, ys[3], color);
         self.vertices.extend_from_slice(&[a, b, c, a, c, d]);
     }
 

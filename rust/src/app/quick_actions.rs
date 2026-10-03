@@ -30,7 +30,9 @@ pub(super) struct QuickKey {
     selected: Vec<u32>,
     dimension: bool,
     hover_shape: Option<u32>,
-    hovered_face: bool,
+    /// Hover target kind + id in 3D (face label, topology element).
+    hovered_face: Option<String>,
+    topo_hover: Option<TopoRef>,
     topo: Vec<TopoRef>,
     selected_solid: usize,
     assembly: Option<(Option<usize>, u64)>,
@@ -154,9 +156,11 @@ fn solid_rules(rules: &mut Rules) {
     } else {
         "Shift+click another element"
     };
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
     if edges > 0 {
-        rules.push(Cmd::EdgeChamfer, "Chamfer", "bevel the selected edges");
-        rules.push(Cmd::EdgeFillet, "Fillet", "round the selected edges");
+        let reason = format!("{edges} edge{} selected", plural(edges));
+        rules.push(Cmd::EdgeChamfer, "Chamfer", reason.clone());
+        rules.push(Cmd::EdgeFillet, "Fillet", reason);
         rules.push(Cmd::Measure, "Measure", measure_reason);
     }
     if faces > 0 {
@@ -182,10 +186,7 @@ fn solid_rules(rules: &mut Rules) {
         .project
         .as_ref()
         .is_some_and(|project| project.sketch_face(project.active_sketch()).is_some());
-    if face_sketch
-        && !app.read_only()
-        && profiles_from_document(&app.document).is_some_and(|p| !p.is_empty())
-    {
+    if face_sketch && !app.read_only() && app.sketch_closed() {
         rules.push(
             Cmd::ExtrudeNew,
             "Extrude face sketch",
@@ -193,16 +194,30 @@ fn solid_rules(rules: &mut Rules) {
         );
     }
     if selection.is_empty() {
-        rules.push(
-            Cmd::SketchOnFace,
-            "Sketch on face",
-            if app.hovered_face.is_some() {
-                "on the hovered face"
-            } else {
-                "hover a face first"
-            },
-        );
+        let hovered_edge = matches!(app.topo_hover, Some(TopoRef::Edge(_)));
+        if hovered_edge {
+            rules.push(
+                Cmd::EdgeChamfer,
+                "Chamfer",
+                "1 edge hovered - click to select it",
+            );
+        }
+        let face_reason = match &app.hovered_face {
+            Some(face) => format!("Sketch on face - {}", face.label),
+            None => "hover a face first".to_string(),
+        };
+        rules.push(Cmd::SketchOnFace, "Sketch on face", face_reason);
         rules.push(Cmd::SketchTop, "New sketch on TOP", "start a new profile");
+        if let Some(label) = app.feature_value_label() {
+            rules.push(
+                Cmd::EditFeatureValue,
+                label,
+                "the selected feature's main value",
+            );
+        }
+        if app.project.as_ref().map_or(0, ProjectFile::feature_count) > 1 {
+            rules.push(Cmd::FeatureUp, "Reorder feature", "Ctrl+Up / Ctrl+Down");
+        }
         rules.push(
             Cmd::SuppressFeature,
             "Suppress feature",
@@ -242,6 +257,11 @@ fn sketch_rules(rules: &mut Rules) {
         return;
     }
     if app.selected_dimension.is_some() {
+        rules.push(
+            Cmd::EditDimensionValue,
+            "Edit dimension value",
+            "type a new value",
+        );
         rules.push(
             Cmd::ToggleReference,
             "Make reference / driving",
@@ -303,11 +323,11 @@ fn sketch_rules(rules: &mut Rules) {
         return;
     }
     let analysis = app.sketch_analysis().clone();
-    let closed = profiles_from_document(document).is_some_and(|p| !p.is_empty());
+    let closed = app.sketch_closed();
     if !analysis.conflicting.is_empty() {
         rules.push(
             Cmd::Undo,
-            "Fix conflict — see red rows",
+            "Fix conflict - see red rows",
             "undo or delete a red constraint",
         );
     }
@@ -315,7 +335,7 @@ fn sketch_rules(rules: &mut Rules) {
         rules.push(Cmd::FinishSketch, "Finish sketch", "closed profile ready");
         rules.push(Cmd::ExtrudeNew, "Extrude", "pull the profile into a solid");
         if analysis.dof > 0 {
-            let label = format!("Add dimension — {} DOF remaining", analysis.dof);
+            let label = format!("Add dimension - {} DOF remaining", analysis.dof);
             rules.push(Cmd::DimensionTool, &label, "fix sizes before extruding");
         } else {
             rules.push(
@@ -333,7 +353,7 @@ fn sketch_rules(rules: &mut Rules) {
     if !closed {
         rules.push(
             Cmd::Line,
-            "Line — continue or close",
+            "Line - continue or close",
             "no closed profile yet",
         );
         rules.push(Cmd::DimensionTool, "Add dimension", "fix sizes");
@@ -362,7 +382,8 @@ impl App {
             selected: self.document.selected_ids(),
             dimension: self.selected_dimension.is_some(),
             hover_shape: self.hover.shape,
-            hovered_face: self.hovered_face.is_some(),
+            hovered_face: self.hovered_face.as_ref().map(|face| face.label.clone()),
+            topo_hover: self.topo_hover.filter(|_| self.solid_preview),
             topo: self
                 .topo_selection
                 .iter()
@@ -386,6 +407,7 @@ impl App {
         {
             return items.clone();
         }
+        self.quick_builds.set(self.quick_builds.get() + 1);
         let items = Rc::new(suggest(self));
         *self.quick_cache.borrow_mut() = Some((key, items.clone()));
         items
@@ -400,22 +422,141 @@ impl App {
         }
     }
 
+    /// Height of the NEXT band: fixed by the column height (header plus
+    /// 4 or 7 rows), so Properties can reserve the space.
+    pub(super) fn quick_band_height(layout: Layout) -> f32 {
+        QUICK_HEADER + Self::quick_row_cap(layout) as f32 * QUICK_ROW + 6.0
+    }
+
+    fn quick_shown(&self) -> bool {
+        self.settings.quick_actions && self.projects_page.is_none()
+    }
+
+    /// Bottom of the Properties area for a base layout (NEXT band top when
+    /// the band is shown).
+    pub(super) fn props_bottom(&self, layout: Layout) -> f32 {
+        let column_bottom = layout.right.y + layout.right.h;
+        if self.quick_shown() {
+            column_bottom - Self::quick_band_height(layout)
+        } else {
+            column_bottom
+        }
+    }
+
+    /// How far the lower part of Properties can scroll: until the lowest
+    /// drawn row (or the open edit field) sits above the band.
+    pub(super) fn max_props_scroll(&self, layout: Layout) -> f32 {
+        let field = self
+            .editing
+            .as_ref()
+            .and_then(|edit| self.edit_field_top(layout, edit.field))
+            .map_or(0.0, |top| top + 25.0);
+        let content = self.props_extent.get().max(field);
+        (content + 8.0 - layout.props_bottom).max(0.0)
+    }
+
+    /// The scrolled part of the Properties column for the painter.
+    pub(super) fn props_region(layout: Layout) -> Option<ScrollRegion> {
+        Some(ScrollRegion {
+            left: layout.right.x,
+            from: layout.right.y + PROPS_SCROLL_TOP,
+            until: layout.right.y + layout.right.h,
+            offset: layout.props_scroll,
+            bottom: layout.props_bottom,
+        })
+    }
+
+    /// True when `point` is over the Properties rows (not the NEXT band).
+    pub(super) fn props_hit(&self, layout: Layout, point: Point) -> bool {
+        layout.right.contains(point.x, point.y) && point.y < layout.props_bottom
+    }
+
+    /// Screen point to unscrolled Properties coordinates (identity outside
+    /// the scrolled part).
+    pub(super) fn props_point(layout: Layout, point: Point) -> Point {
+        if point.x >= layout.right.x
+            && point.y >= layout.right.y + PROPS_SCROLL_TOP
+            && point.y < layout.props_bottom
+        {
+            Point {
+                x: point.x,
+                y: point.y + layout.props_scroll,
+            }
+        } else {
+            point
+        }
+    }
+
+    /// Wheel over Properties: `rows` positive scrolls down (30 px rows).
+    pub(super) fn scroll_props(&mut self, rows: f32) {
+        let layout = self.layout();
+        self.props_scroll =
+            (layout.props_scroll + rows * 30.0).clamp(0.0, self.max_props_scroll(layout));
+    }
+
+    /// Unscrolled top of an edit field drawn in the scrollable part.
+    pub(super) fn edit_field_top(&self, layout: Layout, field: EditField) -> Option<f32> {
+        let offset = match field {
+            EditField::MoveX => 365.0,
+            EditField::MoveY => 395.0,
+            EditField::CenterX | EditField::CenterY => 550.0,
+            EditField::ScaleFactor | EditField::RotateAngle => 580.0,
+            EditField::Variable(index) => {
+                175.0 + index.unwrap_or(self.document.dims.variables.len()) as f32 * 30.0
+            }
+            _ => return None,
+        };
+        Some(layout.right.y + offset)
+    }
+
+    /// Keep the field being edited inside the visible Properties area.
+    pub(super) fn follow_props_edit(&mut self) {
+        let key = (
+            self.document.selected,
+            self.solid_preview,
+            self.selected_solid,
+            self.selected_dimension.is_some(),
+        );
+        if key != self.props_followed {
+            self.props_followed = key;
+            self.props_scroll = 0.0;
+        }
+        let layout = self.layout();
+        let Some(top) = self
+            .editing
+            .as_ref()
+            .and_then(|edit| self.edit_field_top(layout, edit.field))
+        else {
+            return;
+        };
+        let from = layout.right.y + PROPS_SCROLL_TOP;
+        if top < from {
+            return;
+        }
+        let max = self.max_props_scroll(layout);
+        let shown = top - layout.props_scroll;
+        if shown < from {
+            self.props_scroll = (top - from).clamp(0.0, max);
+        } else if shown + 25.0 > layout.props_bottom - 4.0 {
+            self.props_scroll = (top + 29.0 - layout.props_bottom).clamp(0.0, max);
+        }
+    }
+
     /// NEXT band at the bottom of the Properties column, if shown.
     pub(super) fn quick_band(&self, layout: Layout) -> Option<(Rect, usize)> {
-        if !self.settings.quick_actions || self.projects_page.is_some() {
+        if !self.quick_shown() {
             return None;
         }
         let rows = self
             .quick_suggestions()
             .len()
             .min(Self::quick_row_cap(layout));
-        let h = QUICK_HEADER + rows as f32 * QUICK_ROW + 6.0;
         Some((
             Rect {
                 x: layout.right.x + 1.0,
-                y: layout.right.y + layout.right.h - h,
+                y: layout.props_bottom,
                 w: layout.right.w - 1.0,
-                h,
+                h: layout.right.y + layout.right.h - layout.props_bottom,
             },
             rows,
         ))
@@ -568,7 +709,7 @@ impl App {
             self.toggle_solid_view();
             return;
         }
-        let closed = profiles_from_document(&self.document).is_some_and(|p| !p.is_empty());
+        let closed = self.sketch_closed();
         if closed && self.project.is_some() && !self.read_only() {
             self.begin_extrude("newBody");
             if self.extrude_draft.is_some() {
@@ -576,8 +717,54 @@ impl App {
             }
         }
         self.status_message =
-            "Sketch has no closed profile to extrude — draw a closed shape or press X to extrude"
+            "Sketch has no closed profile to extrude - draw a closed shape or press X to extrude"
                 .into();
+    }
+
+    /// NEXT label for the selected feature's main value: "Edit depth" for
+    /// an extrusion, "Edit value" for a revolve / edge finish.
+    pub(super) fn feature_value_label(&self) -> Option<&'static str> {
+        if !self.solid_preview {
+            return None;
+        }
+        if self.selected_extension().is_some() {
+            return Some("Edit value");
+        }
+        self.project
+            .as_ref()
+            .and_then(ProjectFile::extrusion_previews)
+            .is_some_and(|solids| !solids.is_empty())
+            .then_some("Edit depth")
+    }
+
+    /// Open the Properties prompt for the selected feature's main value
+    /// (the same field a click on its DEPTH / value row opens).
+    pub(super) fn edit_feature_value(&mut self) {
+        let field = match self.feature_value_label() {
+            Some("Edit value") => EditField::FeatureValue,
+            Some(_) => EditField::ExtrusionDepth,
+            None => {
+                self.status_message = "No feature value to edit".into();
+                return;
+            }
+        };
+        self.editing = Some(DimensionEdit {
+            field,
+            buffer: String::new(),
+        });
+        self.status_message = if matches!(field, EditField::FeatureValue) {
+            "Type the new angle (deg) or size (mm), then Enter  |  Esc to cancel"
+        } else {
+            "Type positive depth in mm, then Enter  |  Esc to cancel"
+        }
+        .into();
+    }
+
+    /// Open the value prompt of the selected sketch dimension.
+    pub(super) fn edit_selected_dimension(&mut self) {
+        if let Some(key) = self.selected_dimension {
+            self.begin_label_edit(key);
+        }
     }
 
     /// Draft commands (Enter / F / E / Esc) feed the open prompt.
@@ -592,11 +779,9 @@ impl App {
     }
 }
 
-/// The bitmap font has no em dash.
 fn truncate(text: &str, max: usize) -> String {
-    let text = text.replace('—', "-");
     if text.chars().count() <= max {
-        return text;
+        return text.to_string();
     }
     let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
     out.push('~');

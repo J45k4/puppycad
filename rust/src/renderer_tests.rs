@@ -174,3 +174,39 @@ fn rect_contains_is_half_open() {
     assert!(!r.contains(12.0, 25.0));
     assert!(!r.contains(9.9, 22.0));
 }
+
+#[test]
+fn scroll_region_shifts_lower_rows_and_clips_them() {
+    let mut p = painter();
+    p.set_scroll_region(Some(ScrollRegion {
+        left: 100.0,
+        from: 40.0,
+        until: 100.0,
+        offset: 20.0,
+        bottom: 70.0,
+    }));
+    let row = |y| Rect {
+        x: 110.0,
+        y,
+        w: 10.0,
+        h: 5.0,
+    };
+    // Fixed top row and a row left of the column: untouched.
+    p.rect(row(10.0), RED);
+    p.rect(
+        Rect {
+            x: 10.0,
+            ..row(50.0)
+        },
+        RED,
+    );
+    // Shifted up by 20 and kept.
+    p.rect(row(60.0), RED);
+    // Scrolled above the region top or below its bottom: dropped.
+    p.rect(row(45.0), RED);
+    p.rect(row(90.0), RED);
+    let tris = p.logical_triangles();
+    assert_eq!(tris.len(), 6);
+    assert_close(tris[4][0], [110.0, 40.0]);
+    assert_eq!(p.scroll_extent(), 95.0);
+}
