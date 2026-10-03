@@ -100,6 +100,11 @@ impl App {
                     return;
                 }
             }
+            if layout.more_item(16).contains(point.x, point.y) {
+                self.start_tangent_arc();
+                self.redraw();
+                return;
+            }
             for (index, tool) in [Tool::Point, Tool::Polygon, Tool::Slot]
                 .into_iter()
                 .enumerate()
@@ -352,6 +357,7 @@ impl App {
                     self.document.begin_drag(world);
                 }
             }
+            Tool::TangentArc => self.tangent_arc_click(raw_world, world),
             Tool::Point => {
                 self.document.add_point(world);
                 self.status_message.clear();
@@ -932,6 +938,21 @@ impl ApplicationHandler for App {
                                 }
                                 Err(error) => format!("Trim: {error}"),
                             };
+                        }
+                        KeyCode::Comma
+                            if !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.solid_preview =>
+                        {
+                            self.start_tangent_arc();
+                        }
+                        KeyCode::Period
+                            if !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.read_only()
+                                && !self.solid_preview =>
+                        {
+                            self.smooth_join_key();
                         }
                         KeyCode::KeyU if !self.read_only() && !self.solid_preview => {
                             let world = self

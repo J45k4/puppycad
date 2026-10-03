@@ -203,6 +203,10 @@ impl App {
                         b: end,
                     }),
                 },
+                Tool::TangentArc => self
+                    .document
+                    .tangent_source
+                    .and_then(|source| self.document.tangent_arc_shape(source, end, 0).ok()),
                 Tool::Point => None,
                 Tool::FitSpline | Tool::ControlSpline => None,
                 Tool::Select => None,

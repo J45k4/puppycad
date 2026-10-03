@@ -313,6 +313,10 @@ impl Document {
             .flat_map(|(&a, &b)| [a, b])
             .chain(self.endpoint_tangents.keys().map(|(id, _)| *id))
             .collect();
+        for (&(follower, _), &(source, _)) in &self.smooth_joins {
+            sized.extend([follower, source]);
+            angled.extend([follower, source]);
+        }
         for (&target, &(source, _)) in &self.mirrors {
             sized.extend([target, source]);
             angled.extend([target, source]);
@@ -351,6 +355,7 @@ impl Document {
             .chain(self.external_tangents.keys())
             .copied()
             .chain(self.endpoint_tangents.keys().map(|(id, _)| *id))
+            .chain(self.smooth_joins.keys().map(|(id, _)| *id))
             .collect()
     }
 
@@ -652,6 +657,16 @@ impl Document {
                     point: end,
                 }),
                 _ => {}
+            }
+        }
+        for (&(follower, follower_end), &(source, source_end)) in &self.smooth_joins {
+            if let (Some(a), Some(b_curve)) = (b.curve(source), b.curve(follower)) {
+                constraints.push(Constraint::SmoothJoin {
+                    a,
+                    a_end: source_end,
+                    b: b_curve,
+                    b_end: follower_end,
+                });
             }
         }
         for spec in self.chamfers.values() {
