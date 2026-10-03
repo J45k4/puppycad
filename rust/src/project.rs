@@ -19,6 +19,7 @@ mod assemblies;
 mod context;
 mod face;
 mod features;
+mod regions;
 pub use context::{SketchContext, context_in_frame};
 pub use face::{FaceDescriptor, FaceRef, Frame};
 pub use features::{
@@ -850,9 +851,19 @@ pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> 
             loops.push(shape_profile(shape)?);
         }
     }
+    // Loops from the curve arrangement share edges; they are faces of one
+    // subdivision, never nested in or crossing each other.
+    let shapes = loops.len();
+    let mut arrangement = false;
     if !curves.is_empty() {
-        loops.extend(segment_loop_profiles(&curves)?);
+        // Native: sketches with projected geometry may split a projected
+        // outline with drawn lines; plain sketches keep the web's simple
+        // loop rule (branches are rejected).
+        let (found, faces) = segment_loop_profiles(&curves, !document.projections.is_empty())?;
+        loops.extend(found);
+        arrangement = faces;
     }
+    let region = |index: usize| arrangement && index >= shapes;
     if loops.is_empty() {
         return None;
     }
@@ -861,6 +872,9 @@ pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> 
     }
     for i in 0..loops.len() {
         for j in i + 1..loops.len() {
+            if region(i) && region(j) {
+                continue;
+            }
             if loops_intersect(&loops[i], &loops[j]) {
                 return None;
             }
@@ -875,6 +889,7 @@ pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> 
             (0..loops.len())
                 .filter(|candidate| {
                     *candidate != index
+                        && !(region(index) && region(*candidate))
                         && areas[*candidate] > areas[index]
                         && point_inside_loop(loops[index][0], &loops[*candidate])
                 })
@@ -970,7 +985,12 @@ fn shape_profile(shape: &Shape) -> Option<Vec<Point>> {
     })
 }
 
-fn segment_loop_profiles(shapes: &[&Shape]) -> Option<Vec<Vec<Point>>> {
+/// Closed loops of the curves, and whether they are the faces of a
+/// branching arrangement (see `regions.rs`).
+fn segment_loop_profiles(
+    shapes: &[&Shape],
+    allow_arrangement: bool,
+) -> Option<(Vec<Vec<Point>>, bool)> {
     if shapes.is_empty() {
         return None;
     }
@@ -1047,6 +1067,9 @@ fn segment_loop_profiles(shapes: &[&Shape]) -> Option<Vec<Vec<Point>>> {
             _ => return None,
         }
     }
+    if allow_arrangement && regions::needs_arrangement(&segments) {
+        return Some((regions::arrangement_faces(&segments), true));
+    }
     let near = |a: Point, b: Point| a.distance(b) <= 1e-6;
     let mut visited = vec![false; segments.len()];
     let mut profiles = Vec::new();
@@ -1112,7 +1135,7 @@ fn segment_loop_profiles(shapes: &[&Shape]) -> Option<Vec<Vec<Point>>> {
         }
         profiles.push(profile);
     }
-    Some(profiles)
+    Some((profiles, false))
 }
 
 impl ProjectFile {

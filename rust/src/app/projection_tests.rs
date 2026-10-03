@@ -236,6 +236,42 @@ fn use_edges_projects_a_hole_loop_as_a_circle() {
 }
 
 #[test]
+fn mixed_projected_and_drawn_profile_extrudes_a_cut() {
+    let path = copy_fixture("extruded-rectangle");
+    let mut app = App::with_project(&path).unwrap();
+    sketch_on(&mut app, [0.0, 0.0, 1.0]);
+    app.use_edges();
+    // The split line ends exactly on the projected edges (snapped).
+    let top = app.document.snap_point(p(0.2, 50.1), false, true).unwrap();
+    let bottom = app
+        .document
+        .snap_point(p(-0.2, -50.1), false, true)
+        .unwrap();
+    assert_eq!((top.point, bottom.point), (p(0.0, 50.0), p(0.0, -50.0)));
+    app.document.tool = Tool::Line;
+    app.document.draft_start = Some(top.point);
+    assert!(app.document.finish_draft(bottom.point));
+    let profiles = project::profiles_from_document(&app.document).unwrap();
+    assert_eq!(profiles.len(), 2, "two halves");
+    let project = app.project.as_mut().unwrap();
+    let full = 160.0 * 100.0 * 60.0;
+    project
+        .create_extrusion_with_operation(&app.document, 10.0, 0, "cut")
+        .unwrap();
+    let volume: f64 = project
+        .evaluated_solids()
+        .unwrap()
+        .iter()
+        .map(|body| body.volume())
+        .sum();
+    assert!(
+        (volume - (full - 80.0 * 100.0 * 10.0)).abs() < 1e-1,
+        "{volume}"
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn projected_lines_follow_a_depth_change() {
     let path = copy_fixture("extruded-rectangle");
     let mut app = App::with_project(&path).unwrap();
