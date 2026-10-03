@@ -7,7 +7,9 @@
 use super::*;
 
 use puppycad::assembly::{self as asm, Assembly, MateKind, MateRef, Pose, Transform, V3, solver};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Instance colors (cycled); selected and hovered instances are tinted.
 const INSTANCE_COLORS: [[f32; 3]; 6] = [
@@ -117,10 +119,27 @@ pub(super) struct AssemblyView {
     pub(super) prompt: Option<AsmPrompt>,
     undo: Vec<Assembly>,
     redo: Vec<Assembly>,
+    /// Bumped whenever `asm` or `bodies` change; keys `scene_cache`.
+    pub(super) revision: u64,
+    /// The built scene of `revision`: hover and paint only re-pick.
+    scene_cache: RefCell<Option<(u64, Rc<SolidScene>)>>,
+}
+
+/// The scene of the view's current revision, built once and shared.
+pub(super) fn assembly_scene(view: &AssemblyView) -> Rc<SolidScene> {
+    let mut cache = view.scene_cache.borrow_mut();
+    match &*cache {
+        Some((revision, scene)) if *revision == view.revision => scene.clone(),
+        _ => {
+            let scene = Rc::new(build_assembly_scene(view));
+            *cache = Some((view.revision, scene.clone()));
+            scene
+        }
+    }
 }
 
 /// Instance-colored scene: `triangle_body` holds the instance index.
-pub(super) fn assembly_scene(view: &AssemblyView) -> SolidScene {
+fn build_assembly_scene(view: &AssemblyView) -> SolidScene {
     let mut triangles = Vec::new();
     let mut triangle_body = Vec::new();
     let mut edges = Vec::new();
@@ -243,6 +262,8 @@ impl App {
             prompt: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            revision: 0,
+            scene_cache: RefCell::new(None),
         });
         self.solid_drag = None;
     }
@@ -295,6 +316,7 @@ impl App {
             return false;
         }
         let before = view.asm.clone();
+        view.revision += 1;
         let result = edit(&mut view.asm).and_then(|()| solver::apply(&mut view.asm).map(|_| ()));
         let result = result.and_then(|()| match &mut self.project {
             Some(project) => project.set_assembly(view.item, &view.asm),
@@ -334,6 +356,7 @@ impl App {
             return;
         };
         to.push(std::mem::replace(&mut view.asm, state));
+        view.revision += 1;
         if view
             .selected
             .is_some_and(|index| index >= view.asm.instances.len())
@@ -356,7 +379,7 @@ impl App {
     pub(super) fn assembly_projector(
         &self,
         layout: Layout,
-    ) -> Option<(SolidScene, SolidProjector)> {
+    ) -> Option<(Rc<SolidScene>, SolidProjector)> {
         let scene = assembly_scene(self.assembly.as_ref()?);
         let projector = SolidProjector::new(self.solid_view, &scene.vertices, layout.viewport)?;
         Some((scene, projector))
@@ -589,6 +612,7 @@ impl App {
             view.prompt = None;
             view.edges.insert(part_id.clone(), part_edges(&bodies));
             view.bodies.insert(part_id.clone(), bodies);
+            view.revision += 1;
         }
         let count = self.assembly.as_ref().map_or(0, |v| {
             v.asm

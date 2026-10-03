@@ -368,6 +368,7 @@ impl App {
             self.assembly_projector(layout)
         } else {
             self.solid_projector(layout)
+                .map(|(scene, projector)| (std::rc::Rc::new(scene), projector))
         };
         let Some((scene, projector)) = projected else {
             return false;

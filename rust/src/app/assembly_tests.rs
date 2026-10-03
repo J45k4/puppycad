@@ -408,3 +408,28 @@ fn hovered_edge_becomes_the_revolute_axis() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn scene_is_cached_until_the_assembly_changes() {
+    let (mut app, dir) = open_fixture("cache");
+    let scene = |app: &App| app.assembly_projector(app.layout()).unwrap().0;
+    let first = scene(&app);
+    // Hover and repaint reuse the built scene.
+    let p = point_on(&app, 2);
+    move_to(&mut app, p);
+    drop(app.paint());
+    assert!(std::rc::Rc::ptr_eq(&first, &scene(&app)));
+    // An insert rebuilds it.
+    click(&mut app, p);
+    key(&mut app, KeyCode::KeyI);
+    key_text(&mut app, KeyCode::Digit2, Some("2"));
+    let inserted = scene(&app);
+    assert!(!std::rc::Rc::ptr_eq(&first, &inserted));
+    assert!(inserted.triangles.len() > first.triangles.len());
+    // Undo is a change too.
+    key_with(&mut app, ModifiersState::CONTROL, KeyCode::KeyZ);
+    let undone = scene(&app);
+    assert!(!std::rc::Rc::ptr_eq(&inserted, &undone));
+    assert_eq!(undone.triangles.len(), first.triangles.len());
+    let _ = std::fs::remove_dir_all(dir);
+}
