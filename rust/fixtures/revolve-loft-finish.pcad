@@ -1,0 +1,214 @@
+{
+  "items": [
+    {
+      "data": {
+        "cad": {
+          "nodes": [
+            {
+              "id": "plane-top",
+              "name": "Top",
+              "plane": "XY",
+              "type": "referencePlane"
+            },
+            {
+              "id": "plane-front",
+              "name": "Front",
+              "plane": "XZ",
+              "type": "referencePlane"
+            },
+            {
+              "id": "plane-right",
+              "name": "Right",
+              "plane": "YZ",
+              "type": "referencePlane"
+            },
+            {
+              "dimensions": [],
+              "id": "native-sketch-1",
+              "name": "Sketch 1",
+              "relations": [],
+              "targetId": "plane-top",
+              "type": "sketch",
+              "variables": []
+            },
+            {
+              "depth": 20.0,
+              "id": "native-extrude-1",
+              "name": "Extrusion 1",
+              "operation": "newBody",
+              "profileId": "native-sketch-1-profile-1",
+              "sketchId": "native-sketch-1",
+              "type": "extrude"
+            },
+            {
+              "distance": 3.0,
+              "edges": [
+                {
+                  "a": [
+                    0.0,
+                    0.0,
+                    20.0
+                  ],
+                  "b": [
+                    20.0,
+                    0.0,
+                    20.0
+                  ],
+                  "normals": [
+                    [
+                      0.0,
+                      -1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                }
+              ],
+              "id": "native-edge-finish-1",
+              "kind": "chamfer",
+              "name": "Chamfer 1",
+              "type": "edgeFinish"
+            },
+            {
+              "dimensions": [],
+              "id": "native-sketch-2",
+              "name": "Sketch 2",
+              "relations": [],
+              "targetId": "plane-front",
+              "type": "sketch",
+              "variables": []
+            },
+            {
+              "angle": 360.0,
+              "axis": {
+                "a": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "b": {
+                  "x": 0.0,
+                  "y": 1.0
+                }
+              },
+              "id": "native-revolve-1",
+              "name": "Revolve 1",
+              "operation": "newBody",
+              "profileId": "native-sketch-2-profile-1",
+              "sketchId": "native-sketch-2",
+              "type": "revolve"
+            },
+            {
+              "faceId": "native-extrude-1-solid-face-6",
+              "id": "face-native-extrude-1-native-extrude-1-solid-face-6",
+              "sourceId": "native-extrude-1",
+              "type": "face"
+            },
+            {
+              "dimensions": [],
+              "id": "native-sketch-3",
+              "name": "Sketch 3",
+              "relations": [],
+              "targetId": "face-native-extrude-1-native-extrude-1-solid-face-6",
+              "type": "sketch",
+              "variables": []
+            },
+            {
+              "id": "native-loft-1",
+              "name": "Loft 1",
+              "operation": "newBody",
+              "profiles": [
+                {
+                  "profileId": "native-sketch-1-profile-1",
+                  "sketchId": "native-sketch-1"
+                },
+                {
+                  "profileId": "native-sketch-3-profile-1",
+                  "sketchId": "native-sketch-3"
+                }
+              ],
+              "type": "loft"
+            },
+            {
+              "id": "native-entity-1",
+              "p0": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "p1": {
+                "x": 20.0,
+                "y": 20.0
+              },
+              "sketchId": "native-sketch-1",
+              "type": "sketchCornerRectangle"
+            },
+            {
+              "id": "native-entity-1-2",
+              "p0": {
+                "x": 40.0,
+                "y": -10.0
+              },
+              "p1": {
+                "x": 50.0,
+                "y": 0.0
+              },
+              "sketchId": "native-sketch-2",
+              "type": "sketchCornerRectangle"
+            },
+            {
+              "id": "native-entity-1-3",
+              "primitive": {
+                "center": {
+                  "x": 10.0,
+                  "y": 10.0
+                },
+                "id": "native-entity-1-3",
+                "radius": 6.0,
+                "segments": 64,
+                "type": "circle"
+              },
+              "sketchId": "native-sketch-3",
+              "type": "sketchPrimitive"
+            }
+          ],
+          "rootNodeIds": [
+            "plane-top",
+            "plane-front",
+            "plane-right",
+            "native-sketch-1",
+            "native-extrude-1",
+            "native-edge-finish-1",
+            "native-sketch-2",
+            "native-revolve-1",
+            "native-sketch-3",
+            "native-loft-1"
+          ]
+        },
+        "features": [],
+        "tree": {
+          "dirtySketchIds": [],
+          "orderedNodeIds": [
+            "native-sketch-1",
+            "native-extrude-1",
+            "native-edge-finish-1",
+            "native-sketch-2",
+            "native-revolve-1",
+            "native-sketch-3",
+            "native-loft-1"
+          ]
+        }
+      },
+      "id": "native-part-1",
+      "name": "puppycad-feature-fixture-1690451-1791009778571280224",
+      "type": "part"
+    }
+  ],
+  "revision": 1,
+  "selectedPath": [
+    0
+  ],
+  "version": 4
+}

@@ -597,7 +597,7 @@ impl App {
             painter.text(
                 x,
                 y + 113.0,
-                &format!("{label:<8}{:.1} {unit}", feature.value),
+                &format!("{label:<8} {:.1} {unit}", feature.value),
                 1.25,
                 TEXT,
             );

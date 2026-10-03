@@ -3415,3 +3415,84 @@ cp /tmp/native-extrude.pcad /out/rust-native-extrude-options.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Revolve: draw a rectangle and a vertical line left of it, press 6, click
+# the line as the axis, then Enter commits the default 360 deg ring.
+./target/debug/puppycad /tmp/native-revolve.pcad >/tmp/puppycad-revolve.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-revolve.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-revolve.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 560 340 click 1
+xdotool mousemove 640 460 click 1
+xdotool key --window "$window_id" l
+xdotool mousemove 460 300 click 1
+xdotool mousemove 460 500 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" v
+xdotool key --window "$window_id" 6
+sleep 0.3
+import -window root /out/rust-native-revolve-axis.png
+xdotool mousemove 460 400 click 1
+sleep 0.5
+import -window root /out/rust-native-revolve-preview.png
+xdotool key --window "$window_id" Return
+sleep 0.5
+import -window root /out/rust-native-revolve.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"type": "revolve"' /tmp/native-revolve.pcad
+grep -q '"angle": 360' /tmp/native-revolve.pcad
+cp /tmp/native-revolve.pcad /out/rust-native-revolve.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
+
+# Edge chamfer: extrude a block, press 8, click one edge, type 10, Enter.
+./target/debug/puppycad /tmp/native-edge-chamfer.pcad >/tmp/puppycad-edge-chamfer.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-edge-chamfer.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-edge-chamfer.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 500 330 click 1
+xdotool mousemove 750 530 click 1
+xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
+sleep 0.3
+xdotool key --window "$window_id" 8
+xdotool mousemove 469 486
+sleep 0.3
+import -window root /out/rust-native-edge-chamfer-hover.png
+xdotool click 1
+xdotool type --clearmodifiers '10'
+xdotool key Return
+sleep 0.5
+import -window root /out/rust-native-edge-chamfer.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"type": "edgeFinish"' /tmp/native-edge-chamfer.pcad
+grep -q '"distance": 10' /tmp/native-edge-chamfer.pcad
+cp /tmp/native-edge-chamfer.pcad /out/rust-native-edge-chamfer.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

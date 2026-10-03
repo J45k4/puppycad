@@ -378,3 +378,54 @@ fn deleting_features_and_curved_edges() {
     );
     let _ = fs::remove_file(path);
 }
+
+/// `fixtures/revolve-loft-finish.pcad`: a chamfered block, a revolved ring
+/// around it and a loft from the block's footprint to a circle on its top
+/// face. `PUPPYCAD_WRITE_FIXTURES=1` regenerates it.
+#[test]
+fn revolve_loft_finish_fixture_evaluates() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/revolve-loft-finish.pcad");
+    if std::env::var_os("PUPPYCAD_WRITE_FIXTURES").is_some() {
+        let path = test_path("fixture");
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        rectangle(&mut document, p(0.0, 0.0), p(20.0, 20.0));
+        project.create_extrusion(&document, 20.0).unwrap();
+        let edge = project
+            .solid_edges()
+            .into_iter()
+            .map(|(_, edge)| edge)
+            .find(|e| e.a[1].abs() < 1e-4 && e.b[1].abs() < 1e-4 && e.a[2] > 19.0 && e.b[2] > 19.0)
+            .unwrap();
+        project
+            .create_edge_finish(FinishKind::Chamfer, 3.0, &[edge.reference()])
+            .unwrap();
+        let mut front = project
+            .create_sketch_on_plane(&document, SketchPlane::Front)
+            .unwrap();
+        rectangle(&mut front, p(40.0, -10.0), p(50.0, 0.0));
+        project
+            .create_revolve(&front, 0, Y_AXIS, 360.0, "newBody")
+            .unwrap();
+        let (top, _) = project
+            .face_at([10.0, 10.0, 20.0], [0.0, 0.0, 1.0])
+            .unwrap();
+        let mut face = project.create_sketch_on_face(&front, &top).unwrap();
+        circle(&mut face, p(10.0, 10.0), 6.0);
+        project.create_loft(&face, (0, 0), 0, "newBody").unwrap();
+        project.save(&face).unwrap();
+        fs::copy(&path, &fixture).unwrap();
+        let _ = fs::remove_file(path);
+    }
+    let (project, _) = ProjectFile::open(&fixture).unwrap();
+    assert_eq!(project.read_only_reason(), None);
+    let volumes = volumes(&project);
+    assert_eq!(volumes.len(), 3);
+    close(volumes[0], 8000.0 - 4.5 * 20.0, 1e-3);
+    close(volumes[1], PI * (2500.0 - 1600.0) * 10.0, 0.02);
+    let kinds: Vec<_> = project
+        .extension_features()
+        .into_iter()
+        .map(|feature| feature.kind)
+        .collect();
+    assert_eq!(kinds, ["edgeFinish", "revolve", "loft"]);
+}
