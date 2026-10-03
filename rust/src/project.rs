@@ -18,6 +18,7 @@ use crate::spline::{self, SplineMode};
 mod face;
 mod features;
 pub use face::{FaceDescriptor, FaceRef, Frame};
+pub use features::{EdgeRef, FeatureInfo, FinishKind, SolidEdge, Tri};
 pub use features::{FeatureKind, FeatureStatus};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {
@@ -1125,17 +1126,6 @@ impl ProjectFile {
         self.extrude_node_at(index)?.get("operation")?.as_str()
     }
 
-    fn extrude_nodes(&self) -> Option<Vec<&Value>> {
-        Some(
-            self.value
-                .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
-                .as_array()?
-                .iter()
-                .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
-                .collect(),
-        )
-    }
-
     fn is_face_sketch(&self, extrude: &Value) -> bool {
         extrude
             .get("sketchId")
@@ -1144,8 +1134,12 @@ impl ProjectFile {
             .is_some_and(|sketch| sketch.face.is_some())
     }
 
+    /// Feature `index` (tree order) when it is an extrusion.
     fn extrude_node_at(&self, index: usize) -> Option<&Value> {
-        self.extrude_nodes()?.into_iter().nth(index)
+        self.feature_nodes()
+            .into_iter()
+            .nth(index)
+            .filter(|node| node["type"] == "extrude")
     }
 
     pub fn extrusion_options_at(&self, index: usize) -> Option<ExtrudeOptions> {
@@ -1158,9 +1152,16 @@ impl ProjectFile {
 
     /// First reason an extrusion's options cannot be evaluated natively.
     fn extrusion_options_error(&self) -> Option<String> {
-        let extrudes = self.extrude_nodes()?;
         let mut bodies = HashSet::new();
-        for node in extrudes {
+        for node in self.solid_nodes() {
+            if node["type"] != "extrude" {
+                if node.get("operation").and_then(Value::as_str) == Some("newBody")
+                    && let Some(id) = node.get("id").and_then(Value::as_str)
+                {
+                    bodies.insert(id);
+                }
+                continue;
+            }
             let options = match extrude_options(node) {
                 Ok(options) => options,
                 Err(error) => return Some(error),
@@ -1186,7 +1187,8 @@ impl ProjectFile {
     }
 
     /// Evaluate the feature tree (`features.rs`): one tool solid per
-    /// feature (placeholders for inactive ones) and the Boolean bodies.
+    /// feature (placeholders for inactive ones and for revolve, loft and
+    /// edge finish features, which change the bodies only) and the bodies.
     fn evaluate_extrusions(&self) -> Option<(Vec<SolidPreview>, Vec<Manifold>)> {
         self.evaluate_tree()
             .map(|tree| (tree.previews, tree.bodies))
@@ -1240,8 +1242,14 @@ impl ProjectFile {
             .and_then(Value::as_array)
             .is_some_and(|nodes| {
                 nodes.iter().any(|node| {
-                    node.get("type").and_then(Value::as_str) == Some("extrude")
-                        && node.get("sketchId").and_then(Value::as_str) == Some(id)
+                    (matches!(
+                        node.get("type").and_then(Value::as_str),
+                        Some("extrude" | "revolve")
+                    ) && node.get("sketchId").and_then(Value::as_str) == Some(id))
+                        || (node["type"] == "loft"
+                            && node["profiles"]
+                                .as_array()
+                                .is_some_and(|p| p.iter().any(|p| p["sketchId"] == id.as_str())))
                 })
             })
     }
@@ -1254,6 +1262,13 @@ impl ProjectFile {
     pub fn set_extrusion_depth_at(&mut self, index: usize, depth: f32) -> Result<(), String> {
         if !depth.is_finite() || depth <= 0.0 {
             return Err("extrusion depth must be positive".into());
+        }
+        if self
+            .feature_nodes()
+            .get(index)
+            .is_none_or(|node| node["type"] != "extrude")
+        {
+            return Err("the selected feature is not an extrusion".into());
         }
         if self
             .extrusion_previews()
@@ -1269,7 +1284,7 @@ impl ProjectFile {
             .ok_or("project CAD graph changed unexpectedly")?;
         let extrude = nodes
             .iter_mut()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|node| FeatureKind::from_node(node).is_some())
             .nth(index)
             .ok_or("extrusion node is missing")?;
         let old_depth = extrude["depth"].clone();
@@ -1280,7 +1295,7 @@ impl ProjectFile {
                 .and_then(Value::as_array_mut)
                 .unwrap()
                 .iter_mut()
-                .filter(|node| node["type"] == "extrude")
+                .filter(|node| FeatureKind::from_node(node).is_some())
                 .nth(index)
                 .unwrap()["depth"] = old_depth;
             return Err("depth would make the evaluated solid invalid".into());
@@ -1311,7 +1326,7 @@ impl ProjectFile {
         let position = nodes
             .iter()
             .enumerate()
-            .filter(|(_, node)| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|(_, node)| FeatureKind::from_node(node).is_some())
             .nth(index)
             .map(|(position, _)| position)
             .ok_or("extrusion node is missing")?;
@@ -1335,10 +1350,9 @@ impl ProjectFile {
         }))
     }
 
-    /// Ids of the extrusions that start bodies, in body order.
+    /// Ids of the features that start bodies, in body order.
     pub fn body_ids(&self) -> Vec<String> {
-        self.extrude_nodes()
-            .unwrap_or_default()
+        self.solid_nodes()
             .into_iter()
             .filter(|node| node.get("operation").and_then(Value::as_str) == Some("newBody"))
             .filter_map(|node| node.get("id").and_then(Value::as_str).map(str::to_string))
@@ -1361,7 +1375,7 @@ impl ProjectFile {
             .ok_or("project CAD graph changed unexpectedly")?;
         let slot = nodes
             .iter_mut()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|node| FeatureKind::from_node(node).is_some())
             .nth(index)
             .ok_or("extrusion node is missing")?;
         if slot.get("id") != node.get("id") {
@@ -1377,7 +1391,7 @@ impl ProjectFile {
             .and_then(Value::as_array_mut)
             .expect("nodes checked above")
             .iter_mut()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|node| FeatureKind::from_node(node).is_some())
             .nth(index)
             .expect("node checked above") = old;
         Err("restored extrusion no longer evaluates".into())
@@ -1408,6 +1422,13 @@ impl ProjectFile {
 
     pub fn delete_extrusion_at(&mut self, index: usize) -> Result<(), String> {
         if self
+            .feature_nodes()
+            .get(index)
+            .is_none_or(|node| node["type"] != "extrude")
+        {
+            return Err("the selected feature is not an extrusion".into());
+        }
+        if self
             .extrusion_previews()
             .is_none_or(|solids| index >= solids.len())
         {
@@ -1433,7 +1454,7 @@ impl ProjectFile {
             .ok_or("project CAD graph is invalid")?;
         let id = nodes
             .iter()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|node| FeatureKind::from_node(node).is_some())
             .nth(index)
             .and_then(|node| node.get("id"))
             .and_then(Value::as_str)
@@ -1441,7 +1462,7 @@ impl ProjectFile {
             .to_string();
         if nodes
             .iter()
-            .filter(|node| node["type"] == "extrude")
+            .filter(|node| FeatureKind::from_node(node).is_some())
             .skip(index + 1)
             .take_while(|node| node["operation"] != "newBody")
             .any(|node| node["operation"] == "cut" || node["operation"] == "join")
@@ -1481,14 +1502,7 @@ impl ProjectFile {
     }
 
     fn has_any_extrusion(&self) -> bool {
-        self.value
-            .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))
-            .and_then(Value::as_array)
-            .is_some_and(|nodes| {
-                nodes
-                    .iter()
-                    .any(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
-            })
+        self.has_solid_nodes()
     }
 
     fn all_extrusions_registered(&self) -> bool {
@@ -1504,7 +1518,11 @@ impl ProjectFile {
         };
         nodes
             .iter()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .filter(|node| {
+                node.get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| features::SOLID_NODE_TYPES.contains(&t))
+            })
             .all(|node| {
                 node.get("id").and_then(Value::as_str).is_some_and(|id| {
                     roots.iter().any(|entry| entry.as_str() == Some(id))
@@ -1758,7 +1776,7 @@ impl ProjectFile {
             || nodes.iter().any(|node| {
                 matches!(
                     node.get("type").and_then(Value::as_str),
-                    Some("extrude" | "chamfer")
+                    Some("extrude" | "chamfer" | "revolve" | "loft" | "edgeFinish")
                 )
             })
         {
@@ -1821,7 +1839,7 @@ impl ProjectFile {
                 }
                 if matches!(
                     node.get("type").and_then(Value::as_str),
-                    Some("extrude" | "sketchConstraint")
+                    Some("extrude" | "revolve" | "sketchConstraint")
                 ) {
                     continue;
                 }
@@ -3208,6 +3226,13 @@ impl ProjectFile {
             && let Some(error) = project.extrusion_options_error()
         {
             project.read_only_reason = Some(format!("extrusion options: {error}"));
+        }
+        if project.read_only_reason.as_deref() == Some("solid features need native support")
+            && (project.has_extension_features()
+                || nodes_have_type(&project.value, project.part_index, "chamfer"))
+            && let Err(error) = project.evaluate_solids()
+        {
+            project.read_only_reason = Some(error);
         }
         if project.read_only_reason.as_deref() == Some("solid features need native support")
             // Inputs the native evaluator cannot resolve at open keep the
@@ -6286,6 +6311,13 @@ fn update_shape(mut original: Value, shape: &Shape, graph_id: &str) -> Result<Va
         _ => return Err("original sketch entity type no longer matches its geometry".into()),
     }
     Ok(original)
+}
+
+fn nodes_have_type(value: &Value, part_index: usize, kind: &str) -> bool {
+    value
+        .pointer(&format!("/items/{part_index}/data/cad/nodes"))
+        .and_then(Value::as_array)
+        .is_some_and(|nodes| nodes.iter().any(|node| node["type"] == kind))
 }
 
 fn point(value: &Value) -> Option<Point> {
@@ -10231,9 +10263,12 @@ mod dimension_tests;
 #[cfg(test)]
 #[path = "project/extrude_option_tests.rs"]
 mod extrude_option_tests;
+
 #[cfg(test)]
 #[path = "project/face_tests.rs"]
 mod face_tests;
+#[cfg(test)]
+mod feature_tests;
 #[cfg(test)]
 #[path = "project/features_tests.rs"]
 mod features_tests;

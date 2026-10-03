@@ -223,7 +223,7 @@ impl App {
             }
             let active = self.solid_preview && self.selected_solid == index;
             if active {
-                painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
+                painter.rect(row, ACTIVE_ROW);
             }
             let status = statuses
                 .get(index)
@@ -244,10 +244,7 @@ impl App {
                 &format!(
                     "{} {} / {name}{glyph}",
                     if active { ">" } else { "v" },
-                    project
-                        .extrusion_operation_at(index)
-                        .unwrap_or("EXTRUDE")
-                        .to_uppercase(),
+                    project.feature_label(index).to_uppercase(),
                 ),
                 1.0,
                 color,

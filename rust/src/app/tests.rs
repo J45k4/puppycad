@@ -1262,3 +1262,129 @@ fn returning_to_the_solid_view_re_evaluates_edited_sketches() {
         1
     );
 }
+
+fn draw_rectangle(app: &mut App, a: Point, b: Point) {
+    app.document.tool = Tool::Rectangle;
+    app.document.draft_start = Some(a);
+    assert!(app.document.finish_draft(b));
+}
+
+#[test]
+fn revolve_picks_an_axis_previews_and_edits_the_angle() {
+    let path = temp_project("revolve");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(
+        &mut app,
+        Point { x: 10.0, y: 0.0 },
+        Point { x: 20.0, y: 10.0 },
+    );
+    app.begin_revolve();
+    assert!(app.revolve_draft.is_some() && !app.solid_preview);
+    app.handle_revolve_key(KeyCode::KeyY, None);
+    assert!(app.solid_preview);
+    assert!(app.revolve_draft.as_ref().unwrap().ghost.is_ok());
+    let _ = app.paint();
+    app.handle_revolve_key(KeyCode::Digit9, Some("9"));
+    app.handle_revolve_key(KeyCode::Digit0, Some("0"));
+    app.handle_revolve_key(KeyCode::Enter, None);
+    assert!(app.revolve_draft.is_none(), "{}", app.status_message);
+    let volume = |app: &App| app.project.as_ref().unwrap().evaluated_solids().unwrap()[0].volume();
+    let quarter = volume(&app);
+    assert!((quarter - std::f64::consts::PI * 300.0 * 10.0 / 4.0).abs() < 60.0);
+    assert!(app.selected_extension().is_some());
+    app.set_feature_value(180.0).unwrap();
+    assert!(volume(&app) > quarter * 1.9);
+    app.solid_undo_step(false);
+    assert!((volume(&app) - quarter).abs() < 1e-3);
+    // The revolved sketch is locked like an extruded one.
+    assert!(app.read_only());
+    let _ = app.paint();
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn edge_pick_chamfers_the_clicked_edge() {
+    let path = temp_project("edge");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(
+        &mut app,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 20.0, y: 20.0 },
+    );
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 20.0, 0)
+        .unwrap();
+    app.solid_preview = true;
+    app.begin_edge_finish(project::FinishKind::Chamfer);
+    assert!(app.edge_pick.is_some());
+    let layout = Layout::new(1280.0, 800.0);
+    let (_, projector) = app.solid_projector(layout).unwrap();
+    let edges = app.project.as_ref().unwrap().solid_edges();
+    let edge = &edges[0].1;
+    let mid = projector.screen(std::array::from_fn(|i| (edge.a[i] + edge.b[i]) / 2.0));
+    let point = Point {
+        x: mid[0],
+        y: mid[1],
+    };
+    let target = app.edge_near(&projector, &edges, point).unwrap();
+    app.toggle_edge_at(layout, point);
+    assert_eq!(
+        app.edge_pick.as_ref().unwrap().edges,
+        vec![target.reference()]
+    );
+    let _ = app.paint();
+    app.handle_edge_key(KeyCode::Digit1, Some("1"));
+    app.handle_edge_key(KeyCode::Enter, None);
+    assert!(app.edge_pick.is_none(), "{}", app.status_message);
+    let volume = app.project.as_ref().unwrap().evaluated_solids().unwrap()[0].volume();
+    assert!(
+        (volume - (8000.0 - 0.5 * target.length() as f64)).abs() < 1e-2,
+        "{volume}"
+    );
+    app.delete_selected_feature();
+    assert!(
+        app.project
+            .as_ref()
+            .unwrap()
+            .extension_features()
+            .is_empty()
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn loft_takes_profiles_from_two_sketches() {
+    let path = temp_project("loft");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(
+        &mut app,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 20.0, y: 20.0 },
+    );
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 10.0, 0)
+        .unwrap();
+    app.solid_preview = false;
+    app.loft_step(false);
+    assert_eq!(app.loft_start, Some((0, 0)));
+    let project = app.project.as_mut().unwrap();
+    let (top, _) = project
+        .face_at([10.0, 10.0, 10.0], [0.0, 0.0, 1.0])
+        .unwrap();
+    app.document = project.create_sketch_on_face(&app.document, &top).unwrap();
+    draw_rectangle(
+        &mut app,
+        Point { x: 5.0, y: 5.0 },
+        Point { x: 15.0, y: 15.0 },
+    );
+    app.loft_step(true);
+    assert!(app.loft_start.is_none(), "{}", app.status_message);
+    assert!(app.solid_preview);
+    let features = app.project.as_ref().unwrap().extension_features();
+    assert_eq!(features[0].operation, "join");
+    let _ = std::fs::remove_file(path);
+}

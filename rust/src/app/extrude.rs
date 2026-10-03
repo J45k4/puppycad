@@ -307,6 +307,7 @@ impl App {
     /// Click on the END / FLIP / TARGET rows of the solid Properties panel.
     pub(super) fn solid_option_row_click(&mut self, layout: Layout, point: Point) -> bool {
         if !self.solid_preview
+            || self.selected_feature_id().is_some()
             || self.extrude_draft.is_some()
             || !layout.right.contains(point.x, point.y)
             || self

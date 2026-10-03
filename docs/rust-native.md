@@ -626,9 +626,11 @@ preview shows supported bodies together. Press **Shift+X** on a later closed
 reference-plane sketch to cut its 50 mm extrusion from the most recent body.
 Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion with
 that body. The shaded preview and STL export use the evaluated Boolean mesh.
-The Project panel lists each extrusion feature in tree order (see Feature
+The Project panel lists each solid feature in tree order (see Feature
 tree); select the cut or join feature to edit its depth or delete it. Earlier features with dependent cuts or
-joins cannot be deleted in isolation. Chamfers still need native support.
+joins cannot be deleted in isolation. Revolve, loft and edge chamfer/fillet
+features are described below; web `chamfer` graph nodes still need native
+support.
 
 ### Sketches on faces
 
@@ -742,9 +744,9 @@ from the face plane. Fixture: `rust/fixtures/extrude-options.pcad`.
 
 ### Feature tree
 
-Each part's solid features (extrusions — new body, cut, join — and future
-kinds such as revolve or loft; sketches are not features) form an ordered
-list. The Project panel shows one row per feature in that order, then a
+Each part's solid features (`FeatureKind`: extrusions — new body, cut, join
+— revolves, lofts and edge finishes; sketches are not features) form an
+ordered list. The Project panel shows one row per feature in that order, then a
 **ROLLBACK** row. Row glyphs: `[S]` and dim text for suppressed features, red
 `[!]` for features in error (clicking the row shows the reason in the status
 bar), dim text for features after the rollback bar.
@@ -791,6 +793,77 @@ that already have unresolvable features when opened stay read-only, as
 before. Fixture: `rust/fixtures/feature-tree.pcad` (body, suppressed cut,
 join); tests in `rust/src/project/features_tests.rs`.
 
+### Revolve, loft and edge finishes
+
+These are `FeatureKind` variants (`Revolve`, `Loft`, `EdgeFinish`) of the
+feature tree above, evaluated in tree order together with extrusions through
+`manifold-rust` (`rust/src/project/features.rs`), with the same suppression,
+rollback, error status and per-feature caching (revolve and loft cache keys
+include their resolved profiles). Revolve and loft cuts/joins apply to the
+nearest earlier new body, like extrusions; an edge finish applies to the body
+that has its edges. They appear as feature tree rows (`REVOLVE NEWBODY`,
+`LOFT JOIN`, `CHAMFER`, ...); selecting one shows its value (ANGLE,
+DISTANCE or RADIUS) in Properties, where clicking the value edits it (one
+undo step, **Ctrl+Z** / **Ctrl+Shift+Z** in the solid view), and **Delete**
+removes it unless a later feature depends on it.
+
+- **Revolve** — key **8** or **MORE → REVOLVE** in a sketch with a closed
+  profile selected (**[ ]** cycle profiles as for extrude). Click a sketch
+  line as the axis, or press **X** / **Y** for the sketch axes. The view
+  switches to a translucent ghost with an ANGLE prompt (empty = 360°); **O**
+  cycles new body / cut / join, **Enter** commits, **Esc** cancels. The
+  profile (with holes) is swept in 32 segments per full turn (fewer for
+  partial angles, capped at both ends); it may touch the axis but not cross
+  it.
+- **Loft** — key **9** (or **MORE → LOFT**) remembers the selected profile of
+  the current sketch; open another sketch, select its profile and press **9**
+  again for a new body or **Shift+9** to join the last body (**Esc** clears the
+  first pick). Both outer loops are resampled at the union of their
+  arc-length parameters (every original vertex is kept) after aligning the
+  second loop's start to the point nearest the first loop's start and
+  matching winding; the side quads and both caps form the mesh. Profiles with
+  holes, edge-on profiles and self-intersecting results are rejected.
+- **Edge chamfer / fillet** — key **0** (chamfer) or **Shift+0** (fillet), or
+  **MORE → EDGE CHAMFER / EDGE FILLET**, in the solid view. Hovering
+  highlights the nearest sharp edge (adjacent face normals more than 20°
+  apart, collinear mesh segments between the same two planes merged); click
+  edges to add or remove them, type the DISTANCE / RADIUS (empty = 2 mm),
+  **Enter** commits. Only straight edges between planar faces are accepted;
+  facets of tessellated curves are shown grey and rejected. Convex edges are
+  cut with a prism along the edge whose cross-section is the material outside
+  the chamfer line or the fillet arc (16 segments per 90°); concave edges get
+  the same prism added. Hover ignores occlusion (the nearest projected edge
+  wins).
+
+File format: none of these exist as web graph nodes (the web `chamfer` node
+references web topology `edge` nodes the native app cannot resolve), so they
+are native extension nodes that the web loader drops when it normalizes the
+graph:
+
+```json
+{"type":"revolve","id":"native-revolve-1","name":"Revolve 1","sketchId":"…","profileId":"<sketchId>-profile-1",
+ "axis":{"a":{"x":0,"y":0},"b":{"x":0,"y":1}},"angle":360,"operation":"newBody"}
+{"type":"loft","id":"native-loft-1","name":"Loft 1","operation":"newBody",
+ "profiles":[{"sketchId":"…","profileId":"…"},{"sketchId":"…","profileId":"…"}]}
+{"type":"edgeFinish","id":"native-edge-finish-1","name":"Chamfer 1","kind":"chamfer","distance":2,
+ "edges":[{"a":[x,y,z],"b":[x,y,z],"normals":[[nx,ny,nz],[nx,ny,nz]]}]}
+```
+
+The axis is in sketch coordinates and the angle in degrees (0, 360]; loft
+operations are `newBody` or `join`; a fillet stores `radius` instead of
+`distance`. Edges are stored by their world endpoints and the outward normals
+of the two faces and are re-identified on every evaluation: first by
+endpoints, then by an edge between the same two planes on the same line, so a
+finish survives upstream changes that keep its edge (for example a deeper
+extrusion under a bottom edge). A finish whose edge no longer exists, an
+invalid angle, axis or operation in a file being opened, and web `chamfer`
+nodes, open the part read-only with the evaluation error as the reason;
+edits made natively mark the feature `[!]` instead. Sketches used by a revolve
+or loft lock like extruded sketches. STL/3MF export uses the evaluated bodies.
+Fixture: `rust/fixtures/revolve-loft-finish.pcad`; tests in
+`rust/src/project/feature_tests.rs`, `rust/src/project/features_tests.rs`
+and `rust/src/app/tests.rs`.
+
 ## Shortcuts
 
 Every command lives in one registry (`rust/src/app/commands.rs`): label,
@@ -815,7 +888,9 @@ dimension between driving and reference instead of drawing a rectangle,
 a spline, **Esc** cancels an armed up-to-body pick, **E**/**F**/**U** edit the
 selected extrusion in the 3D preview (end condition, flip, up-to body) but
 are Ellipse/Fit/Extend in the sketch, and **[** / **]** cycle profiles in the sketch but solids in the 3D
-preview. A unit test checks that no chord is bound twice within the same
+preview (with Ctrl they move the rollback bar). Revolve, loft and edge
+finishes use **8**, **9** / **Shift+9** and **0** / **Shift+0** because **6** and
+**7** toggle relation glyphs and automatic constraints. A unit test checks that no chord is bound twice within the same
 context. The table below is the output of
 `cargo run --manifest-path rust/Cargo.toml -- --print-shortcuts`
 ("editable": not in read-only sketches; "selection": needs a selected shape
@@ -915,6 +990,16 @@ or dimension):
 | `]` | Next profile | sketch |
 | `[` | Previous solid | 3D preview |
 | `]` | Next solid | 3D preview |
+| `Ctrl+Up` | Move feature up | 3D preview |
+| `Ctrl+Down` | Move feature down | 3D preview |
+| `Ctrl+H` | Suppress / unsuppress feature | 3D preview |
+| `Ctrl+[` | Roll back one feature | 3D preview |
+| `Ctrl+]` | Roll forward one feature | 3D preview |
+| `8` | Revolve profile | sketch |
+| `9` | Loft (new body) | sketch |
+| `Shift+9` | Loft (join) | sketch |
+| `0` | Edge chamfer | any view |
+| `Shift+0` | Edge fillet | any view |
 
 #### View
 
@@ -928,6 +1013,7 @@ or dimension):
 | `M` | MORE menu | any view |
 | `Ctrl+K` / `Ctrl+Shift+P` | Command palette | any view |
 | `?` / `F1` | Keyboard shortcuts | any view |
+| `Ctrl+,` | Settings | any view |
 
 #### Project
 
@@ -991,7 +1077,7 @@ applied live and saved to `settings.json` in `$PUPPYCAD_CONFIG_DIR`, else
   Pattern prompts and status messages still say mm.
 - `grid_mm` (0.5, 1, 2, 5, 10, 25.4): grid snap step. Grid lines are drawn
   on the multiple of the step nearest 25 mm.
-- `theme` (dark, light): all colors come from a `Palette` with `DARK` and
+- `theme` (dark, light): all colors come from a `ThemePalette` with `DARK` and
   `LIGHT` variants (`app/settings.rs`); the `const` colors are the `DARK`
   fields and the painter substitutes the active palette.
 - `ui_scale` (`null` = monitor scale factor rounded to 1.0/1.5/2.0, or 1.0,
@@ -1040,7 +1126,9 @@ Library crate (`rust/src/lib.rs`):
   states and the per-feature evaluation cache; tests in
   `project/features_tests.rs`), `project/face.rs`
   (plane frames, web face descriptors, face lookup, face sketches and their
-  support edges; tests in `project/face_tests.rs`), `solver.rs`,
+  support edges; tests in `project/face_tests.rs`), `project/features.rs`
+  (revolve, loft and edge finish meshes, sharp-edge detection and the native
+  extension nodes; tests in `project/feature_tests.rs`), `solver.rs`,
   `sketch_value.rs` (dimension expressions and sketch variables),
   `spline.rs`, `stl.rs` (body triangles, ASCII/binary STL, numbered
   writes), `threemf.rs` (3MF package). `lib.rs` also hosts `roundtrip` and
@@ -1064,7 +1152,9 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   preview projection, dragging, face and body picking and painting), `extrude.rs`
   (extrude prompt with ghost preview, end condition/flip/target edits and
   their undo), `feature_tree.rs` (feature rows, reorder/suppress/rollback
-  keys and drag), `view_sketch.rs` (sketch grid
+  keys and drag), `features.rs` (revolve axis pick and ANGLE prompt, loft
+  picks, edge hover/pick and size prompt, extension feature Properties),
+  `view_sketch.rs` (sketch grid
   and shape painting, dimension labels, hover highlight, relation glyphs and
   inference hints), `settings.rs` (settings file, units, theme palettes,
   SETTINGS panel, UI scale), `status.rs` (status bar fields, tooltips,
@@ -1221,6 +1311,13 @@ with Ctrl+Up (`rust-native-tree-reordered.png`), moves the rollback bar with
 Ctrl+[ (`rust-native-tree-rollback.png`), drags the ROLLBACK row above the
 join (`rust-native-tree-rollback-drag.png`) and checks the saved
 `rollbackIndex`.
+A revolve scenario draws a rectangle and a vertical line beside it, presses
+8 (`rust-native-revolve-axis.png`), clicks the line as the axis
+(`rust-native-revolve-preview.png`) and commits a 360° ring
+(`rust-native-revolve.png`). An edge chamfer scenario extrudes a block,
+presses 0, hovers a top edge (`rust-native-edge-chamfer-hover.png`), clicks
+it, types 10 and commits (`rust-native-edge-chamfer.png`); both check the
+saved `revolve` / `edgeFinish` nodes.
 It does not open a host desktop
 window.
 

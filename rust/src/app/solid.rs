@@ -453,6 +453,9 @@ impl App {
         else {
             return;
         };
+        if solids.is_empty() {
+            return;
+        }
         self.selected_solid =
             (self.selected_solid as isize + direction).rem_euclid(solids.len() as isize) as usize;
         self.status_message = format!(

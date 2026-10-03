@@ -181,6 +181,11 @@ pub(super) enum Cmd {
     SuppressFeature,
     RollbackUp,
     RollbackDown,
+    Revolve,
+    Loft,
+    LoftJoin,
+    EdgeChamfer,
+    EdgeFillet,
 }
 
 pub(super) struct Command {
@@ -976,6 +981,46 @@ pub(super) static COMMANDS: &[Command] = &[
         |app| app.move_rollback(1),
     ),
     cmd(
+        Cmd::Revolve,
+        "Revolve profile",
+        "8",
+        C::Solid,
+        S::Sketch,
+        App::begin_revolve,
+    ),
+    cmd(
+        Cmd::Loft,
+        "Loft (new body)",
+        "9",
+        C::Solid,
+        S::Sketch,
+        |app| app.loft_step(false),
+    ),
+    cmd(
+        Cmd::LoftJoin,
+        "Loft (join)",
+        "Shift+9",
+        C::Solid,
+        S::Sketch,
+        |app| app.loft_step(true),
+    ),
+    cmd(
+        Cmd::EdgeChamfer,
+        "Edge chamfer",
+        "0",
+        C::Solid,
+        S::Any,
+        |app| app.begin_edge_finish(project::FinishKind::Chamfer),
+    ),
+    cmd(
+        Cmd::EdgeFillet,
+        "Edge fillet",
+        "Shift+0",
+        C::Solid,
+        S::Any,
+        |app| app.begin_edge_finish(project::FinishKind::Fillet),
+    ),
+    cmd(
         Cmd::Settings,
         "Settings",
         "Ctrl+,",
@@ -986,7 +1031,7 @@ pub(super) static COMMANDS: &[Command] = &[
 ];
 
 /// MORE menu rows (index = `Layout::more_item` slot) and their labels.
-pub(super) const MORE_MENU: [(Cmd, &str); 22] = [
+pub(super) const MORE_MENU: [(Cmd, &str); 26] = [
     (Cmd::Point, "POINT [P]"),
     (Cmd::Polygon, "POLYGON [G]"),
     (Cmd::Slot, "SLOT [S]"),
@@ -1009,6 +1054,10 @@ pub(super) const MORE_MENU: [(Cmd, &str); 22] = [
     (Cmd::CircularPattern, "CIRC PATTERN [;]"),
     (Cmd::SketchOnFace, "SKETCH ON FACE [4]"),
     (Cmd::Settings, "SETTINGS [CTRL ,]"),
+    (Cmd::Revolve, "REVOLVE [8]"),
+    (Cmd::Loft, "LOFT [9]"),
+    (Cmd::EdgeChamfer, "EDGE CHAMFER [0]"),
+    (Cmd::EdgeFillet, "EDGE FILLET [SHIFT 0]"),
 ];
 
 /// Toolbar buttons 0..=9 (`Layout::tool_button` slot) and their commands.
@@ -1237,6 +1286,11 @@ impl App {
             KeyCode::Digit5 => Cmd::FaceContext,
             KeyCode::Digit6 => Cmd::ToggleGlyphs,
             KeyCode::Digit7 => Cmd::ToggleAutoConstraints,
+            KeyCode::Digit8 => Cmd::Revolve,
+            KeyCode::Digit9 if shift => Cmd::LoftJoin,
+            KeyCode::Digit9 => Cmd::Loft,
+            KeyCode::Digit0 if shift => Cmd::EdgeFillet,
+            KeyCode::Digit0 => Cmd::EdgeChamfer,
             KeyCode::KeyF if plain_shift && sketch_edit => Cmd::Normal,
             KeyCode::KeyF if !self.solid_preview => Cmd::FitView,
             KeyCode::Escape => Cmd::Cancel,
@@ -1666,6 +1720,10 @@ impl App {
     }
 
     fn cancel_key(&mut self) {
+        if self.loft_start.take().is_some() {
+            self.status_message = "Loft cancelled".into();
+            return;
+        }
         if self.pick.is_some() {
             self.pick = None;
             self.status_message = "Cancelled".into();
@@ -1687,7 +1745,9 @@ impl App {
     }
 
     fn delete_key(&mut self) {
-        if self.solid_preview {
+        if self.selected_feature_id().is_some() {
+            self.delete_selected_feature();
+        } else if self.solid_preview {
             if let Some(project) = &mut self.project {
                 match project.delete_extrusion_at(self.selected_solid) {
                     Ok(()) => {

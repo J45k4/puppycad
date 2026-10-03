@@ -25,6 +25,7 @@ const EXPECTED: Record<string, number[]> = {
 	"mirror-symmetry.pcad": [1],
 	"offset.pcad": [1],
 	"patterns.pcad": [1],
+	"revolve-loft-finish.pcad": [3],
 	"segmented-primitives.pcad": [1],
 	"segmented-slot.pcad": [1],
 	"splines.pcad": [1],

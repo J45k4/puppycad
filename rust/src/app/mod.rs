@@ -2,6 +2,7 @@ mod commands;
 mod corner;
 mod extrude;
 mod feature_tree;
+mod features;
 mod input;
 mod palette;
 mod panels;
@@ -27,6 +28,7 @@ pub(crate) use commands::shortcuts_markdown;
 use commands::*;
 use corner::*;
 use extrude::*;
+use features::*;
 use palette::*;
 use pattern::*;
 use project_panel::*;
@@ -331,6 +333,12 @@ pub(crate) struct App {
     status_cache: std::cell::RefCell<StatusCache>,
     /// Hovered toolbar button / MORE row and when the hover began.
     tip_hover: Option<(HoverTarget, std::time::Instant)>,
+    /// Revolve in progress: axis pick, then the angle prompt and ghost.
+    revolve_draft: Option<RevolveDraft>,
+    /// First loft profile (sketch index, profile index).
+    loft_start: Option<(usize, usize)>,
+    /// Edge chamfer/fillet picking in the 3D preview.
+    edge_pick: Option<EdgePick>,
 }
 
 /// What the pointer is over in Select mode.
@@ -407,6 +415,8 @@ enum EditField {
     Variable(Option<usize>),
     /// One step of the linear/circular pattern prompt.
     PatternValue,
+    /// Revolve angle or edge finish size of the selected feature.
+    FeatureValue,
 }
 
 impl Default for App {
@@ -470,6 +480,9 @@ impl Default for App {
             monitor_scale: 1.0,
             status_cache: Default::default(),
             tip_hover: None,
+            revolve_draft: None,
+            loft_start: None,
+            edge_pick: None,
         }
     }
 }
@@ -988,6 +1001,12 @@ impl App {
         }
         if self.extrude_draft.is_some() {
             self.paint_extrude_draft(&mut painter, layout);
+        } else if self
+            .revolve_draft
+            .as_ref()
+            .is_some_and(|draft| draft.axis.is_some())
+        {
+            self.paint_revolve_draft(&mut painter, layout);
         } else if self.solid_preview {
             if let Some(solids) = self
                 .project
@@ -995,7 +1014,12 @@ impl App {
                 .and_then(ProjectFile::active_extrusion_previews)
                 && let Some((scene, projector)) = self.solid_projector(layout)
             {
-                if scene.bodies < solids.len() {
+                if scene.bodies < solids.len()
+                    || self
+                        .project
+                        .as_ref()
+                        .is_some_and(ProjectFile::has_extension_features)
+                {
                     self.paint_boolean_preview(
                         &mut painter,
                         layout,
@@ -1006,13 +1030,18 @@ impl App {
                 } else {
                     self.paint_solid_preview(&mut painter, layout, &solids, &projector);
                 }
-                self.paint_face_hover(&mut painter, layout, &projector);
+                if self.edge_pick.is_some() {
+                    self.paint_edge_pick(&mut painter, layout, &projector);
+                } else {
+                    self.paint_face_hover(&mut painter, layout, &projector);
+                }
             }
         } else {
             self.paint_grid(&mut painter, layout);
             self.paint_reference_edges(&mut painter, layout);
             self.paint_shapes(&mut painter, layout);
             self.paint_profile_choice(&mut painter, layout);
+            self.paint_revolve_axis_prompt(&mut painter, layout);
         }
         self.paint_panels(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);

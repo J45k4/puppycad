@@ -265,3 +265,72 @@ fn upstream_sketch_edit_rebuilds_only_from_the_changed_feature() {
         "{edited}"
     );
 }
+
+#[test]
+fn revolve_loft_and_edge_finish_are_tree_features() {
+    let (mut project, _) =
+        ProjectFile::open(Path::new("fixtures/revolve-loft-finish.pcad")).unwrap();
+    assert_eq!(project.feature_count(), 4);
+    assert_eq!(
+        project
+            .feature_nodes()
+            .iter()
+            .filter_map(|node| FeatureKind::from_node(node))
+            .collect::<Vec<_>>(),
+        vec![
+            FeatureKind::Extrude,
+            FeatureKind::EdgeFinish,
+            FeatureKind::Revolve,
+            FeatureKind::Loft
+        ]
+    );
+    assert!(
+        project
+            .feature_statuses()
+            .iter()
+            .all(FeatureStatus::is_active)
+    );
+    let volume = |project: &ProjectFile| -> f64 {
+        project
+            .evaluated_solids()
+            .unwrap()
+            .iter()
+            .map(Manifold::volume)
+            .sum()
+    };
+    let full = volume(&project);
+    assert_eq!(project.evaluated_solids().unwrap().len(), 3);
+    // Suppressing the chamfer adds material back; the rest stays cached.
+    let evaluations = project.feature_evaluations();
+    project.set_feature_suppressed(1, true).unwrap();
+    assert!(volume(&project) > full);
+    assert_eq!(project.feature_statuses()[1], FeatureStatus::Suppressed);
+    assert_eq!(project.feature_evaluations() - evaluations, 3);
+    project.set_feature_suppressed(1, false).unwrap();
+    // Rolling back above the revolve drops the revolve and loft bodies.
+    project.set_rollback_index(Some(2)).unwrap();
+    assert_eq!(project.evaluated_solids().unwrap().len(), 1);
+    assert_eq!(project.feature_statuses()[3], FeatureStatus::RolledBack);
+    project.set_rollback_index(None).unwrap();
+    assert!((volume(&project) - full).abs() < 1e-3);
+    // A revolve whose profile is gone is an error; the part still evaluates.
+    let revolve = project.feature_index("native-revolve-1").unwrap();
+    let mut node = project.feature_node(revolve).unwrap();
+    node["profileId"] = json!("native-sketch-2-profile-9");
+    project
+        .restore_feature_tree({
+            let mut snapshot = project.feature_tree_snapshot();
+            for slot in snapshot["nodes"].as_array_mut().unwrap() {
+                if slot["id"] == "native-revolve-1" {
+                    *slot = node.clone();
+                }
+            }
+            snapshot
+        })
+        .unwrap();
+    assert!(matches!(
+        project.feature_statuses()[revolve],
+        FeatureStatus::Error(_)
+    ));
+    assert_eq!(project.evaluated_solids().unwrap().len(), 2);
+}

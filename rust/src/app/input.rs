@@ -123,6 +123,21 @@ impl App {
             }
             self.more_open = false;
         }
+        if self.edge_pick.is_some() && layout.viewport.contains(point.x, point.y) {
+            self.toggle_edge_at(layout, point);
+            self.redraw();
+            return;
+        }
+        if self
+            .revolve_draft
+            .as_ref()
+            .is_some_and(|draft| draft.axis.is_none())
+            && layout.viewport.contains(point.x, point.y)
+        {
+            self.pick_revolve_axis(point);
+            self.redraw();
+            return;
+        }
         if !self.solid_preview
             && self.document.selected.is_none()
             && !self
@@ -174,7 +189,9 @@ impl App {
             return;
         }
         if let Some(field) = self.editable_field_at(point) {
-            if self.read_only() && !matches!(field, EditField::ExtrusionDepth) {
+            if self.read_only()
+                && !matches!(field, EditField::ExtrusionDepth | EditField::FeatureValue)
+            {
                 self.status_message =
                     "READ ONLY: this sketch has unsupported native features".into();
             } else {
@@ -185,6 +202,9 @@ impl App {
                 self.status_message = match field {
                     EditField::ExtrusionDepth => {
                         "Type positive depth in mm, then Enter  |  Esc to cancel"
+                    }
+                    EditField::FeatureValue => {
+                        "Type the new angle (deg) or size (mm), then Enter  |  Esc to cancel"
                     }
                     EditField::PolygonSides => "Type 3-64 sides, then Enter  |  Esc to cancel",
                     EditField::SlotWidth => "Type slot width in mm, then Enter  |  Esc to cancel",
@@ -1006,6 +1026,16 @@ impl App {
             }
             if self.extrude_draft.is_some() {
                 self.handle_draft_key(code, event.text.as_deref());
+                self.redraw();
+                return;
+            }
+            if self.revolve_draft.is_some() {
+                self.handle_revolve_key(code, event.text.as_deref());
+                self.redraw();
+                return;
+            }
+            if self.edge_pick.is_some() {
+                self.handle_edge_key(code, event.text.as_deref());
                 self.redraw();
                 return;
             }
