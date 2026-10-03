@@ -65,9 +65,39 @@ pub fn offset_shape(shape: &Shape, distance: f32) -> Result<Shape, String> {
                 "Ellipse offset requires a general offset curve and is not supported yet".into(),
             );
         }
+        Shape::Polygon { radius, sides, .. } => {
+            *radius += distance / (std::f32::consts::PI / (*sides).max(3) as f32).cos();
+            if radius.is_nan() || *radius <= 1e-6 {
+                return Err("Offset would collapse the polygon".into());
+            }
+        }
+        Shape::RotatedRectangle { width, height, .. } => {
+            *width += 2.0 * distance;
+            *height += 2.0 * distance;
+            if width.is_nan() || height.is_nan() || width.min(*height) <= 1e-6 {
+                return Err("Offset would collapse the rectangle".into());
+            }
+        }
+        Shape::Capsule { width, .. } => {
+            *width += 2.0 * distance;
+            if width.is_nan() || *width <= 1e-6 {
+                return Err("Offset would collapse the slot".into());
+            }
+        }
+        Shape::Rectangle { a, b, .. } => {
+            let (sx, sy) = ((b.x - a.x).signum(), (b.y - a.y).signum());
+            if (b.x - a.x).abs() + 2.0 * distance <= 1e-6
+                || (b.y - a.y).abs() + 2.0 * distance <= 1e-6
+            {
+                return Err("Offset would collapse the rectangle".into());
+            }
+            a.x -= sx * distance;
+            b.x += sx * distance;
+            a.y -= sy * distance;
+            b.y += sy * distance;
+        }
         Shape::Spline { .. } => return Err("Spline offset is not supported yet".into()),
         Shape::Point { .. } => return Err("A sketch point has no offset curve".into()),
-        _ => return Err("Offset supports lines, circles and arcs".into()),
     }
     Ok(result)
 }
@@ -446,7 +476,7 @@ impl Document {
         )
     }
 
-    /// Circles and arcs whose radius and angles an offset relation drives.
+    /// Curves and outlines whose size and angles an offset relation drives.
     pub(super) fn offset_curves(&self) -> impl Iterator<Item = u32> + '_ {
         self.offsets
             .iter()
@@ -498,6 +528,13 @@ impl Document {
                     Constraint::SameValue(s.start, t.start),
                     Constraint::SameValue(s.sweep, t.sweep),
                 ]),
+                (Some(E::Shape(s)), Some(E::Shape(t))) => {
+                    constraints.push(Constraint::OffsetShape {
+                        source: s,
+                        target: t,
+                        distance,
+                    })
+                }
                 _ => {}
             }
         }

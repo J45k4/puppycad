@@ -49,7 +49,8 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 3. Mirror and the symmetry constraint (**done**: `rust/src/model/symmetry.rs`;
    Shift+S symmetry gesture, Shift+I / MORE → MIRROR).
 4. Offset, single and chain (**done**: `rust/src/model/offset.rs`; Shift+U /
-   MORE → OFFSET; lines, circles, arcs and mitered line chains, matching the
+   MORE → OFFSET; lines, circles, arcs, rectangles, polygons, slots and mitered
+   line chains, matching the
    web scope).
 5. Linear and circular patterns (**done**: `rust/src/model/pattern.rs`;
    Shift+Z / MORE → LIN PATTERN, `;` / MORE → CIRC PATTERN).

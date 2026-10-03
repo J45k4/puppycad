@@ -345,3 +345,82 @@ fn annotations_survive_multi_selection_move_and_delete() {
     assert!(doc.delete_selected());
     assert!(!doc.dims.label_positions.contains_key(&key_a));
 }
+
+#[test]
+fn split_and_trim_carry_point_dimensions_to_the_retained_piece() {
+    let mut doc = Document::default();
+    let l = line(&mut doc, p(0.0, 0.0), p(40.0, 0.0));
+    let q = doc.shapes.len() as u32 + 10;
+    doc.shapes.push(Shape::Point {
+        id: q,
+        at: p(40.0, 20.0),
+    });
+    // Distance from the line's far end to a point.
+    let key = doc.add_point_dimension((l, 1), Some((q, 0)), None).unwrap();
+    doc.set_dimension_label_position(key, Some(p(50.0, 10.0)))
+        .unwrap();
+    doc.toggle_reference(key).unwrap();
+    doc.selected = Some(l);
+    let piece = doc.split_selected_curve(p(10.0, 0.0)).unwrap();
+    let DimensionKey::Point(dimension) = key else {
+        panic!("expected a point dimension");
+    };
+    let moved = &doc.dims.point_dimensions[&dimension];
+    assert_eq!(moved.a, (piece, 1));
+    assert_eq!(doc.dimension_anchor(moved.a), Some(p(40.0, 0.0)));
+    assert!(doc.dims.references.contains(&key));
+    assert_eq!(doc.dims.label_positions.get(&key), Some(&p(50.0, 10.0)));
+    // Trimming away the dimensioned end drops the dimension.
+    doc.selected = Some(piece);
+    doc.trim_selected_curve(p(30.0, 0.0)).unwrap();
+    assert!(doc.dims.point_dimensions.is_empty());
+    assert!(!doc.dims.references.contains(&key));
+    assert!(!doc.dims.label_positions.contains_key(&key));
+}
+
+#[test]
+fn split_circle_keeps_its_diameter_as_a_radius_with_annotations() {
+    let mut doc = Document::default();
+    let c = circle(&mut doc, p(0.0, 0.0), p(10.0, 0.0));
+    doc.selected = Some(c);
+    doc.set_dimension(DimensionField::CircleDiameter, 20.0)
+        .unwrap();
+    let key = DimensionKey::Field(c, DimensionField::CircleDiameter);
+    assert_eq!(doc.set_dimension_expression(key, "10 mm + 10 mm"), Ok(20.0));
+    doc.set_dimension_label_position(key, Some(p(30.0, 30.0)))
+        .unwrap();
+    doc.selected = Some(c);
+    doc.split_selected_circle(p(10.0, 0.0), p(-10.0, 0.0))
+        .unwrap();
+    let radius = DimensionKey::Field(c, DimensionField::CurveRadius);
+    assert_eq!(doc.dimension_value(radius), Some(10.0));
+    assert_eq!(
+        doc.dimension_expression(radius),
+        Some("(10 mm + 10 mm) / 2")
+    );
+    assert_eq!(doc.dims.label_positions.get(&radius), Some(&p(30.0, 30.0)));
+}
+
+#[test]
+fn scale_and_rotate_move_labels_and_clear_stale_expressions() {
+    let mut doc = Document::default();
+    let l = line(&mut doc, p(0.0, 0.0), p(10.0, 0.0));
+    doc.selected = Some(l);
+    doc.set_dimension(DimensionField::LineLength, 10.0).unwrap();
+    let key = DimensionKey::Field(l, DimensionField::LineLength);
+    assert_eq!(doc.set_dimension_expression(key, "5 mm * 2"), Ok(10.0));
+    doc.set_dimension_label_position(key, Some(p(5.0, 4.0)))
+        .unwrap();
+    doc.selected = Some(l);
+    assert!(doc.rotate_selected(90.0, p(0.0, 0.0), false));
+    // Rotation keeps the length and its expression; the label turns along.
+    assert_eq!(doc.dimension_expression(key), Some("5 mm * 2"));
+    let at = doc.dims.label_positions[&key];
+    assert!(at.distance(p(-4.0, 5.0)) < 1e-4, "{at:?}");
+    assert!(doc.scale_selected(2.0, p(0.0, 0.0), false));
+    // Like the web app, scaling clears the now stale expression.
+    assert_eq!(doc.dimension_value(key), Some(20.0));
+    assert!(!doc.dims.expressions.contains_key(&key));
+    let at = doc.dims.label_positions[&key];
+    assert!(at.distance(p(-8.0, 10.0)) < 1e-4, "{at:?}");
+}

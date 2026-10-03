@@ -165,11 +165,16 @@ lengths) are removed; relations at the far ends and line-wide relations stay.
 Split and Trim move fillet/chamfer joins to the retained piece. Native
 rectangle corners and curved edges are not supported (the web app does not
 support them either).
-**Offset**: select a line, circle or arc and press **Shift+U** (or pick
+**Offset**: select a line, circle, arc, rectangle, rotated rectangle,
+polygon or slot and press **Shift+U** (or pick
 **MORE → OFFSET**). Type a signed distance in the Properties prompt and press
 Enter; an empty prompt keeps the last distance (5 mm by default). As in the
 web app, positive distances move a line to the left of its direction and grow
-circles and arcs; negative distances go the other way. The copy is linked to
+circles, arcs and closed outlines (a rectangle's width and height grow by twice
+the distance, a slot's width likewise, a polygon's circumradius by
+`distance / cos(pi / sides)` so its edges move by the distance); negative
+distances go the other way. Outline copies keep their kind, so web files with
+offsets of these shapes now open editable. The copy is linked to
 its source by the web `offset` relation (`a` source, `b` copy, signed
 `value`). When the selected line joins other lines end to end (shared
 endpoints, with or without coincident links, through vertices where exactly
@@ -283,11 +288,24 @@ kind is inferred (its previous kind, else length, angle, scalar). Changing a
 variable re-evaluates every dependent dimension and solves as one undo step;
 any failure rolls everything back. Expressions save as the web relation
 `expression` next to the exactly evaluated `value` (the web loader checks
-they match), and variables as the sketch node's `variables` array. An
-expression that no longer produces the stored value (after a direct edit such
-as scaling) is dropped on save. Dimensions stored as graph `sketchConstraint`
-nodes move to sketch relations once they get a label position, reference
-flag or expression.
+they match), and variables as the sketch node's `variables` array. As in
+the web `transformSketchSelection`, scaling a shape clears the expressions of
+the dimensions whose value it changes, rotating clears a rotation
+dimension's expression, and both move moved label positions with the shape
+(a copy gets transformed copies). An expression that still no longer produces
+the stored value is dropped on save. Dimensions stored as graph
+`sketchConstraint` nodes move to sketch relations once they get a label
+position, reference flag or expression.
+
+**Split and trim.** As in the web `splitSketchCurve`/`trimSketchCurve`, a
+point dimension on a split or trimmed shape moves to the retained piece that
+still has its anchor at the same position (a dimension on a line's far end
+follows the new piece); one whose anchor is cut away is dropped with its
+label position, reference flag and expression. Driving lengths and sweeps of
+the cut shape are dropped (reference ones keep measuring), ellipse width and
+height stay on the first piece, and a circle's diameter dimension becomes
+the arc's radius dimension, keeping its reference flag, label position and
+expression (as `(expression) / 2`).
 
 ### Constraint solver
 
@@ -337,11 +355,20 @@ arcs, ellipses, elliptic arcs and splines (anchor pairs, equal radii or axes,
 mirrored arc start and ellipse rotation, negated sweeps) are solver residuals
 too, as are offsets (a line copy at a signed distance to the left of its
 source, concentric circles and arcs with a radius difference and equal
-angles, and a mitered line chain offset that also keeps its sources joined).
-The only hand-propagated relation is a mirror copy of a rectangle,
-polygon or slot, which is regenerated from its source and axis after every
-solve. Pattern copies (see **Patterns**) are likewise regenerated from their
-sources after every solve, for every shape kind.
+angles, outline copies with the same center, cap centers and rotation and
+grown sizes, and a mitered line chain offset that also keeps its sources
+joined).
+Rectangles, rotated rectangles, regular polygons and slots are solver
+entities too (`solver::ShapeVar`): a corner rectangle is its two corner
+points, a rotated rectangle its center, half-axes and rotation, a polygon its
+center, circumradius and rotation, and a slot its two cap centers and width.
+Their corners, vertices and cap centers are derived anchors, so a mirror copy
+of any of them is a solver residual (reflected center, equal sizes, mirrored
+rotation; a mirrored corner rectangle is a rotated rectangle, as in the web
+app), and their width, height, radius and rotation dimensions and fixed
+anchors become hard relations once they take part in one. The only
+hand-propagated relation left is a pattern: copies (see **Patterns**) are
+regenerated from their sources after every solve, for every shape kind.
 
 Rotating a direction target now turns its source with it; Equal ellipses can
 be scaled; splines with linked end points can be moved, scaled, rotated, and
@@ -358,11 +385,13 @@ shape still moves the whole shape. For lines, points, circles, and arcs the
 anchor becomes a strong soft target that is re-solved every frame with every
 hard relation, so it slides along what they allow: a line end with a driving
 length moves on a circle around the other end, and coincident points follow.
-A dragged line endpoint keeps the other endpoint in place. For the other
-shapes the anchor edit keeps driving width, height, radius, and rotation
-dimensions (the corner or vertex slides along them), then re-solves like a
-whole-shape drag (all relations, including tangency and shared ellipses,
-follow). Release commits one undo step, Esc cancels. A fixed anchor
+A dragged line endpoint keeps the other endpoint in place. Rectangle corners,
+rotated-rectangle corners, polygon vertices and slot cap centers work the
+same way: the derived anchor is a 1e3 soft target (`Soft::Anchor`) re-solved
+with every relation, after a first guess that keeps driving width, height,
+radius and rotation dimensions. Ellipse axis points still keep those
+dimensions directly and re-solve like a whole-shape drag (all relations,
+including tangency and shared ellipses, follow). Release commits one undo step, Esc cancels. A fixed anchor
 (or any fixed anchor on a non-line shape) refuses to drag; every relation
 the shape takes part in follows through the solver.
 
@@ -375,10 +404,16 @@ remaining degrees of freedom, which parameters are fully determined, and for
 each relation whether it is satisfied, conflicting (residual above tolerance at
 the current geometry) or redundant (adds no rank after earlier relations).
 `Document::analyze_constraints` runs it over every solver-modeled shape: lines,
-sketch points, circles, arcs, ellipses, elliptic arcs and splines (rectangles,
-polygons and slots are not counted). A free line has 4 DOF, a point 2, a circle
-3, an arc 5 (center, radius, start, sweep), an ellipse 5 (center, axes,
-rotation), an elliptic arc 7, a spline 2 per handle.
+sketch points, circles, arcs, ellipses, elliptic arcs, splines, rectangles,
+rotated rectangles, polygons and slots. A free line has 4 DOF, a point 2, a
+circle 3, an arc 5 (center, radius, start, sweep), an ellipse 5 (center, axes,
+rotation), an elliptic arc 7, a spline 2 per handle, a corner rectangle 4 (two
+corners), a rotated rectangle 5, a polygon 4 (center, radius, rotation) and a
+slot 5 (cap centers, width). Point-on-curve, tangency and other curve
+relations count toward the rank like every other relation. Pattern copies
+follow their sources, so their parameters are not free: a six-copy circular
+pattern of one free line reads DOF 4, and a copy is drawn fully constrained
+only when every source of its pattern is.
 
 In the sketch view the header's right edge shows **DOF n** (green at 0),
 **OVER-CONSTRAINED** (purple) when a relation is redundant, or **CONFLICT**

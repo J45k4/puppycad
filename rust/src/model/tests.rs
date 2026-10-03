@@ -6538,3 +6538,236 @@ fn deleting_a_pattern_member_drops_the_pattern_like_the_web() {
     assert!(doc.patterns.is_empty());
     assert_eq!(doc.shapes.len(), pattern_sources().len() + 1);
 }
+
+#[test]
+fn constraint_analysis_counts_rectangles_polygons_and_slots() {
+    let dof = |shape: Shape| Document::from_shapes(vec![shape]).analyze_constraints().dof;
+    assert_eq!(
+        dof(Shape::Rectangle {
+            id: 1,
+            a: pt(0.0, 0.0),
+            b: pt(10.0, 5.0),
+        }),
+        4
+    );
+    assert_eq!(
+        dof(Shape::RotatedRectangle {
+            id: 1,
+            center: pt(0.0, 0.0),
+            width: 10.0,
+            height: 5.0,
+            rotation: 20.0,
+        }),
+        5
+    );
+    assert_eq!(
+        dof(Shape::Polygon {
+            id: 1,
+            center: pt(0.0, 0.0),
+            radius: 5.0,
+            sides: 6,
+            rotation: 0.0,
+        }),
+        4
+    );
+    assert_eq!(
+        dof(Shape::Capsule {
+            id: 1,
+            from: pt(0.0, 0.0),
+            to: pt(10.0, 0.0),
+            width: 4.0,
+            arc_segments: 8,
+        }),
+        5
+    );
+    // A fixed corner and a driving width and height pin a rectangle.
+    let mut doc = Document::from_shapes(vec![Shape::Rectangle {
+        id: 1,
+        a: pt(0.0, 0.0),
+        b: pt(10.0, 5.0),
+    }]);
+    doc.fixed_anchors.insert((1, 0), pt(0.0, 0.0));
+    doc.driving_dimensions
+        .insert((1, DimensionField::RectangleWidth), 10.0);
+    doc.driving_dimensions
+        .insert((1, DimensionField::RectangleHeight), 5.0);
+    let analysis = doc.analyze_constraints();
+    assert_eq!(analysis.dof, 0);
+    assert!(analysis.fully_constrained.contains(&1));
+}
+
+#[test]
+fn mirrored_rectangles_polygons_and_slots_are_solved() {
+    let mut doc = Document::from_shapes(vec![
+        axis_line(1),
+        Shape::Rectangle {
+            id: 2,
+            a: pt(20.0, 0.0),
+            b: pt(30.0, 6.0),
+        },
+        Shape::Polygon {
+            id: 3,
+            center: pt(30.0, -20.0),
+            radius: 4.0,
+            sides: 5,
+            rotation: 10.0,
+        },
+        Shape::Capsule {
+            id: 4,
+            from: pt(20.0, 20.0),
+            to: pt(30.0, 25.0),
+            width: 4.0,
+            arc_segments: 8,
+        },
+    ]);
+    let copies = doc.mirror_shapes(&[2, 3, 4], 1).unwrap();
+    assert_mirrored(&doc);
+    // Editing a copy drives its source through the solver.
+    doc.selected = Some(copies[1]);
+    assert!(doc.move_selected(pt(-3.0, 1.0)));
+    assert_mirrored(&doc);
+    assert!(near(doc.shapes[2].center(), pt(33.0, -19.0)));
+    doc.selected = Some(3);
+    assert_eq!(doc.set_dimension(DimensionField::CurveRadius, 7.0), Ok(()));
+    assert_mirrored(&doc);
+    doc.selected = Some(copies[2]);
+    assert!(doc.move_selected(pt(0.0, 2.0)));
+    assert_mirrored(&doc);
+    // Mirror copies count as constrained: only the axis and sources move
+    // (the polygon radius is driven).
+    let analysis = doc.analyze_constraints();
+    assert_eq!(analysis.dof, 4 + 4 + 3 + 5);
+}
+
+#[test]
+fn derived_anchor_drag_slides_along_relations() {
+    let mut doc = Document::from_shapes(vec![
+        axis_line(1),
+        Shape::Polygon {
+            id: 2,
+            center: pt(30.0, 0.0),
+            radius: 5.0,
+            sides: 4,
+            rotation: 0.0,
+        },
+    ]);
+    doc.mirror_shapes(&[2], 1).unwrap();
+    doc.driving_dimensions
+        .insert((2, DimensionField::CurveRadius), 5.0);
+    doc.selected = Some(2);
+    // Vertex 1 at (35, 0): the radius is driven, so the vertex can only turn
+    // the polygon about its center; the copy follows.
+    assert!(doc.begin_drag(pt(35.0, 0.0)));
+    assert!(doc.drag_to(pt(30.0, 10.0)));
+    assert!(doc.finish_drag());
+    let Shape::Polygon {
+        radius, rotation, ..
+    } = doc.shapes[1]
+    else {
+        panic!("expected a polygon");
+    };
+    assert!((radius - 5.0).abs() < 1e-3, "{radius}");
+    assert!((rotation - 90.0).abs() < 0.5, "{rotation}");
+    assert_mirrored(&doc);
+}
+
+#[test]
+fn pattern_copies_do_not_add_degrees_of_freedom() {
+    let mut doc = line_doc(&[(pt(10.0, 0.0), pt(20.0, 0.0))]);
+    doc.circular_pattern(&[1], 6, 360.0, pt(0.0, 0.0), None)
+        .unwrap();
+    assert_eq!(doc.shapes.len(), 6);
+    let analysis = doc.analyze_constraints();
+    // Only the source line is free.
+    assert_eq!(analysis.dof, 4);
+    assert!(analysis.fully_constrained.is_empty());
+    doc.fixed_anchors.insert((1, 0), pt(10.0, 0.0));
+    doc.fixed_anchors.insert((1, 1), pt(20.0, 0.0));
+    let analysis = doc.analyze_constraints();
+    assert_eq!(analysis.dof, 0);
+    assert_eq!(analysis.fully_constrained.len(), 6);
+}
+
+#[test]
+fn rectangles_polygons_and_slots_offset_and_follow_their_source() {
+    let mut doc = Document::from_shapes(vec![
+        Shape::Rectangle {
+            id: 1,
+            a: pt(0.0, 0.0),
+            b: pt(10.0, 6.0),
+        },
+        Shape::Polygon {
+            id: 2,
+            center: pt(40.0, 0.0),
+            radius: 5.0,
+            sides: 6,
+            rotation: 0.0,
+        },
+        Shape::Capsule {
+            id: 3,
+            from: pt(0.0, 30.0),
+            to: pt(10.0, 30.0),
+            width: 4.0,
+            arc_segments: 8,
+        },
+        Shape::RotatedRectangle {
+            id: 4,
+            center: pt(40.0, 30.0),
+            width: 8.0,
+            height: 4.0,
+            rotation: 30.0,
+        },
+    ]);
+    let mut copies = Vec::new();
+    for id in 1..=4 {
+        doc.selected = Some(id);
+        copies.push(doc.offset_selected(2.0).unwrap()[0]);
+    }
+    let find = |doc: &Document, id: u32| doc.shapes.iter().find(|s| s.id() == id).unwrap().clone();
+    assert_eq!(
+        find(&doc, copies[0]),
+        Shape::Rectangle {
+            id: copies[0],
+            a: pt(-2.0, -2.0),
+            b: pt(12.0, 8.0),
+        }
+    );
+    let Shape::Polygon { radius, .. } = find(&doc, copies[1]) else {
+        panic!("expected a polygon");
+    };
+    let expected = 5.0 + 2.0 / (std::f32::consts::PI / 6.0).cos();
+    assert!((radius - expected).abs() < 1e-4);
+    assert!(
+        matches!(find(&doc, copies[2]), Shape::Capsule { width, .. } if (width - 8.0).abs() < 1e-4)
+    );
+    assert!(matches!(
+        find(&doc, copies[3]),
+        Shape::RotatedRectangle { width, height, .. }
+            if (width - 12.0).abs() < 1e-4 && (height - 8.0).abs() < 1e-4
+    ));
+    // Moving and resizing the sources drags the copies along.
+    doc.selected = Some(1);
+    assert!(doc.move_selected(pt(5.0, 5.0)));
+    assert_eq!(
+        find(&doc, copies[0]),
+        Shape::Rectangle {
+            id: copies[0],
+            a: pt(3.0, 3.0),
+            b: pt(17.0, 13.0),
+        }
+    );
+    doc.selected = Some(2);
+    assert_eq!(doc.set_dimension(DimensionField::CurveRadius, 8.0), Ok(()));
+    let Shape::Polygon { radius, .. } = find(&doc, copies[1]) else {
+        panic!("expected a polygon");
+    };
+    assert!((radius - (expected + 3.0)).abs() < 1e-3, "{radius}");
+    // Each offset counts as a constrained copy.
+    assert_eq!(doc.analyze_constraints().dof, 4 + 3 + 5 + 5);
+    // A changed distance regenerates the copy.
+    doc.selected = Some(copies[2]);
+    assert_eq!(doc.set_offset_distance(1.0), Ok(()));
+    assert!(
+        matches!(find(&doc, copies[2]), Shape::Capsule { width, .. } if (width - 6.0).abs() < 1e-4)
+    );
+}
