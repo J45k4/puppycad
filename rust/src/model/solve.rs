@@ -311,7 +311,7 @@ impl Document {
             .shared_ellipses
             .iter()
             .flat_map(|(&a, &b)| [a, b])
-            .chain(self.endpoint_tangents.keys().copied())
+            .chain(self.endpoint_tangents.keys().map(|(id, _)| *id))
             .collect();
         for &(id, field) in self.driving_dimensions.keys() {
             match field {
@@ -343,10 +343,10 @@ impl Document {
         self.point_curve_links
             .keys()
             .chain(self.normal_links.keys())
-            .chain(self.endpoint_tangents.keys())
             .chain(self.internal_tangents.keys())
             .chain(self.external_tangents.keys())
             .copied()
+            .chain(self.endpoint_tangents.keys().map(|(id, _)| *id))
             .collect()
     }
 
@@ -375,7 +375,9 @@ impl Document {
             .chain(self.equal_ellipses.keys())
             .chain(self.shared_ellipses.keys())
             .chain(self.point_links.values())
+            .chain(self.chamfers.keys())
             .copied()
+            .chain(self.endpoint_joins.values().map(|(id, _)| *id))
             .chain(self.projected_targets())
             .collect();
         let sources: Vec<u32> = self
@@ -605,7 +607,7 @@ impl Document {
                 param,
             });
         }
-        for (&target, &(source, endpoint, line_sign, sweep_sign)) in &self.endpoint_tangents {
+        for (&(target, endpoint), &(source, line_sign, sweep_sign)) in &self.endpoint_tangents {
             if let (Some(SolverEntity::Arc(arc)), Some(line)) = (b.entity(target), b.line(source)) {
                 keep_length.insert(source);
                 constraints.push(Constraint::EndpointTangent {
@@ -614,6 +616,37 @@ impl Document {
                     endpoint,
                     line_sign: line_sign as f64,
                     sweep_sign: sweep_sign as f64,
+                });
+            }
+        }
+        for (&(line_id, line_end), &(other, other_end)) in &self.endpoint_joins {
+            let Some(line) = b.line(line_id) else {
+                continue;
+            };
+            let end = if line_end == 0 { line.a } else { line.b };
+            match b.entity(other) {
+                Some(SolverEntity::Line(other)) => {
+                    let other = if other_end == 0 { other.a } else { other.b };
+                    constraints.push(Constraint::Coincident(end, other));
+                }
+                Some(SolverEntity::Arc(arc)) => constraints.push(Constraint::ArcEndpoint {
+                    arc,
+                    endpoint: other_end,
+                    point: end,
+                }),
+                _ => {}
+            }
+        }
+        for spec in self.chamfers.values() {
+            if let (Some(a), Some(line_b)) = (b.line(spec.a.0), b.line(spec.b.0)) {
+                constraints.push(Constraint::Chamfer {
+                    a,
+                    a_end: spec.a.1,
+                    b: line_b,
+                    b_end: spec.b.1,
+                    first: spec.first as f64,
+                    second: spec.second as f64,
+                    angle: spec.mode == ChamferMode::DistanceAngle,
                 });
             }
         }

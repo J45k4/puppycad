@@ -30,7 +30,11 @@ impl Document {
         self.normal_links
             .retain(|target, (source, _)| *target != id && *source != id);
         self.endpoint_tangents
-            .retain(|target, (source, _, _, _)| *target != id && *source != id);
+            .retain(|(target, _), (source, _, _)| *target != id && *source != id);
+        self.endpoint_joins
+            .retain(|(line, _), (other, _)| *line != id && *other != id);
+        self.chamfers
+            .retain(|line, spec| *line != id && spec.a.0 != id && spec.b.0 != id);
         self.equal_ellipses
             .retain(|target, source| *target != id && *source != id);
         self.shared_ellipses
@@ -111,12 +115,8 @@ impl Document {
         }
         self.driving_dimensions
             .remove(&(id, DimensionField::LineLength));
-        if let Some(point_id) = self.point_links.remove(&(id, 1)) {
-            self.point_links.insert((new_id, 1), point_id);
-        }
-        if let Some(position) = self.fixed_anchors.remove(&(id, 1)) {
-            self.fixed_anchors.insert((new_id, 1), position);
-        }
+        let relations = self.detach_endpoint_relations((id, 1));
+        self.attach_endpoint_relations((new_id, 1), relations);
         self.selected = Some(new_id);
         Ok(new_id)
     }
@@ -599,6 +599,20 @@ impl Document {
             return Ok(0);
         }
         let before = self.snapshot();
+        if intervals[0].0 != 0.0 {
+            self.drop_endpoint_relations((id, 0));
+        }
+        if intervals.last().is_some_and(|(_, end)| *end == 1.0) {
+            if intervals.len() > 1 {
+                let relations = self.detach_endpoint_relations((id, 1));
+                self.attach_endpoint_relations(
+                    (self.next_id + intervals.len() as u32 - 2, 1),
+                    relations,
+                );
+            }
+        } else {
+            self.drop_endpoint_relations((id, 1));
+        }
         let old_start_link = self.point_links.remove(&(id, 0));
         let old_end_link = self.point_links.remove(&(id, 1));
         let old_start_fixed = self.fixed_anchors.remove(&(id, 0));

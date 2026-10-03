@@ -1,6 +1,7 @@
 use crate::solver;
 use crate::spline::{self, SplineMode};
 use std::collections::{HashMap, HashSet};
+mod corner;
 mod dimensions;
 mod drag;
 mod edit;
@@ -11,6 +12,7 @@ mod solve;
 #[cfg(test)]
 mod tests;
 
+pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
@@ -118,7 +120,9 @@ struct DocumentState {
     midpoint_links: HashMap<u32, u32>,
     point_curve_links: HashMap<u32, u32>,
     normal_links: HashMap<u32, (u32, u8)>,
-    endpoint_tangents: HashMap<u32, (u32, u8, i8, i8)>,
+    endpoint_tangents: HashMap<(u32, u8), (u32, i8, i8)>,
+    endpoint_joins: HashMap<(u32, u8), (u32, u8)>,
+    chamfers: HashMap<u32, ChamferSpec>,
     equal_ellipses: HashMap<u32, u32>,
     shared_ellipses: HashMap<u32, u32>,
     concentric: HashMap<u32, u32>,
@@ -160,7 +164,14 @@ pub struct Document {
     pub midpoint_links: HashMap<u32, u32>,
     pub point_curve_links: HashMap<u32, u32>,
     pub normal_links: HashMap<u32, (u32, u8)>,
-    pub endpoint_tangents: HashMap<u32, (u32, u8, i8, i8)>,
+    /// Smooth join: (arc, endpoint 0 start / 1 end) -> (line, line sign,
+    /// sweep sign), the web `endpointTangent` relation.
+    pub endpoint_tangents: HashMap<(u32, u8), (u32, i8, i8)>,
+    /// Line endpoint coincident with another line or arc endpoint:
+    /// (line, endpoint) -> (other shape, endpoint 0/1).
+    pub endpoint_joins: HashMap<(u32, u8), (u32, u8)>,
+    /// Chamfer line -> its driving setbacks (web `chamfer` relation).
+    pub chamfers: HashMap<u32, ChamferSpec>,
     pub equal_ellipses: HashMap<u32, u32>,
     pub shared_ellipses: HashMap<u32, u32>,
     pub concentric: HashMap<u32, u32>,
@@ -204,6 +215,8 @@ impl Default for Document {
             point_curve_links: HashMap::new(),
             normal_links: HashMap::new(),
             endpoint_tangents: HashMap::new(),
+            endpoint_joins: HashMap::new(),
+            chamfers: HashMap::new(),
             equal_ellipses: HashMap::new(),
             shared_ellipses: HashMap::new(),
             concentric: HashMap::new(),
@@ -328,6 +341,8 @@ impl Document {
             point_curve_links: self.point_curve_links.clone(),
             normal_links: self.normal_links.clone(),
             endpoint_tangents: self.endpoint_tangents.clone(),
+            endpoint_joins: self.endpoint_joins.clone(),
+            chamfers: self.chamfers.clone(),
             equal_ellipses: self.equal_ellipses.clone(),
             shared_ellipses: self.shared_ellipses.clone(),
             concentric: self.concentric.clone(),
@@ -352,6 +367,8 @@ impl Document {
         self.point_curve_links = state.point_curve_links;
         self.normal_links = state.normal_links;
         self.endpoint_tangents = state.endpoint_tangents;
+        self.endpoint_joins = state.endpoint_joins;
+        self.chamfers = state.chamfers;
         self.equal_ellipses = state.equal_ellipses;
         self.shared_ellipses = state.shared_ellipses;
         self.concentric = state.concentric;
