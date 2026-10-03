@@ -91,10 +91,10 @@ per-instance selection and export.
 2. (Done) Hover pre-highlight, relation glyphs beside entities, inference
    hints while placing.
 3. Undo history panel.
-4. Toolbar icons, tooltips with shortcuts, status bar with cursor coordinates,
-   DOF and snap mode.
-5. Settings: units, grid size, theme; persisted window layout.
-6. Keep the pixel font; add a UI scale factor for HiDPI.
+4. (Done) Toolbar icons, tooltips with shortcuts, status bar with cursor
+   coordinates, DOF and snap mode.
+5. (Done) Settings: units, grid size, theme; persisted window layout.
+6. (Done) Keep the pixel font; add a UI scale factor for HiDPI.
 
 ## Phase 6 — Code health (continuous)
 

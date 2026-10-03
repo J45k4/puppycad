@@ -6,13 +6,19 @@ mod palette;
 mod panels;
 mod pattern;
 mod project_panel;
+mod settings;
 mod shortcut_overlay;
 mod solid;
+mod status;
 mod tangent;
 mod view_sketch;
 
 #[cfg(test)]
 mod input_tests;
+#[cfg(test)]
+mod settings_tests;
+#[cfg(test)]
+mod status_tests;
 #[cfg(test)]
 mod tests;
 
@@ -23,9 +29,11 @@ use extrude::*;
 use palette::*;
 use pattern::*;
 use project_panel::*;
+use settings::*;
 #[cfg(test)]
 use shortcut_overlay::*;
 use solid::*;
+use status::*;
 
 use puppycad::{model, project, sketch_value, spline, stl, threemf};
 
@@ -54,27 +62,31 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const BG: Color = [0.055, 0.070, 0.096, 1.0];
-const PANEL: Color = [0.090, 0.111, 0.145, 1.0];
-const PANEL_LIGHT: Color = [0.124, 0.150, 0.190, 1.0];
-const BORDER: Color = [0.20, 0.24, 0.29, 1.0];
-const TEXT: Color = [0.88, 0.91, 0.94, 1.0];
-const MUTED: Color = [0.50, 0.58, 0.65, 1.0];
-const ACCENT: Color = [0.32, 0.78, 0.93, 1.0];
-const SHAPE: Color = [0.96, 0.72, 0.38, 1.0];
+const BG: Color = DARK.bg;
+const PANEL: Color = DARK.panel;
+const PANEL_LIGHT: Color = DARK.panel_light;
+const BORDER: Color = DARK.border;
+const TEXT: Color = DARK.text;
+const MUTED: Color = DARK.muted;
+const ACCENT: Color = DARK.accent;
+const SHAPE: Color = DARK.shape;
 /// Constraint-state colors (web intent: fully constrained reads as settled,
 /// conflicts as errors, redundancy as a warning).
-const FULLY_CONSTRAINED: Color = [0.46, 0.84, 0.52, 1.0];
-const CONFLICT: Color = [0.96, 0.36, 0.36, 1.0];
-const REDUNDANT: Color = [0.78, 0.56, 0.96, 1.0];
+const FULLY_CONSTRAINED: Color = DARK.fully_constrained;
+const CONFLICT: Color = DARK.conflict;
+const REDUNDANT: Color = DARK.redundant;
 /// Driving dimension labels and their dimension lines.
-const DIMENSION: Color = [0.62, 0.80, 0.98, 1.0];
+const DIMENSION: Color = DARK.dimension;
 /// Select-mode hover pre-highlight (a lighter accent).
-const HOVER: Color = [0.66, 0.92, 1.0, 1.0];
+const HOVER: Color = DARK.hover;
 /// Inference hints while placing.
-const HINT: Color = [0.98, 0.84, 0.42, 1.0];
+const HINT: Color = DARK.hint;
 /// Hovered planar face outline in the 3D preview.
-const FACE_HOVER: Color = [1.0, 0.86, 0.30, 1.0];
+const FACE_HOVER: Color = DARK.face_hover;
+/// Active button fill and selected row fill.
+const ACTIVE: Color = DARK.active;
+const ACTIVE_ROW: Color = DARK.active_row;
+const GRID: Color = DARK.grid;
 
 #[derive(Clone, Copy, Debug)]
 struct Layout {
@@ -83,11 +95,35 @@ struct Layout {
     right: Rect,
     top: Rect,
     bottom: Rect,
+    /// UI scale: physical pixels per layout unit. Every rect is in logical
+    /// units; `physical` multiplies by this.
+    scale: f32,
 }
 
 const MORE_COLUMN_ROWS: usize = 18;
 
 impl Layout {
+    /// Layout for a physical surface at a UI scale: the logical canvas is
+    /// the physical size divided by `scale`.
+    fn scaled(physical_width: f32, physical_height: f32, scale: f32) -> Self {
+        let scale = scale.max(0.1);
+        Self {
+            scale,
+            ..Self::new(physical_width / scale, physical_height / scale)
+        }
+    }
+
+    /// A layout rect in physical pixels.
+    #[cfg(test)]
+    fn physical(self, rect: Rect) -> Rect {
+        Rect {
+            x: rect.x * self.scale,
+            y: rect.y * self.scale,
+            w: rect.w * self.scale,
+            h: rect.h * self.scale,
+        }
+    }
+
     fn new(width: f32, height: f32) -> Self {
         let left_width = 236.0_f32.min(width * 0.25);
         let right_width = 270.0_f32.min(width * 0.28);
@@ -124,6 +160,7 @@ impl Layout {
                 w: width,
                 h: bottom_height,
             },
+            scale: 1.0,
         }
     }
 
@@ -282,6 +319,15 @@ pub(crate) struct App {
     palette: Option<Palette>,
     /// Shortcut cheat sheet (? / F1) is shown.
     shortcut_overlay: bool,
+    /// Persisted user settings (units, grid, theme, UI scale, window).
+    settings: Settings,
+    settings_open: bool,
+    /// Active UI scale and the monitor's rounded scale factor.
+    ui_scale: f32,
+    monitor_scale: f32,
+    status_cache: std::cell::RefCell<StatusCache>,
+    /// Hovered toolbar button / MORE row and when the hover began.
+    tip_hover: Option<(HoverTarget, std::time::Instant)>,
 }
 
 /// What the pointer is over in Select mode.
@@ -414,6 +460,12 @@ impl Default for App {
             redraw_requests: Default::default(),
             palette: None,
             shortcut_overlay: false,
+            settings: Settings::default(),
+            settings_open: false,
+            ui_scale: 1.0,
+            monitor_scale: 1.0,
+            status_cache: Default::default(),
+            tip_hover: None,
         }
     }
 }
@@ -868,7 +920,7 @@ impl App {
             .as_ref()
             .map_or(Layout::new(1280.0, 800.0), |window| {
                 let size = window.inner_size();
-                Layout::new(size.width as f32, size.height as f32)
+                Layout::scaled(size.width as f32, size.height as f32, self.ui_scale)
             })
     }
 
@@ -915,6 +967,8 @@ impl App {
         let width = layout.top.w;
         let height = layout.bottom.y + layout.bottom.h;
         let mut painter = Painter::new(width, height);
+        painter.set_scale(layout.scale);
+        painter.set_remap(self.settings.theme.palette().remap());
         painter.rect(
             Rect {
                 x: 0.0,
@@ -958,8 +1012,10 @@ impl App {
         }
         self.paint_panels(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
+        self.paint_settings(&mut painter, layout);
         self.paint_palette(&mut painter, layout);
         self.paint_shortcut_overlay(&mut painter, layout);
+        self.paint_tooltip(&mut painter, layout);
         painter
     }
 

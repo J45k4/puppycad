@@ -26,6 +26,7 @@ COPY fixtures ./fixtures
 RUN chmod +x ./ui-smoke.sh
 
 ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV PUPPYCAD_CONFIG_DIR=/tmp/puppycad-config
 ENV WGPU_BACKEND=vulkan
 ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 

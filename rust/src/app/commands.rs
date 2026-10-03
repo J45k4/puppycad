@@ -175,6 +175,7 @@ pub(super) enum Cmd {
     ExportStl,
     ExportAsciiStl,
     Export3mf,
+    Settings,
 }
 
 pub(super) struct Command {
@@ -929,10 +930,18 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Any,
         |app| app.export_3mf(),
     ),
+    cmd(
+        Cmd::Settings,
+        "Settings",
+        "Ctrl+,",
+        C::View,
+        S::Any,
+        |app| app.open_settings(),
+    ),
 ];
 
 /// MORE menu rows (index = `Layout::more_item` slot) and their labels.
-pub(super) const MORE_MENU: [(Cmd, &str); 21] = [
+pub(super) const MORE_MENU: [(Cmd, &str); 22] = [
     (Cmd::Point, "POINT [P]"),
     (Cmd::Polygon, "POLYGON [G]"),
     (Cmd::Slot, "SLOT [S]"),
@@ -954,6 +963,21 @@ pub(super) const MORE_MENU: [(Cmd, &str); 21] = [
     (Cmd::LinearPattern, "LIN PATTERN [SHIFT Z]"),
     (Cmd::CircularPattern, "CIRC PATTERN [;]"),
     (Cmd::SketchOnFace, "SKETCH ON FACE [4]"),
+    (Cmd::Settings, "SETTINGS [CTRL ,]"),
+];
+
+/// Toolbar buttons 0..=9 (`Layout::tool_button` slot) and their commands.
+pub(super) const TOOLBAR: [Cmd; 10] = [
+    Cmd::Select,
+    Cmd::Rectangle,
+    Cmd::Circle,
+    Cmd::Line,
+    Cmd::Ellipse,
+    Cmd::SketchTop,
+    Cmd::SketchFront,
+    Cmd::SketchRight,
+    Cmd::Arc,
+    Cmd::MoreMenu,
 ];
 
 /// The registry as Markdown tables, one per category (`--print-shortcuts`).
@@ -1061,6 +1085,7 @@ impl App {
         let sketch_edit = !read_only && !self.solid_preview;
         Some(match code {
             KeyCode::KeyK if ctrl => Cmd::CommandPalette,
+            KeyCode::Comma if ctrl => Cmd::Settings,
             KeyCode::KeyP if ctrl && shift => Cmd::CommandPalette,
             KeyCode::Slash if plain_shift => Cmd::ShortcutOverlay,
             KeyCode::F1 => Cmd::ShortcutOverlay,

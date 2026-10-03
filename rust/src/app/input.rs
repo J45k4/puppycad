@@ -5,6 +5,7 @@ impl App {
     /// every move; idle Select mode inside the viewport repaints only when
     /// the hovered shape, anchor or glyph changes.
     pub(super) fn pointer_moved(&mut self, next: Point) {
+        self.document.grid_step = self.settings.grid_mm;
         let (dx, dy) = (next.x - self.cursor.x, next.y - self.cursor.y);
         if self.pan_drag {
             self.document.pan.x += dx;
@@ -30,7 +31,7 @@ impl App {
         if self.solid_preview {
             self.update_face_hover();
         }
-        let hover_changed = self.update_hover();
+        let hover_changed = self.update_hover() | self.update_tooltip_hover();
         let layout = self.layout();
         let idle_select = self.document.tool == Tool::Select
             && !self.solid_preview
@@ -80,7 +81,8 @@ impl App {
         self.name_edit = None;
         let layout = self.layout();
         let point = self.cursor;
-        if self.overlay_click(layout, point) {
+        self.document.grid_step = self.settings.grid_mm;
+        if self.overlay_click(layout, point) || self.settings_click(layout, point) {
             self.redraw();
             return;
         }
@@ -680,13 +682,27 @@ impl App {
 }
 
 impl ApplicationHandler for App {
+    fn new_events(&mut self, _: &ActiveEventLoop, cause: winit::event::StartCause) {
+        // The tooltip timer fired: repaint once to show it.
+        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
+            self.redraw();
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_control_flow(match self.tooltip_deadline() {
+            Some(deadline) => winit::event_loop::ControlFlow::WaitUntil(deadline),
+            None => winit::event_loop::ControlFlow::Wait,
+        });
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
         }
-        let attributes = Window::default_attributes()
-            .with_title("PuppyCAD")
-            .with_inner_size(LogicalSize::new(1280.0, 800.0));
+        self.settings = Settings::load();
+        self.apply_settings();
+        let attributes = self.window_attributes();
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
@@ -703,6 +719,7 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.init_window_scale(&window);
         window.request_redraw();
         self.window = Some(window);
     }
@@ -741,7 +758,10 @@ impl App {
     /// Returns true when the event loop should exit.
     pub(super) fn handle_window_event(&mut self, event: WindowEvent) -> bool {
         match event {
-            WindowEvent::CloseRequested => return true,
+            WindowEvent::CloseRequested => {
+                self.save_window_geometry();
+                return true;
+            }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
@@ -749,9 +769,10 @@ impl App {
                 self.redraw();
             }
             WindowEvent::CursorMoved { position, .. } => {
+                // Physical pixels to layout units (UI scale).
                 self.pointer_moved(Point {
-                    x: position.x as f32,
-                    y: position.y as f32,
+                    x: position.x as f32 / self.ui_scale,
+                    y: position.y as f32 / self.ui_scale,
                 });
             }
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
@@ -845,7 +866,10 @@ impl App {
 
     pub(super) fn handle_key(&mut self, event: KeyPress) {
         if let PhysicalKey::Code(code) = event.physical_key {
-            if self.palette_key(code, event.text.as_deref()) || self.shortcut_overlay_key(code) {
+            if self.palette_key(code, event.text.as_deref())
+                || self.shortcut_overlay_key(code)
+                || self.settings_key(code)
+            {
                 self.redraw();
                 return;
             }

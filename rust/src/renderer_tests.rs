@@ -128,10 +128,11 @@ fn text_advances_eight_cells_per_char_and_skips_blanks() {
     p.text(0.0, 0.0, " ", 3.0, RED);
     assert!(p.vertices.is_empty());
     // A glyph after a space starts 8 * scale pixels to the right.
-    let mut a = Painter::new(2.0, 2.0);
-    a.text(0.0, 0.0, "A", 0.01, RED);
-    let mut sa = Painter::new(2.0, 2.0);
-    sa.text(0.0, 0.0, " A", 0.01, RED);
+    // (Whole-pixel scale: font pixels snap to physical pixels.)
+    let mut a = Painter::new(200.0, 200.0);
+    a.text(0.0, 0.0, "A", 1.0, RED);
+    let mut sa = Painter::new(200.0, 200.0);
+    sa.text(0.0, 0.0, " A", 1.0, RED);
     assert_eq!(a.vertices.len(), sa.vertices.len());
     for (x, y) in a.vertices.iter().zip(&sa.vertices) {
         assert!((y.position[0] - x.position[0] - 0.08).abs() < 1e-5);
