@@ -2,8 +2,6 @@
 //! category, availability and the `App` action it runs. Keyboard shortcuts,
 //! the MORE menu, the command palette and the shortcut overlay all go
 //! through this table, so the cheat sheet cannot drift from the bindings.
-// The palette and overlay that read the metadata land in the next commits.
-#![allow(dead_code)]
 
 use super::*;
 
@@ -63,6 +61,7 @@ pub(super) enum Scope {
 
 impl Scope {
     /// Whether one key may not be bound twice across these scopes.
+    #[cfg(test)]
     pub(super) fn overlaps(self, other: Scope) -> bool {
         match (self, other) {
             (Scope::Any, _) | (_, Scope::Any) => true,
@@ -144,6 +143,7 @@ pub(super) enum Cmd {
     GeometrySnap,
     MoreMenu,
     CommandPalette,
+    ShortcutOverlay,
     NewPart,
     SketchTop,
     SketchFront,
@@ -754,6 +754,14 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Any,
         App::open_palette,
     ),
+    cmd(
+        Cmd::ShortcutOverlay,
+        "Keyboard shortcuts",
+        "? / F1",
+        C::View,
+        S::Any,
+        App::toggle_shortcut_overlay,
+    ),
     // Project
     cmd(Cmd::NewPart, "New part", "B", C::Project, S::Any, |app| {
         app.create_part()
@@ -881,6 +889,7 @@ pub(super) fn command(id: Cmd) -> &'static Command {
         .expect("every Cmd is registered")
 }
 
+#[cfg(test)]
 /// Normalized key chords of a shortcut text ("Ctrl+Y / Ctrl+Shift+Z").
 pub(super) fn shortcut_chords(text: &str) -> Vec<String> {
     text.split(" / ")
@@ -933,6 +942,8 @@ impl App {
         Some(match code {
             KeyCode::KeyK if ctrl => Cmd::CommandPalette,
             KeyCode::KeyP if ctrl && shift => Cmd::CommandPalette,
+            KeyCode::Slash if plain_shift => Cmd::ShortcutOverlay,
+            KeyCode::F1 => Cmd::ShortcutOverlay,
             KeyCode::Escape if self.pick.is_some() => Cmd::Cancel,
             KeyCode::KeyS if plain_shift && sketch_edit => Cmd::Symmetry,
             KeyCode::KeyI if plain_shift && sketch_edit => Cmd::Mirror,

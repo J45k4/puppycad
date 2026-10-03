@@ -805,3 +805,97 @@ fn palette_skips_unavailable_rows_and_enter_runs_selection() {
     app.palette_run();
     assert!(matches!(app.pick, Some(Pick::Mirror { .. })));
 }
+
+#[test]
+fn shortcut_overlay_toggles_and_swallows_keys() {
+    let mut app = App {
+        modifiers: ModifiersState::SHIFT,
+        ..App::default()
+    };
+    assert_eq!(
+        app.command_for_key(KeyCode::Slash),
+        Some(Cmd::ShortcutOverlay)
+    );
+    app.modifiers = ModifiersState::empty();
+    assert_eq!(app.command_for_key(KeyCode::F1), Some(Cmd::ShortcutOverlay));
+    app.run_command(Cmd::ShortcutOverlay);
+    assert!(app.shortcut_overlay);
+    // Other keys do nothing while it is shown.
+    assert!(app.shortcut_overlay_key(KeyCode::KeyC));
+    assert!(app.shortcut_overlay);
+    assert_ne!(app.document.tool, Tool::Circle);
+    assert!(app.shortcut_overlay_key(KeyCode::F1));
+    assert!(!app.shortcut_overlay);
+    assert!(!app.shortcut_overlay_key(KeyCode::F1));
+    app.run_command(Cmd::ShortcutOverlay);
+    app.modifiers = ModifiersState::SHIFT;
+    app.shortcut_overlay_key(KeyCode::Slash);
+    assert!(!app.shortcut_overlay);
+    app.run_command(Cmd::ShortcutOverlay);
+    app.shortcut_overlay_key(KeyCode::Escape);
+    assert!(!app.shortcut_overlay);
+    // The palette and the overlay replace each other.
+    app.run_command(Cmd::CommandPalette);
+    app.run_command(Cmd::ShortcutOverlay);
+    assert!(app.palette.is_none() && app.shortcut_overlay);
+    app.run_command(Cmd::CommandPalette);
+    assert!(app.palette.is_some() && !app.shortcut_overlay);
+}
+
+#[test]
+fn shortcut_overlay_lists_every_shortcut_and_fits_the_window() {
+    for (width, height) in [(1280.0, 800.0), (1600.0, 900.0), (1920.0, 1080.0)] {
+        let lines = shortcut_overlay_lines(width, height);
+        let column = overlay_column_width(width);
+        for line in &lines {
+            let chars = match &line.text {
+                OverlayText::Header(name) => name.len(),
+                OverlayText::Entry { keys, label } => 15 + label.chars().count().max(keys.len()),
+            };
+            assert!(
+                line.x >= 0.0 && line.x + chars as f32 * 8.0 <= width,
+                "{line:?} at {width}"
+            );
+            assert!(line.y + 8.0 <= height, "{line:?} at {height}");
+            assert!(chars as f32 * 8.0 <= column, "{line:?} wider than a column");
+        }
+        for category in Category::ALL {
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.text == OverlayText::Header(category.name())),
+                "{category:?}"
+            );
+        }
+        // Each shortcut command shows its label once.
+        for command in COMMANDS
+            .iter()
+            .filter(|command| !command.shortcut.is_empty())
+        {
+            let shown = lines.iter().any(|line| match &line.text {
+                OverlayText::Entry { label, .. } => {
+                    command.label.starts_with(label.trim_end_matches("...")) && !label.is_empty()
+                }
+                OverlayText::Header(_) => false,
+            });
+            assert!(shown, "{} missing", command.label);
+        }
+        // A header is never the last line of a column.
+        for pair in lines.windows(2) {
+            if matches!(pair[0].text, OverlayText::Header(_)) {
+                assert_eq!(pair[0].x, pair[1].x);
+            }
+        }
+    }
+    // At 1280 px the sheet wraps into several columns.
+    let columns = |width: f32| {
+        let mut xs: Vec<i32> = shortcut_overlay_lines(width, 800.0)
+            .iter()
+            .map(|line| line.x as i32)
+            .collect();
+        xs.dedup();
+        xs.len()
+    };
+    assert!(columns(1280.0) >= 2);
+    assert!(columns(1280.0) <= 4);
+}

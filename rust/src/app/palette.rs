@@ -101,6 +101,7 @@ fn palette_row(layout: Layout, visible: usize) -> Rect {
 impl App {
     pub(super) fn open_palette(&mut self) {
         self.more_open = false;
+        self.shortcut_overlay = false;
         self.palette = Some(Palette::default());
         self.palette_select_from(0, 1);
     }
@@ -200,9 +201,14 @@ impl App {
         true
     }
 
-    /// Click while the palette is open: a row runs it, a click outside
+    /// Click while the palette or the cheat sheet is open: a palette row
+    /// runs, a click outside the palette or anywhere on the cheat sheet
     /// closes it. Returns true when handled.
     pub(super) fn overlay_click(&mut self, layout: Layout, point: Point) -> bool {
+        if self.shortcut_overlay {
+            self.shortcut_overlay = false;
+            return true;
+        }
         if self.palette.is_none() {
             return false;
         }

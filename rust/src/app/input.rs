@@ -720,7 +720,9 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    if self.palette_key(code, event.text.as_deref()) {
+                    if self.palette_key(code, event.text.as_deref())
+                        || self.shortcut_overlay_key(code)
+                    {
                         self.redraw();
                         return;
                     }

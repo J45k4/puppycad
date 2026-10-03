@@ -5,6 +5,7 @@ mod palette;
 mod panels;
 mod pattern;
 mod project_panel;
+mod shortcut_overlay;
 mod solid;
 mod tangent;
 mod view_sketch;
@@ -17,6 +18,8 @@ use corner::*;
 use palette::*;
 use pattern::*;
 use project_panel::*;
+#[cfg(test)]
+use shortcut_overlay::*;
 use solid::*;
 
 use puppycad::{model, project, sketch_value, spline, stl, threemf};
@@ -251,6 +254,8 @@ pub(crate) struct App {
     dimension_start: Option<(u32, usize)>,
     /// Command palette (Ctrl+K) while open.
     palette: Option<Palette>,
+    /// Shortcut cheat sheet (? / F1) is shown.
+    shortcut_overlay: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -366,6 +371,7 @@ impl Default for App {
             label_drag: None,
             dimension_start: None,
             palette: None,
+            shortcut_overlay: false,
         }
     }
 }
@@ -894,6 +900,7 @@ impl App {
         self.paint_panels(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
         self.paint_palette(&mut painter, layout);
+        self.paint_shortcut_overlay(&mut painter, layout);
         painter
     }
 
