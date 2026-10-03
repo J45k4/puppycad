@@ -432,6 +432,7 @@ xdotool mousemove 1150 110 click 1
 xdotool mousemove 800 590 click 1
 xdotool mousemove 1150 63 click 1
 xdotool mousemove 1150 215 click 1
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-authored-solid.png
 xdotool key --clearmodifiers ctrl+s
@@ -471,6 +472,7 @@ xdotool mousemove 500 430 click 1
 xdotool mousemove 500 430 click 1
 xdotool mousemove 500 300 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-line-loop-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -503,6 +505,7 @@ for point in '500 300' '700 300' '700 300' '700 350' '700 350' '570 350' '570 35
     xdotool mousemove "$1" "$2" click 1
 done
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-concave-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -539,6 +542,7 @@ for point in '500 300' '700 300' '700 300' '700 430' '700 430' '500 430' '500 43
     xdotool mousemove "$1" "$2" click 1
 done
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-line-hole-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -575,6 +579,7 @@ xdotool mousemove 530 365 click 1
 xdotool mousemove 630 365 click 1
 xdotool mousemove 580 385 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-slot-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -613,6 +618,7 @@ xdotool mousemove 430 63 click 1
 xdotool mousemove 500 365 click 1
 xdotool mousemove 700 365 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-arc-line-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -653,6 +659,7 @@ xdotool key --window "$window_id" bracketright
 sleep 0.2
 import -window root /out/rust-native-profile-selection.png
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-second-profile-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -665,6 +672,7 @@ grep -q '"profileId": "native-sketch-1-profile-2"' /tmp/native-two-profiles.pcad
 xdotool key --window "$window_id" Tab
 xdotool key --window "$window_id" bracketleft
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-two-profiles-two-bodies.png
 xdotool key --window "$window_id" ctrl+s
@@ -698,6 +706,7 @@ for plane in front right; do
     xdotool mousemove 500 300 click 1
     xdotool mousemove 700 430 click 1
     xdotool key --window "$window_id" x
+    xdotool key --window "$window_id" Return
     sleep 0.3
     import -window root "/out/rust-native-$plane-solid.png"
     xdotool key --window "$window_id" ctrl+s
@@ -736,6 +745,7 @@ xdotool mousemove 585 365 click 1
 xdotool mousemove 640 365 click 1
 xdotool mousemove 665 365 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 import -window root /out/rust-native-hole-solid.png
 xdotool key --window "$window_id" ctrl+s
@@ -770,6 +780,7 @@ xdotool mousemove 175 63 click 1
 xdotool mousemove 450 300 click 1
 xdotool mousemove 610 410 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.2
 xdotool key --window "$window_id" 2
 sleep 0.2
@@ -777,6 +788,7 @@ xdotool mousemove 175 63 click 1
 xdotool mousemove 650 300 click 1
 xdotool mousemove 790 430 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.3
 xdotool key --window "$window_id" bracketleft
 xdotool key --window "$window_id" bracketright
@@ -987,6 +999,7 @@ xdotool mousemove 723 360 click 1
 sleep 0.2
 import -window root /out/rust-native-center-rectangle.png
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 sleep 0.2
 xdotool key --window "$window_id" ctrl+s
 sleep 0.2
@@ -1080,11 +1093,13 @@ xdotool key --window "$window_id" r
 xdotool mousemove 500 300 click 1
 xdotool mousemove 750 550 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 xdotool key --window "$window_id" 1
 xdotool key --window "$window_id" r
 xdotool mousemove 575 375 click 1
 xdotool mousemove 675 475 click 1
 xdotool key --window "$window_id" shift+x
+xdotool key --window "$window_id" Return
 sleep 0.2
 import -window root /out/rust-native-cut-extrusion.png
 xdotool key --window "$window_id" ctrl+s
@@ -1118,11 +1133,13 @@ xdotool key --window "$window_id" r
 xdotool mousemove 430 330 click 1
 xdotool mousemove 630 530 click 1
 xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
 xdotool key --window "$window_id" 1
 xdotool key --window "$window_id" r
 xdotool mousemove 580 330 click 1
 xdotool mousemove 780 530 click 1
 xdotool key --window "$window_id" shift+j
+xdotool key --window "$window_id" Return
 sleep 0.2
 import -window root /out/rust-native-join-extrusion.png
 xdotool key --window "$window_id" ctrl+s
@@ -3224,6 +3241,47 @@ grep -q '"axis": "x"' /tmp/native-dims.pcad
 grep -q '"expression": "#w\*-2"' /tmp/native-dims.pcad
 grep -q '"name": "w"' /tmp/native-dims.pcad
 cp /tmp/native-dims.pcad /out/rust-native-dimensions.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
+
+# Extrude options: X opens a ghost preview with a DEPTH prompt, E switches
+# to symmetric, Enter commits; E/Ctrl+Z in the solid view edit and undo.
+./target/debug/puppycad /tmp/native-extrude.pcad >/tmp/puppycad-extrude.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-extrude.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-extrude.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 520 320 click 1
+xdotool mousemove 760 470 click 1
+xdotool key --window "$window_id" x
+xdotool type --clearmodifiers '30'
+sleep 0.3
+import -window root /out/rust-native-extrude-preview.png
+xdotool key --window "$window_id" e
+sleep 0.3
+import -window root /out/rust-native-extrude-symmetric-preview.png
+xdotool key --window "$window_id" Return
+sleep 0.3
+import -window root /out/rust-native-extrude-symmetric.png
+# E cycles symmetric -> blind on the committed body; Ctrl+Z restores it.
+xdotool key --window "$window_id" e
+xdotool key --window "$window_id" ctrl+z
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"endCondition": "symmetric"' /tmp/native-extrude.pcad
+grep -q '"depth": 30' /tmp/native-extrude.pcad
+cp /tmp/native-extrude.pcad /out/rust-native-extrude-options.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""

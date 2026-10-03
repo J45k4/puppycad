@@ -584,3 +584,108 @@ fn tangent_arc_tool_and_smooth_join_key() {
     app.smooth_join_key();
     assert!(!app.document.smooth_joins.contains_key(&(2, 0)));
 }
+
+fn temp_project(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "puppycad-app-{name}-{}-{}.pcad",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
+#[test]
+fn extrude_prompt_previews_a_ghost_and_commits_on_enter() {
+    let path = temp_project("draft");
+    let mut app = App::with_project(&path).unwrap();
+    app.document.tool = Tool::Rectangle;
+    app.document.draft_start = Some(Point { x: 0.0, y: 0.0 });
+    assert!(app.document.finish_draft(Point { x: 40.0, y: 20.0 }));
+    app.begin_extrude("newBody");
+    assert!(app.solid_preview);
+    let ghost = |app: &App| {
+        let g = app.extrude_draft.as_ref().unwrap().ghost.as_ref().unwrap();
+        (g.start, g.depth)
+    };
+    assert_eq!(ghost(&app), (0.0, 50.0));
+    assert!(app.project.as_ref().unwrap().extrusion_previews().is_none());
+    app.handle_draft_key(KeyCode::Digit2, Some("2"));
+    app.handle_draft_key(KeyCode::Digit5, Some("5"));
+    assert_eq!(ghost(&app).1, 25.0);
+    app.handle_draft_key(KeyCode::KeyE, None);
+    assert_eq!(ghost(&app), (-12.5, 25.0));
+    app.handle_draft_key(KeyCode::Escape, None);
+    assert!(app.extrude_draft.is_none() && !app.solid_preview);
+    assert!(app.project.as_ref().unwrap().extrusion_previews().is_none());
+
+    app.begin_extrude("newBody");
+    app.handle_draft_key(KeyCode::KeyF, None);
+    app.handle_draft_key(KeyCode::Enter, None);
+    assert!(app.extrude_draft.is_none() && app.solid_preview);
+    let solids = app.project.as_ref().unwrap().extrusion_previews().unwrap();
+    assert_eq!((solids[0].start, solids[0].depth), (-50.0, 50.0));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn extrusion_option_edits_are_single_undo_steps() {
+    let mut app = App::with_project(Path::new("fixtures/extrude-options.pcad")).unwrap();
+    let end = |app: &App, index| {
+        app.project
+            .as_ref()
+            .unwrap()
+            .extrusion_options_at(index)
+            .unwrap()
+            .end
+    };
+    let volume = |app: &App| app.project.as_ref().unwrap().evaluated_solids().unwrap()[0].volume();
+    let original = volume(&app);
+    app.selected_solid = 1;
+    app.cycle_solid_end_condition();
+    assert_eq!(
+        end(&app, 1),
+        project::EndCondition::UpToBody("extrude-1".into())
+    );
+    assert!(volume(&app) > original);
+    app.toggle_solid_flip();
+    app.solid_undo_step(false);
+    app.solid_undo_step(false);
+    assert_eq!(end(&app, 1), project::EndCondition::ThroughAll);
+    assert!((volume(&app) - original).abs() < 1e-3);
+    app.solid_undo_step(true);
+    assert_eq!(
+        end(&app, 1),
+        project::EndCondition::UpToBody("extrude-1".into())
+    );
+    app.selected_solid = 0;
+    app.set_solid_depth(40.0).unwrap();
+    app.solid_undo_step(false);
+    assert_eq!(
+        app.project.as_ref().unwrap().extrusion_previews().unwrap()[0].depth,
+        60.0
+    );
+}
+
+#[test]
+fn armed_body_pick_sets_the_up_to_body_target() {
+    let mut app = App::with_project(Path::new("fixtures/extrude-options.pcad")).unwrap();
+    let layout = Layout::new(1280.0, 800.0);
+    app.selected_solid = 2;
+    app.arm_body_pick();
+    assert!(app.body_pick);
+    let (scene, projector) = app.solid_projector(layout).unwrap();
+    let mid = scene.triangles[0];
+    let point = projector.screen(std::array::from_fn(|axis| {
+        (mid[0][axis] + mid[1][axis] + mid[2][axis]) / 3.0
+    }));
+    let point = Point {
+        x: point[0],
+        y: point[1],
+    };
+    assert_eq!(projector.pick_body(&scene, point), Some(0));
+    app.pick_target_body(layout, point);
+    assert!(!app.body_pick);
+    assert_eq!(app.solid_undo.len(), 1);
+}

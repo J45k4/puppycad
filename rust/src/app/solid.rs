@@ -16,19 +16,23 @@ pub(super) struct SolidScene {
     pub(super) bodies: usize,
     pub(super) vertices: Vec<[f32; 3]>,
     pub(super) triangles: Vec<[[f32; 3]; 3]>,
+    /// Body index of each triangle.
+    pub(super) triangle_body: Vec<usize>,
 }
 
 impl SolidScene {
     pub(super) fn from_manifolds(solids: &[Manifold]) -> Self {
         let mut vertices = Vec::new();
         let mut triangles = Vec::new();
-        for mesh in solids.iter().map(|solid| solid.get_mesh_gl(0)) {
+        let mut triangle_body = Vec::new();
+        for (body, mesh) in solids.iter().map(|solid| solid.get_mesh_gl(0)).enumerate() {
             let points: Vec<[f32; 3]> = mesh
                 .vert_properties
                 .chunks_exact(mesh.num_prop as usize)
                 .map(|p| [p[0], p[1], p[2]])
                 .collect();
             for indices in mesh.tri_verts.as_chunks::<3>().0 {
+                triangle_body.push(body);
                 triangles.push(std::array::from_fn(|corner| {
                     points[indices[corner] as usize]
                 }));
@@ -39,6 +43,7 @@ impl SolidScene {
             bodies: solids.len(),
             vertices,
             triangles,
+            triangle_body,
         }
     }
 }
@@ -144,9 +149,10 @@ impl SolidProjector {
 
     /// Orbit pivot for a drag starting at `point`: the nearest surface under the cursor,
     /// or the current pivot depth when the cursor misses (web: `getOrbitAnchorPoint`).
-    pub(super) fn pick_pivot(&self, scene: &SolidScene, point: Point) -> [f32; 3] {
-        let mut nearest: Option<f32> = None;
-        for &[a, b, c] in &scene.triangles {
+    /// Nearest triangle under screen `point`: (view depth, triangle index).
+    pub(super) fn hit(&self, scene: &SolidScene, point: Point) -> Option<(f32, usize)> {
+        let mut nearest: Option<(f32, usize)> = None;
+        for (index, &[a, b, c]) in scene.triangles.iter().enumerate() {
             let [pa, pb, pc] = [a, b, c].map(|p| (self.screen(p), self.depth(p)));
             let det = (pb.0[1] - pc.0[1]) * (pa.0[0] - pc.0[0])
                 + (pc.0[0] - pb.0[0]) * (pa.0[1] - pc.0[1]);
@@ -172,10 +178,21 @@ impl SolidProjector {
             } else {
                 wa * pa.1 + wb * pb.1 + wc * pc.1
             };
-            if nearest.is_none_or(|best| depth > best) {
-                nearest = Some(depth);
+            if nearest.is_none_or(|(best, _)| depth > best) {
+                nearest = Some((depth, index));
             }
         }
+        nearest
+    }
+
+    /// Body under screen `point`.
+    pub(super) fn pick_body(&self, scene: &SolidScene, point: Point) -> Option<usize> {
+        self.hit(scene, point)
+            .map(|(_, index)| scene.triangle_body[index])
+    }
+
+    pub(super) fn pick_pivot(&self, scene: &SolidScene, point: Point) -> [f32; 3] {
+        let nearest = self.hit(scene, point).map(|(depth, _)| depth);
         let depth = nearest.unwrap_or_else(|| view3d::add(self.view.pan, self.view.pivot)[2]);
         self.model_at(point, depth)
     }

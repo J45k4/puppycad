@@ -3,7 +3,7 @@ use super::*;
 impl App {
     pub(super) fn editable_field_at(&self, point: Point) -> Option<EditField> {
         let layout = self.layout();
-        if !layout.right.contains(point.x, point.y) {
+        if !layout.right.contains(point.x, point.y) || self.extrude_draft.is_some() {
             return None;
         }
         if self.solid_preview
@@ -132,12 +132,7 @@ impl App {
                 Err(_) => "Offset error: enter a signed distance in mm".into(),
             },
             EditField::ExtrusionDepth => match edit.buffer.parse::<f32>() {
-                Ok(depth) => match self
-                    .project
-                    .as_mut()
-                    .expect("solid editor has project")
-                    .set_extrusion_depth_at(self.selected_solid, depth)
-                {
+                Ok(depth) => match self.set_solid_depth(depth) {
                     Ok(()) => format!("Extrusion depth set to {depth:.1} mm  |  Ctrl+S to save"),
                     Err(error) => format!("Extrusion error: {error}"),
                 },
@@ -850,13 +845,19 @@ impl App {
             1.5,
             TEXT,
         );
-        if let Some(solids) = self
+        if self.extrude_draft.is_some() {
+            self.paint_draft_panel(painter, layout);
+        } else if let Some(solids) = self
             .project
             .as_ref()
             .and_then(ProjectFile::extrusion_previews)
             .filter(|_| self.solid_preview)
         {
             let selected = self.selected_solid.min(solids.len() - 1);
+            let options = self
+                .project
+                .as_ref()
+                .and_then(|project| project.extrusion_options_at(selected));
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 66.0,
@@ -871,11 +872,43 @@ impl App {
                 1.25,
                 TEXT,
             );
+            if let Some(options) = &options {
+                let target = match &options.end {
+                    project::EndCondition::UpToBody(target) => Some(target.as_str()),
+                    _ => None,
+                };
+                for (row, line) in [
+                    Some(format!("END     {}   [E]", options.end.label())),
+                    Some(format!(
+                        "FLIP    {}   [F]",
+                        if options.flip { "ON" } else { "OFF" }
+                    )),
+                    target.map(|target| {
+                        format!(
+                            "TARGET  {target}   {}",
+                            if self.body_pick { "PICK..." } else { "[U]" }
+                        )
+                    }),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if let Some(line) = line {
+                        painter.text(
+                            layout.right.x + 18.0,
+                            layout.right.y + 143.0 + row as f32 * 30.0,
+                            &line,
+                            1.25,
+                            TEXT,
+                        );
+                    }
+                }
+            }
             painter.text(
                 layout.right.x + 18.0,
-                layout.right.y + 155.0,
+                layout.right.y + 245.0,
                 if solids.len() == 1 {
-                    "CLICK DEPTH TO EDIT"
+                    "CLICK A ROW TO EDIT"
                 } else {
                     "[ ]  SELECT FEATURE"
                 },
@@ -885,7 +918,7 @@ impl App {
             if solids.len() > 1 {
                 painter.text(
                     layout.right.x + 18.0,
-                    layout.right.y + 175.0,
+                    layout.right.y + 350.0,
                     &format!("FEATURE {} / {}", selected + 1, solids.len()),
                     1.0,
                     MUTED,
@@ -893,21 +926,21 @@ impl App {
             }
             painter.text(
                 layout.right.x + 18.0,
-                layout.right.y + 190.0,
+                layout.right.y + 285.0,
                 "TAB  Sketch view",
                 1.2,
                 MUTED,
             );
             painter.text(
                 layout.right.x + 18.0,
-                layout.right.y + 230.0,
+                layout.right.y + 320.0,
                 "CTRL+E  EXPORT STL",
                 1.2,
                 TEXT,
             );
             painter.text(
                 layout.right.x + 18.0,
-                layout.right.y + 265.0,
+                layout.right.y + 350.0,
                 "DEL  REMOVE FEATURE",
                 1.2,
                 MUTED,

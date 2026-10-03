@@ -1364,6 +1364,77 @@ impl ProjectFile {
         }))
     }
 
+    /// Ids of the extrusions that start bodies, in body order.
+    pub fn body_ids(&self) -> Vec<String> {
+        self.extrude_nodes()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|node| node.get("operation").and_then(Value::as_str) == Some("newBody"))
+            .filter_map(|node| node.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    }
+
+    /// Copy of an extrusion node, for undo.
+    pub fn extrude_node_snapshot(&self, index: usize) -> Option<Value> {
+        self.extrude_node_at(index).cloned()
+    }
+
+    /// Put back an extrusion node saved by `extrude_node_snapshot`; the
+    /// graph is unchanged when the result would not evaluate.
+    pub fn restore_extrude_node(&mut self, index: usize, node: Value) -> Result<(), String> {
+        let path = format!("/items/{}/data/cad/nodes", self.part_index);
+        let nodes = self
+            .value
+            .pointer_mut(&path)
+            .and_then(Value::as_array_mut)
+            .ok_or("project CAD graph changed unexpectedly")?;
+        let slot = nodes
+            .iter_mut()
+            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .nth(index)
+            .ok_or("extrusion node is missing")?;
+        if slot.get("id") != node.get("id") {
+            return Err("extrusion order changed".into());
+        }
+        let old = std::mem::replace(slot, node);
+        if self.evaluated_solids().is_some() {
+            return Ok(());
+        }
+        *self
+            .value
+            .pointer_mut(&path)
+            .and_then(Value::as_array_mut)
+            .expect("nodes checked above")
+            .iter_mut()
+            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .nth(index)
+            .expect("node checked above") = old;
+        Err("restored extrusion no longer evaluates".into())
+    }
+
+    /// The tool solid an extrusion would add, without changing the project.
+    pub fn ghost_extrusion(
+        &mut self,
+        current: &Document,
+        depth: f32,
+        profile_index: usize,
+        operation: &str,
+        options: &ExtrudeOptions,
+    ) -> Result<SolidPreview, String> {
+        let value = self.value.clone();
+        let document = self.sketches[self.active_sketch].document.clone();
+        let result = self
+            .create_extrusion_with_options(current, depth, profile_index, operation, options)
+            .and_then(|()| {
+                self.extrusion_previews()
+                    .and_then(|mut previews| previews.pop())
+                    .ok_or_else(|| "extrusion does not evaluate".to_string())
+            });
+        self.value = value;
+        self.sketches[self.active_sketch].document = document;
+        result
+    }
+
     pub fn delete_extrusion_at(&mut self, index: usize) -> Result<(), String> {
         if self
             .extrusion_previews()
@@ -1576,7 +1647,12 @@ impl ProjectFile {
                 .and_then(Value::as_array_mut)
                 .expect("nodes checked above")
                 .pop();
-            return Err("selected sketch does not form a supported closed profile".into());
+            return Err(match options.end {
+                EndCondition::ThroughAll | EndCondition::UpToBody(_) => {
+                    "the end condition does not reach a body in that direction".into()
+                }
+                _ => "selected sketch does not form a supported closed profile".into(),
+            });
         }
         self.value["items"][self.part_index]["data"]["cad"]["rootNodeIds"]
             .as_array_mut()
