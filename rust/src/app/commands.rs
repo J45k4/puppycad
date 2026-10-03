@@ -1067,7 +1067,7 @@ pub(super) static COMMANDS: &[Command] = &[
     ),
     cmd(
         Cmd::MateInstances,
-        "Mate selected face to hovered face (empty space: fasten to world)",
+        "Mate selected face/edge to hovered face/edge (empty space: fasten to world)",
         "J",
         C::Assembly,
         S::Assembly,

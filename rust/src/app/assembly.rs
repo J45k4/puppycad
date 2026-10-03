@@ -74,13 +74,15 @@ impl AsmField {
     }
 }
 
-/// A local face pick on an instance: point and outward normal in part
-/// coordinates.
+/// A local face or edge pick on an instance, in part coordinates: for a
+/// face the hit point and outward normal, for a sharp edge its midpoint and
+/// direction (the axis of a revolute or slider mate).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct FacePick {
     pub(super) instance: usize,
     pub(super) point: V3,
     pub(super) normal: V3,
+    pub(super) edge: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,6 +107,9 @@ pub(super) struct AssemblyView {
     edges: HashMap<String, Vec<project::SolidEdge>>,
     pub(super) selected: Option<usize>,
     pub(super) hovered: Option<usize>,
+    /// Sharp edge under the cursor (world space), highlighted and used as
+    /// the mate axis by J.
+    pub(super) hovered_edge: Option<project::SolidEdge>,
     /// Face clicked on the selected instance (mate side A).
     pub(super) pick_a: Option<FacePick>,
     /// Mate id selected in the Properties mate list (Delete removes it).
@@ -252,6 +257,7 @@ impl App {
             edges,
             selected: None,
             hovered: None,
+            hovered_edge: None,
             pick_a: None,
             selected_mate: None,
             prompt: None,
@@ -394,18 +400,66 @@ impl App {
             instance,
             point: std::array::from_fn(|i| local[i] / transform.scale[i]),
             normal: asm::v_unit(pose.vector(normal.map(f64::from)))?,
+            edge: false,
         })
+    }
+
+    /// The visible sharp edge near `point` as a local pick, with the world
+    /// edge for highlighting.
+    pub(super) fn assembly_edge_at(
+        &self,
+        layout: Layout,
+        point: Point,
+    ) -> Option<(FacePick, project::SolidEdge)> {
+        if !layout.viewport.contains(point.x, point.y) {
+            return None;
+        }
+        let view = self.assembly.as_ref()?;
+        let (scene, projector) = self.assembly_projector(layout)?;
+        let edge = self.edge_near(&projector, &scene, point)?;
+        let instance = scene
+            .edges
+            .iter()
+            .find(|(_, e)| e.a == edge.a && e.b == edge.b)?
+            .0;
+        let transform = view.asm.instances[instance].transform();
+        let pose = transform.pose().inverse();
+        let mid: V3 = std::array::from_fn(|i| f64::from(edge.a[i] + edge.b[i]) * 0.5);
+        let local = pose.point(mid);
+        let direction = asm::v_sub(edge.b.map(f64::from), edge.a.map(f64::from));
+        Some((
+            FacePick {
+                instance,
+                point: std::array::from_fn(|i| local[i] / transform.scale[i]),
+                normal: asm::v_unit(pose.vector(direction))?,
+                edge: true,
+            },
+            edge,
+        ))
+    }
+
+    /// A sharp edge under the cursor wins over the face behind it.
+    pub(super) fn assembly_pick_at(&self, layout: Layout, point: Point) -> Option<FacePick> {
+        self.assembly_edge_at(layout, point)
+            .map(|(pick, _)| pick)
+            .or_else(|| self.assembly_face_at(layout, point))
     }
 
     /// Recompute the hovered instance; true when it changed.
     pub(super) fn update_assembly_hover(&mut self) -> bool {
         let layout = self.layout();
-        let hovered = self
-            .assembly_face_at(layout, self.cursor)
-            .map(|pick| pick.instance);
+        let edge = self.assembly_edge_at(layout, self.cursor);
+        let hovered = match &edge {
+            Some((pick, _)) => Some(pick.instance),
+            None => self
+                .assembly_face_at(layout, self.cursor)
+                .map(|pick| pick.instance),
+        };
+        let edge = edge.map(|(_, edge)| edge);
         match &mut self.assembly {
-            Some(view) if view.hovered != hovered => {
+            Some(view) if view.hovered != hovered || view.hovered_edge != edge => {
                 view.hovered = hovered;
+                view.hovered_edge = edge;
                 true
             }
             _ => false,
@@ -450,7 +504,7 @@ impl App {
         if !layout.viewport.contains(point.x, point.y) {
             return;
         }
-        let pick = self.assembly_face_at(layout, point);
+        let pick = self.assembly_pick_at(layout, point);
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
             view.selected = pick.map(|pick| pick.instance);
@@ -612,7 +666,7 @@ impl App {
     /// the cursor on another instance; a prompt then asks for the kind.
     pub(super) fn begin_mate(&mut self) {
         let layout = self.layout();
-        let b = self.assembly_face_at(layout, self.cursor);
+        let b = self.assembly_pick_at(layout, self.cursor);
         let Some(view) = &mut self.assembly else {
             return;
         };
@@ -640,21 +694,33 @@ impl App {
             return;
         };
         let ids = [a.instance, b.instance].map(|i| view.asm.instances[i].id.clone());
+        let poses = [a.instance, b.instance].map(|i| view.asm.instances[i].transform().pose());
         let names = [a.instance, b.instance].map(|i| view.asm.instances[i].label().to_string());
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
         }
         // Frame A's Z is A's outward face normal; frame B's Z points into B,
-        // so coinciding frames put the faces against each other.
+        // so coinciding frames put the faces against each other. An edge
+        // pick uses the edge direction instead, turned to agree with the
+        // other side's axis so the mate does not flip the instance.
+        let mut za = a.normal;
+        let mut zb = if b.edge {
+            b.normal
+        } else {
+            asm::v_scale(b.normal, -1.0)
+        };
+        if asm::v_dot(poses[0].vector(za), poses[1].vector(zb)) < 0.0 {
+            if b.edge {
+                zb = asm::v_scale(zb, -1.0);
+            } else if a.edge {
+                za = asm::v_scale(za, -1.0);
+            }
+        }
         self.assembly_edit(
             &format!("{} mate {} - {}", kind.label(), names[0], names[1]),
             |assembly| {
-                let ca =
-                    assembly.add_connector(Some(&ids[0]), &Pose::from_normal(a.point, a.normal));
-                let cb = assembly.add_connector(
-                    Some(&ids[1]),
-                    &Pose::from_normal(b.point, asm::v_scale(b.normal, -1.0)),
-                );
+                let ca = assembly.add_connector(Some(&ids[0]), &Pose::from_normal(a.point, za));
+                let cb = assembly.add_connector(Some(&ids[1]), &Pose::from_normal(b.point, zb));
                 assembly.add_mate(
                     kind,
                     MateRef {
@@ -992,6 +1058,10 @@ impl App {
                 painter.triangle(points[0], points[1], points[2], color);
             }
             paint_visible_edges(painter, &scene, &projector);
+            if let Some(edge) = &view.hovered_edge {
+                let (s, e) = (projector.screen(edge.a), projector.screen(edge.b));
+                painter.line(s[0], s[1], e[0], e[1], 3.0, FACE_HOVER);
+            }
             if let Some(pick) = view.pick_a {
                 let transform = view.asm.instances[pick.instance].transform();
                 let p = transform.apply(pick.point).map(|c| c as f32);

@@ -350,3 +350,61 @@ fn j_over_empty_space_fastens_the_selection_to_the_world() {
     assert_eq!(view(&app).asm.mates.len(), 2);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn hovered_edge_becomes_the_revolute_axis() {
+    let (mut app, dir) = open_fixture("edge-axis");
+    key(&mut app, KeyCode::KeyI);
+    key_text(&mut app, KeyCode::Digit1, Some("1"));
+    let p = point_on(&app, 0);
+    click(&mut app, p);
+    // Hover the midpoint of a visible edge of the inserted instance.
+    let (scene, projector) = app.assembly_projector(app.layout()).unwrap();
+    let target = scene
+        .edges
+        .iter()
+        .filter(|(i, _)| *i == 3)
+        .find_map(|(_, e)| {
+            let mid = std::array::from_fn(|i| (e.a[i] + e.b[i]) * 0.5);
+            let s = projector.screen(mid);
+            let point = Point { x: s[0], y: s[1] };
+            app.assembly_edge_at(app.layout(), point)
+                .filter(|(pick, _)| pick.instance == 3)
+                .map(|(_, edge)| (point, edge))
+        })
+        .expect("a visible edge");
+    drop(scene);
+    move_to(&mut app, target.0);
+    let hovered = view(&app).hovered_edge.clone().expect("edge highlighted");
+    assert_eq!(hovered.a, target.1.a);
+    let painter = app.paint();
+    drop(painter);
+    let before = view(&app).asm.instances[3].transform().pose();
+    key(&mut app, KeyCode::KeyJ);
+    match view(&app).prompt {
+        Some(AsmPrompt::MateKind { b, .. }) => assert!(b.edge),
+        ref other => panic!("{other:?} {}", app.status_message),
+    }
+    key_text(&mut app, KeyCode::Digit2, Some("2"));
+    let asm = &view(&app).asm;
+    assert_eq!(asm.mates.len(), 3, "{}", app.status_message);
+    let mate = asm.mates.last().unwrap();
+    assert_eq!(mate.kind, puppycad::assembly::MateKind::Revolute);
+    let connector = asm
+        .connectors
+        .iter()
+        .find(|c| c.id == mate.b.connector_id)
+        .unwrap();
+    // The connector's Z is parallel to the edge (in part coordinates).
+    let local = before.inverse();
+    let direction = local.vector(std::array::from_fn(|i| {
+        f64::from(hovered.b[i] - hovered.a[i])
+    }));
+    let z = connector.frame().axis(2);
+    let cross = puppycad::assembly::v_cross(z, puppycad::assembly::v_unit(direction).unwrap());
+    assert!(
+        puppycad::assembly::v_len(cross) < 1e-6,
+        "{z:?} {direction:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
