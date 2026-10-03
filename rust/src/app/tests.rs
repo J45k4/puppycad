@@ -11,6 +11,16 @@ fn layout_keeps_three_columns_and_toolbar_separate() {
     assert!(layout.tool_button(9).contains(1150.0, 55.0));
     assert!(layout.more_item(1).contains(1150.0, 145.0));
     assert!(layout.more_item(2).contains(1150.0, 180.0));
+    // MORE rows past the 18th open a second column that stays on screen.
+    for index in 0..20 {
+        let item = layout.more_item(index);
+        assert!(
+            item.y + item.h <= 800.0 && item.x >= 0.0,
+            "{index}: {item:?}"
+        );
+    }
+    assert!(layout.more_item(18).contains(1030.0, 110.0));
+    assert!(layout.more_item(19).contains(1030.0, 146.0));
     assert!(layout.sketch_row(1, 0).contains(100.0, 187.0));
     assert!(layout.row(0, 0, 2).contains(100.0, 227.0));
     assert!(layout.part_row(1).contains(100.0, 187.0));

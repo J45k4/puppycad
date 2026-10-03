@@ -131,6 +131,7 @@ impl App {
                 },
                 Err(_) => "Offset error: enter a signed distance in mm".into(),
             },
+            EditField::PatternValue => self.finish_pattern_edit(&edit.buffer),
             EditField::ExtrusionDepth => match edit.buffer.parse::<f32>() {
                 Ok(depth) => match self
                     .project
@@ -689,7 +690,7 @@ impl App {
                 row.x + 10.0,
                 row.y + 9.0,
                 &format!(
-                    "{} {}{}{}{}{}{}{}{}{}",
+                    "{} {}{}{}{}{}{}{}{}{}{}",
                     shape.name(),
                     shape.id(),
                     if self.document.construction.contains(&shape.id()) {
@@ -821,6 +822,11 @@ impl App {
                     },
                     if self.document.smooth_join_member(shape.id()) {
                         " [TJ]"
+                    } else {
+                        ""
+                    },
+                    if self.document.pattern_of(shape.id()).is_some() {
+                        " [PAT]"
                     } else {
                         ""
                     },
@@ -1620,6 +1626,7 @@ impl App {
                 | EditField::FilletRadius
                 | EditField::OffsetCreate
                 | EditField::OffsetDistance
+                | EditField::PatternValue
                 | EditField::ChamferFirst
                 | EditField::ChamferSecond
                 | EditField::Label(_)
@@ -1660,6 +1667,8 @@ impl App {
                 field.y + 7.0,
                 &if matches!(edit.field, EditField::OffsetCreate) {
                     format!("OFFSET > {}_ mm", edit.buffer)
+                } else if matches!(edit.field, EditField::PatternValue) {
+                    self.pattern_prompt_text(&edit.buffer)
                 } else if matches!(edit.field, EditField::FilletRadius) {
                     format!("FILLET R > {}_ mm", edit.buffer)
                 } else if matches!(edit.field, EditField::ChamferFirst) {

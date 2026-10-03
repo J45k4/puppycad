@@ -1,6 +1,7 @@
 mod corner;
 mod input;
 mod panels;
+mod pattern;
 mod project_panel;
 mod solid;
 mod tangent;
@@ -10,6 +11,7 @@ mod view_sketch;
 mod tests;
 
 use corner::*;
+use pattern::*;
 use project_panel::*;
 use solid::*;
 
@@ -64,6 +66,8 @@ struct Layout {
     top: Rect,
     bottom: Rect,
 }
+
+const MORE_COLUMN_ROWS: usize = 18;
 
 impl Layout {
     fn new(width: f32, height: f32) -> Self {
@@ -136,10 +140,19 @@ impl Layout {
 
     fn more_item(self, index: usize) -> Rect {
         let button = self.tool_button(9);
+        // Eighteen rows fill the 800 px window; later items open a second
+        // column to the left of the first rows.
+        let (column, row) = if index < MORE_COLUMN_ROWS {
+            (0.0, index)
+        } else {
+            (1.0, index - MORE_COLUMN_ROWS)
+        };
+        // The second column is wider so its longer labels stay inside.
+        let width = button.w + column * 90.0;
         Rect {
-            x: button.x,
-            y: 96.0 + index as f32 * 36.0,
-            w: button.w,
+            x: button.x - column * (width + 4.0),
+            y: 96.0 + row as f32 * 36.0,
+            w: width,
             h: 32.0,
         }
     }
@@ -213,6 +226,9 @@ pub(crate) struct App {
     corner_values: CornerValues,
     /// Distance the Offset prompt starts from (and remembers).
     offset_value: f32,
+    /// Linear/circular pattern prompt in progress.
+    pattern_prompt: Option<PatternPrompt>,
+    pattern_values: PatternValues,
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
@@ -239,6 +255,8 @@ enum Pick {
     Symmetry { axis: u32, first: Option<Point> },
     /// Mirror tool: click the mirror line for these shapes.
     Mirror { sources: Vec<u32> },
+    /// Circular pattern: click the rotation center for these shapes.
+    PatternCenter { sources: Vec<u32> },
 }
 
 struct DimensionEdit {
@@ -286,6 +304,8 @@ enum EditField {
     Label(DimensionKey),
     /// Sketch variable row (`None`: add a variable).
     Variable(Option<usize>),
+    /// One step of the linear/circular pattern prompt.
+    PatternValue,
 }
 
 impl Default for App {
@@ -324,6 +344,8 @@ impl Default for App {
             corner_pair: None,
             corner_values: CornerValues::default(),
             offset_value: 5.0,
+            pattern_prompt: None,
+            pattern_values: PatternValues::default(),
             analysis: Default::default(),
             selected_dimension: None,
             label_drag: None,
@@ -585,6 +607,9 @@ impl App {
                     }
                 };
             }
+            Some(Pick::PatternCenter { sources }) => {
+                self.status_message = self.pattern_center_click(sources, world);
+            }
             None => {}
         }
     }
@@ -843,6 +868,8 @@ impl App {
             "CHAMFER [SHIFT H]",
             "OFFSET [SHIFT U]",
             "TANGENT ARC [,]",
+            "LIN PATTERN [SHIFT Z]",
+            "CIRC PATTERN [;]",
         ]
         .into_iter()
         .enumerate()

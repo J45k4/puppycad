@@ -3227,3 +3227,71 @@ cp /tmp/native-dims.pcad /out/rust-native-dimensions.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Patterns: box-select a circle and make a linear pattern of 3 (Shift+Z),
+# then rotate a line six times about a sketch point (;, click the
+# point as the referenced center). Both save as web pattern relations.
+./target/debug/puppycad /tmp/native-pattern.pcad >/tmp/puppycad-pattern.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-pattern.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-pattern.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" c
+xdotool mousemove 360 260 click 1
+xdotool mousemove 385 260 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" v
+xdotool mousemove 320 220 mousedown 1
+xdotool mousemove 360 260
+xdotool mousemove 400 300
+xdotool mouseup 1
+sleep 0.3
+xdotool key --window "$window_id" shift+z
+xdotool type --clearmodifiers '3'
+xdotool key Return
+xdotool type --clearmodifiers '40'
+xdotool key Return
+xdotool type --clearmodifiers '0'
+xdotool key Return
+xdotool key Return
+sleep 0.5
+import -window root /out/rust-native-pattern-linear.png
+xdotool key --window "$window_id" p
+xdotool mousemove 640 470 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" l
+xdotool mousemove 680 470 click 1
+xdotool mousemove 740 470 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" v
+xdotool mousemove 710 470 click 1
+xdotool key --window "$window_id" semicolon
+xdotool type --clearmodifiers '6'
+xdotool key Return
+xdotool key Return
+xdotool mousemove 640 470 click 1
+sleep 0.5
+import -window root /out/rust-native-pattern-circular.png
+xdotool mousemove 1150 63 click 1
+sleep 0.3
+import -window root /out/rust-native-pattern-more.png
+xdotool mousemove 1150 63 click 1
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test -s /tmp/native-pattern.pcad
+grep -q '"type": *"linearPattern"' /tmp/native-pattern.pcad
+grep -q '"type": *"circularPattern"' /tmp/native-pattern.pcad
+grep -q '"centerAnchor"' /tmp/native-pattern.pcad
+cp /tmp/native-pattern.pcad /out/rust-native-pattern.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

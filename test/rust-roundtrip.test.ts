@@ -20,6 +20,7 @@ const EXPECTED: Record<string, number[]> = {
 	"graph-constrained-line.pcad": [1],
 	"mirror-symmetry.pcad": [1],
 	"offset.pcad": [1],
+	"patterns.pcad": [1],
 	"segmented-primitives.pcad": [1],
 	"segmented-slot.pcad": [1],
 	"splines.pcad": [1],

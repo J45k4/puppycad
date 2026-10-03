@@ -115,6 +115,13 @@ impl App {
                 self.redraw();
                 return;
             }
+            for (index, tool) in [(18, PatternTool::Linear), (19, PatternTool::Circular)] {
+                if layout.more_item(index).contains(point.x, point.y) {
+                    self.begin_pattern(tool);
+                    self.redraw();
+                    return;
+                }
+            }
             for (index, tool) in [Tool::Point, Tool::Polygon, Tool::Slot]
                 .into_iter()
                 .enumerate()
@@ -870,6 +877,7 @@ impl ApplicationHandler for App {
                             KeyCode::Escape => {
                                 self.editing = None;
                                 self.corner_pair = None;
+                                self.pattern_prompt = None;
                                 self.status_message = "Dimension edit cancelled".into();
                             }
                             KeyCode::Tab
@@ -896,6 +904,7 @@ impl ApplicationHandler for App {
                                 }
                             }
                             _ if !self.modifiers.control_key() && !self.modifiers.super_key() => {
+                                let pattern_signed = self.pattern_step_signed();
                                 if let (Some(editing), Some(text)) =
                                     (&mut self.editing, &event.text)
                                 {
@@ -942,7 +951,11 @@ impl ApplicationHandler for App {
                                                         | EditField::SplineY
                                                         | EditField::PointX
                                                         | EditField::PointY
-                                                )))
+                                                )
+                                                || (matches!(
+                                                    editing.field,
+                                                    EditField::PatternValue
+                                                ) && pattern_signed)))
                                             && editing.buffer.len() < 16
                                         {
                                             editing.buffer.push(ch);
@@ -1211,6 +1224,21 @@ impl ApplicationHandler for App {
                                 && !self.solid_preview =>
                         {
                             self.smooth_join_key();
+                        }
+                        KeyCode::KeyZ
+                            if self.modifiers.shift_key()
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.solid_preview =>
+                        {
+                            self.begin_pattern(PatternTool::Linear);
+                        }
+                        KeyCode::Semicolon
+                            if !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.solid_preview =>
+                        {
+                            self.begin_pattern(PatternTool::Circular);
                         }
                         KeyCode::KeyU if !self.read_only() && !self.solid_preview => {
                             let world = self

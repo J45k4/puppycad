@@ -399,6 +399,7 @@ impl Document {
             .copied()
             .chain(self.symmetry_followers())
             .chain(self.offset_followers())
+            .chain(self.pattern_followers())
             .chain(self.endpoint_joins.values().map(|(id, _)| *id))
             .chain(self.projected_targets())
             .collect();
@@ -943,6 +944,7 @@ impl Document {
         let (problem, entities) = self.build_problem(pins, false, drag);
         if problem.constraints.is_empty() {
             self.propagate_mirrors();
+            self.propagate_patterns();
             return Ok(());
         }
         // Stored geometry is f32, so pinned input carries ~1e-6 relative
@@ -1080,6 +1082,7 @@ impl Document {
             }
         }
         self.propagate_mirrors();
+        self.propagate_patterns();
         Ok(())
     }
 

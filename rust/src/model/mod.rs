@@ -10,6 +10,7 @@ mod drag;
 mod edit;
 mod geometry;
 mod offset;
+mod pattern;
 mod relations;
 mod selection;
 mod shapes;
@@ -26,6 +27,7 @@ pub use annotations::{
 pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
 pub use offset::{OffsetChain, offset_chain_segments, offset_shape};
+pub use pattern::{PatternKind, SketchPattern};
 pub use selection::SelectionFilter;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
@@ -162,6 +164,7 @@ struct DocumentState {
     offsets: HashMap<u32, (u32, f32)>,
     offset_chains: Vec<OffsetChain>,
     dims: DimensionMeta,
+    patterns: Vec<SketchPattern>,
 }
 
 #[derive(Clone, Debug)]
@@ -239,6 +242,9 @@ pub struct Document {
     /// Dimension annotations: label positions, point dimensions, reference
     /// dimensions, expressions and sketch variables.
     pub dims: DimensionMeta,
+    /// Linked linear and circular patterns (web `linearPattern` /
+    /// `circularPattern`).
+    pub patterns: Vec<SketchPattern>,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -294,6 +300,7 @@ impl Default for Document {
             offsets: HashMap::new(),
             offset_chains: Vec::new(),
             dims: DimensionMeta::default(),
+            patterns: Vec::new(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -426,6 +433,7 @@ impl Document {
             offsets: self.offsets.clone(),
             offset_chains: self.offset_chains.clone(),
             dims: self.dims.clone(),
+            patterns: self.patterns.clone(),
         }
     }
 
@@ -458,6 +466,7 @@ impl Document {
         self.offsets = state.offsets;
         self.offset_chains = state.offset_chains;
         self.dims = state.dims;
+        self.patterns = state.patterns;
         self.selected = None;
         self.selection_extra.clear();
         self.selection_primary = None;

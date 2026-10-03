@@ -528,6 +528,7 @@ impl Document {
             .copied()
             .chain(self.symmetry_followers())
             .chain(self.offset_followers())
+            .chain(self.pattern_followers())
             .collect();
         self.shapes
             .iter()

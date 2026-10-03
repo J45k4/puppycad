@@ -2260,6 +2260,105 @@ impl ProjectFile {
                             }
                             continue;
                         }
+                        if let Some(kind @ ("linearPattern" | "circularPattern")) =
+                            relation.get("type").and_then(Value::as_str)
+                        {
+                            let graph_shape = |graph_id: Option<&str>| {
+                                graph_id.and_then(|graph_id| {
+                                    entity_ids.iter().find_map(|(shape_id, id)| {
+                                        (id == graph_id).then_some(*shape_id)
+                                    })
+                                })
+                            };
+                            let ids = |value: Option<&Value>| -> Option<Vec<u32>> {
+                                value?
+                                    .as_array()?
+                                    .iter()
+                                    .map(|id| graph_shape(id.as_str()))
+                                    .collect()
+                            };
+                            let point = |value: Option<&Value>| -> Option<Point> {
+                                let value = value?;
+                                Some(Point {
+                                    x: value.get("x")?.as_f64()? as f32,
+                                    y: value.get("y")?.as_f64()? as f32,
+                                })
+                            };
+                            let sources = ids(relation.get("sources"));
+                            let instances: Option<Vec<Vec<u32>>> = relation
+                                .get("instances")
+                                .and_then(Value::as_array)
+                                .and_then(|groups| {
+                                    groups.iter().map(|group| ids(Some(group))).collect()
+                                });
+                            let pattern_kind = if kind == "linearPattern" {
+                                let cells = instances.as_ref().map_or(0, |i| i.len() + 1);
+                                let columns = match relation.get("columns") {
+                                    None => Some(cells),
+                                    Some(value) => value.as_u64().map(|c| c as usize),
+                                };
+                                let row_step = match relation.get("rowStep") {
+                                    None => Some(Point { x: 0.0, y: 20.0 }),
+                                    value => point(value),
+                                };
+                                match (point(relation.get("step")), columns, row_step) {
+                                    (Some(step), Some(columns), Some(row_step)) => {
+                                        Some(crate::model::PatternKind::Linear {
+                                            step,
+                                            columns,
+                                            row_step,
+                                        })
+                                    }
+                                    _ => None,
+                                }
+                            } else {
+                                let anchor =
+                                    match relation.get("centerAnchor") {
+                                        None => Some(None),
+                                        Some(anchor) => graph_shape(
+                                            anchor.get("entityId").and_then(Value::as_str),
+                                        )
+                                        .and_then(|id| {
+                                            let name = anchor.get("point")?.as_str()?;
+                                            let shape =
+                                                document.shapes.iter().find(|s| s.id() == id)?;
+                                            Some(Some((id, symmetry_anchor_index(shape, name)?)))
+                                        }),
+                                    };
+                                match (
+                                    point(relation.get("center")),
+                                    anchor,
+                                    relation.get("angle").and_then(Value::as_f64),
+                                ) {
+                                    (Some(center), Some(center_anchor), Some(angle)) => {
+                                        Some(crate::model::PatternKind::Circular {
+                                            center,
+                                            center_anchor,
+                                            angle: angle as f32,
+                                        })
+                                    }
+                                    _ => None,
+                                }
+                            };
+                            let plain = relation.get("id").and_then(Value::as_str).is_some()
+                                && relation.get("reference") != Some(&Value::Bool(true))
+                                && relation.get("expression").is_none()
+                                && relation.get("skipped").is_none();
+                            let loaded = match (sources, instances, pattern_kind) {
+                                (Some(sources), Some(instances), Some(kind)) if plain => document
+                                    .load_pattern(crate::model::SketchPattern {
+                                        sources,
+                                        instances,
+                                        kind,
+                                    })
+                                    .is_ok(),
+                                _ => false,
+                            };
+                            if !loaded {
+                                read_only_reason = Some("unsupported pattern relation".into());
+                            }
+                            continue;
+                        }
                         if matches!(
                             relation.get("type").and_then(Value::as_str),
                             Some("offset" | "offsetChain")
@@ -3245,8 +3344,8 @@ fn serialize_sketches(
             let Some(kind) = relation.get("type").and_then(Value::as_str) else {
                 return true;
             };
-            if kind == "distance" {
-                // Point dimensions are rewritten from the document below.
+            if kind == "distance" || kind == "linearPattern" || kind == "circularPattern" {
+                // Point dimensions and patterns are rewritten from the document below.
                 return false;
             }
             if kind == "fixed" {
@@ -4475,6 +4574,71 @@ fn serialize_sketches(
                 offset_chain_json(chain, &json!(relation_id), &next_ids)
                     .ok_or("Offset chain source is missing")?,
             );
+        }
+        for pattern in &document.patterns {
+            let graph = |id: &u32| -> Result<Value, String> {
+                next_ids
+                    .get(id)
+                    .map(|id| json!(id))
+                    .ok_or_else(|| "Pattern references deleted geometry".to_string())
+            };
+            let sources = pattern
+                .sources
+                .iter()
+                .map(graph)
+                .collect::<Result<Vec<_>, _>>()?;
+            let instances = pattern
+                .instances
+                .iter()
+                .map(|group| group.iter().map(graph).collect::<Result<Vec<_>, _>>())
+                .collect::<Result<Vec<_>, _>>()?;
+            let prefix = match pattern.kind {
+                crate::model::PatternKind::Linear { .. } => "linear-pattern",
+                crate::model::PatternKind::Circular { .. } => "circular-pattern",
+            };
+            let mut suffix = 1;
+            let mut relation_id = format!("{prefix}-{suffix}");
+            while !relation_ids.insert(relation_id.clone()) {
+                suffix += 1;
+                relation_id = format!("{prefix}-{suffix}");
+            }
+            let mut relation = json!({
+                "id": relation_id,
+                "type": if prefix == "linear-pattern" { "linearPattern" } else { "circularPattern" },
+                "sources": sources,
+                "instances": instances,
+            });
+            match pattern.kind {
+                crate::model::PatternKind::Linear {
+                    step,
+                    columns,
+                    row_step,
+                } => {
+                    relation["step"] = json!({"x": step.x, "y": step.y});
+                    relation["columns"] = json!(columns);
+                    relation["rowStep"] = json!({"x": row_step.x, "y": row_step.y});
+                }
+                crate::model::PatternKind::Circular {
+                    center,
+                    center_anchor,
+                    angle,
+                } => {
+                    let center = document.pattern_center(pattern).unwrap_or(center);
+                    relation["center"] = json!({"x": center.x, "y": center.y});
+                    relation["angle"] = json!(angle);
+                    if let Some((id, index)) = center_anchor {
+                        let shape = document
+                            .shapes
+                            .iter()
+                            .find(|shape| shape.id() == id)
+                            .ok_or("Pattern center is missing")?;
+                        let name =
+                            symmetry_anchor_name(shape, index).ok_or("Invalid pattern center")?;
+                        relation["centerAnchor"] = json!({"entityId": graph(&id)?, "point": name});
+                    }
+                }
+            }
+            relations.push(relation);
         }
         for pair in &document.symmetric_points {
             let anchor = |(id, index): (u32, usize)| -> Result<Value, String> {
@@ -7725,6 +7889,64 @@ mod tests {
         assert_eq!(final_document.concentric.get(&2), Some(&1));
         assert_eq!(final_document.shapes[0].center(), Point { x: 5.0, y: 8.0 });
         assert_eq!(final_document.shapes[1].center(), Point { x: 5.0, y: 8.0 });
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn linear_and_circular_patterns_round_trip_with_the_web_format() {
+        use crate::model::PatternKind;
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/patterns.pcad");
+        let path = test_path("patterns");
+        fs::copy(&fixture, &path).unwrap();
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        assert_eq!(project.read_only_reason(), None);
+        assert_eq!(document.patterns.len(), 2);
+        assert_eq!(document.patterns[0].sources, vec![1]);
+        assert_eq!(document.patterns[0].instances.len(), 5);
+        assert!(matches!(
+            document.patterns[0].kind,
+            PatternKind::Linear { columns: 3, .. }
+        ));
+        assert!(matches!(
+            document.patterns[1].kind,
+            PatternKind::Circular {
+                center_anchor: Some((8, 0)),
+                ..
+            }
+        ));
+        // Editing the source moves every linear copy; moving the referenced
+        // center moves the circular copies.
+        document.select_only(Some(1));
+        assert!(document.move_selected(Point { x: 1.0, y: 0.0 }));
+        assert_eq!(document.shapes[5].center(), Point { x: 51.0, y: 25.0 });
+        document.select_only(Some(8));
+        assert!(document.move_selected(Point { x: 0.0, y: 5.0 }));
+        project.save(&document).unwrap();
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let relations = saved
+            .pointer("/items/0/data/cad/nodes")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .find(|node| node["type"] == "sketch")
+            .unwrap()["relations"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert!(relations.iter().any(|r| r["type"] == "linearPattern"
+            && r["sources"] == json!(["native-entity-1"])
+            && r["columns"] == 3
+            && r["step"] == json!({"x": 20.0, "y": 0.0})
+            && r["rowStep"] == json!({"x": 0.0, "y": 15.0})));
+        assert!(relations.iter().any(|r| r["type"] == "circularPattern"
+            && r["centerAnchor"] == json!({"entityId": "native-entity-8", "point": "center"})
+            && r["center"] == json!({"x": 0.0, "y": 55.0})
+            && r["angle"] == 360.0
+            && r["instances"].as_array().unwrap().len() == 3));
+        let (reopened, loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(reopened.read_only_reason(), None);
+        assert_eq!(loaded.patterns, document.patterns);
+        assert_eq!(loaded.shapes[5].center(), Point { x: 51.0, y: 25.0 });
         fs::remove_file(path).unwrap();
     }
 

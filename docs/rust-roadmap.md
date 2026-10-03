@@ -51,7 +51,8 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 4. Offset, single and chain (**done**: `rust/src/model/offset.rs`; Shift+U /
    MORE → OFFSET; lines, circles, arcs and mitered line chains, matching the
    web scope).
-5. Linear and circular patterns.
+5. Linear and circular patterns (**done**: `rust/src/model/pattern.rs`;
+   Shift+Z / MORE → LIN PATTERN, `;` / MORE → CIRC PATTERN).
 6. Tangent arc and smooth join (**done**: `rust/src/model/tangent.rs`; `,` /
    MORE → TANGENT ARC, `.` smooth join, web `smoothJoin`).
 7. Remaining spline constraints (**done** to the web scope: fixed,
