@@ -1037,7 +1037,17 @@ impl Document {
     /// Covers every solver-modeled shape: lines, points, circles, arcs,
     /// ellipses, elliptic arcs and splines. Run once per committed edit.
     pub fn analyze_constraints(&self) -> SketchAnalysis {
-        let (problem, entities) = self.build_problem(&HashSet::new(), true, None);
+        let (mut problem, entities) = self.build_problem(&HashSet::new(), true, None);
+        // Pattern copies follow their sources (they are regenerated after
+        // every solve), so their parameters are not free.
+        let instances: HashSet<u32> = self.pattern_followers().collect();
+        for id in &instances {
+            if let Some(found) = entities.get(id) {
+                for var in found.vars() {
+                    problem.locked[var] = true;
+                }
+            }
+        }
         let analysis = problem.analyze(&problem.params, 1e-3);
         let mut owner = vec![0u32; problem.params.len()];
         for (&id, found) in &entities {
@@ -1063,6 +1073,18 @@ impl Document {
             let vars = found.vars();
             if vars.iter().all(|&var| analysis.fixed[var]) {
                 result.fully_constrained.insert(id);
+            }
+        }
+        // A copy is as constrained as its pattern's sources.
+        for pattern in &self.patterns {
+            let sources_fixed = pattern
+                .sources
+                .iter()
+                .all(|id| result.fully_constrained.contains(id));
+            for id in pattern.instances.iter().flatten() {
+                if !sources_fixed {
+                    result.fully_constrained.remove(id);
+                }
             }
         }
         result

@@ -390,7 +390,10 @@ circle 3, an arc 5 (center, radius, start, sweep), an ellipse 5 (center, axes,
 rotation), an elliptic arc 7, a spline 2 per handle, a corner rectangle 4 (two
 corners), a rotated rectangle 5, a polygon 4 (center, radius, rotation) and a
 slot 5 (cap centers, width). Point-on-curve, tangency and other curve
-relations count toward the rank like every other relation.
+relations count toward the rank like every other relation. Pattern copies
+follow their sources, so their parameters are not free: a six-copy circular
+pattern of one free line reads DOF 4, and a copy is drawn fully constrained
+only when every source of its pattern is.
 
 In the sketch view the header's right edge shows **DOF n** (green at 0),
 **OVER-CONSTRAINED** (purple) when a relation is redundant, or **CONFLICT**

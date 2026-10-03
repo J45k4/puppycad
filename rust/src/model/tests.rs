@@ -6670,3 +6670,20 @@ fn derived_anchor_drag_slides_along_relations() {
     assert!((rotation - 90.0).abs() < 0.5, "{rotation}");
     assert_mirrored(&doc);
 }
+
+#[test]
+fn pattern_copies_do_not_add_degrees_of_freedom() {
+    let mut doc = line_doc(&[(pt(10.0, 0.0), pt(20.0, 0.0))]);
+    doc.circular_pattern(&[1], 6, 360.0, pt(0.0, 0.0), None)
+        .unwrap();
+    assert_eq!(doc.shapes.len(), 6);
+    let analysis = doc.analyze_constraints();
+    // Only the source line is free.
+    assert_eq!(analysis.dof, 4);
+    assert!(analysis.fully_constrained.is_empty());
+    doc.fixed_anchors.insert((1, 0), pt(10.0, 0.0));
+    doc.fixed_anchors.insert((1, 1), pt(20.0, 0.0));
+    let analysis = doc.analyze_constraints();
+    assert_eq!(analysis.dof, 0);
+    assert_eq!(analysis.fully_constrained.len(), 6);
+}
