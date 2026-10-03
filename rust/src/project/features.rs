@@ -1121,6 +1121,27 @@ impl ProjectFile {
         self.sketches[self.active_sketch].document = current.clone();
     }
 
+    /// Bodies after evaluating the features before feature `index` (all
+    /// features when `index` is past the end); empty without features.
+    pub(super) fn bodies_before(&self, index: usize) -> Vec<Manifold> {
+        let Some(evaluation) = self.evaluate_tree() else {
+            return Vec::new();
+        };
+        if index >= evaluation.statuses.len() {
+            return evaluation.bodies;
+        }
+        index
+            .checked_sub(1)
+            .and_then(|last| {
+                self.feature_cache
+                    .entries
+                    .borrow()
+                    .get(last)
+                    .map(|entry| entry.bodies.clone())
+            })
+            .unwrap_or_default()
+    }
+
     /// Evaluate every feature in order. None when the part has no features
     /// or contains nodes the native evaluator does not support.
     pub(super) fn evaluate_tree(&self) -> Option<TreeEvaluation> {

@@ -58,6 +58,7 @@ impl Document {
         self.forget_symmetry(id);
         self.forget_offsets(id);
         self.forget_patterns(id);
+        self.projections.remove(&id);
         self.construction.remove(&id);
         self.axis_constraints.remove(&id);
         self.point_links

@@ -1029,6 +1029,14 @@ impl Document {
             entities,
             ..
         } = b;
+        // Projected entities follow the body, not the solver.
+        for id in self.projections.keys() {
+            if let Some(found) = entities.get(id) {
+                for var in found.vars() {
+                    problem.locked[var] = true;
+                }
+            }
+        }
         problem.constraints = constraints;
         (problem, entities)
     }

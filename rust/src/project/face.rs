@@ -247,7 +247,22 @@ impl ProjectFile {
         let profile = profiles_from_document(&workspace.document)?
             .into_iter()
             .nth(index)?;
-        let frame = self.sketch_frame_guarded(sketch_id, chain)?;
+        let mut frame = self.sketch_frame_guarded(sketch_id, chain)?;
+        // Native placement of blind and symmetric prisms (the web treats
+        // every extrusion as blind from the sketch plane): the faces must
+        // lie where the evaluated body has them.
+        let start = match extrude_options(extrude) {
+            Ok(ExtrudeOptions {
+                end: EndCondition::Symmetric,
+                ..
+            }) => -depth / 2.0,
+            Ok(ExtrudeOptions {
+                end: EndCondition::Blind,
+                flip: true,
+            }) => -depth,
+            _ => 0.0,
+        };
+        frame.origin = frame.world(Point { x: 0.0, y: 0.0 }, start);
         Some(ExtrusionBase {
             frame,
             loops: std::iter::once(profile.outer)
@@ -329,49 +344,6 @@ impl ProjectFile {
         self.sketches.get(index)?.face.as_ref()
     }
 
-    /// The supporting extrusion's prism edges projected into face sketch
-    /// `index` (web `sketchSupportEdges`); empty for reference-plane sketches.
-    pub fn sketch_support_edges(&self, index: usize) -> Vec<(Point, Point)> {
-        let Some(sketch) = self.sketches.get(index) else {
-            return Vec::new();
-        };
-        let Some(face) = &sketch.face else {
-            return Vec::new();
-        };
-        let Some(frame) = self.sketch_frame(&sketch.id) else {
-            return Vec::new();
-        };
-        let Some(base) = self
-            .extrude_node(&face.extrude_id)
-            .and_then(|extrude| self.extrusion_base(extrude, 0))
-        else {
-            return Vec::new();
-        };
-        let project = |point: Point, offset: f32| frame.local(base.frame.world(point, offset)).0;
-        let mut edges: Vec<(Point, Point)> = Vec::new();
-        for loop_points in &base.loops {
-            for i in 0..loop_points.len() {
-                let (a, b) = (loop_points[i], loop_points[(i + 1) % loop_points.len()]);
-                for (p, q) in [
-                    (project(a, 0.0), project(b, 0.0)),
-                    (project(a, base.depth), project(b, base.depth)),
-                    (project(a, 0.0), project(a, base.depth)),
-                ] {
-                    let same = |u: Point, v: Point| u.distance(v) < 1e-5;
-                    if same(p, q)
-                        || edges
-                            .iter()
-                            .any(|&(u, v)| (same(u, p) && same(v, q)) || (same(u, q) && same(v, p)))
-                    {
-                        continue;
-                    }
-                    edges.push((p, q));
-                }
-            }
-        }
-        edges
-    }
-
     /// Adds an empty sketch on an extrusion face and makes it active.
     pub fn create_sketch_on_face(
         &mut self,
@@ -431,7 +403,9 @@ impl ProjectFile {
         });
         self.active_sketch = self.sketches.len() - 1;
         let mut document = Document::default();
-        document.reference_edges = self.sketch_support_edges(self.active_sketch);
+        let context = self.sketch_context(self.active_sketch);
+        document.reference_edges = context.edges;
+        document.reference_silhouette = context.silhouette;
         Ok(document)
     }
 }

@@ -15,6 +15,7 @@ mod glyphs;
 mod history;
 mod offset;
 mod pattern;
+mod projection;
 mod relations;
 mod selection;
 mod shapes;
@@ -34,6 +35,7 @@ pub use glyphs::{GLYPH_PAD, Inference, InferenceKind, PlacedGlyph, RelationGlyph
 pub use history::{HistoryStep, next_step_stamp, number_label as history_number_label};
 pub use offset::{OffsetChain, offset_chain_segments, offset_shape};
 pub use pattern::{PatternKind, SketchPattern};
+pub use projection::{EdgeKey, ProjectedCurve, ProjectionSource, classify_polyline};
 pub use selection::SelectionFilter;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
@@ -171,6 +173,7 @@ struct DocumentState {
     offset_chains: Vec<OffsetChain>,
     dims: DimensionMeta,
     patterns: Vec<SketchPattern>,
+    projections: HashMap<u32, ProjectionSource>,
     /// Selected shape ids when the snapshot was taken (restored on undo).
     selection: Vec<u32>,
     /// Undo step label (see `history.rs`); set by `record_undo`.
@@ -263,6 +266,12 @@ pub struct Document {
     /// projected into the sketch plane). Their ends and midpoints snap; they
     /// are not sketch entities, take no relations and are never saved.
     pub reference_edges: Vec<(Point, Point)>,
+    /// Display-only outline of the rest of the face sketch's body projected
+    /// into the sketch plane (drawn dimmer; not snapped, never saved).
+    pub reference_silhouette: Vec<(Point, Point)>,
+    /// Projected entities (native `projected` relation): shape -> source.
+    /// The solver treats them as fixed.
+    pub projections: HashMap<u32, ProjectionSource>,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -321,6 +330,8 @@ impl Default for Document {
             dims: DimensionMeta::default(),
             patterns: Vec::new(),
             reference_edges: Vec::new(),
+            reference_silhouette: Vec::new(),
+            projections: HashMap::new(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -480,6 +491,7 @@ impl Document {
             offset_chains: self.offset_chains.clone(),
             dims: self.dims.clone(),
             patterns: self.patterns.clone(),
+            projections: self.projections.clone(),
             selection: self.selected_ids(),
             label: String::new(),
             stamp: 0,
@@ -516,6 +528,7 @@ impl Document {
         self.offset_chains = state.offset_chains;
         self.dims = state.dims;
         self.patterns = state.patterns;
+        self.projections = state.projections;
         let selection: Vec<u32> = state
             .selection
             .into_iter()

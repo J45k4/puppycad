@@ -374,11 +374,11 @@ impl App {
                     match project.switch_sketch(index, &self.document) {
                         Ok(document) => {
                             self.document = document;
-                            self.document.reference_edges = if self.face_context {
-                                project.sketch_support_edges(project.active_sketch())
+                            self.document.set_reference_context(if self.face_context {
+                                project.sketch_context(project.active_sketch())
                             } else {
-                                Vec::new()
-                            };
+                                Default::default()
+                            });
                             self.solid_preview = false;
                             self.selected_profile = 0;
                             self.editing = None;

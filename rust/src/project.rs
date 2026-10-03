@@ -16,8 +16,10 @@ use crate::model::{
 use crate::spline::{self, SplineMode};
 
 mod assemblies;
+mod context;
 mod face;
 mod features;
+pub use context::{SketchContext, context_in_frame};
 pub use face::{FaceDescriptor, FaceRef, Frame};
 pub use features::{
     EdgeRef, FeatureInfo, FinishKind, SHARP_EDGE_DEGREES, SolidEdge, Tri, sharp_edges,
@@ -3410,6 +3412,11 @@ impl ProjectFile {
 
     pub fn sketch_count(&self) -> usize {
         self.sketches.len()
+    }
+
+    /// Graph id of sketch `index`.
+    pub fn sketch_id(&self, index: usize) -> Option<String> {
+        self.sketches.get(index).map(|sketch| sketch.id.clone())
     }
 
     pub fn sketch_name(&self, index: usize) -> Option<&str> {

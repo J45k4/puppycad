@@ -27,6 +27,8 @@ mod history_tests;
 #[cfg(test)]
 mod input_tests;
 #[cfg(test)]
+mod projection_tests;
+#[cfg(test)]
 mod settings_tests;
 #[cfg(test)]
 mod status_tests;
@@ -563,11 +565,11 @@ impl App {
         match project.switch_part(target, &self.document) {
             Ok(document) => {
                 self.document = document;
-                self.document.reference_edges = if self.face_context {
-                    project.sketch_support_edges(project.active_sketch())
+                self.document.set_reference_context(if self.face_context {
+                    project.sketch_context(project.active_sketch())
                 } else {
-                    Vec::new()
-                };
+                    Default::default()
+                });
                 self.selected_solid = 0;
                 self.selected_profile = 0;
                 self.solid_preview = project.extrusion_previews().is_some();
@@ -911,12 +913,11 @@ impl App {
     /// Loads the active face sketch's supporting-body edges into the document
     /// (drawn behind the sketch and used as snap targets) unless key 5 hid them.
     fn refresh_reference_edges(&mut self) {
-        self.document.reference_edges = match &self.project {
-            Some(project) if self.face_context => {
-                project.sketch_support_edges(project.active_sketch())
-            }
-            _ => Vec::new(),
+        let context = match &self.project {
+            Some(project) if self.face_context => project.sketch_context(project.active_sketch()),
+            _ => Default::default(),
         };
+        self.document.set_reference_context(context);
     }
 
     fn toggle_glyphs(&mut self) {
