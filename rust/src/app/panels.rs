@@ -116,9 +116,10 @@ impl App {
     }
 
     pub(super) fn finish_dimension_edit(&mut self) {
-        let Some(edit) = self.editing.take() else {
+        let Some(mut edit) = self.editing.take() else {
             return;
         };
+        edit.buffer = self.entry_to_mm(edit.field, &edit.buffer);
         self.status_message = match edit.field {
             EditField::FilletRadius | EditField::ChamferFirst | EditField::ChamferSecond => {
                 self.finish_corner_edit(edit.field, &edit.buffer)
@@ -282,15 +283,18 @@ impl App {
             1.0,
             MUTED,
         );
-        let unit = if Document::dimension_is_angle(key) {
-            "deg"
-        } else {
-            "mm"
-        };
+        let angle = Document::dimension_is_angle(key);
+        let unit = if angle { "deg" } else { self.units().name() };
         let value = self
             .document
             .displayed_dimension_value(key)
-            .map(model::format_value)
+            .map(|value| {
+                if angle {
+                    model::format_value(value)
+                } else {
+                    model::format_value(self.units().mm_to_display(value))
+                }
+            })
             .unwrap_or_default();
         painter.text(
             x,
@@ -401,7 +405,7 @@ impl App {
             painter.rect(
                 row,
                 if editing.is_some() {
-                    [0.13, 0.29, 0.37, 1.0]
+                    ACTIVE_ROW
                 } else {
                     PANEL_LIGHT
                 },
@@ -493,14 +497,7 @@ impl App {
             for (perspective, label) in [(true, "PERSPECTIVE"), (false, "ORTHO")] {
                 let button = layout.projection_button(perspective);
                 let active = self.solid_view.perspective == perspective;
-                painter.rect(
-                    button,
-                    if active {
-                        [0.13, 0.31, 0.40, 1.0]
-                    } else {
-                        PANEL_LIGHT
-                    },
-                );
+                painter.rect(button, if active { ACTIVE } else { PANEL_LIGHT });
                 painter.outline(button, 1.0, if active { ACCENT } else { BORDER });
                 painter.text(
                     button.x + 10.0,
@@ -512,10 +509,10 @@ impl App {
             }
         }
         for (index, tool, label) in [
-            (0, Tool::Select, "SELECT  [V]"),
-            (1, Tool::Rectangle, "RECT  [R]"),
+            (0, Tool::Select, "SELECT [V]"),
+            (1, Tool::Rectangle, "RECT [R]"),
             (2, Tool::Circle, "CIRCLE [C]"),
-            (3, Tool::Line, "LINE   [L]"),
+            (3, Tool::Line, "LINE [L]"),
             (4, Tool::Ellipse, "ELLIPSE [E]"),
             (8, Tool::Arc, "ARC [A]"),
         ] {
@@ -523,7 +520,7 @@ impl App {
             painter.rect(
                 button,
                 if self.document.tool == tool {
-                    [0.13, 0.31, 0.40, 1.0]
+                    ACTIVE
                 } else {
                     PANEL_LIGHT
                 },
@@ -537,34 +534,31 @@ impl App {
                     BORDER
                 },
             );
-            painter.text(
-                button.x + 10.0,
-                button.y + 10.0,
-                label,
-                if tool == Tool::Ellipse { 1.0 } else { 1.25 },
-                TEXT,
-            );
+            paint_glyph(painter, button.x + 4.0, button.y + 8.0, index, ACCENT);
+            painter.text(button.x + 22.0, button.y + 12.0, label, 1.0, TEXT);
         }
-        for (index, label) in ["+ TOP [1]", "+ FRONT [2]", "+ RIGHT [3]"]
+        for (index, label) in ["TOP [1]", "FRONT [2]", "RIGHT [3]"]
             .into_iter()
             .enumerate()
         {
             let button = layout.tool_button(index + 5);
             painter.rect(button, PANEL_LIGHT);
             painter.outline(button, 1.0, BORDER);
-            painter.text(button.x + 8.0, button.y + 10.0, label, 1.0, TEXT);
+            paint_glyph(painter, button.x + 4.0, button.y + 8.0, index + 5, ACCENT);
+            painter.text(button.x + 22.0, button.y + 12.0, label, 1.0, TEXT);
         }
         let more = layout.tool_button(9);
         painter.rect(
             more,
             if self.more_open || matches!(self.document.tool, Tool::Point | Tool::Polygon) {
-                [0.13, 0.31, 0.40, 1.0]
+                ACTIVE
             } else {
                 PANEL_LIGHT
             },
         );
         painter.outline(more, 1.0, if self.more_open { ACCENT } else { BORDER });
-        painter.text(more.x + 8.0, more.y + 10.0, "MORE [M]", 1.0, TEXT);
+        paint_glyph(painter, more.x + 4.0, more.y + 8.0, 9, ACCENT);
+        painter.text(more.x + 22.0, more.y + 12.0, "MORE [M]", 1.0, TEXT);
         painter.text(17.0, layout.left.y + 19.0, "PROJECT", 1.5, TEXT);
         let part_rows = self.part_rows();
         if !part_rows.is_empty() {
@@ -584,7 +578,7 @@ impl App {
                 }
                 let active = *part_index == project.active_part_index();
                 if active {
-                    painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
+                    painter.rect(row, ACTIVE_ROW);
                 }
                 let name = project.part_name_at(*part_index).unwrap_or("Part");
                 let display_name = if name.chars().count() > 13 {
@@ -611,7 +605,7 @@ impl App {
                 .as_ref()
                 .is_none_or(|project| project.active_sketch() == index);
             if active {
-                painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
+                painter.rect(row, ACTIVE_ROW);
             }
             let name = self
                 .project
@@ -652,7 +646,7 @@ impl App {
             }
             let active = self.solid_preview && self.selected_solid == index;
             if active {
-                painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
+                painter.rect(row, ACTIVE_ROW);
             }
             painter.text(
                 row.x + 9.0,
@@ -683,7 +677,7 @@ impl App {
             }
             let row = layout.row(index + solids.len(), part_rows.len(), self.sketch_count());
             if selected_ids.contains(&shape.id()) {
-                painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
+                painter.rect(row, ACTIVE_ROW);
             }
             painter.text(
                 row.x + 10.0,
@@ -878,7 +872,7 @@ impl App {
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 113.0,
-                &format!("DEPTH   {:.1} mm", solids[selected].depth),
+                &format!("DEPTH   {}", self.len(solids[selected].depth)),
                 1.25,
                 TEXT,
             );
@@ -999,11 +993,11 @@ impl App {
             match shape {
                 Shape::Line { a, b, .. } => {
                     for (index, line) in [
-                        format!("LENGTH  {:.1} mm", a.distance(*b)),
-                        format!("START X {:.1} mm", a.x),
-                        format!("START Y {:.1} mm", a.y),
-                        format!("END X   {:.1} mm", b.x),
-                        format!("END Y   {:.1} mm", b.y),
+                        format!("LENGTH  {}", self.len(a.distance(*b))),
+                        format!("START X {}", self.len(a.x)),
+                        format!("START Y {}", self.len(a.y)),
+                        format!("END X   {}", self.len(b.x)),
+                        format!("END Y   {}", self.len(b.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1019,10 +1013,10 @@ impl App {
                 }
                 Shape::Rectangle { a, b, .. } => {
                     for (index, line) in [
-                        format!("WIDTH   {:.1} mm", (a.x - b.x).abs()),
-                        format!("HEIGHT  {:.1} mm", (a.y - b.y).abs()),
-                        format!("X       {:.1} mm", a.x.min(b.x)),
-                        format!("Y       {:.1} mm", a.y.min(b.y)),
+                        format!("WIDTH   {}", self.len((a.x - b.x).abs())),
+                        format!("HEIGHT  {}", self.len((a.y - b.y).abs())),
+                        format!("X       {}", self.len(a.x.min(b.x))),
+                        format!("Y       {}", self.len(a.y.min(b.y))),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1044,11 +1038,11 @@ impl App {
                     ..
                 } => {
                     for (index, line) in [
-                        format!("WIDTH   {:.1} mm", width),
-                        format!("HEIGHT  {:.1} mm", height),
+                        format!("WIDTH   {}", self.len(*width)),
+                        format!("HEIGHT  {}", self.len(*height)),
                         format!("ANGLE   {:.1} deg", rotation),
-                        format!("CENTER X {:.1} mm", center.x),
-                        format!("CENTER Y {:.1} mm", center.y),
+                        format!("CENTER X {}", self.len(center.x)),
+                        format!("CENTER Y {}", self.len(center.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1064,9 +1058,9 @@ impl App {
                 }
                 Shape::Circle { center, radius, .. } => {
                     for (index, line) in [
-                        format!("DIAMETER {:.1} mm", radius * 2.0),
-                        format!("CENTER X {:.1} mm", center.x),
-                        format!("CENTER Y {:.1} mm", center.y),
+                        format!("DIAMETER {}", self.len(radius * 2.0)),
+                        format!("CENTER X {}", self.len(center.x)),
+                        format!("CENTER Y {}", self.len(center.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1088,11 +1082,11 @@ impl App {
                     ..
                 } => {
                     for (index, line) in [
-                        format!("WIDTH   {:.1} mm", rx * 2.0),
-                        format!("HEIGHT  {:.1} mm", ry * 2.0),
+                        format!("WIDTH   {}", self.len(rx * 2.0)),
+                        format!("HEIGHT  {}", self.len(ry * 2.0)),
                         format!("ANGLE   {:.1} deg", rotation),
-                        format!("CENTER X {:.1} mm", center.x),
-                        format!("CENTER Y {:.1} mm", center.y),
+                        format!("CENTER X {}", self.len(center.x)),
+                        format!("CENTER Y {}", self.len(center.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1115,8 +1109,8 @@ impl App {
                     ..
                 } => {
                     for (index, line) in [
-                        format!("WIDTH   {:.1} mm", rx * 2.0),
-                        format!("HEIGHT  {:.1} mm", ry * 2.0),
+                        format!("WIDTH   {}", self.len(rx * 2.0)),
+                        format!("HEIGHT  {}", self.len(ry * 2.0)),
                         format!("ANGLE   {:.1} deg", rotation),
                         format!("START   {:.1} deg", start_angle.to_degrees()),
                         format!("SWEEP   {:.1} deg", sweep.to_degrees()),
@@ -1172,14 +1166,14 @@ impl App {
                         painter.text(
                             layout.right.x + 18.0,
                             layout.right.y + 193.0,
-                            &format!("POINT {} X {:.1} mm", index + 1, point.x),
+                            &format!("POINT {} X {}", index + 1, self.len(point.x)),
                             1.1,
                             if fixed { MUTED } else { ACCENT },
                         );
                         painter.text(
                             layout.right.x + 18.0,
                             layout.right.y + 223.0,
-                            &format!("POINT {} Y {:.1} mm", index + 1, point.y),
+                            &format!("POINT {} Y {}", index + 1, self.len(point.y)),
                             1.1,
                             if fixed { MUTED } else { ACCENT },
                         );
@@ -1202,11 +1196,11 @@ impl App {
                     ..
                 } => {
                     for (index, line) in [
-                        format!("RADIUS  {:.1} mm", radius),
+                        format!("RADIUS  {}", self.len(*radius)),
                         format!("SWEEP   {:.1} deg", sweep.to_degrees()),
                         format!("START   {:.1} deg", start_angle.to_degrees()),
-                        format!("CENTER X {:.1} mm", center.x),
-                        format!("CENTER Y {:.1} mm", center.y),
+                        format!("CENTER X {}", self.len(center.x)),
+                        format!("CENTER Y {}", self.len(center.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1221,9 +1215,12 @@ impl App {
                     }
                 }
                 Shape::Point { at, .. } => {
-                    for (index, line) in [format!("X {:.1} mm", at.x), format!("Y {:.1} mm", at.y)]
-                        .into_iter()
-                        .enumerate()
+                    for (index, line) in [
+                        format!("X {}", self.len(at.x)),
+                        format!("Y {}", self.len(at.y)),
+                    ]
+                    .into_iter()
+                    .enumerate()
                     {
                         painter.text(
                             layout.right.x + 18.0,
@@ -1252,10 +1249,10 @@ impl App {
                 } => {
                     for (index, line) in [
                         format!("SIDES    {sides}"),
-                        format!("RADIUS   {:.1} mm", radius),
+                        format!("RADIUS   {}", self.len(*radius)),
                         format!("ANGLE    {:.1} deg", rotation),
-                        format!("CENTER X {:.1} mm", center.x),
-                        format!("CENTER Y {:.1} mm", center.y),
+                        format!("CENTER X {}", self.len(center.x)),
+                        format!("CENTER Y {}", self.len(center.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1273,12 +1270,12 @@ impl App {
                     from, to, width, ..
                 } => {
                     for (index, line) in [
-                        format!("WIDTH    {:.1} mm", width),
-                        format!("DISTANCE {:.1} mm", from.distance(*to)),
-                        format!("FROM X   {:.1} mm", from.x),
-                        format!("FROM Y   {:.1} mm", from.y),
-                        format!("TO X     {:.1} mm", to.x),
-                        format!("TO Y     {:.1} mm", to.y),
+                        format!("WIDTH    {}", self.len(*width)),
+                        format!("DISTANCE {}", self.len(from.distance(*to))),
+                        format!("FROM X   {}", self.len(from.x)),
+                        format!("FROM Y   {}", self.len(from.y)),
+                        format!("TO X     {}", self.len(to.x)),
+                        format!("TO Y     {}", self.len(to.y)),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1489,7 +1486,7 @@ impl App {
                 painter.text(
                     layout.right.x + 18.0,
                     layout.right.y + 325.0,
-                    &format!("OFFSET {:.1} MM", value),
+                    &format!("OFFSET {}", self.len(value).to_uppercase()),
                     1.0,
                     ACCENT,
                 );
@@ -1497,7 +1494,7 @@ impl App {
                 painter.text(
                     layout.right.x + 18.0,
                     layout.right.y + 325.0,
-                    &format!("DIFF {:.1} MM", value),
+                    &format!("DIFF {}", self.len(*value).to_uppercase()),
                     1.0,
                     ACCENT,
                 );
@@ -1512,14 +1509,14 @@ impl App {
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 372.0,
-                &format!("MOVE X   {:.1} mm", self.move_offset.x),
+                &format!("MOVE X   {}", self.len(self.move_offset.x)),
                 1.2,
                 TEXT,
             );
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 402.0,
-                &format!("MOVE Y   {:.1} mm", self.move_offset.y),
+                &format!("MOVE Y   {}", self.len(self.move_offset.y)),
                 1.2,
                 TEXT,
             );
@@ -1554,14 +1551,14 @@ impl App {
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 562.0,
-                &format!("CX {:.1}", self.transform_center.x),
+                &format!("CX {}", self.len(self.transform_center.x)),
                 1.2,
                 TEXT,
             );
             painter.text(
                 layout.right.x + layout.right.w * 0.5 + 8.0,
                 layout.right.y + 562.0,
-                &format!("CY {:.1}", self.transform_center.y),
+                &format!("CY {}", self.len(self.transform_center.y)),
                 1.2,
                 TEXT,
             );
@@ -1704,24 +1701,24 @@ impl App {
                 },
                 h: 25.0,
             };
-            painter.rect(field, [0.13, 0.29, 0.37, 1.0]);
+            painter.rect(field, ACTIVE_ROW);
             painter.outline(field, 1.0, ACCENT);
             painter.text(
                 field.x + 8.0,
                 field.y + 7.0,
                 &if matches!(edit.field, EditField::OffsetCreate) {
-                    format!("OFFSET > {}_ mm", edit.buffer)
+                    format!("OFFSET > {}_ {}", edit.buffer, self.units().name())
                 } else if matches!(edit.field, EditField::PatternValue) {
                     self.pattern_prompt_text(&edit.buffer)
                 } else if matches!(edit.field, EditField::FilletRadius) {
-                    format!("FILLET R > {}_ mm", edit.buffer)
+                    format!("FILLET R > {}_ {}", edit.buffer, self.units().name())
                 } else if matches!(edit.field, EditField::ChamferFirst) {
-                    format!("CHAMFER D1 > {}_ mm", edit.buffer)
+                    format!("CHAMFER D1 > {}_ {}", edit.buffer, self.units().name())
                 } else if matches!(edit.field, EditField::ChamferSecond) {
                     if self.corner_values.mode == ChamferMode::DistanceAngle {
                         format!("CHAMFER ANGLE > {}_ deg", edit.buffer)
                     } else {
-                        format!("CHAMFER D2 > {}_ mm", edit.buffer)
+                        format!("CHAMFER D2 > {}_ {}", edit.buffer, self.units().name())
                     }
                 } else if matches!(edit.field, EditField::PolygonSides) {
                     format!("> {}_ sides", edit.buffer)
@@ -1732,7 +1729,7 @@ impl App {
                 } else if center_half {
                     format!("> {}_", edit.buffer)
                 } else {
-                    format!("> {}_ mm", edit.buffer)
+                    format!("> {}_ {}", edit.buffer, self.units().name())
                 },
                 1.25,
                 TEXT,
@@ -1816,7 +1813,19 @@ impl App {
         } else {
             &self.status_message
         };
-        painter.text(15.0, layout.bottom.y + 10.0, status, 1.2, MUTED);
+        // Keep the message left of the status fields (cursor, tool, snap).
+        let room = ((layout.status_info().x - 25.0) / 9.6).max(0.0) as usize;
+        let status: String = if status.chars().count() > room {
+            status
+                .chars()
+                .take(room.saturating_sub(3))
+                .chain("...".chars())
+                .collect()
+        } else {
+            status.to_string()
+        };
+        painter.text(15.0, layout.bottom.y + 10.0, &status, 1.2, MUTED);
+        self.paint_status_info(painter, layout);
         if !self.solid_preview {
             let filter = self.selection_filter;
             for (index, (label, on)) in [
@@ -1828,14 +1837,7 @@ impl App {
             .enumerate()
             {
                 let button = layout.filter_button(index);
-                painter.rect(
-                    button,
-                    if on {
-                        [0.13, 0.31, 0.40, 1.0]
-                    } else {
-                        PANEL_LIGHT
-                    },
-                );
+                painter.rect(button, if on { ACTIVE } else { PANEL_LIGHT });
                 painter.outline(button, 1.0, if on { ACCENT } else { BORDER });
                 painter.text(
                     button.x + 8.0,

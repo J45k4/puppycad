@@ -5,6 +5,11 @@ impl App {
         self.name_edit = None;
         let layout = self.layout();
         let point = self.cursor;
+        self.document.grid_step = self.settings.grid_mm;
+        if self.settings_click(layout, point) {
+            self.redraw();
+            return;
+        }
         if self.select_projection(layout, point) {
             self.redraw();
             return;
@@ -117,6 +122,11 @@ impl App {
             }
             if layout.more_item(20).contains(point.x, point.y) {
                 self.sketch_on_face();
+                self.redraw();
+                return;
+            }
+            if layout.more_item(21).contains(point.x, point.y) {
+                self.open_settings();
                 self.redraw();
                 return;
             }
@@ -684,13 +694,27 @@ impl App {
 }
 
 impl ApplicationHandler for App {
+    fn new_events(&mut self, _: &ActiveEventLoop, cause: winit::event::StartCause) {
+        // The tooltip timer fired: repaint once to show it.
+        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) {
+            self.redraw();
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_control_flow(match self.tooltip_deadline() {
+            Some(deadline) => winit::event_loop::ControlFlow::WaitUntil(deadline),
+            None => winit::event_loop::ControlFlow::Wait,
+        });
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
         }
-        let attributes = Window::default_attributes()
-            .with_title("PuppyCAD")
-            .with_inner_size(LogicalSize::new(1280.0, 800.0));
+        self.settings = Settings::load();
+        self.apply_settings();
+        let attributes = self.window_attributes();
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
@@ -707,6 +731,7 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.init_window_scale(&window);
         window.request_redraw();
         self.window = Some(window);
     }
@@ -716,7 +741,10 @@ impl ApplicationHandler for App {
             return;
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.save_window_geometry();
+                event_loop.exit()
+            }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
@@ -724,10 +752,12 @@ impl ApplicationHandler for App {
                 self.redraw();
             }
             WindowEvent::CursorMoved { position, .. } => {
+                // Physical pixels to layout units (UI scale).
                 let next = Point {
-                    x: position.x as f32,
-                    y: position.y as f32,
+                    x: position.x as f32 / self.ui_scale,
+                    y: position.y as f32 / self.ui_scale,
                 };
+                self.document.grid_step = self.settings.grid_mm;
                 let (dx, dy) = (next.x - self.cursor.x, next.y - self.cursor.y);
                 if self.pan_drag {
                     self.document.pan.x += dx;
@@ -753,6 +783,7 @@ impl ApplicationHandler for App {
                 if self.solid_preview {
                     self.update_face_hover();
                 }
+                self.update_hover();
                 self.redraw();
             }
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
@@ -827,6 +858,10 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    if self.settings_key(code) {
+                        self.redraw();
+                        return;
+                    }
                     if self.projects_page.is_some() {
                         let layout = self.layout();
                         match code {

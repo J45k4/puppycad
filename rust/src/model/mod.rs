@@ -198,6 +198,8 @@ pub struct Document {
     pub draft_start: Option<Point>,
     pub draft_end: Option<Point>,
     pub arc_clockwise: bool,
+    /// Grid snap spacing in millimeters (settings `grid_mm`).
+    pub grid_step: f32,
     /// Tangent arc source endpoint while [`Tool::TangentArc`] is placing.
     pub tangent_source: Option<(u32, u8)>,
     pub driving_dimensions: HashMap<(u32, DimensionField), f32>,
@@ -277,6 +279,7 @@ impl Default for Document {
             draft_start: None,
             draft_end: None,
             arc_clockwise: false,
+            grid_step: 1.0,
             tangent_source: None,
             driving_dimensions: HashMap::new(),
             construction: HashSet::new(),
@@ -373,9 +376,16 @@ impl Document {
         }
         best.or_else(|| {
             grid.then(|| SnapResult {
-                point: Point {
-                    x: raw.x.round(),
-                    y: raw.y.round(),
+                point: {
+                    let step = if self.grid_step > 0.0 {
+                        self.grid_step
+                    } else {
+                        1.0
+                    };
+                    Point {
+                        x: (raw.x / step).round() * step,
+                        y: (raw.y / step).round() * step,
+                    }
                 },
                 kind: SnapKind::Grid,
             })

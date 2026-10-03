@@ -41,13 +41,15 @@ impl App {
     pub(super) fn paint_grid(&self, painter: &mut Painter, layout: Layout) {
         let viewport = layout.viewport;
         let origin = self.viewport_origin();
-        let spacing = 25.0 * self.document.zoom;
+        // Grid lines every ~25 mm, on a whole multiple of the snap step.
+        let step = self.settings.grid_mm.max(0.01);
+        let spacing = step * (25.0 / step).round().max(1.0) * self.document.zoom;
         if spacing > 8.0 {
             let first_x =
                 viewport.x + (origin.x + self.document.pan.x - viewport.x).rem_euclid(spacing);
             let first_y =
                 viewport.y + (origin.y + self.document.pan.y - viewport.y).rem_euclid(spacing);
-            let grid: Color = [0.13, 0.16, 0.20, 1.0];
+            let grid: Color = GRID;
             let mut x = first_x;
             while x < viewport.x + viewport.w {
                 painter.line(x, viewport.y, x, viewport.y + viewport.h, 1.0, grid);
@@ -749,7 +751,7 @@ impl App {
             }
             let text = match editing {
                 Some((key, buffer)) if key == label.key => format!("{buffer}_"),
-                _ => label.text.clone(),
+                _ => self.display_label(label.key, &label.text),
             };
             let (w, h) = model::label_size(&text);
             let rect = Rect {

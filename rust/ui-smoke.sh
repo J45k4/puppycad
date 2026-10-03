@@ -19,6 +19,12 @@ cleanup() {
 trap cleanup EXIT
 
 export DISPLAY=:99
+# Settings come from an empty config dir at UI scale 1.0 so every click
+# position below matches the default 1280x800 layout.
+export PUPPYCAD_CONFIG_DIR=/tmp/puppycad-config
+rm -rf "$PUPPYCAD_CONFIG_DIR"
+mkdir -p "$PUPPYCAD_CONFIG_DIR"
+printf '{"ui_scale": 1.0}\n' > "$PUPPYCAD_CONFIG_DIR/settings.json"
 tries=0
 until xdpyinfo >/dev/null 2>&1; do
     tries=$((tries + 1))
@@ -3412,6 +3418,53 @@ sleep 0.5
 grep -q '"endCondition": "symmetric"' /tmp/native-extrude.pcad
 grep -q '"depth": 30' /tmp/native-extrude.pcad
 cp /tmp/native-extrude.pcad /out/rust-native-extrude-options.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
+
+# Settings: Ctrl+, opens the panel; UNITS cycles mm -> cm -> in and the
+# Properties panel shows inches; THEME switches to light; both restored.
+./target/debug/puppycad /tmp/native-settings.pcad >/tmp/puppycad-settings.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-settings.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-settings.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 520 320 click 1
+xdotool mousemove 774 470 click 1
+xdotool key --window "$window_id" v
+xdotool mousemove 520 400 click 1
+xdotool key --window "$window_id" ctrl+comma
+sleep 0.3
+xdotool mousemove 620 194 click 1
+xdotool mousemove 620 194 click 1
+sleep 0.3
+import -window root /out/rust-native-settings-inches.png
+grep -q '"units": "in"' "$PUPPYCAD_CONFIG_DIR/settings.json"
+xdotool key --window "$window_id" Escape
+xdotool mousemove 175 63
+sleep 0.8
+import -window root /out/rust-native-settings-properties-in.png
+xdotool key --window "$window_id" ctrl+comma
+xdotool mousemove 620 266 click 1
+sleep 0.3
+import -window root /out/rust-native-settings-light.png
+grep -q '"theme": "light"' "$PUPPYCAD_CONFIG_DIR/settings.json"
+xdotool mousemove 620 266 click 1
+xdotool mousemove 620 194 click 1
+xdotool mousemove 620 338 click 1
+sleep 0.3
+grep -q '"units": "mm"' "$PUPPYCAD_CONFIG_DIR/settings.json"
+grep -q '"theme": "dark"' "$PUPPYCAD_CONFIG_DIR/settings.json"
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
