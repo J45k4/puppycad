@@ -169,6 +169,8 @@ pub(crate) struct App {
     editing: Option<DimensionEdit>,
     name_edit: Option<NameEdit>,
     more_open: bool,
+    /// Multi-click gesture in progress (symmetry or mirror).
+    pick: Option<Pick>,
     move_offset: Point,
     scale_factor: f32,
     rotate_angle: f32,
@@ -187,6 +189,16 @@ pub(crate) struct App {
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
+}
+
+/// Viewport clicks a relation gesture is waiting for.
+#[derive(Clone, Debug, PartialEq)]
+enum Pick {
+    /// Shift+S with a mirror line selected: click the first shape, then the
+    /// second one.
+    Symmetry { axis: u32, first: Option<Point> },
+    /// Mirror tool: click the mirror line for these shapes.
+    Mirror { sources: Vec<u32> },
 }
 
 struct DimensionEdit {
@@ -239,6 +251,7 @@ impl Default for App {
             editing: None,
             name_edit: None,
             more_open: false,
+            pick: None,
             move_offset: Point { x: 10.0, y: -10.0 },
             scale_factor: 1.5,
             rotate_angle: 30.0,
@@ -379,6 +392,98 @@ impl App {
         }
         self.document.tool = tool;
         self.more_open = false;
+        self.pick = None;
+    }
+
+    /// Shift+S: arm the symmetry gesture with the selected line as axis.
+    fn begin_symmetry(&mut self) {
+        let axis = self.document.selected.filter(|&id| {
+            self.document
+                .shapes
+                .iter()
+                .any(|shape| shape.id() == id && matches!(shape, Shape::Line { .. }))
+        });
+        match axis {
+            Some(axis) => {
+                self.document.finish_drag();
+                self.pick = Some(Pick::Symmetry { axis, first: None });
+                self.status_message =
+                    "Symmetry: click the first shape, then its mirror  |  Esc to cancel".into();
+            }
+            None => {
+                self.status_message = "Select a mirror line, then Shift+S".into();
+            }
+        }
+    }
+
+    /// Mirror tool (Shift+I or MORE > MIRROR): mirror the selection across
+    /// the next clicked line.
+    fn begin_mirror(&mut self) {
+        self.more_open = false;
+        let sources: Vec<u32> = self.document.selected.into_iter().collect();
+        if sources.is_empty() {
+            self.status_message = "Select geometry to mirror first".into();
+            return;
+        }
+        self.document.finish_drag();
+        self.select_tool(Tool::Select);
+        self.pick = Some(Pick::Mirror { sources });
+        self.status_message = "Mirror: click the mirror line  |  Esc to cancel".into();
+    }
+
+    /// Handle a viewport click while a pick gesture is armed.
+    fn handle_pick(&mut self, world: Point) {
+        let tolerance = 7.0 / self.document.zoom.max(0.2);
+        match self.pick.take() {
+            Some(Pick::Symmetry { axis, first: None }) => {
+                self.pick = Some(Pick::Symmetry {
+                    axis,
+                    first: Some(world),
+                });
+                self.status_message = "Symmetry: click the mirrored shape  |  Esc to cancel".into();
+            }
+            Some(Pick::Symmetry {
+                axis,
+                first: Some(first),
+            }) => {
+                self.status_message = match self
+                    .document
+                    .toggle_symmetry_at(axis, first, world, tolerance)
+                {
+                    Ok(true) => "Symmetry set  |  Ctrl+S to save".into(),
+                    Ok(false) => "Symmetry removed".into(),
+                    Err(error) => format!("Symmetry: {error}"),
+                };
+            }
+            Some(Pick::Mirror { sources }) => {
+                let axis = self
+                    .document
+                    .shapes
+                    .iter()
+                    .rev()
+                    .find(|shape| {
+                        matches!(shape, Shape::Line { .. })
+                            && !sources.contains(&shape.id())
+                            && shape.hit(world, tolerance)
+                    })
+                    .map(Shape::id);
+                self.status_message = match axis {
+                    Some(axis) => match self.document.mirror_shapes(&sources, axis) {
+                        Ok(created) => format!(
+                            "Mirrored {} shape{}  |  Ctrl+S to save",
+                            created.len(),
+                            if created.len() == 1 { "" } else { "s" }
+                        ),
+                        Err(error) => format!("Mirror: {error}"),
+                    },
+                    None => {
+                        self.pick = Some(Pick::Mirror { sources });
+                        "Mirror: click a line to mirror across  |  Esc to cancel".into()
+                    }
+                };
+            }
+            None => {}
+        }
     }
 
     fn finish_spline(&mut self, closed: bool) {
@@ -625,6 +730,7 @@ impl App {
             "JOIN [SHIFT J]",
             "FIT SPLINE",
             "CTRL SPLINE",
+            "MIRROR [SHIFT I]",
         ]
         .into_iter()
         .enumerate()

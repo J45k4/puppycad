@@ -37,6 +37,7 @@ impl Document {
             .retain(|target, source| *target != id && *source != id);
         self.concentric
             .retain(|target, source| *target != id && *source != id);
+        self.forget_symmetry(id);
         self.construction.remove(&id);
         self.axis_constraints.remove(&id);
         self.point_links

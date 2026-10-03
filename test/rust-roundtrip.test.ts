@@ -17,6 +17,7 @@ const FIXTURES = join(ROOT, "rust", "fixtures")
 const EXPECTED: Record<string, number[]> = {
 	"extruded-rectangle.pcad": [1],
 	"graph-constrained-line.pcad": [1],
+	"mirror-symmetry.pcad": [1],
 	"segmented-primitives.pcad": [1],
 	"segmented-slot.pcad": [1],
 	"splines.pcad": [1],

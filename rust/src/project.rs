@@ -1981,6 +1981,69 @@ impl ProjectFile {
                             }
                             continue;
                         }
+                        if matches!(
+                            relation.get("type").and_then(Value::as_str),
+                            Some("symmetric" | "mirror")
+                        ) {
+                            let graph_shape = |graph_id: Option<&str>| {
+                                graph_id.and_then(|graph_id| {
+                                    entity_ids.iter().find_map(|(shape_id, id)| {
+                                        (id == graph_id).then_some(*shape_id)
+                                    })
+                                })
+                            };
+                            let axis =
+                                graph_shape(relation.get("symmetryLine").and_then(Value::as_str));
+                            let plain = relation.get("id").and_then(Value::as_str).is_some()
+                                && relation.get("reference") != Some(&Value::Bool(true))
+                                && relation.get("expression").is_none();
+                            let loaded = if relation["type"] == "symmetric" {
+                                let read_anchor = |side: &str| {
+                                    let id = graph_shape(
+                                        relation.pointer(&format!("/{side}/entityId"))?.as_str(),
+                                    )?;
+                                    let name =
+                                        relation.pointer(&format!("/{side}/point"))?.as_str()?;
+                                    let shape =
+                                        document.shapes.iter().find(|shape| shape.id() == id)?;
+                                    Some((id, symmetry_anchor_index(shape, name)?))
+                                };
+                                match (read_anchor("a"), read_anchor("b"), axis) {
+                                    (Some(a), Some(b), Some(axis))
+                                        if plain && a != b && a.0 != axis && b.0 != axis =>
+                                    {
+                                        document
+                                            .symmetric_points
+                                            .push(crate::model::SymmetricPoints { a, b, axis });
+                                        true
+                                    }
+                                    _ => false,
+                                }
+                            } else {
+                                let source = graph_shape(relation.get("a").and_then(Value::as_str));
+                                let target = graph_shape(relation.get("b").and_then(Value::as_str));
+                                match (source, target, axis) {
+                                    (Some(source), Some(target), Some(axis))
+                                        if plain
+                                            && source != target
+                                            && source != axis
+                                            && target != axis
+                                            && !document.mirrors.contains_key(&target)
+                                            && mirror_kinds_match(
+                                                &document, source, target, axis,
+                                            ) =>
+                                    {
+                                        document.mirrors.insert(target, (source, axis));
+                                        true
+                                    }
+                                    _ => false,
+                                }
+                            };
+                            if !loaded {
+                                read_only_reason = Some("unsupported symmetry relation".into());
+                            }
+                            continue;
+                        }
                         if relation.get("type").and_then(Value::as_str) == Some("concentric") {
                             let resolve = |side: &str| {
                                 relation.get(side)?.as_str().and_then(|graph_id| {
@@ -3134,6 +3197,55 @@ fn serialize_sketches(
                 }
                 return false;
             }
+            if kind == "symmetric" || kind == "mirror" {
+                let resolve = |id: Option<&str>| -> Option<u32> {
+                    let id = id?;
+                    old_graph_shape_ids
+                        .get(id)
+                        .or_else(|| graph_shape_ids.get(id))
+                        .copied()
+                };
+                let Some(axis) = resolve(relation.get("symmetryLine").and_then(Value::as_str))
+                else {
+                    return false;
+                };
+                let Some(axis_id) = next_ids.get(&axis) else {
+                    return false;
+                };
+                if kind == "mirror" {
+                    let source = resolve(relation.get("a").and_then(Value::as_str));
+                    let target = resolve(relation.get("b").and_then(Value::as_str));
+                    if let (Some(source), Some(target)) = (source, target)
+                        && document.mirrors.get(&target) == Some(&(source, axis))
+                        && let Some((source_id, target_id)) =
+                            next_ids.get(&source).zip(next_ids.get(&target))
+                    {
+                        relation["a"] = json!(source_id);
+                        relation["b"] = json!(target_id);
+                        relation["symmetryLine"] = json!(axis_id);
+                        return true;
+                    }
+                    return false;
+                }
+                let read = |side: &str| -> Option<(u32, usize)> {
+                    let id = resolve(relation.pointer(&format!("/{side}/entityId"))?.as_str())?;
+                    let name = relation.pointer(&format!("/{side}/point"))?.as_str()?;
+                    let shape = document.shapes.iter().find(|shape| shape.id() == id)?;
+                    Some((id, symmetry_anchor_index(shape, name)?))
+                };
+                if let (Some(a), Some(b)) = (read("a"), read("b"))
+                    && document
+                        .symmetric_points
+                        .contains(&crate::model::SymmetricPoints { a, b, axis })
+                    && let Some((a_id, b_id)) = next_ids.get(&a.0).zip(next_ids.get(&b.0))
+                {
+                    relation["a"]["entityId"] = json!(a_id);
+                    relation["b"]["entityId"] = json!(b_id);
+                    relation["symmetryLine"] = json!(axis_id);
+                    return true;
+                }
+                return false;
+            }
             if kind == "concentric" {
                 let resolve = |side: &str| -> Option<u32> {
                     let id = relation.get(side)?.as_str()?;
@@ -3621,6 +3733,75 @@ fn serialize_sketches(
             relations
                 .push(json!({"id":relation_id,"type":"concentric","a":source_id,"b":target_id}));
         }
+        let mut mirrors: Vec<_> = document.mirrors.iter().collect();
+        mirrors.sort_by_key(|(target, _)| **target);
+        for (&target, &(source, axis)) in mirrors {
+            let source_id = next_ids.get(&source).ok_or("Mirror source is missing")?;
+            let target_id = next_ids.get(&target).ok_or("Mirror target is missing")?;
+            let axis_id = next_ids.get(&axis).ok_or("Mirror line is missing")?;
+            if relations.iter().any(|relation| {
+                relation["type"] == "mirror"
+                    && relation["a"] == *source_id
+                    && relation["b"] == *target_id
+                    && relation["symmetryLine"] == *axis_id
+            }) {
+                continue;
+            }
+            let base = format!("native-mirror-{source_id}-{target_id}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(json!({
+                "id": relation_id,
+                "type": "mirror",
+                "a": source_id,
+                "b": target_id,
+                "symmetryLine": axis_id
+            }));
+        }
+        for pair in &document.symmetric_points {
+            let anchor = |(id, index): (u32, usize)| -> Result<Value, String> {
+                let graph_id = next_ids.get(&id).ok_or("Symmetric point is missing")?;
+                let shape = document
+                    .shapes
+                    .iter()
+                    .find(|shape| shape.id() == id)
+                    .ok_or("Symmetric point is missing")?;
+                let name = symmetry_anchor_name(shape, index).ok_or("Invalid symmetric point")?;
+                Ok(json!({"entityId": graph_id, "point": name}))
+            };
+            let (a, b) = (anchor(pair.a)?, anchor(pair.b)?);
+            let axis_id = next_ids.get(&pair.axis).ok_or("Symmetry line is missing")?;
+            if relations.iter().any(|relation| {
+                relation["type"] == "symmetric"
+                    && relation["a"] == a
+                    && relation["b"] == b
+                    && relation["symmetryLine"] == *axis_id
+            }) {
+                continue;
+            }
+            let base = format!(
+                "native-symmetric-{}-{}",
+                a["entityId"].as_str().unwrap_or(""),
+                b["entityId"].as_str().unwrap_or("")
+            );
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(json!({
+                "id": relation_id,
+                "type": "symmetric",
+                "a": a,
+                "b": b,
+                "symmetryLine": axis_id
+            }));
+        }
         let mut fixed: Vec<_> = document.fixed_anchors.iter().collect();
         fixed.sort_by_key(|((shape_id, index), _)| (*shape_id, *index));
         for (&(shape_id, index), &position) in fixed {
@@ -3738,6 +3919,60 @@ fn apply_construction(node: &mut Value, enabled: bool) -> Result<(), String> {
         target.remove("construction");
     }
     Ok(())
+}
+
+/// Web anchor name -> native symmetry anchor index (see
+/// `Document::symmetry_anchor_point`).
+fn symmetry_anchor_index(shape: &Shape, name: &str) -> Option<usize> {
+    match shape {
+        Shape::Line { .. } => match name {
+            "p0" => Some(0),
+            "p1" => Some(1),
+            _ => None,
+        },
+        Shape::Point { .. }
+        | Shape::Circle { .. }
+        | Shape::Arc { .. }
+        | Shape::Ellipse { .. }
+        | Shape::EllipticArc { .. } => (name == "center").then_some(0),
+        Shape::Spline { points, .. } => name
+            .strip_prefix("point")?
+            .parse::<usize>()
+            .ok()
+            .filter(|index| *index < points.len()),
+        _ => None,
+    }
+}
+
+fn symmetry_anchor_name(shape: &Shape, index: usize) -> Option<String> {
+    match (shape, index) {
+        (Shape::Line { .. }, 0) => Some("p0".into()),
+        (Shape::Line { .. }, 1) => Some("p1".into()),
+        (
+            Shape::Point { .. }
+            | Shape::Circle { .. }
+            | Shape::Arc { .. }
+            | Shape::Ellipse { .. }
+            | Shape::EllipticArc { .. },
+            0,
+        ) => Some("center".into()),
+        (Shape::Spline { points, .. }, index) if index < points.len() => {
+            Some(format!("point{index}"))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `target` has the kind a mirror of `source` across line `axis` has.
+fn mirror_kinds_match(document: &Document, source: u32, target: u32, axis: u32) -> bool {
+    let find = |id: u32| document.shapes.iter().find(|shape| shape.id() == id);
+    let (Some(source), Some(target), Some(Shape::Line { a, b, .. })) =
+        (find(source), find(target), find(axis))
+    else {
+        return false;
+    };
+    crate::model::mirror_shape(source, *a, *b)
+        .is_some_and(|expected| std::mem::discriminant(&expected) == std::mem::discriminant(target))
 }
 
 fn read_point(value: &Value) -> Option<Point> {
@@ -6127,6 +6362,69 @@ mod tests {
         assert_eq!(final_document.concentric.get(&2), Some(&1));
         assert_eq!(final_document.shapes[0].center(), Point { x: 5.0, y: 8.0 });
         assert_eq!(final_document.shapes[1].center(), Point { x: 5.0, y: 8.0 });
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mirror_and_symmetric_relations_round_trip_with_the_web_format() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/mirror-symmetry.pcad");
+        let path = test_path("mirror-symmetry");
+        fs::copy(&fixture, &path).unwrap();
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        assert_eq!(project.read_only_reason(), None);
+        assert_eq!(document.mirrors.get(&3), Some(&(2, 1)));
+        assert_eq!(
+            document.symmetric_points,
+            vec![crate::model::SymmetricPoints {
+                a: (4, 0),
+                b: (5, 0),
+                axis: 1
+            }]
+        );
+        // Moving the source circle moves its mirror image; moving the point
+        // moves the symmetric line end.
+        document.selected = Some(2);
+        assert!(document.move_selected(Point { x: 5.0, y: 0.0 }));
+        document.selected = Some(4);
+        assert!(document.move_selected(Point { x: 0.0, y: 4.0 }));
+        // A mirror copy made natively is saved as a web mirror relation.
+        let copy = document.mirror_shapes(&[5], 1).unwrap()[0];
+        project.save(&document).unwrap();
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let relations = saved
+            .pointer("/items/0/data/cad/nodes")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .find(|node| node["type"] == "sketch")
+            .unwrap()["relations"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert!(relations.iter().any(|r| r["id"] == "mirror-1"
+            && r["a"] == "native-entity-2"
+            && r["b"] == "native-entity-3"
+            && r["symmetryLine"] == "native-entity-1"));
+        assert!(relations.iter().any(|r| r["id"] == "symmetric-1"
+            && r["a"] == json!({"entityId": "native-entity-4", "point": "center"})
+            && r["b"] == json!({"entityId": "native-entity-5", "point": "p0"})));
+        assert_eq!(
+            relations.iter().filter(|r| r["type"] == "mirror").count(),
+            2
+        );
+        let (reopened, loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(reopened.read_only_reason(), None);
+        assert_eq!(loaded.mirrors.len(), 2);
+        assert_eq!(loaded.mirrors.get(&copy), Some(&(5, 1)));
+        assert_eq!(loaded.symmetric_points.len(), 1);
+        assert_eq!(loaded.shapes[2].center(), Point { x: -35.0, y: 10.0 });
+        assert!(matches!(
+            loaded.shapes[4],
+            Shape::Line {
+                a: Point { x: -20.0, y: -26.0 },
+                ..
+            }
+        ));
         fs::remove_file(path).unwrap();
     }
 

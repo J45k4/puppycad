@@ -78,6 +78,16 @@ impl App {
                 self.redraw();
                 return;
             }
+            if layout.more_item(13).contains(point.x, point.y) {
+                if self.read_only() {
+                    self.status_message =
+                        "READ ONLY: this sketch has unsupported native features".into();
+                } else {
+                    self.begin_mirror();
+                }
+                self.redraw();
+                return;
+            }
             for (index, tool) in [Tool::Point, Tool::Polygon, Tool::Slot]
                 .into_iter()
                 .enumerate()
@@ -301,6 +311,11 @@ impl App {
             return;
         }
         let raw_world = self.document.screen_to_world(point, self.viewport_origin());
+        if self.pick.is_some() && !self.read_only() {
+            self.handle_pick(raw_world);
+            self.redraw();
+            return;
+        }
         let world = if self.document.tool == Tool::Select {
             raw_world
         } else {
@@ -651,6 +666,28 @@ impl ApplicationHandler for App {
                         return;
                     }
                     match code {
+                        KeyCode::Escape if self.pick.is_some() => {
+                            self.pick = None;
+                            self.status_message = "Cancelled".into();
+                        }
+                        KeyCode::KeyS
+                            if self.modifiers.shift_key()
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.read_only()
+                                && !self.solid_preview =>
+                        {
+                            self.begin_symmetry();
+                        }
+                        KeyCode::KeyI
+                            if self.modifiers.shift_key()
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.read_only()
+                                && !self.solid_preview =>
+                        {
+                            self.begin_mirror();
+                        }
                         KeyCode::Enter | KeyCode::NumpadEnter
                             if matches!(
                                 self.document.tool,

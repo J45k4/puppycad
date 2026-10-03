@@ -160,6 +160,23 @@ pub enum Constraint {
     },
     /// Two parameters are equal.
     SameValue(usize, usize),
+    /// `a + b == 0` (mirrored sweeps and elliptic start angles).
+    Opposite(usize, usize),
+    /// The axis line is the perpendicular bisector of `a` and `b` (the web
+    /// `symmetric` relation; a point on the axis may map to itself).
+    Symmetric {
+        a: PointVar,
+        b: PointVar,
+        axis: LineVar,
+    },
+    /// `target == 2 * axis_angle - source`, wrapped; angles in degrees when
+    /// `degrees`, otherwise radians (mirrored rotations and arc starts).
+    MirrorAngle {
+        source: usize,
+        target: usize,
+        axis: LineVar,
+        degrees: bool,
+    },
     /// Point lies on a finite curve (segment, sweep, or spline span).
     /// `param` is an auxiliary spline parameter in segment units.
     PointOnCurve {
@@ -589,7 +606,21 @@ impl Constraint {
                 out.push(var);
                 value(&mut out, v);
             }
-            Constraint::SameValue(a, b) => out.extend([a, b]),
+            Constraint::SameValue(a, b) | Constraint::Opposite(a, b) => out.extend([a, b]),
+            Constraint::Symmetric { a, b, axis } => {
+                point(&mut out, a);
+                point(&mut out, b);
+                line(&mut out, axis);
+            }
+            Constraint::MirrorAngle {
+                source,
+                target,
+                axis,
+                ..
+            } => {
+                out.extend([source, target]);
+                line(&mut out, axis);
+            }
             Constraint::PointOnCurve {
                 point: p,
                 ref curve,
@@ -895,6 +926,29 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
         }
         Constraint::Equal { var, value: v } => out.push(p[var] - value(p, v)),
         Constraint::SameValue(a, b) => out.push(p[a] - p[b]),
+        Constraint::Opposite(a, b) => out.push(p[a] + p[b]),
+        Constraint::Symmetric { a, b, axis } => {
+            let direction = unit(p, axis);
+            let (ax, ay) = pt(p, a);
+            let (bx, by) = pt(p, b);
+            let (ox, oy) = pt(p, axis.a);
+            let middle = ((ax + bx) * 0.5 - ox, (ay + by) * 0.5 - oy);
+            out.extend([cross(middle, direction), dot((ax - bx, ay - by), direction)]);
+        }
+        Constraint::MirrorAngle {
+            source,
+            target,
+            axis,
+            degrees,
+        } => {
+            let (dx, dy) = delta(p, axis);
+            let scale = if degrees {
+                std::f64::consts::PI / 180.0
+            } else {
+                1.0
+            };
+            out.push(wrap((p[target] + p[source]) * scale - 2.0 * dy.atan2(dx)));
+        }
         Constraint::Radius { circle, value: v } => out.push(p[circle.radius] - value(p, v)),
         Constraint::EqualRadius(first, second) => out.push(p[first.radius] - p[second.radius]),
         Constraint::RadiusDifference {

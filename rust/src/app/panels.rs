@@ -468,7 +468,7 @@ impl App {
                 row.x + 10.0,
                 row.y + 9.0,
                 &format!(
-                    "{} {}{}{}{}{}{}{}",
+                    "{} {}{}{}{}{}{}{}{}",
                     shape.name(),
                     shape.id(),
                     if self.document.construction.contains(&shape.id()) {
@@ -591,6 +591,11 @@ impl App {
                             })
                         ))
                         .unwrap_or(""),
+                    if self.document.has_symmetry(shape.id()) {
+                        " [SYM]"
+                    } else {
+                        ""
+                    },
                     analysis.as_ref().map_or("", |analysis| {
                         if analysis.conflicting.contains(&shape.id()) {
                             " [!]"

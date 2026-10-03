@@ -8,12 +8,14 @@ mod geometry;
 mod relations;
 mod shapes;
 mod solve;
+mod symmetry;
 #[cfg(test)]
 mod tests;
 
 use geometry::*;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
+pub use symmetry::{mirror_shape, reflect_point};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
@@ -103,6 +105,16 @@ impl AxisConstraint {
     }
 }
 
+/// Point symmetry (the web `symmetric` relation): anchors `a` and `b`
+/// (shape id, anchor index as in [`Pin::Anchor`]) mirror each other across
+/// the line `axis`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SymmetricPoints {
+    pub a: (u32, usize),
+    pub b: (u32, usize),
+    pub axis: u32,
+}
+
 #[derive(Clone, Debug)]
 struct DocumentState {
     shapes: Vec<Shape>,
@@ -124,6 +136,8 @@ struct DocumentState {
     concentric: HashMap<u32, u32>,
     line_relations: HashMap<u32, (u32, LineRelationKind)>,
     fixed_anchors: HashMap<(u32, usize), Point>,
+    symmetric_points: Vec<SymmetricPoints>,
+    mirrors: HashMap<u32, (u32, u32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -166,6 +180,10 @@ pub struct Document {
     pub concentric: HashMap<u32, u32>,
     pub line_relations: HashMap<u32, (u32, LineRelationKind)>,
     pub fixed_anchors: HashMap<(u32, usize), Point>,
+    /// Point symmetry relations (web `symmetric`).
+    pub symmetric_points: Vec<SymmetricPoints>,
+    /// Whole-shape symmetry (web `mirror`): target -> (source, axis line).
+    pub mirrors: HashMap<u32, (u32, u32)>,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -209,6 +227,8 @@ impl Default for Document {
             concentric: HashMap::new(),
             line_relations: HashMap::new(),
             fixed_anchors: HashMap::new(),
+            symmetric_points: Vec::new(),
+            mirrors: HashMap::new(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -333,6 +353,8 @@ impl Document {
             concentric: self.concentric.clone(),
             line_relations: self.line_relations.clone(),
             fixed_anchors: self.fixed_anchors.clone(),
+            symmetric_points: self.symmetric_points.clone(),
+            mirrors: self.mirrors.clone(),
         }
     }
 
@@ -357,6 +379,8 @@ impl Document {
         self.concentric = state.concentric;
         self.line_relations = state.line_relations;
         self.fixed_anchors = state.fixed_anchors;
+        self.symmetric_points = state.symmetric_points;
+        self.mirrors = state.mirrors;
         self.selected = None;
         self.selected_spline_point = None;
         self.draft_start = None;

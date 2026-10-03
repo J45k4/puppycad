@@ -460,6 +460,7 @@ impl Document {
             .chain(self.point_curve_links.keys())
             .chain(self.point_links.values())
             .copied()
+            .chain(self.symmetry_followers())
             .collect();
         self.shapes
             .iter()
@@ -508,6 +509,15 @@ impl Document {
             return Ok(());
         }
         self.shapes = start.clone();
+        // Mirror lines stay put unless they are the dragged shape.
+        explicit.extend(
+            self.mirrors
+                .values()
+                .map(|&(_, axis)| axis)
+                .chain(self.symmetric_points.iter().map(|pair| pair.axis))
+                .filter(|&axis| axis != id)
+                .map(Pin::Shape),
+        );
         let second = self
             .solve_once(&explicit, Some((id, index)))
             .map(|()| (self.shapes.clone(), distance(self)));

@@ -4885,3 +4885,386 @@ fn curve_relations_follow_through_the_solver() {
     assert!(doc.move_selected(Point { x: 3.0, y: 4.0 }));
     assert_eq!(doc.shapes[1].center(), Point { x: 3.0, y: 4.0 });
 }
+
+fn axis_line(id: u32) -> Shape {
+    // Vertical mirror line x = 10.
+    Shape::Line {
+        id,
+        a: Point { x: 10.0, y: -50.0 },
+        b: Point { x: 10.0, y: 50.0 },
+    }
+}
+
+fn near(a: Point, b: Point) -> bool {
+    a.distance(b) < 1e-3
+}
+
+/// Every mirror relation holds: target equals the mirror image of source.
+fn assert_mirrored(doc: &Document) {
+    for (&target, &(source, axis)) in &doc.mirrors {
+        let find = |id: u32| doc.shapes.iter().find(|s| s.id() == id).unwrap().clone();
+        let Shape::Line { a, b, .. } = find(axis) else {
+            panic!("axis is not a line");
+        };
+        let expected = mirror_shape(&find(source), a, b).unwrap().with_id(target);
+        let actual = find(target);
+        let (p, q) = (expected.snap_points(), actual.snap_points());
+        assert!(
+            p.len() == q.len() && p.iter().all(|p| q.iter().any(|q| near(p.point, q.point))),
+            "{expected:?} != {actual:?}"
+        );
+    }
+}
+
+#[test]
+fn mirror_shape_reflects_each_kind() {
+    let a = Point { x: 0.0, y: 0.0 };
+    let b = Point { x: 0.0, y: 10.0 };
+    let line = Shape::Line {
+        id: 1,
+        a: Point { x: 1.0, y: 2.0 },
+        b: Point { x: 3.0, y: 5.0 },
+    };
+    assert_eq!(
+        mirror_shape(&line, a, b),
+        Some(Shape::Line {
+            id: 1,
+            a: Point { x: -1.0, y: 2.0 },
+            b: Point { x: -3.0, y: 5.0 },
+        })
+    );
+    let arc = Shape::Arc {
+        id: 2,
+        center: Point { x: 5.0, y: 0.0 },
+        radius: 2.0,
+        start_angle: 0.0,
+        sweep: 1.0,
+        segments: 32,
+    };
+    let Some(Shape::Arc {
+        center,
+        start_angle,
+        sweep,
+        ..
+    }) = mirror_shape(&arc, a, b)
+    else {
+        panic!("arc");
+    };
+    assert!(near(center, Point { x: -5.0, y: 0.0 }));
+    assert!((start_angle - std::f64::consts::PI).abs() < 1e-9 && sweep == -1.0);
+    let ellipse = Shape::EllipticArc {
+        id: 3,
+        center: Point { x: 4.0, y: 1.0 },
+        rx: 3.0,
+        ry: 1.0,
+        rotation: 30.0,
+        start_angle: 0.5,
+        sweep: 1.0,
+        segments: 32,
+    };
+    let mirrored = mirror_shape(&ellipse, a, b).unwrap();
+    assert!(matches!(
+        mirrored,
+        Shape::EllipticArc { rotation, start_angle, sweep, .. }
+            if (rotation - 150.0).abs() < 1e-4 && start_angle == -0.5 && sweep == -1.0
+    ));
+    // Every anchor of the source maps onto an anchor of the mirror image.
+    for shape in [
+        ellipse,
+        Shape::Polygon {
+            id: 4,
+            center: Point { x: 6.0, y: 2.0 },
+            radius: 3.0,
+            sides: 5,
+            rotation: 10.0,
+        },
+        Shape::Rectangle {
+            id: 5,
+            a: Point { x: 2.0, y: 1.0 },
+            b: Point { x: 6.0, y: 3.0 },
+        },
+        Shape::Capsule {
+            id: 6,
+            from: Point { x: 2.0, y: 1.0 },
+            to: Point { x: 6.0, y: 3.0 },
+            width: 2.0,
+            arc_segments: 8,
+        },
+        Shape::Spline {
+            id: 7,
+            mode: crate::spline::SplineMode::Fit,
+            points: vec![
+                Point { x: 1.0, y: 1.0 },
+                Point { x: 2.0, y: 3.0 },
+                Point { x: 4.0, y: 2.0 },
+            ],
+            closed: false,
+        },
+    ] {
+        let mirrored = mirror_shape(&shape, a, b).unwrap();
+        for snap in shape.snap_points() {
+            let image = reflect_point(snap.point, a, b).unwrap();
+            assert!(
+                mirrored.snap_points().iter().any(|s| near(s.point, image)),
+                "{shape:?} -> {mirrored:?} misses {image:?}"
+            );
+        }
+    }
+    assert!(matches!(
+        mirror_shape(
+            &Shape::Rectangle {
+                id: 5,
+                a: Point { x: 2.0, y: 1.0 },
+                b: Point { x: 6.0, y: 3.0 },
+            },
+            a,
+            b
+        ),
+        Some(Shape::RotatedRectangle { .. })
+    ));
+}
+
+#[test]
+fn mirror_tool_copies_each_kind_with_one_undo_step() {
+    let shapes = vec![
+        axis_line(1),
+        Shape::Line {
+            id: 2,
+            a: Point { x: 20.0, y: 0.0 },
+            b: Point { x: 30.0, y: 5.0 },
+        },
+        Shape::Point {
+            id: 3,
+            at: Point { x: 25.0, y: 25.0 },
+        },
+        Shape::Circle {
+            id: 4,
+            center: Point { x: 40.0, y: 0.0 },
+            radius: 5.0,
+            segments: 64,
+        },
+        Shape::Arc {
+            id: 5,
+            center: Point { x: 40.0, y: 20.0 },
+            radius: 5.0,
+            start_angle: 0.3,
+            sweep: 1.5,
+            segments: 32,
+        },
+        Shape::Ellipse {
+            id: 6,
+            center: Point { x: 30.0, y: -20.0 },
+            rx: 6.0,
+            ry: 3.0,
+            rotation: 20.0,
+            segments: 64,
+        },
+        Shape::Rectangle {
+            id: 7,
+            a: Point { x: 15.0, y: 30.0 },
+            b: Point { x: 25.0, y: 40.0 },
+        },
+        Shape::Polygon {
+            id: 8,
+            center: Point { x: 50.0, y: 30.0 },
+            radius: 4.0,
+            sides: 6,
+            rotation: 15.0,
+        },
+        Shape::Spline {
+            id: 9,
+            mode: crate::spline::SplineMode::Fit,
+            points: vec![
+                Point { x: 20.0, y: -30.0 },
+                Point { x: 25.0, y: -25.0 },
+                Point { x: 30.0, y: -32.0 },
+            ],
+            closed: false,
+        },
+    ];
+    for id in 2..=9 {
+        let mut doc = Document::from_shapes(shapes.clone());
+        let created = doc.mirror_shapes(&[id], 1).unwrap();
+        assert_eq!(created.len(), 1);
+        let copy = created[0];
+        assert_eq!(doc.mirrors.get(&copy), Some(&(id, 1)));
+        assert!(doc.has_symmetry(copy) && doc.has_symmetry(id));
+        assert_eq!(doc.shapes.len(), shapes.len() + 1);
+        // The source is unchanged and the copy is its exact mirror image.
+        assert_eq!(doc.shapes[id as usize - 1], shapes[id as usize - 1]);
+        assert_mirrored(&doc);
+        assert!(doc.undo());
+        assert_eq!(doc.shapes, shapes);
+        assert!(doc.mirrors.is_empty());
+    }
+}
+
+#[test]
+fn mirrored_copy_follows_either_side_and_the_axis() {
+    let mut doc = Document::from_shapes(vec![
+        axis_line(1),
+        Shape::Circle {
+            id: 2,
+            center: Point { x: 30.0, y: 0.0 },
+            radius: 5.0,
+            segments: 64,
+        },
+        Shape::Arc {
+            id: 3,
+            center: Point { x: 30.0, y: 20.0 },
+            radius: 4.0,
+            start_angle: 0.2,
+            sweep: 1.2,
+            segments: 32,
+        },
+        Shape::Polygon {
+            id: 4,
+            center: Point { x: 30.0, y: -20.0 },
+            radius: 4.0,
+            sides: 5,
+            rotation: 0.0,
+        },
+    ]);
+    let circle = doc.mirror_shapes(&[2], 1).unwrap()[0];
+    doc.mirror_shapes(&[3], 1).unwrap();
+    let polygon = doc.mirror_shapes(&[4], 1).unwrap()[0];
+    let center =
+        |doc: &Document, id: u32| doc.shapes.iter().find(|s| s.id() == id).unwrap().center();
+    assert!(near(center(&doc, circle), Point { x: -10.0, y: 0.0 }));
+    // Move the source: the copy follows.
+    doc.selected = Some(2);
+    assert!(doc.move_selected(Point { x: 5.0, y: 3.0 }));
+    assert!(near(center(&doc, circle), Point { x: -15.0, y: 3.0 }));
+    // Resize the source: the copy's radius follows.
+    assert_eq!(doc.set_dimension(DimensionField::CurveRadius, 8.0), Ok(()));
+    assert!(matches!(
+        doc.shapes.iter().find(|s| s.id() == circle),
+        Some(Shape::Circle { radius, .. }) if (radius - 8.0).abs() < 1e-3
+    ));
+    // Move the copy: the source follows.
+    doc.selected = Some(circle);
+    assert!(doc.move_selected(Point { x: -5.0, y: 2.0 }));
+    assert!(near(center(&doc, circle), Point { x: -20.0, y: 5.0 }));
+    assert!(near(center(&doc, 2), Point { x: 40.0, y: 5.0 }));
+    // Rotate the arc source: the mirrored arc keeps the mirrored sweep.
+    doc.selected = Some(3);
+    assert!(doc.rotate_selected(30.0, Point { x: 30.0, y: 20.0 }, false));
+    assert_mirrored(&doc);
+    // Move the axis: every copy follows.
+    doc.selected = Some(1);
+    assert!(doc.move_selected(Point { x: 10.0, y: 0.0 }));
+    assert_mirrored(&doc);
+    assert!(near(center(&doc, polygon), Point { x: 10.0, y: -20.0 }));
+    // Deleting the axis drops the relations.
+    doc.selected = Some(1);
+    assert!(doc.delete_selected());
+    assert!(doc.mirrors.is_empty());
+}
+
+#[test]
+fn symmetric_points_hold_after_moving_either_side() {
+    let mut doc = Document::from_shapes(vec![
+        axis_line(1),
+        Shape::Point {
+            id: 2,
+            at: Point { x: 20.0, y: 5.0 },
+        },
+        Shape::Line {
+            id: 3,
+            a: Point { x: -5.0, y: 0.0 },
+            b: Point { x: -20.0, y: -10.0 },
+        },
+    ]);
+    // Point 2 and the first end of line 3 become symmetric about x = 10.
+    assert_eq!(
+        doc.toggle_symmetry_at(
+            1,
+            Point { x: 20.0, y: 5.0 },
+            Point { x: -5.5, y: -0.3 },
+            1.0
+        ),
+        Ok(true)
+    );
+    assert_eq!(doc.symmetric_points.len(), 1);
+    assert_eq!(doc.symmetric_points[0].a, (2, 0));
+    assert_eq!(doc.symmetric_points[0].b, (3, 0));
+    let end = |doc: &Document| match doc.shapes[2] {
+        Shape::Line { a, .. } => a,
+        _ => unreachable!(),
+    };
+    let point = |doc: &Document| doc.shapes[1].center();
+    let symmetric = |doc: &Document| {
+        let (p, q) = (point(doc), end(doc));
+        ((p.x + q.x) * 0.5 - 10.0).abs() < 1e-3 && (p.y - q.y).abs() < 1e-3
+    };
+    assert!(symmetric(&doc));
+    assert!(near(point(&doc), Point { x: 20.0, y: 5.0 }));
+    doc.selected = Some(2);
+    assert!(doc.move_selected(Point { x: 3.0, y: 4.0 }));
+    assert!(symmetric(&doc));
+    assert!(near(end(&doc), Point { x: -3.0, y: 9.0 }));
+    doc.selected = Some(3);
+    assert!(doc.move_selected(Point { x: -2.0, y: 1.0 }));
+    assert!(symmetric(&doc));
+    assert!(doc.undo());
+    assert!(doc.undo());
+    assert!(near(point(&doc), Point { x: 20.0, y: 5.0 }));
+    // Toggling again removes the relation.
+    assert_eq!(
+        doc.toggle_symmetry_at(1, Point { x: 20.0, y: 5.0 }, Point { x: 0.0, y: 5.0 }, 1.0),
+        Ok(false)
+    );
+    assert!(doc.symmetric_points.is_empty());
+    assert!(doc.undo());
+    assert_eq!(doc.symmetric_points.len(), 1);
+}
+
+#[test]
+fn symmetry_gesture_links_two_existing_shapes_of_the_same_kind() {
+    let mut doc = Document::from_shapes(vec![
+        axis_line(1),
+        Shape::Circle {
+            id: 2,
+            center: Point { x: 30.0, y: 0.0 },
+            radius: 5.0,
+            segments: 64,
+        },
+        Shape::Circle {
+            id: 3,
+            center: Point { x: -12.0, y: 4.0 },
+            radius: 3.0,
+            segments: 64,
+        },
+    ]);
+    assert_eq!(
+        doc.toggle_symmetry_at(1, Point { x: 35.0, y: 0.0 }, Point { x: -9.0, y: 4.0 }, 0.5),
+        Ok(true)
+    );
+    assert_eq!(doc.mirrors.get(&3), Some(&(2, 1)));
+    assert_mirrored(&doc);
+    assert!(near(doc.shapes[1].center(), Point { x: 30.0, y: 0.0 }));
+    let analysis = doc.analyze_constraints();
+    assert!(analysis.conflicting.is_empty() && analysis.redundant.is_empty());
+    assert!(doc.undo());
+    assert!(doc.mirrors.is_empty());
+    assert!(near(doc.shapes[2].center(), Point { x: -12.0, y: 4.0 }));
+    // Different kinds are not mirror images; the axis cannot be a side.
+    let mut doc = Document::from_shapes(vec![
+        axis_line(1),
+        Shape::Circle {
+            id: 2,
+            center: Point { x: 30.0, y: 0.0 },
+            radius: 5.0,
+            segments: 64,
+        },
+        Shape::Polygon {
+            id: 3,
+            center: Point { x: -12.0, y: 4.0 },
+            radius: 3.0,
+            sides: 5,
+            rotation: 0.0,
+        },
+    ]);
+    assert!(doc.toggle_mirror_relation(2, 3, 1).is_err());
+    assert!(doc.toggle_mirror_relation(1, 2, 1).is_err());
+}

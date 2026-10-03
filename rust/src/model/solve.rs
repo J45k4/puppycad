@@ -313,6 +313,10 @@ impl Document {
             .flat_map(|(&a, &b)| [a, b])
             .chain(self.endpoint_tangents.keys().copied())
             .collect();
+        for (&target, &(source, _)) in &self.mirrors {
+            sized.extend([target, source]);
+            angled.extend([target, source]);
+        }
         for &(id, field) in self.driving_dimensions.keys() {
             match field {
                 DimensionField::CircleDiameter
@@ -376,6 +380,7 @@ impl Document {
             .chain(self.shared_ellipses.keys())
             .chain(self.point_links.values())
             .copied()
+            .chain(self.symmetry_followers())
             .chain(self.projected_targets())
             .collect();
         let sources: Vec<u32> = self
@@ -407,11 +412,23 @@ impl Document {
             }
         }
         let mut error = String::new();
-        for tier in 0..3 {
+        // Mirror lines stay put while either side of a symmetry is edited
+        // (otherwise moving the axis is often the cheapest solution).
+        let axes: Vec<u32> = self
+            .mirrors
+            .values()
+            .map(|&(_, axis)| axis)
+            .chain(self.symmetric_points.iter().map(|pair| pair.axis))
+            .collect();
+        for tier in 0..4 {
+            if tier == 2 && axes.is_empty() {
+                continue;
+            }
             let mut tier_pins = explicit.clone();
             match tier {
                 0 => tier_pins.extend(sources.iter().map(|&id| Pin::Shape(id))),
                 1 => tier_pins.extend(sources.iter().map(|&id| Pin::Anchor(id, 0))),
+                2 => tier_pins.extend(axes.iter().map(|&id| Pin::Shape(id))),
                 _ => {}
             }
             match self.solve_once(&tier_pins, None) {
@@ -677,6 +694,7 @@ impl Document {
                 constraints.push(Constraint::Coincident(s, t));
             }
         }
+        self.symmetry_constraints(&mut b, &mut constraints);
         for (&target, &source) in &self.equal_ellipses {
             if let (Some(t), Some(s)) = (b.ellipse(target), b.ellipse(source)) {
                 constraints.push(Constraint::SameValue(s.rx, t.rx));
@@ -833,6 +851,7 @@ impl Document {
     ) -> Result<(), String> {
         let (problem, entities) = self.build_problem(pins, false, drag);
         if problem.constraints.is_empty() {
+            self.propagate_mirrors();
             return Ok(());
         }
         // Stored geometry is f32, so pinned input carries ~1e-6 relative
@@ -969,6 +988,7 @@ impl Document {
                 _ => {}
             }
         }
+        self.propagate_mirrors();
         Ok(())
     }
 
