@@ -7,6 +7,7 @@ pub mod sketch_value;
 pub mod solver;
 pub mod spline;
 pub mod stl;
+pub mod threemf;
 
 use std::path::Path;
 

@@ -907,6 +907,13 @@ impl App {
             );
             painter.text(
                 layout.right.x + 18.0,
+                layout.right.y + 247.0,
+                "CTRL+ALT+E  EXPORT 3MF",
+                1.2,
+                TEXT,
+            );
+            painter.text(
+                layout.right.x + 18.0,
                 layout.right.y + 265.0,
                 "DEL  REMOVE FEATURE",
                 1.2,

@@ -13,7 +13,7 @@ use corner::*;
 use project_panel::*;
 use solid::*;
 
-use puppycad::{model, project, sketch_value, spline, stl};
+use puppycad::{model, project, sketch_value, spline, stl, threemf};
 
 use std::{
     path::{Path, PathBuf},
@@ -387,6 +387,24 @@ impl App {
                 Err(reason) => reason,
             },
             None => "Open a .pcad project to export STL".into(),
+        };
+    }
+
+    fn export_3mf(&mut self) {
+        self.status_message = match &self.project {
+            Some(project) => match stl::project_bodies(project).and_then(|bodies| {
+                threemf::write_3mf(project.path(), project.part_name(), &bodies)
+                    .map(|path| (path, bodies.len()))
+            }) {
+                Ok((path, count)) => format!(
+                    "Exported {count} {} to {}",
+                    if count == 1 { "body" } else { "bodies" },
+                    path.file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into())
+                ),
+                Err(reason) => format!("3MF export failed: {reason}"),
+            },
+            None => "Open a .pcad project to export 3MF".into(),
         };
     }
 
