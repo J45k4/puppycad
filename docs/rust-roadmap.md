@@ -49,8 +49,9 @@ everything after it. Each item shows its final status.
 
 1. Instances, connectors, all five mate kinds, servos, solver. **Done.**
 2. Assembly view, insert/delete, face-to-face mate gesture, undo, export. **Done.**
-3. Editing connectors and mates after creation, edge axes, world
-   connectors, servo angles, mate limits, `--export`. **Partial:** not started.
+3. Editing mates after creation (select, delete, servo angle), edge axes,
+   world connectors, `--export` for assemblies, edge overlay and scene cache.
+   **Done.** Mate limits and changing a mate's kind remain open.
 
 ## Phase 5 — Editor UX
 
@@ -77,8 +78,7 @@ Consolidated from the Known gaps in [`rust-native.md`](rust-native.md#known-gaps
   names, and solving non-fasten mates.
 - Native support for web `chamfer` graph nodes (topology edges).
 - Pattern copies solved instead of regenerated; skipped instances, more copies.
-- Assembly mate and connector editing, edge axes, world connectors, servo
-  angle editing, mate limits, assemblies in `--export`.
+- Assembly mate limits, changing a mate's kind, servos on non-revolute mates.
 - Inferred midpoint and intersection relations from snaps.
 - Lifting the Equal/offset split-trim-extend block and quarter-turn rotation
   of H/V lines.

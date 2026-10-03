@@ -440,6 +440,30 @@ back. Ctrl+E / Ctrl+Shift+E write one STL per instance
 (`<project>-<instance>.stl`), Ctrl+Alt+E one 3MF with an object per
 instance.
 
+Instances are drawn with the same dark sharp-edge lines as the part view;
+edges are computed once per part and moved by each instance's transform. The
+built scene is cached per assembly revision, so hovering only re-picks.
+
+The Properties panel lists the selected instance's mates. Click a mate row to
+select it; **Delete** then removes the mate, its servo and any connectors no
+other mate uses. A revolute mate shows its servo angle in a DEG box at the
+right of its row: click it, type degrees and press Enter to drive the joint
+and re-solve (a mate without a servo shows `-- DEG` and gets one). Every
+change is one undo step.
+
+Press **J** with an instance selected and nothing under the cursor to fasten
+it to the world (ground) where it currently sits. Hovering a sharp edge
+highlights it; clicking an edge, or pressing **J** while one is hovered, uses
+the edge as the mate axis (its midpoint and direction) instead of the face
+normal, which is the natural pick for revolute and slider mates. The edge
+direction is flipped if needed so the mate does not turn the part over.
+
+CLI: `puppycad --export IN.pcad OUT.stl|OUT.3mf [--assembly NAME]` exports an
+assembly when the project's selected document is one, or when `--assembly`
+names one by name or id. Mates are solved first. STL writes one file per
+instance, `<out-stem>-<instance>.stl`; 3MF writes one package with one object
+per instance.
+
 ## Files
 
 **Compatibility.** The native app reads and writes the web `.pcad` v4
@@ -634,8 +658,8 @@ duplicate bindings within a context.
 | --- | --- | --- |
 | `Ctrl+B` | Open / close assembly view | any view |
 | `I` | Insert part instance | assembly view |
-| `Delete` / `Backspace` | Delete instance | assembly view |
-| `J` | Mate selected face to hovered face | assembly view |
+| `Delete` / `Backspace` | Delete instance / selected mate | assembly view |
+| `J` | Mate selected face/edge to hovered face/edge (empty space: fasten to world) | assembly view |
 | `Ctrl+Z` | Undo assembly edit | assembly view |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo assembly edit | assembly view |
 | `Escape` | Clear selection / leave assembly | assembly view |
@@ -750,14 +774,14 @@ docker --context rootless run --rm -v "$PWD/workdir:/out" \
 | Face sketches | hover, sketch, cut | `face-hover`, `face-sketch`, `face-cut` |
 | Feature tree | suppress, reorder, rollback | `tree-*` |
 | Revolve / loft / finish | revolve, edge chamfer, loft join | `revolve*`, `edge-chamfer*`, `loft*` |
-| Assembly | open, select, export, delete | `assembly`, `assembly-selected`, `assembly-deleted` |
+| Assembly | open, select, export, delete, mate row, servo edit | `assembly`, `assembly-selected`, `assembly-deleted`, `assembly-mate-selected`, `assembly-servo-60` |
 
 ## Known gaps
 
 - STEP export.
-- Assemblies: connectors and mates cannot be edited after creation (delete
-  the instance instead); no edge axes or world connectors from the UI; servo
-  angles are not editable; no mate limits; `--export` skips assemblies.
+- Assemblies: mate kinds cannot be changed and mates cannot be renamed after
+  creation; servos only on revolute mates; no mate limits; instance scale is
+  ignored for edge directions and connector axes.
 - The web app does not read the native extensions (extrude options,
   suppression, rollback, revolve, loft, edge finish, instance names) and
   does not solve non-fasten mates.
