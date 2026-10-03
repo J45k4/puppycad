@@ -16,19 +16,23 @@ pub(super) struct SolidScene {
     pub(super) bodies: usize,
     pub(super) vertices: Vec<[f32; 3]>,
     pub(super) triangles: Vec<[[f32; 3]; 3]>,
+    /// Body index of each triangle.
+    pub(super) triangle_body: Vec<usize>,
 }
 
 impl SolidScene {
     pub(super) fn from_manifolds(solids: &[Manifold]) -> Self {
         let mut vertices = Vec::new();
         let mut triangles = Vec::new();
-        for mesh in solids.iter().map(|solid| solid.get_mesh_gl(0)) {
+        let mut triangle_body = Vec::new();
+        for (body, mesh) in solids.iter().map(|solid| solid.get_mesh_gl(0)).enumerate() {
             let points: Vec<[f32; 3]> = mesh
                 .vert_properties
                 .chunks_exact(mesh.num_prop as usize)
                 .map(|p| [p[0], p[1], p[2]])
                 .collect();
             for indices in mesh.tri_verts.as_chunks::<3>().0 {
+                triangle_body.push(body);
                 triangles.push(std::array::from_fn(|corner| {
                     points[indices[corner] as usize]
                 }));
@@ -39,6 +43,7 @@ impl SolidScene {
             bodies: solids.len(),
             vertices,
             triangles,
+            triangle_body,
         }
     }
 }
@@ -186,6 +191,12 @@ impl SolidProjector {
             }
         }
         nearest
+    }
+
+    /// Body under screen `point`.
+    pub(super) fn pick_body(&self, scene: &SolidScene, point: Point) -> Option<usize> {
+        self.pick_triangle(scene, point)
+            .map(|(index, _, _)| scene.triangle_body[index])
     }
 
     /// Orbit pivot for a drag starting at `point`: the nearest surface under the cursor,

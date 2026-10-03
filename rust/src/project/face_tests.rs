@@ -293,3 +293,41 @@ fn web_face_sketch_fixture_opens_editable() {
     );
     assert_eq!(project.sketch_support_edges(2).len(), 4);
 }
+
+#[test]
+fn face_sketch_extrusions_honor_end_conditions_and_flip() {
+    use crate::project::{EndCondition, ExtrudeOptions};
+    let (mut project, _, document, path) = block(
+        "face-options",
+        SketchPlane::Top,
+        p(0.0, 0.0),
+        p(20.0, 10.0),
+        15.0,
+    );
+    let (top, _) = project.face_at([10.0, 5.0, 15.0], [0.0, 0.0, 1.0]).unwrap();
+    let mut sketch = project.create_sketch_on_face(&document, &top).unwrap();
+    rectangle(&mut sketch, p(5.0, 2.0), p(15.0, 8.0));
+    project
+        .create_extrusion_with_operation(&sketch, 5.0, 0, "cut")
+        .unwrap();
+    let set = |project: &mut ProjectFile, end, flip| {
+        project
+            .set_extrusion_options_at(1, &ExtrudeOptions { end, flip })
+            .unwrap();
+        let tool = project.extrusion_previews().unwrap().swap_remove(1);
+        (tool.start, tool.depth, volume(project))
+    };
+    // Flipped cut grows outward from the face: nothing is removed.
+    let (start, depth, flipped) = set(&mut project, EndCondition::Blind, true);
+    assert_eq!((start, depth), (0.0, 5.0));
+    assert!((flipped - 3000.0).abs() < 1e-2, "{flipped}");
+    // Symmetric straddles the face: half the depth is cut.
+    let (start, _, symmetric) = set(&mut project, EndCondition::Symmetric, false);
+    assert_eq!(start, -2.5);
+    assert!((symmetric - (3000.0 - 150.0)).abs() < 1e-2, "{symmetric}");
+    // Through all spans the whole block measured from the face origin.
+    let (start, depth, through) = set(&mut project, EndCondition::ThroughAll, false);
+    assert!(start < -15.0 && start + depth > 0.0, "{start} {depth}");
+    assert!((through - (3000.0 - 900.0)).abs() < 1e-2, "{through}");
+    let _ = fs::remove_file(path);
+}

@@ -1,4 +1,5 @@
 mod corner;
+mod extrude;
 mod input;
 mod panels;
 mod pattern;
@@ -11,6 +12,7 @@ mod view_sketch;
 mod tests;
 
 use corner::*;
+use extrude::*;
 use pattern::*;
 use project_panel::*;
 use solid::*;
@@ -245,6 +247,13 @@ pub(crate) struct App {
     label_drag: Option<LabelDrag>,
     /// First anchor picked with the D tool.
     dimension_start: Option<(u32, usize)>,
+    /// Open extrude prompt with its ghost preview.
+    extrude_draft: Option<ExtrudeDraft>,
+    /// Extrusion option/depth edits, newest last.
+    solid_undo: Vec<SolidUndo>,
+    solid_redo: Vec<SolidUndo>,
+    /// Next viewport click picks the up-to-body target.
+    body_pick: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -359,6 +368,10 @@ impl Default for App {
             selected_dimension: None,
             label_drag: None,
             dimension_start: None,
+            extrude_draft: None,
+            solid_undo: Vec::new(),
+            solid_redo: Vec::new(),
+            body_pick: false,
         }
     }
 }
@@ -442,38 +455,6 @@ impl App {
             },
             None => "Open a .pcad project to export 3MF".into(),
         };
-    }
-
-    fn create_extrusion(&mut self, operation: &str) {
-        self.document.finish_drag();
-        if let Some(profiles) = profiles_from_document(&self.document) {
-            self.selected_profile = self.selected_profile.min(profiles.len().saturating_sub(1));
-        }
-        self.status_message = match &mut self.project {
-            Some(project) => match if operation == "newBody" {
-                project.create_extrusion_for_profile(&self.document, 50.0, self.selected_profile)
-            } else {
-                project.create_extrusion_with_operation(
-                    &self.document,
-                    50.0,
-                    self.selected_profile,
-                    operation,
-                )
-            } {
-                Ok(()) => {
-                    self.selected_solid = project
-                        .extrusion_previews()
-                        .map_or(0, |solids| solids.len() - 1);
-                    self.solid_preview = true;
-                    format!(
-                        "Created 50 mm {operation} extrusion  |  Ctrl+S to save  |  Tab: sketch"
-                    )
-                }
-                Err(error) => format!("Extrude: {error}"),
-            },
-            None => "Open a .pcad project to create an extrusion".into(),
-        };
-        self.more_open = false;
     }
 
     fn select_tool(&mut self, tool: Tool) {
@@ -858,7 +839,9 @@ impl App {
             self.paint_projects_page(&mut painter, layout, page);
             return painter;
         }
-        if self.solid_preview {
+        if self.extrude_draft.is_some() {
+            self.paint_extrude_draft(&mut painter, layout);
+        } else if self.solid_preview {
             if let Some(solids) = self
                 .project
                 .as_ref()

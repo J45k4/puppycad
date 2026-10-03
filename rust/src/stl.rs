@@ -314,6 +314,7 @@ mod tests {
             ],
             depth: 20.0,
             frame: SketchPlane::Top.frame(),
+            start: 0.0,
             holes: Vec::new(),
         };
         let stl = export_solid(&solid).unwrap();
@@ -346,6 +347,7 @@ mod tests {
             holes: Vec::new(),
             depth: 10.0,
             frame: SketchPlane::Top.frame(),
+            start: 0.0,
         };
         let cutter = SolidPreview {
             name: "Cutter".into(),
@@ -358,6 +360,7 @@ mod tests {
             holes: Vec::new(),
             depth: 10.0,
             frame: SketchPlane::Top.frame(),
+            start: 0.0,
         };
         let result = manifold_from_solid(&base)
             .unwrap()
@@ -379,6 +382,7 @@ mod tests {
                 ],
                 depth: 30.0,
                 frame: plane.frame(),
+                start: 0.0,
                 holes: Vec::new(),
             };
             let stl = export_solid(&solid).unwrap();
@@ -419,6 +423,7 @@ mod tests {
             ],
             depth: 10.0,
             frame: SketchPlane::Top.frame(),
+            start: 0.0,
         };
         let stl = export_solid(&solid).unwrap();
         let vertices: Vec<Vec<f64>> = stl
@@ -472,6 +477,7 @@ mod tests {
             holes: Vec::new(),
             depth: 10.0,
             frame: SketchPlane::Top.frame(),
+            start: 0.0,
         };
         let stl = export_solid(&solid).unwrap();
         let vertices: Vec<Vec<f64>> = stl
@@ -521,6 +527,7 @@ mod binary_tests {
             holes: Vec::new(),
             depth: 1.0,
             frame: SketchPlane::Top.frame(),
+            start: 0.0,
         }
     }
 

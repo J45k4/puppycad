@@ -15,6 +15,11 @@ impl App {
             self.redraw();
             return;
         }
+        if self.body_pick && layout.viewport.contains(point.x, point.y) {
+            self.pick_target_body(layout, point);
+            self.redraw();
+            return;
+        }
         if self.projects_page.is_some() {
             if let Some(index) = self.projects_page_entry_at(layout, point) {
                 self.open_listed_project(index);
@@ -29,7 +34,7 @@ impl App {
         }
         if self.more_open {
             if layout.more_item(3).contains(point.x, point.y) {
-                self.create_extrusion("newBody");
+                self.begin_extrude("newBody");
                 self.redraw();
                 return;
             }
@@ -64,7 +69,7 @@ impl App {
                 return;
             }
             if layout.more_item(10).contains(point.x, point.y) {
-                self.create_extrusion("join");
+                self.begin_extrude("join");
                 self.redraw();
                 return;
             }
@@ -182,6 +187,10 @@ impl App {
             } else if (Self::DIMENSION_MODE_ROW..Self::DIMENSION_MODE_ROW + 28.0).contains(&y) {
                 self.toggle_selected_reference();
             }
+            self.redraw();
+            return;
+        }
+        if self.solid_option_row_click(layout, point) {
             self.redraw();
             return;
         }
@@ -981,7 +990,52 @@ impl ApplicationHandler for App {
                         self.redraw();
                         return;
                     }
+                    if self.extrude_draft.is_some() {
+                        self.handle_draft_key(code, event.text.as_deref());
+                        self.redraw();
+                        return;
+                    }
                     match code {
+                        KeyCode::Escape if self.body_pick => {
+                            self.body_pick = false;
+                            self.status_message = "Body pick cancelled".into();
+                        }
+                        KeyCode::KeyE
+                            if self.solid_preview
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.modifiers.shift_key() =>
+                        {
+                            self.cycle_solid_end_condition();
+                        }
+                        KeyCode::KeyF
+                            if self.solid_preview
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.modifiers.shift_key() =>
+                        {
+                            self.toggle_solid_flip();
+                        }
+                        KeyCode::KeyU
+                            if self.solid_preview
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.modifiers.shift_key() =>
+                        {
+                            self.arm_body_pick();
+                        }
+                        KeyCode::KeyZ
+                            if self.solid_preview
+                                && (self.modifiers.control_key() || self.modifiers.super_key()) =>
+                        {
+                            self.solid_undo_step(self.modifiers.shift_key());
+                        }
+                        KeyCode::KeyY
+                            if self.solid_preview
+                                && (self.modifiers.control_key() || self.modifiers.super_key()) =>
+                        {
+                            self.solid_undo_step(true);
+                        }
                         KeyCode::Escape if self.pick.is_some() => {
                             self.pick = None;
                             self.status_message = "Cancelled".into();
@@ -1308,15 +1362,15 @@ impl ApplicationHandler for App {
                         KeyCode::BracketLeft if self.solid_preview => self.cycle_solid(-1),
                         KeyCode::BracketRight if self.solid_preview => self.cycle_solid(1),
                         KeyCode::KeyX if self.modifiers.shift_key() => {
-                            self.create_extrusion("cut");
+                            self.begin_extrude("cut");
                         }
                         KeyCode::KeyJ if self.modifiers.shift_key() => {
-                            self.create_extrusion("join");
+                            self.begin_extrude("join");
                         }
                         KeyCode::KeyX
                             if !self.modifiers.control_key() && !self.modifiers.super_key() =>
                         {
-                            self.create_extrusion("newBody");
+                            self.begin_extrude("newBody");
                         }
                         KeyCode::KeyL if !self.modifiers.shift_key() => {
                             self.select_tool(Tool::Line)

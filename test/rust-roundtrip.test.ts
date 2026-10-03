@@ -17,6 +17,7 @@ const FIXTURES = join(ROOT, "rust", "fixtures")
 // Sketch count per top-level part for each native fixture.
 const EXPECTED: Record<string, number[]> = {
 	"dimensions.pcad": [1],
+	"extrude-options.pcad": [3],
 	"extruded-rectangle.pcad": [1],
 	"face-sketch.pcad": [3],
 	"graph-constrained-line.pcad": [1],
