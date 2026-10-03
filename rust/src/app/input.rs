@@ -1060,25 +1060,7 @@ impl ApplicationHandler for App {
                         } else {
                             NameTarget::Part
                         }),
-                        KeyCode::Tab => {
-                            if self
-                                .project
-                                .as_ref()
-                                .and_then(ProjectFile::extrusion_previews)
-                                .is_some()
-                            {
-                                self.solid_preview = !self.solid_preview;
-                                if !self.solid_preview {
-                                    self.refresh_reference_edges();
-                                }
-                                self.status_message = if self.solid_preview {
-                                    "3D extrusion preview  |  Tab: sketch"
-                                } else {
-                                    "Sketch view  |  Tab: 3D preview"
-                                }
-                                .into();
-                            }
-                        }
+                        KeyCode::Tab => self.toggle_solid_view(),
                         KeyCode::KeyD
                             if self.modifiers.control_key() || self.modifiers.super_key() =>
                         {

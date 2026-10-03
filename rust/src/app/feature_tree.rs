@@ -51,6 +51,42 @@ impl App {
         }
     }
 
+    /// Tab: switch between the sketch and the 3D view. Entering the 3D view
+    /// syncs the sketch, so features fed by it re-evaluate (incrementally).
+    pub(super) fn toggle_solid_view(&mut self) {
+        if self
+            .project
+            .as_ref()
+            .and_then(ProjectFile::extrusion_previews)
+            .is_none()
+        {
+            return;
+        }
+        if !self.solid_preview {
+            self.sync_sketch_to_project();
+        }
+        self.solid_preview = !self.solid_preview;
+        if !self.solid_preview {
+            self.refresh_reference_edges();
+        }
+        self.status_message = if self.solid_preview {
+            match self
+                .project
+                .as_ref()
+                .map(ProjectFile::feature_statuses)
+                .and_then(|statuses| {
+                    statuses
+                        .iter()
+                        .position(|status| matches!(status, FeatureStatus::Error(_)))
+                }) {
+                Some(index) => format!("3D preview  |  feature {} has an error", index + 1),
+                None => "3D extrusion preview  |  Tab: sketch".into(),
+            }
+        } else {
+            "Sketch view  |  Tab: 3D preview".into()
+        };
+    }
+
     /// Run a feature tree edit as one undo step.
     fn tree_edit(&mut self, edit: impl FnOnce(&mut ProjectFile) -> Result<String, String>) -> bool {
         let Some(project) = self.project.as_mut() else {
