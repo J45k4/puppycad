@@ -33,6 +33,21 @@ impl ExtrudeDraft {
 pub(super) struct SolidUndo {
     pub(super) index: usize,
     pub(super) node: Value,
+    /// History panel label ("Extrude 50 mm").
+    pub(super) label: String,
+    /// Ordering stamp shared with sketch steps (`model::next_step_stamp`).
+    pub(super) stamp: u64,
+}
+
+impl SolidUndo {
+    pub(super) fn new(index: usize, node: Value, label: String) -> Self {
+        Self {
+            index,
+            node,
+            label,
+            stamp: model::next_step_stamp(),
+        }
+    }
 }
 
 /// Blind -> Symmetric -> Through all -> Up to body -> Blind. Through all and
@@ -201,9 +216,14 @@ impl App {
         let Some(node) = project.extrude_node_snapshot(index) else {
             return;
         };
+        let label = format!(
+            "Set end {}{}",
+            options.end.label(),
+            if options.flip { ", flipped" } else { "" }
+        );
         self.status_message = match project.set_extrusion_options_at(index, &options) {
             Ok(()) => {
-                self.solid_undo.push(SolidUndo { index, node });
+                self.solid_undo.push(SolidUndo::new(index, node, label));
                 self.solid_redo.clear();
                 format!(
                     "{}{}  |  Ctrl+Z to undo  |  Ctrl+S to save",
@@ -223,7 +243,8 @@ impl App {
             .extrude_node_snapshot(index)
             .ok_or("extrusion node is missing")?;
         project.set_extrusion_depth_at(index, depth)?;
-        self.solid_undo.push(SolidUndo { index, node });
+        let label = format!("Extrude {} mm", model::history_number_label(depth));
+        self.solid_undo.push(SolidUndo::new(index, node, label));
         self.solid_redo.clear();
         Ok(())
     }
@@ -352,17 +373,15 @@ impl App {
         };
         self.status_message = match project.restore_extrude_node(step.index, step.node) {
             Ok(()) => {
+                let message = format!("{}: {}", if redo { "Redo" } else { "Undo" }, step.label);
                 to.push(SolidUndo {
                     index: step.index,
                     node: current,
+                    label: step.label,
+                    stamp: step.stamp,
                 });
                 self.selected_solid = step.index;
-                if redo {
-                    "Redo extrusion edit"
-                } else {
-                    "Undo extrusion edit"
-                }
-                .into()
+                message
             }
             Err(error) => format!("Undo: {error}"),
         };

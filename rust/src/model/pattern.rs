@@ -285,7 +285,7 @@ impl Document {
 
     fn add_pattern(&mut self, pattern: SketchPattern, cells: usize) -> Result<usize, String> {
         self.validate_pattern(&pattern, cells)?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add pattern");
         self.future.clear();
         self.patterns.push(pattern);
         let index = self.patterns.len() - 1;
@@ -372,7 +372,7 @@ impl Document {
                 )
             })
             .collect();
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Edit linear pattern");
         self.future.clear();
         let mut instances = Vec::new();
         let mut fresh = Vec::new();
@@ -429,7 +429,7 @@ impl Document {
             angle,
         };
         self.validate_pattern(&next, count)?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Edit circular pattern");
         self.future.clear();
         self.patterns[index].kind = next.kind;
         self.resize_pattern_cells(index, count);

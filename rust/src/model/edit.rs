@@ -13,7 +13,7 @@ impl Document {
         if !self.shapes.iter().any(|shape| shape.id() == id) {
             return false;
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Delete shape");
         self.future.clear();
         self.remove_shape_and_relations(id);
         self.selected = None;
@@ -110,7 +110,7 @@ impl Document {
         if click.distance(split) > 8.0 / self.zoom.max(0.2) {
             return Err("Move the pointer onto the selected line".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Split line");
         self.future.clear();
         let new_id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -185,7 +185,7 @@ impl Document {
         }
         if closed {
             let opened = spline::open_periodic(&curves, nearest.segment, nearest.t)?;
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Split spline");
             self.future.clear();
             self.shapes[index] = Shape::Spline {
                 id,
@@ -197,7 +197,7 @@ impl Document {
             return Ok(id);
         }
         let (first, second) = spline::split_open(&curves, nearest.segment, nearest.t)?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Split spline");
         self.future.clear();
         let new_id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -268,7 +268,7 @@ impl Document {
         {
             return Err("Choose an interior point on the elliptic arc".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Split elliptic arc");
         self.future.clear();
         let new_id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -354,7 +354,7 @@ impl Document {
         if end - start <= minimum || tau - (end - start) <= minimum {
             return Err("Choose two distinct split points".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Split ellipse");
         self.future.clear();
         let new_id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -438,7 +438,7 @@ impl Document {
         }
         let first_sweep = sweep * fraction;
         let second_start = start_angle + first_sweep;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Split arc");
         self.future.clear();
         let new_id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -526,7 +526,7 @@ impl Document {
         if end - start <= minimum || tau - (end - start) <= minimum {
             return Err("Choose two distinct split points".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Split circle");
         self.future.clear();
         self.radius_differences
             .retain(|target, (source, _)| *target != id && *source != id);
@@ -683,7 +683,7 @@ impl Document {
             }
         }
         self.shapes.splice(index..=index, pieces);
-        self.history.push(before);
+        self.record_undo(before, "Trim line");
         self.future.clear();
         self.selected = Some(id);
         Ok(intervals.len())
@@ -849,7 +849,7 @@ impl Document {
             }
         }
         self.shapes.splice(index..=index, pieces);
-        self.history.push(before);
+        self.record_undo(before, "Trim spline");
         self.future.clear();
         self.selected_spline_point = None;
         self.selected = Some(id);
@@ -920,7 +920,7 @@ impl Document {
             self.delete_selected();
             return Ok(0);
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Trim ellipse");
         self.future.clear();
         self.shapes[index] = Shape::EllipticArc {
             id,
@@ -1049,7 +1049,7 @@ impl Document {
             }
         }
         self.shapes.splice(index..=index, pieces);
-        self.history.push(before);
+        self.record_undo(before, "Trim elliptic arc");
         self.future.clear();
         self.selected = Some(id);
         self.driving_dimensions
@@ -1115,7 +1115,7 @@ impl Document {
             self.delete_selected();
             return Ok(0);
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Trim circle");
         self.future.clear();
         self.radius_differences
             .retain(|target, (source, _)| *target != id && *source != id);
@@ -1216,7 +1216,7 @@ impl Document {
             }
         }
         self.shapes.splice(index..=index, pieces);
-        self.history.push(before);
+        self.record_undo(before, "Trim arc");
         self.future.clear();
         self.selected = Some(id);
         self.driving_dimensions
@@ -1317,7 +1317,7 @@ impl Document {
             .filter(|point| point.distance(endpoint) > 1e-5)
             .min_by(|left, right| left.distance(endpoint).total_cmp(&right.distance(endpoint)))
             .ok_or("No boundary found beyond this endpoint")?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Extend line");
         self.future.clear();
         self.shapes[index] = if start {
             Shape::Line { id, a: target, b }
@@ -1443,7 +1443,7 @@ impl Document {
             .min_by(|left, right| left.0.total_cmp(&right.0))
             .ok_or("No boundary found beyond this endpoint")?;
         let extra = direction * target.0;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Extend elliptic arc");
         self.future.clear();
         self.shapes[index] = Shape::EllipticArc {
             id,
@@ -1538,7 +1538,7 @@ impl Document {
             .min_by(|left, right| left.0.total_cmp(&right.0))
             .ok_or("No boundary found beyond this endpoint")?;
         let extra = direction * target.0;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Extend arc");
         self.future.clear();
         self.shapes[index] = Shape::Arc {
             id,
@@ -1582,7 +1582,7 @@ impl Document {
             .filter(|((shape_id, _), _)| *shape_id == source_id)
             .map(|((_, field), value)| ((*field), *value))
             .collect();
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Copy shape");
         self.future.clear();
         self.shapes.push(source.translated(delta).with_id(id));
         if self.construction.contains(&source_id) {
@@ -1621,7 +1621,10 @@ impl Document {
             };
             moved.push((index, self.shapes[index].translated(delta)));
         }
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Move {}", history::count_label(ids.len(), "shape")),
+        );
         self.future.clear();
         for (index, next) in moved {
             self.shapes[index] = next;
@@ -1685,7 +1688,7 @@ impl Document {
             };
             next = projected;
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Move shape");
         self.future.clear();
         self.shapes[index] = next;
         let id = self.shapes[index].id();
@@ -1779,7 +1782,7 @@ impl Document {
         if dimensions.iter().any(|(_, value)| !value.is_finite()) {
             return false;
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Scale shape");
         self.future.clear();
         if copy {
             let new_id = self.next_id;
@@ -1902,7 +1905,7 @@ impl Document {
         {
             return false;
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Rotate shape");
         self.future.clear();
         if copy {
             let id = self.next_id;

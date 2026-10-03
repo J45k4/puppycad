@@ -336,7 +336,7 @@ impl Document {
             .next_back()
             .map_or(1, |last| last + 1);
         self.dims.point_dimensions.insert(id, dimension);
-        self.history.push(before);
+        self.record_undo(before, "Add dimension");
         self.future.clear();
         Ok(DimensionKey::Point(id))
     }
@@ -363,7 +363,10 @@ impl Document {
             return Ok(());
         }
         let pin = Pin::Anchor(dimension.a.0, dimension.a.1);
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Set dimension {}", history::number_label(value)),
+        );
         self.future.clear();
         if let Some(dimension) = self.dims.point_dimensions.get_mut(&id) {
             dimension.value = value;
@@ -510,7 +513,14 @@ impl Document {
         self.history.truncate(depth);
         match result {
             Ok(()) => {
-                self.history.push(before);
+                self.record_undo(
+                    before,
+                    if reference {
+                        "Make reference dimension"
+                    } else {
+                        "Make driving dimension"
+                    },
+                );
                 self.future.clear();
                 Ok(reference)
             }
@@ -572,6 +582,7 @@ impl Document {
     /// Runs `edit` as one undo step; on error everything is rolled back.
     fn transaction<T>(
         &mut self,
+        label: String,
         edit: impl FnOnce(&mut Self) -> Result<T, String>,
     ) -> Result<T, String> {
         let before = self.snapshot();
@@ -580,7 +591,7 @@ impl Document {
         self.history.truncate(depth);
         match result {
             Ok(value) => {
-                self.history.push(before);
+                self.record_undo(before, label);
                 self.future.clear();
                 Ok(value)
             }
@@ -611,7 +622,11 @@ impl Document {
         {
             return Ok(value);
         }
-        self.transaction(|doc| {
+        let label = match key {
+            DimensionKey::Field(_, field) => history::dimension_label(field, value),
+            _ => format!("Set dimension {}", history::number_label(value)),
+        };
+        self.transaction(label, |doc| {
             doc.set_dimension_value(key, value)?;
             match expression {
                 Some(expression) => doc.dims.expressions.insert(key, expression),
@@ -720,7 +735,7 @@ impl Document {
                 ))
             })
             .collect();
-        self.transaction(|doc| {
+        self.transaction("Edit variables".into(), |doc| {
             doc.dims.variables = variables;
             for (key, expression) in dependents {
                 let value =
@@ -1058,7 +1073,7 @@ impl Document {
         if self.dims.label_positions.get(&key).copied() == at {
             return Ok(());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Move dimension label");
         self.future.clear();
         match at {
             Some(at) => self.dims.label_positions.insert(key, at),
@@ -1119,7 +1134,7 @@ impl Document {
         if !self.dimension_keys().contains(&key) {
             return Err("Dimension no longer exists".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Delete dimension");
         self.future.clear();
         match key {
             DimensionKey::Field(id, field) => {

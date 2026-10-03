@@ -156,7 +156,7 @@ impl Document {
         {
             return Err("Line end is driven by a relation".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Toggle Fix");
         self.future.clear();
         Ok(if self.fixed_anchors.remove(&(id, index)).is_some() {
             false
@@ -196,7 +196,7 @@ impl Document {
         {
             return Err("Arc endpoint is driven by Equal".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Toggle Fix");
         self.future.clear();
         let enabled = if self.fixed_anchors.remove(&(id, index)).is_some() {
             false
@@ -243,7 +243,7 @@ impl Document {
         {
             return Err("Ellipse axis is driven by Equal".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Toggle Fix");
         self.future.clear();
         let enabled = if self.fixed_anchors.remove(&(id, index)).is_some() {
             false
@@ -277,7 +277,7 @@ impl Document {
         let position = self
             .fixed_anchor_position(id, index)
             .ok_or("Anchor is missing")?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Toggle Fix");
         self.future.clear();
         let enabled = if self.fixed_anchors.remove(&(id, index)).is_some() {
             false
@@ -308,7 +308,10 @@ impl Document {
             return Err("Line direction is driven by a relation".into());
         }
         if self.axis_constraints.get(&id) == Some(&axis) {
-            self.history.push(self.snapshot());
+            self.record_undo(
+                self.snapshot(),
+                format!("Remove {}", history::title_label(axis.name())),
+            );
             self.future.clear();
             self.axis_constraints.remove(&id);
             return Ok(false);
@@ -324,7 +327,10 @@ impl Document {
                 y: a.y + length.copysign(if b.y == a.y { 1.0 } else { b.y - a.y }),
             },
         };
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Add {}", history::title_label(axis.name())),
+        );
         self.future.clear();
         // Keep the fixed or linked second end as the solver's initial guess
         // when it cannot move; the solve then decides how the line aligns.
@@ -345,7 +351,7 @@ impl Document {
             return Err("Hover a different line".into());
         }
         if self.equal_lines.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Equal");
             self.future.clear();
             self.equal_lines.remove(&target_id);
             return Ok(false);
@@ -386,7 +392,7 @@ impl Document {
         if !next_b.x.is_finite() || !next_b.y.is_finite() {
             return Err("Equal line length is out of range".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Equal");
         self.future.clear();
         if !self.fixed_anchors.contains_key(&(target_id, 1))
             && !self.point_links.contains_key(&(target_id, 1))
@@ -500,7 +506,10 @@ impl Document {
                 *source == source_id && existing.name() == kind.name()
             })
         {
-            self.history.push(self.snapshot());
+            self.record_undo(
+                self.snapshot(),
+                format!("Remove {}", history::title_label(kind.name())),
+            );
             self.future.clear();
             self.line_relations.remove(&target_id);
             return Ok(false);
@@ -526,7 +535,10 @@ impl Document {
             .ok_or("Selected line is missing")?;
         let next = Self::line_relation_shape(source, &self.shapes[target_index], kind)
             .ok_or("Direction relation requires two nonzero finite lines")?;
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Add {}", history::title_label(kind.name())),
+        );
         self.future.clear();
         if !target_constrained {
             self.shapes[target_index] = next;
@@ -597,7 +609,10 @@ impl Document {
         if (old_value - value).abs() <= 1e-6 && self.shapes[index] == next {
             return Ok(());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Set angle {} deg", history::number_label(value)),
+        );
         self.future.clear();
         self.shapes[index] = next;
         self.line_relations
@@ -614,7 +629,7 @@ impl Document {
             return Err("Hover a different circle or arc".into());
         }
         if self.equal_radii.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Equal radius");
             self.future.clear();
             self.equal_radii.remove(&target_id);
             return Ok(false);
@@ -665,7 +680,7 @@ impl Document {
         {
             return Err("Target radius is constrained".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Equal radius");
         self.future.clear();
         match &mut self.shapes[target_index] {
             Shape::Circle { radius, .. } | Shape::Arc { radius, .. } => *radius = source_radius,
@@ -688,7 +703,7 @@ impl Document {
             .get(&target_id)
             .is_some_and(|(source, _)| *source == source_id)
         {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Radial distance");
             self.future.clear();
             self.radius_differences.remove(&target_id);
             return Ok(false);
@@ -729,7 +744,7 @@ impl Document {
         {
             return Err("Target radius already has a driving dimension".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Radial distance");
         self.future.clear();
         self.radius_differences
             .insert(target_id, (source_id, source_radius - target_radius));
@@ -764,7 +779,10 @@ impl Document {
         if (old_value - value).abs() <= 1e-6 {
             return Ok(());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Set radial distance {} mm", history::number_label(value)),
+        );
         self.future.clear();
         if let Shape::Circle { radius, .. } = &mut self.shapes[index] {
             *radius = target_radius;
@@ -1357,7 +1375,7 @@ impl Document {
             return Err("Hover another curve".into());
         }
         if self.point_curve_links.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Coincident");
             self.future.clear();
             self.point_curve_links.remove(&target_id);
             return Ok(false);
@@ -1386,7 +1404,7 @@ impl Document {
         {
             return Err("Point already has a driving relation".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Coincident");
         self.future.clear();
         self.shapes[index] = Shape::Point {
             id: target_id,
@@ -1406,7 +1424,7 @@ impl Document {
             .get(&target_id)
             .is_some_and(|(source, _)| *source == source_id)
         {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Normal");
             self.future.clear();
             self.normal_links.remove(&target_id);
             return Ok(false);
@@ -1456,7 +1474,7 @@ impl Document {
             .ok_or("Hovered curve is missing")?;
         let next = Self::normal_line_target(source, &self.shapes[index], endpoint)
             .ok_or("No valid normal contact for this curve")?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Normal");
         self.future.clear();
         self.shapes[index] = next;
         self.normal_links.insert(target_id, (source_id, endpoint));
@@ -1469,7 +1487,7 @@ impl Document {
             return Err("Hover another line or arc".into());
         }
         if self.midpoint_links.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Midpoint");
             self.future.clear();
             self.midpoint_links.remove(&target_id);
             return Ok(false);
@@ -1501,7 +1519,7 @@ impl Document {
         {
             return Err("Point already has a curve relation".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Midpoint");
         self.future.clear();
         self.shapes[index] = Shape::Point {
             id: target_id,
@@ -1521,7 +1539,7 @@ impl Document {
             return Err("Hover another line or curve".into());
         }
         if self.external_tangents.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Tangent");
             self.future.clear();
             self.external_tangents.remove(&target_id);
             return Ok(false);
@@ -1544,7 +1562,7 @@ impl Document {
         }
         let next = Self::external_tangent_target(source, &self.shapes[target_index])
             .ok_or("No valid external tangent contact for these curves")?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Tangent");
         self.future.clear();
         self.shapes[target_index] = next;
         self.external_tangents.insert(target_id, source_id);
@@ -1576,7 +1594,7 @@ impl Document {
             (other_id, selected_id)
         };
         if self.internal_tangents.get(&inner_id) == Some(&outer_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Internal tangent");
             self.future.clear();
             self.internal_tangents.remove(&inner_id);
             return Ok(false);
@@ -1612,7 +1630,7 @@ impl Document {
             .unwrap();
         let next = Self::internal_tangent_target(outer, &self.shapes[index])
             .ok_or("No valid internal tangent contact for these curves")?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Internal tangent");
         self.future.clear();
         self.shapes[index] = next;
         self.internal_tangents.insert(inner_id, outer_id);
@@ -1625,7 +1643,7 @@ impl Document {
             return Err("Hover a different ellipse or elliptic arc".into());
         }
         if self.equal_ellipses.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Equal ellipse");
             self.future.clear();
             self.equal_ellipses.remove(&target_id);
             return Ok(false);
@@ -1675,7 +1693,7 @@ impl Document {
         {
             return Err("Target ellipse axes are constrained".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Equal ellipse");
         self.future.clear();
         match &mut self.shapes[target_index] {
             Shape::Ellipse { rx, ry, .. } | Shape::EllipticArc { rx, ry, .. } => {
@@ -1722,7 +1740,7 @@ impl Document {
             return Err("Hover a different curve".into());
         }
         if self.concentric.get(&target_id) == Some(&source_id) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Concentric");
             self.future.clear();
             self.concentric.remove(&target_id);
             return Ok(false);
@@ -1771,7 +1789,7 @@ impl Document {
         if self.has_fixed_anchor(target_id) && target_center.distance(source_center) > 1e-6 {
             return Err("Target curve has a fixed anchor".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Concentric");
         self.future.clear();
         self.shapes[target_index] = self.shapes[target_index].translated(delta);
         self.concentric.insert(target_id, source_id);

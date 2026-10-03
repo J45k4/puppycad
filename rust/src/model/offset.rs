@@ -319,7 +319,7 @@ impl Document {
             }
         }
         let copy = offset_shape(source, distance)?.with_id(self.next_id);
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Offset");
         self.future.clear();
         let target = copy.id();
         self.next_id = self.next_id.saturating_add(1);
@@ -344,7 +344,7 @@ impl Document {
             .chain_segments(&sources)
             .ok_or("Offset source must be a line")?;
         let lines = offset_chain_segments(&segments, closed, distance as f64 * side as f64)?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Offset chain");
         self.future.clear();
         let mut targets = Vec::new();
         for (&(source, _), (a, b)) in sources.iter().zip(lines) {
@@ -396,7 +396,7 @@ impl Document {
                 .iter()
                 .position(|shape| shape.id() == target)
                 .ok_or("Offset shape is missing")?;
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Set offset distance");
             self.future.clear();
             self.shapes[index] = next;
             self.offsets.insert(target, (source, distance));
@@ -416,7 +416,7 @@ impl Document {
             .ok_or("Offset source is missing")?;
         let lines =
             offset_chain_segments(&segments, chain.closed, distance as f64 * chain.side as f64)?;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Set offset distance");
         self.future.clear();
         for (&id, (a, b)) in chain.targets.iter().zip(lines) {
             if let Some(shape) = self.shapes.iter_mut().find(|shape| shape.id() == id) {

@@ -207,8 +207,16 @@ impl Document {
                 result.push(selected);
             }
         }
+        let label = self
+            .last_undo_label()
+            .filter(|_| self.history.len() > history_len)
+            .map(|label| match label.strip_suffix(" shape") {
+                Some(verb) => format!("{verb} {} shapes", ids.len()),
+                None => label.to_string(),
+            })
+            .unwrap_or_else(|| format!("Edit {} shapes", ids.len()));
         self.history.truncate(history_len);
-        self.history.push(before);
+        self.record_undo(before, label);
         self.future.clear();
         self.set_selection(&result);
         true

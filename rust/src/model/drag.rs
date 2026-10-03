@@ -207,7 +207,12 @@ impl Document {
                     .any(|shape| shape.id() == original.id() && shape != original)
             });
         if changed {
-            self.history.push(drag.before);
+            let label = if drag.group.is_empty() {
+                "Drag shape".to_string()
+            } else {
+                format!("Drag {} shapes", drag.group.len() + 1)
+            };
+            self.record_undo(drag.before, label);
             self.future.clear();
         }
         self.revision.set(next_revision());
