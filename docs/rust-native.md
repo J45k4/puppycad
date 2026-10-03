@@ -390,6 +390,37 @@ recomputed once per committed edit, undo or redo, never during a drag. Because
 edits that cannot be solved are rolled back, a conflict normally appears only
 in documents loaded that way.
 
+#### Viewport feedback
+
+In Select mode the shape under the cursor (honoring the selection filters)
+is pre-highlighted in a lighter accent and its anchors show as faint squares
+before any click. Pointer moves in idle Select mode repaint only when the
+hovered shape, anchor or glyph changes; placing, dragging, panning and the 3D
+view still repaint on every move.
+
+Every relation draws a small glyph beside each entity it involves
+(`model/glyphs.rs`, `Document::placed_glyphs`): `H`/`V`, `//` parallel, `T`
+perpendicular, `COL`, `ANG`, `=` equal, `O` concentric, `TAN` tangent
+(including endpoint tangents), `MID`, `POC`, `NORM`, `TJ` smooth join, `SE`,
+`RD`, `SYM`, `OFS`, `PAT`, and `FIX` with a lock square at each fixed anchor.
+The 8x8 font is ASCII only, hence `//`, `T` and `TAN` instead of the Unicode
+symbols. A line's glyphs start at its midpoint and a circle's or arc's on its
+rim; they stack outward along the entity's normal (above/right of a line,
+radially for curves) so the glyphs of one entity never overlap, and use the
+entity's DOF tint. Hovering a glyph highlights every partner of its relation;
+clicking it selects the entity it sits beside. Key **6** hides or shows all
+glyphs (`GLY` in the status bar).
+
+While placing a segment (a line, the first edge of a three-point rectangle,
+an arc chord or a slot axis) an inference hint appears at the cursor with a
+dashed guide when the segment is within 2° of horizontal/vertical (`H`/`V`),
+parallel or perpendicular (`//`/`T`) to a line within 30 px of the cursor, or
+tangent (`TAN`) to a circle it ends on or an arc whose end it starts from.
+Hints are visual only, except that with automatic constraints on (the web
+"Automatic constraints" checkbox; key **7**, `AUTO` in the status bar, on by
+default) a line committed while its `H`/`V` hint showed snaps exactly to the
+axis and gets that relation in the same undo step.
+
 Press **K** with a shape selected to toggle construction geometry. Its tree row
 and viewport outline dim, the flag persists in the web project graph, and
 construction geometry cannot be used as the native extrusion profile. Copies
@@ -729,8 +760,9 @@ Library crate (`rust/src/lib.rs`):
   `edit.rs` (delete, split, trim, extend,
   copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
-  `geometry.rs` (curve intersections and boundaries), `tests.rs`,
-  `dimension_tests.rs`.
+  `geometry.rs` (curve intersections and boundaries), `glyphs.rs` (relation
+  glyph layout, placement inference, automatic H/V), `tests.rs`,
+  `dimension_tests.rs`, `glyph_tests.rs`.
 - `project.rs` (`.pcad` load/save, parts, extrusion profiles and end
   conditions; dimension round-trip tests in `project/dimension_tests.rs`,
   extrude option tests in `project/extrude_option_tests.rs`), `project/face.rs`
@@ -756,7 +788,8 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   preview projection, dragging, face and body picking and painting), `extrude.rs`
   (extrude prompt with ghost preview, end condition/flip/target edits and
   their undo), `view_sketch.rs` (sketch grid
-  and shape painting, dimension labels), `tests.rs`, `input_tests.rs`
+  and shape painting, dimension labels, hover highlight, relation glyphs and
+  inference hints), `tests.rs`, `input_tests.rs`
   (headless keyboard/mouse tests).
 - `renderer.rs` (CPU `Painter` that builds the triangle list, and the
   `wgpu` `Renderer` that uploads it; `Painter` tests in
@@ -892,6 +925,12 @@ A face sketch scenario extrudes a rectangle, hovers its top face
 (`rust-native-face-hover.png`), presses 4, draws a circle over the projected
 block outline (`rust-native-face-sketch.png`), cuts it with Shift+X
 (`rust-native-face-cut.png`) and checks the saved `face` node and cut.
+A viewport feedback scenario draws two lines, makes them parallel with
+Shift+P, hovers one in Select mode (`rust-native-glyphs-hover.png`: hover
+highlight plus `//` glyphs on both lines), places a near-horizontal line
+(`rust-native-glyphs-hint.png`: dashed guide and `H` hint), commits it
+(`rust-native-glyphs-auto.png`: the line is horizontal with an `H` glyph) and
+checks the saved `parallel` and `horizontal` relations.
 It does not open a host desktop
 window.
 

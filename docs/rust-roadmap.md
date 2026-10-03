@@ -86,8 +86,8 @@ per-instance selection and export.
 ## Phase 5 — Editor UX
 
 1. Searchable command palette and a shortcut overlay.
-2. Hover pre-highlight, relation glyphs beside entities, inference hints while
-   placing.
+2. (Done) Hover pre-highlight, relation glyphs beside entities, inference
+   hints while placing.
 3. Undo history panel.
 4. Toolbar icons, tooltips with shortcuts, status bar with cursor coordinates,
    DOF and snap mode.

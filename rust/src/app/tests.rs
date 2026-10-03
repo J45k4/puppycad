@@ -743,3 +743,134 @@ fn armed_body_pick_sets_the_up_to_body_target() {
     assert!(!app.body_pick);
     assert_eq!(app.solid_undo.len(), 1);
 }
+
+#[test]
+fn hover_redraws_only_when_the_hovered_shape_changes() {
+    let mut app = App {
+        document: Document::from_shapes(vec![
+            Shape::Line {
+                id: 1,
+                a: Point { x: 0.0, y: 0.0 },
+                b: Point { x: 100.0, y: 0.0 },
+            },
+            Shape::Line {
+                id: 2,
+                a: Point { x: 0.0, y: 60.0 },
+                b: Point { x: 100.0, y: 60.0 },
+            },
+        ]),
+        ..App::default()
+    };
+    let at = |app: &App, x: f32, y: f32| {
+        app.document
+            .world_to_screen(Point { x, y }, app.viewport_origin())
+    };
+    let empty = at(&app, 50.0, 30.0);
+    app.pointer_moved(empty);
+    let base = app.redraw_requests.get();
+    // Moving over empty canvas: no repaint.
+    app.pointer_moved(at(&app, 52.0, 31.0));
+    assert_eq!(app.redraw_requests.get(), base);
+    // Entering line 1: exactly one repaint, and it is pre-highlighted.
+    app.pointer_moved(at(&app, 40.0, 1.0));
+    assert_eq!(app.redraw_requests.get(), base + 1);
+    assert_eq!(app.hover.shape, Some(1));
+    assert_eq!(app.hovered_ids(), vec![1]);
+    // Sliding along the same line: no repaint.
+    app.pointer_moved(at(&app, 45.0, 0.5));
+    app.pointer_moved(at(&app, 60.0, -1.0));
+    assert_eq!(app.redraw_requests.get(), base + 1);
+    // Switching to line 2, then leaving it: one repaint each.
+    app.pointer_moved(at(&app, 40.0, 60.0));
+    assert_eq!(app.redraw_requests.get(), base + 2);
+    assert_eq!(app.hover.shape, Some(2));
+    app.pointer_moved(empty);
+    assert_eq!(app.redraw_requests.get(), base + 3);
+    assert_eq!(app.hover.shape, None);
+    // Filtered-out geometry is not pre-highlighted.
+    app.selection_filter.geometry = false;
+    app.pointer_moved(at(&app, 40.0, 1.0));
+    assert_eq!(app.hover.shape, None);
+    // Placing tools repaint on every move (the draft follows the cursor).
+    app.document.tool = Tool::Line;
+    let before = app.redraw_requests.get();
+    app.pointer_moved(at(&app, 41.0, 1.0));
+    assert_eq!(app.redraw_requests.get(), before + 1);
+}
+
+#[test]
+fn hovering_a_glyph_highlights_partners_and_clicking_selects_its_entity() {
+    let mut app = App {
+        document: Document::from_shapes(vec![
+            Shape::Line {
+                id: 1,
+                a: Point { x: 0.0, y: 0.0 },
+                b: Point { x: 100.0, y: 20.0 },
+            },
+            Shape::Line {
+                id: 2,
+                a: Point { x: 0.0, y: 60.0 },
+                b: Point { x: 100.0, y: 70.0 },
+            },
+        ]),
+        ..App::default()
+    };
+    app.document.selected = Some(2);
+    app.document
+        .toggle_line_relation_with(1, LineRelationKind::Parallel)
+        .unwrap();
+    app.document.clear_selection();
+    let origin = app.viewport_origin();
+    let glyph = app
+        .document
+        .placed_glyphs(origin)
+        .into_iter()
+        .find(|g| g.glyph.owner == 1)
+        .unwrap();
+    assert_eq!(glyph.glyph.label, "//");
+    let inside = Point {
+        x: glyph.x + 3.0,
+        y: glyph.y + 3.0,
+    };
+    app.pointer_moved(inside);
+    let mut partners = app.hovered_ids();
+    partners.sort();
+    assert_eq!(partners, vec![1, 2]);
+    app.handle_left_press();
+    assert_eq!(app.document.selected, Some(1));
+    assert!(!app.document.dragging());
+    // Key 6 hides the glyphs: no hit, no hover.
+    app.toggle_glyphs();
+    assert!(!app.show_glyphs);
+    app.pointer_moved(inside);
+    assert!(app.hover.glyph.is_none());
+}
+
+#[test]
+fn line_commit_adds_horizontal_only_with_automatic_constraints() {
+    let mut app = App::default();
+    let at = |app: &App, x: f32, y: f32| {
+        app.document
+            .world_to_screen(Point { x, y }, app.viewport_origin())
+    };
+    app.snap_grid = false;
+    app.snap_geometry = false;
+    app.document.tool = Tool::Line;
+    app.cursor = at(&app, 3.0, 3.0);
+    app.handle_left_press();
+    app.pointer_moved(at(&app, 103.0, 4.5));
+    assert_eq!(
+        app.placing_inference().map(|i| i.kind),
+        Some(model::InferenceKind::Horizontal)
+    );
+    app.handle_left_press();
+    assert_eq!(app.document.axis_constraints.len(), 1);
+    app.toggle_auto_constraints();
+    assert!(!app.auto_constraints);
+    app.cursor = at(&app, 3.0, 40.0);
+    app.handle_left_press();
+    app.cursor = at(&app, 103.0, 41.5);
+    app.handle_left_press();
+    assert_eq!(app.document.shapes.len(), 2);
+    assert_eq!(app.document.axis_constraints.len(), 1);
+}

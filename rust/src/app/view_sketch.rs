@@ -127,13 +127,164 @@ impl App {
         }
     }
 
+    /// Shapes the hover pre-highlights: the shape under the cursor, or
+    /// every partner of a hovered relation glyph.
+    pub(super) fn hovered_ids(&self) -> Vec<u32> {
+        if self.document.tool != Tool::Select {
+            return Vec::new();
+        }
+        match &self.hover.glyph {
+            Some(glyph) => glyph.partners.clone(),
+            None => self.hover.shape.into_iter().collect(),
+        }
+    }
+
+    /// Faint anchor squares of the hovered (unselected) shape.
+    fn paint_hover_anchors(&self, painter: &mut Painter, layout: Layout) {
+        let Some(id) = self.hover.shape else {
+            return;
+        };
+        if self.document.tool != Tool::Select || self.document.is_selected(id) {
+            return;
+        }
+        let origin = self.viewport_origin();
+        let faint: Color = [HOVER[0], HOVER[1], HOVER[2], 0.45];
+        for (_, point) in self.document.drag_anchors(id) {
+            let at = self.document.world_to_screen(point, origin);
+            if layout.viewport.contains(at.x, at.y) {
+                painter.outline(
+                    Rect {
+                        x: at.x - 3.0,
+                        y: at.y - 3.0,
+                        w: 6.0,
+                        h: 6.0,
+                    },
+                    1.0,
+                    faint,
+                );
+            }
+        }
+    }
+
+    /// Entity color without selection/hover: the DOF tint.
+    pub(super) fn dof_tint(&self, id: u32) -> Color {
+        let analysis = self.sketch_analysis();
+        if analysis.conflicting.contains(&id) {
+            CONFLICT
+        } else if analysis.redundant.contains(&id) {
+            REDUNDANT
+        } else if self.document.construction.contains(&id) {
+            MUTED
+        } else if analysis.fully_constrained.contains(&id) {
+            FULLY_CONSTRAINED
+        } else {
+            SHAPE
+        }
+    }
+
+    /// Relation glyphs beside their entities (key 6 hides them). A hovered
+    /// glyph is drawn in the hover color, as are its relation's partners.
+    fn paint_relation_glyphs(&self, painter: &mut Painter, layout: Layout) {
+        if !self.show_glyphs {
+            return;
+        }
+        let origin = self.viewport_origin();
+        for placed in self.document.placed_glyphs(origin) {
+            if !layout.viewport.contains(placed.x, placed.y)
+                || !layout
+                    .viewport
+                    .contains(placed.x + placed.w, placed.y + placed.h)
+            {
+                continue;
+            }
+            let hovered = self.hover.glyph.as_ref() == Some(&placed.glyph);
+            let color = if hovered {
+                HOVER
+            } else {
+                self.dof_tint(placed.glyph.owner)
+            };
+            let rect = Rect {
+                x: placed.x,
+                y: placed.y,
+                w: placed.w,
+                h: placed.h,
+            };
+            painter.rect(rect, [BG[0], BG[1], BG[2], 0.85]);
+            painter.outline(rect, 1.0, [color[0], color[1], color[2], 0.55]);
+            painter.text(
+                placed.x + model::GLYPH_PAD,
+                placed.y + model::GLYPH_PAD,
+                placed.glyph.label,
+                1.0,
+                color,
+            );
+            if let Some(index) = placed.glyph.anchor
+                && let Some((_, at)) = self
+                    .document
+                    .drag_anchors(placed.glyph.owner)
+                    .into_iter()
+                    .find(|(i, _)| *i == index)
+            {
+                // Lock square on the fixed anchor.
+                let at = self.document.world_to_screen(at, origin);
+                painter.rect(
+                    Rect {
+                        x: at.x - 3.0,
+                        y: at.y - 3.0,
+                        w: 6.0,
+                        h: 6.0,
+                    },
+                    color,
+                );
+            }
+        }
+    }
+
+    /// Inference hint while placing: dashed guide plus a glyph at the cursor.
+    fn paint_inference(&self, painter: &mut Painter) {
+        let Some(inference) = self.placing_inference() else {
+            return;
+        };
+        let origin = self.viewport_origin();
+        let (a, b) = (
+            self.document.world_to_screen(inference.guide.0, origin),
+            self.document.world_to_screen(inference.guide.1, origin),
+        );
+        dashed_line(painter, a, b, 1.2, HINT);
+        let label = inference.kind.label();
+        let rect = Rect {
+            x: self.cursor.x + 12.0,
+            y: self.cursor.y + 12.0,
+            w: label.len() as f32 * 8.0 + model::GLYPH_PAD * 2.0,
+            h: 8.0 + model::GLYPH_PAD * 2.0,
+        };
+        painter.rect(rect, [BG[0], BG[1], BG[2], 0.85]);
+        painter.outline(rect, 1.0, HINT);
+        painter.text(
+            rect.x + model::GLYPH_PAD,
+            rect.y + model::GLYPH_PAD,
+            label,
+            1.0,
+            HINT,
+        );
+    }
+
     pub(super) fn paint_shapes(&self, painter: &mut Painter, layout: Layout) {
         let origin = self.viewport_origin();
         let selected = self.document.selected_ids();
+        let hovered = self.hovered_ids();
         for shape in &self.document.shapes {
-            self.paint_shape(painter, shape, origin, selected.contains(&shape.id()));
+            self.paint_shape_hovered(
+                painter,
+                shape,
+                origin,
+                selected.contains(&shape.id()),
+                hovered.contains(&shape.id()),
+            );
         }
+        self.paint_hover_anchors(painter, layout);
         self.paint_anchor_handles(painter, layout);
+        self.paint_relation_glyphs(painter, layout);
         self.paint_box_select(painter, layout);
         self.paint_dimension_labels(painter, layout);
         if let Some(start) = self.document.draft_start
@@ -250,6 +401,7 @@ impl App {
                 self.paint_shape(painter, &shape, origin, true);
             }
         }
+        self.paint_inference(painter);
         if matches!(self.document.tool, Tool::FitSpline | Tool::ControlSpline)
             && !self.spline_points.is_empty()
         {
@@ -319,10 +471,31 @@ impl App {
         origin: Point,
         selected: bool,
     ) {
+        self.paint_shape_hovered(painter, shape, origin, selected, false);
+    }
+
+    /// `paint_shape` with Select-mode hover pre-highlight (lighter accent).
+    pub(super) fn paint_shape_hovered(
+        &self,
+        painter: &mut Painter,
+        shape: &Shape,
+        origin: Point,
+        selected: bool,
+        hovered: bool,
+    ) {
         let analysis = self.sketch_analysis();
         let id = shape.id();
+        let stroke = if selected {
+            2.5
+        } else if hovered {
+            2.2
+        } else {
+            1.8
+        };
         let color = if selected {
             ACCENT
+        } else if hovered {
+            HOVER
         } else if analysis.conflicting.contains(&id) {
             CONFLICT
         } else if analysis.redundant.contains(&id) {
@@ -339,7 +512,7 @@ impl App {
             Shape::Line { a, b, .. } => {
                 let a = self.document.world_to_screen(*a, origin);
                 let b = self.document.world_to_screen(*b, origin);
-                painter.line(a.x, a.y, b.x, b.y, if selected { 2.5 } else { 1.8 }, color);
+                painter.line(a.x, a.y, b.x, b.y, stroke, color);
                 if selected {
                     for (index, endpoint) in [a, b].iter().enumerate() {
                         let fixed = self
@@ -366,7 +539,7 @@ impl App {
                         w: (a.x - b.x).abs(),
                         h: (a.y - b.y).abs(),
                     },
-                    if selected { 2.5 } else { 1.8 },
+                    stroke,
                     color,
                 );
             }
@@ -383,7 +556,7 @@ impl App {
                     let b = self
                         .document
                         .world_to_screen(corners[(index + 1) % 4], origin);
-                    painter.line(a.x, a.y, b.x, b.y, if selected { 2.5 } else { 1.8 }, color);
+                    painter.line(a.x, a.y, b.x, b.y, stroke, color);
                 }
             }
             Shape::Circle { center, radius, .. } => {
@@ -392,7 +565,7 @@ impl App {
                     center.x,
                     center.y,
                     radius * self.document.zoom,
-                    if selected { 2.5 } else { 1.8 },
+                    stroke,
                     color,
                 );
             }
@@ -419,14 +592,7 @@ impl App {
                         ),
                         origin,
                     );
-                    painter.line(
-                        previous.x,
-                        previous.y,
-                        next.x,
-                        next.y,
-                        if selected { 2.5 } else { 1.8 },
-                        color,
-                    );
+                    painter.line(previous.x, previous.y, next.x, next.y, stroke, color);
                     previous = next;
                 }
             }
@@ -468,14 +634,7 @@ impl App {
                         ),
                         origin,
                     );
-                    painter.line(
-                        previous.x,
-                        previous.y,
-                        next.x,
-                        next.y,
-                        if selected { 2.5 } else { 1.8 },
-                        color,
-                    );
+                    painter.line(previous.x, previous.y, next.x, next.y, stroke, color);
                     previous = next;
                 }
             }
@@ -491,7 +650,7 @@ impl App {
                     for pair in sampled.windows(2) {
                         let a = self.document.world_to_screen(pair[0], origin);
                         let b = self.document.world_to_screen(pair[1], origin);
-                        painter.line(a.x, a.y, b.x, b.y, if selected { 2.5 } else { 1.8 }, color);
+                        painter.line(a.x, a.y, b.x, b.y, stroke, color);
                     }
                 }
                 if selected {
@@ -553,14 +712,7 @@ impl App {
                         ),
                         origin,
                     );
-                    painter.line(
-                        previous.x,
-                        previous.y,
-                        next.x,
-                        next.y,
-                        if selected { 2.5 } else { 1.8 },
-                        color,
-                    );
+                    painter.line(previous.x, previous.y, next.x, next.y, stroke, color);
                     previous = next;
                 }
             }
@@ -605,7 +757,7 @@ impl App {
                         ),
                         origin,
                     );
-                    painter.line(a.x, a.y, b.x, b.y, if selected { 2.5 } else { 1.8 }, color);
+                    painter.line(a.x, a.y, b.x, b.y, stroke, color);
                 }
             }
             Shape::Capsule {
@@ -621,7 +773,7 @@ impl App {
                     let b = self
                         .document
                         .world_to_screen(outline[(index + 1) % outline.len()], origin);
-                    painter.line(a.x, a.y, b.x, b.y, if selected { 2.5 } else { 1.8 }, color);
+                    painter.line(a.x, a.y, b.x, b.y, stroke, color);
                 }
             }
         }
@@ -805,5 +957,23 @@ impl App {
         };
         painter.rect(rect, fill);
         painter.outline(rect, 1.0, edge);
+    }
+}
+
+/// Dashed screen-space segment (9 px dashes).
+pub(super) fn dashed_line(painter: &mut Painter, a: Point, b: Point, width: f32, color: Color) {
+    let length = a.distance(b);
+    let steps = (length / 9.0).ceil().max(1.0) as usize;
+    for step in (0..steps).step_by(2) {
+        let t0 = step as f32 / steps as f32;
+        let t1 = ((step + 1) as f32 / steps as f32).min(1.0);
+        painter.line(
+            a.x + (b.x - a.x) * t0,
+            a.y + (b.y - a.y) * t0,
+            a.x + (b.x - a.x) * t1,
+            a.y + (b.y - a.y) * t1,
+            width,
+            color,
+        );
     }
 }

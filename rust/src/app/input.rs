@@ -1,6 +1,81 @@
 use super::*;
 
 impl App {
+    /// Pointer move. Panning, dragging, placing and the 3D view repaint on
+    /// every move; idle Select mode inside the viewport repaints only when
+    /// the hovered shape, anchor or glyph changes.
+    pub(super) fn pointer_moved(&mut self, next: Point) {
+        let (dx, dy) = (next.x - self.cursor.x, next.y - self.cursor.y);
+        if self.pan_drag {
+            self.document.pan.x += dx;
+            self.document.pan.y += dy;
+        }
+        match self.solid_drag {
+            Some(SolidDrag::Rotate) => self.solid_view.rotate_drag(dx, dy),
+            Some(SolidDrag::Pan { units_per_pixel }) => {
+                self.solid_view.pan_drag(dx, dy, units_per_pixel)
+            }
+            None => {}
+        }
+        self.cursor = next;
+        if let Some(drag) = &mut self.label_drag
+            && drag.start.distance(next) > 3.0
+        {
+            drag.moved = true;
+        }
+        if self.document.dragging() && !self.pan_drag && self.solid_drag.is_none() {
+            let world = self.document.screen_to_world(next, self.viewport_origin());
+            self.document.drag_to(world);
+        }
+        if self.solid_preview {
+            self.update_face_hover();
+        }
+        let hover_changed = self.update_hover();
+        let layout = self.layout();
+        let idle_select = self.document.tool == Tool::Select
+            && !self.solid_preview
+            && !self.pan_drag
+            && self.solid_drag.is_none()
+            && self.box_start.is_none()
+            && self.label_drag.is_none()
+            && self.pick.is_none()
+            && !self.document.dragging()
+            && self.projects_page.is_none()
+            && !self.more_open
+            && layout.viewport.contains(next.x, next.y);
+        if hover_changed || !idle_select {
+            self.redraw();
+        }
+    }
+
+    /// Recompute [`Hover`]; true when it changed.
+    pub(super) fn update_hover(&mut self) -> bool {
+        let layout = self.layout();
+        let mut next = Hover::default();
+        if self.document.tool == Tool::Select
+            && !self.solid_preview
+            && self.projects_page.is_none()
+            && !self.document.dragging()
+            && layout.viewport.contains(self.cursor.x, self.cursor.y)
+        {
+            let origin = self.viewport_origin();
+            let world = self.document.screen_to_world(self.cursor, origin);
+            next.glyph = self
+                .show_glyphs
+                .then(|| self.document.glyph_at(self.cursor, origin))
+                .flatten()
+                .map(|placed| placed.glyph);
+            if next.glyph.is_none() {
+                self.document.selection_filter = self.selection_filter;
+                next.shape = self.document.pick_at(world);
+                next.anchor = self.document.anchor_at(world);
+            }
+        }
+        let changed = next != self.hover;
+        self.hover = next;
+        changed
+    }
+
     pub(super) fn handle_left_press(&mut self) {
         self.name_edit = None;
         let layout = self.layout();
@@ -473,6 +548,20 @@ impl App {
                     self.redraw();
                     return;
                 }
+                if self.show_glyphs
+                    && let Some(placed) = self.document.glyph_at(point, self.viewport_origin())
+                {
+                    // A relation glyph click selects the entity it sits beside.
+                    self.selected_dimension = None;
+                    self.document.select_only(Some(placed.glyph.owner));
+                    self.status_message = format!(
+                        "{} relation of {}",
+                        placed.glyph.label,
+                        placed.glyph.partners.len()
+                    );
+                    self.redraw();
+                    return;
+                }
                 self.selected_dimension = None;
                 self.document.selection_filter = self.selection_filter;
                 let hit = self.document.pick_at(world);
@@ -523,8 +612,13 @@ impl App {
             | Tool::Polygon
             | Tool::Slot => {
                 if self.document.draft_start.is_some() {
-                    let finished = self.document.finish_draft(world);
-                    if finished {
+                    let (finished, axis) = self
+                        .document
+                        .finish_draft_auto(world, self.auto_constraints);
+                    if let Some(axis) = axis {
+                        self.status_message =
+                            format!("Auto {}  |  7: automatic constraints", axis.name());
+                    } else if finished {
                         self.status_message.clear();
                     } else if self.document.draft_end.is_some() {
                         self.status_message = match self.document.tool {
@@ -753,36 +847,10 @@ impl App {
                 self.redraw();
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let next = Point {
+                self.pointer_moved(Point {
                     x: position.x as f32,
                     y: position.y as f32,
-                };
-                let (dx, dy) = (next.x - self.cursor.x, next.y - self.cursor.y);
-                if self.pan_drag {
-                    self.document.pan.x += dx;
-                    self.document.pan.y += dy;
-                }
-                match self.solid_drag {
-                    Some(SolidDrag::Rotate) => self.solid_view.rotate_drag(dx, dy),
-                    Some(SolidDrag::Pan { units_per_pixel }) => {
-                        self.solid_view.pan_drag(dx, dy, units_per_pixel)
-                    }
-                    None => {}
-                }
-                self.cursor = next;
-                if let Some(drag) = &mut self.label_drag
-                    && drag.start.distance(next) > 3.0
-                {
-                    drag.moved = true;
-                }
-                if self.document.dragging() && !self.pan_drag && self.solid_drag.is_none() {
-                    let world = self.document.screen_to_world(next, self.viewport_origin());
-                    self.document.drag_to(world);
-                }
-                if self.solid_preview {
-                    self.update_face_hover();
-                }
-                self.redraw();
+                });
             }
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
                 (ElementState::Pressed, MouseButton::Left) => self.handle_left_press(),
@@ -1751,6 +1819,8 @@ impl App {
                 KeyCode::Digit3 => self.create_sketch(SketchPlane::Right),
                 KeyCode::Digit4 => self.sketch_on_face(),
                 KeyCode::Digit5 => self.toggle_face_context(),
+                KeyCode::Digit6 => self.toggle_glyphs(),
+                KeyCode::Digit7 => self.toggle_auto_constraints(),
                 KeyCode::KeyF
                     if self.modifiers.shift_key()
                         && !self.modifiers.control_key()

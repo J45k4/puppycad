@@ -3415,3 +3415,56 @@ cp /tmp/native-extrude.pcad /out/rust-native-extrude-options.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Viewport feedback: two lines made parallel with Shift+P, hover one in Select
+# mode (pre-highlight + relation glyphs), then a near-horizontal line shows the
+# H inference hint and commits with an automatic horizontal relation.
+./target/debug/puppycad /tmp/native-glyphs.pcad >/tmp/puppycad-glyphs.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-glyphs.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-glyphs.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" l
+xdotool mousemove 430 290 click 1
+xdotool mousemove 760 340 click 1
+xdotool mousemove 430 440 click 1
+xdotool mousemove 700 500 click 1
+sleep 0.2
+xdotool mousemove 595 315
+sleep 0.2
+xdotool key --window "$window_id" shift+p
+xdotool key --window "$window_id" v
+xdotool mousemove 650 400
+sleep 0.2
+xdotool mousemove 595 315
+sleep 0.4
+import -window root /out/rust-native-glyphs-hover.png
+xdotool key --window "$window_id" l
+xdotool mousemove 430 620 click 1
+xdotool mousemove 740 624
+sleep 0.4
+import -window root /out/rust-native-glyphs-hint.png
+xdotool click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" v
+xdotool mousemove 900 200
+sleep 0.3
+import -window root /out/rust-native-glyphs-auto.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.3
+test -s /tmp/native-glyphs.pcad
+grep -q '"parallel"' /tmp/native-glyphs.pcad
+grep -q '"horizontal"' /tmp/native-glyphs.pcad
+cp /tmp/native-glyphs.pcad /out/rust-native-glyphs.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
