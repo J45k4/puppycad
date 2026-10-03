@@ -386,6 +386,22 @@ impl SolidEdge {
         length(sub(self.b, self.a))
     }
 
+    /// The edge moved by a rigid placement: `point` maps positions and
+    /// `vector` maps directions (normals and inward directions).
+    pub fn transformed(
+        &self,
+        point: impl Fn([f32; 3]) -> [f32; 3],
+        vector: impl Fn([f32; 3]) -> [f32; 3],
+    ) -> Self {
+        Self {
+            a: point(self.a),
+            b: point(self.b),
+            normals: self.normals.map(&vector),
+            inward: self.inward.map(&vector),
+            straight: self.straight,
+        }
+    }
+
     /// Convex edges get material removed; concave edges get material added.
     pub fn convex(&self) -> bool {
         dot(self.inward[0], self.normals[1]) < 0.0

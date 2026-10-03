@@ -616,7 +616,11 @@ impl App {
 
 /// Sharp edges in a darker tone, split into pieces so the parts hidden
 /// behind the bodies are left out.
-fn paint_visible_edges(painter: &mut Painter, scene: &SolidScene, projector: &SolidProjector) {
+pub(super) fn paint_visible_edges(
+    painter: &mut Painter,
+    scene: &SolidScene,
+    projector: &SolidProjector,
+) {
     for (_, edge) in &scene.edges {
         let (sa, sb) = (projector.screen(edge.a), projector.screen(edge.b));
         let pixels = ((sb[0] - sa[0]).powi(2) + (sb[1] - sa[1]).powi(2)).sqrt();

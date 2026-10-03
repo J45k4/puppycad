@@ -214,3 +214,36 @@ fn exports_one_stl_per_instance_and_one_3mf() {
     assert!(xml.contains("name=\"Forearm\""));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn instances_carry_transformed_sharp_edges() {
+    let (app, dir) = open_fixture("edges");
+    let (scene, projector) = app.assembly_projector(app.layout()).unwrap();
+    // Three boxes, twelve sharp edges each.
+    assert_eq!(scene.edges.len(), 36);
+    // Edges follow the instance transform: the forearm's edges lie in its
+    // world-space bounding box.
+    let lo = |axis: usize| {
+        scene
+            .triangles
+            .iter()
+            .zip(&scene.triangle_body)
+            .filter(|(_, b)| **b == 2)
+            .flat_map(|(t, _)| t.iter().map(move |p| p[axis]))
+            .fold(f32::INFINITY, f32::min)
+    };
+    for (_, edge) in scene.edges.iter().filter(|(i, _)| *i == 2) {
+        for axis in 0..3 {
+            assert!(edge.a[axis] >= lo(axis) - 1e-3);
+        }
+    }
+    let visible = scene
+        .edges
+        .iter()
+        .filter(|(_, e)| {
+            projector.visible(&scene, std::array::from_fn(|i| (e.a[i] + e.b[i]) * 0.5))
+        })
+        .count();
+    assert!(visible > 0 && visible < scene.edges.len(), "{visible}");
+    let _ = std::fs::remove_dir_all(dir);
+}

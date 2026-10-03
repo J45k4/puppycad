@@ -99,6 +99,8 @@ pub(super) struct AssemblyView {
     pub(super) asm: Assembly,
     /// Part-local bodies by part id.
     bodies: HashMap<String, Result<Vec<stl::Body>, String>>,
+    /// Part-local sharp edges by part id (the part view's edge overlay).
+    edges: HashMap<String, Vec<project::SolidEdge>>,
     pub(super) selected: Option<usize>,
     pub(super) hovered: Option<usize>,
     /// Face clicked on the selected instance (mate side A).
@@ -112,8 +114,19 @@ pub(super) struct AssemblyView {
 pub(super) fn assembly_scene(view: &AssemblyView) -> SolidScene {
     let mut triangles = Vec::new();
     let mut triangle_body = Vec::new();
+    let mut edges = Vec::new();
     for (index, instance) in view.asm.instances.iter().enumerate() {
         let transform = instance.transform();
+        let pose = transform.pose();
+        for edge in view.edges.get(&instance.part_id).into_iter().flatten() {
+            edges.push((
+                index,
+                edge.transformed(
+                    |p| transform.apply(p.map(f64::from)).map(|c| c as f32),
+                    |v| pose.vector(v.map(f64::from)).map(|c| c as f32),
+                ),
+            ));
+        }
         let Some(Ok(bodies)) = view.bodies.get(&instance.part_id) else {
             continue;
         };
@@ -130,10 +143,18 @@ pub(super) fn assembly_scene(view: &AssemblyView) -> SolidScene {
         vertices: triangles.iter().flatten().copied().collect(),
         triangles,
         triangle_body,
-        // Instance meshes are transformed `Body` triangles, not manifolds, so
-        // the sharp-edge overlay is not computed for assemblies yet.
-        edges: Vec::new(),
+        edges,
     }
+}
+
+/// Sharp edges of a part's evaluated bodies (rebuilt as manifolds).
+fn part_edges(bodies: &Result<Vec<stl::Body>, String>) -> Vec<project::SolidEdge> {
+    bodies
+        .iter()
+        .flatten()
+        .filter_map(|body| stl::manifold_from_triangles(&body.triangles, &body.name).ok())
+        .flat_map(|solid| project::sharp_edges(&solid))
+        .collect()
 }
 
 /// File-name-safe form of an instance name.
@@ -203,6 +224,10 @@ impl App {
                 .entry(instance.part_id.clone())
                 .or_insert_with(|| project.part_bodies(&instance.part_id, &self.document));
         }
+        let edges = bodies
+            .iter()
+            .map(|(id, bodies)| (id.clone(), part_edges(bodies)))
+            .collect();
         let solve = if assembly.read_only_reason.is_none() {
             solver::apply(&mut assembly).err()
         } else {
@@ -220,6 +245,7 @@ impl App {
             item,
             asm: assembly,
             bodies,
+            edges,
             selected: None,
             hovered: None,
             pick_a: None,
@@ -512,6 +538,7 @@ impl App {
         };
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
+            view.edges.insert(part_id.clone(), part_edges(&bodies));
             view.bodies.insert(part_id.clone(), bodies);
         }
         let count = self.assembly.as_ref().map_or(0, |v| {
@@ -837,6 +864,7 @@ impl App {
             for (_, points, color) in faces {
                 painter.triangle(points[0], points[1], points[2], color);
             }
+            paint_visible_edges(painter, &scene, &projector);
             if let Some(pick) = view.pick_a {
                 let transform = view.asm.instances[pick.instance].transform();
                 let p = transform.apply(pick.point).map(|c| c as f32);
