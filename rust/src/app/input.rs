@@ -88,6 +88,16 @@ impl App {
                 self.redraw();
                 return;
             }
+            if layout.more_item(16).contains(point.x, point.y) {
+                if self.read_only() {
+                    self.status_message =
+                        "READ ONLY: this sketch has unsupported native features".into();
+                } else {
+                    self.begin_offset();
+                }
+                self.redraw();
+                return;
+            }
             for (index, kind) in [(14, CornerKind::Fillet), (15, CornerKind::Chamfer)] {
                 if layout.more_item(index).contains(point.x, point.y) {
                     if self.read_only() {
@@ -141,6 +151,9 @@ impl App {
                     }
                     EditField::RadialDifference => {
                         "Type signed radius difference in mm, then Enter  |  Esc to cancel"
+                    }
+                    EditField::OffsetDistance => {
+                        "Type signed offset distance in mm, then Enter  |  Esc to cancel"
                     }
                     EditField::CenterX | EditField::CenterY => {
                         "Type signed center coordinate in mm, then Enter  |  Esc to cancel"
@@ -718,6 +731,8 @@ impl ApplicationHandler for App {
                                                         | EditField::RotateAngle
                                                         | EditField::RelationAngle
                                                         | EditField::RadialDifference
+                                                        | EditField::OffsetCreate
+                                                        | EditField::OffsetDistance
                                                         | EditField::Dimension(
                                                             DimensionField::ArcSweep
                                                         )
@@ -975,6 +990,15 @@ impl ApplicationHandler for App {
                                 }
                                 Err(error) => format!("Trim: {error}"),
                             };
+                        }
+                        KeyCode::KeyU
+                            if self.modifiers.shift_key()
+                                && !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.read_only()
+                                && !self.solid_preview =>
+                        {
+                            self.begin_offset();
                         }
                         KeyCode::KeyU if !self.read_only() && !self.solid_preview => {
                             let world = self

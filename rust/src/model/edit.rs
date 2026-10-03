@@ -47,6 +47,7 @@ impl Document {
         self.concentric
             .retain(|target, source| *target != id && *source != id);
         self.forget_symmetry(id);
+        self.forget_offsets(id);
         self.construction.remove(&id);
         self.axis_constraints.remove(&id);
         self.point_links
@@ -129,6 +130,9 @@ impl Document {
 
     pub fn split_selected_curve(&mut self, click: Point) -> Result<u32, String> {
         let id = self.selected.ok_or("Select a curve to split")?;
+        if self.has_offset(id) {
+            return Err("Remove the offset before splitting".into());
+        }
         if self.internal_tangent_member(id)
             || self.midpoint_links.values().any(|source| *source == id)
             || self.point_curve_links.values().any(|source| *source == id)
@@ -463,6 +467,9 @@ impl Document {
 
     pub fn split_selected_circle(&mut self, first: Point, second: Point) -> Result<u32, String> {
         let id = self.selected.ok_or("Select a circle to split")?;
+        if self.has_offset(id) {
+            return Err("Remove the offset before splitting".into());
+        }
         if self.internal_tangent_member(id)
             || self.midpoint_links.values().any(|source| *source == id)
             || self.point_curve_links.values().any(|source| *source == id)
@@ -677,6 +684,9 @@ impl Document {
 
     pub fn trim_selected_curve(&mut self, click: Point) -> Result<usize, String> {
         let id = self.selected.ok_or("Select a curve to trim")?;
+        if self.has_offset(id) {
+            return Err("Remove the offset before trimming".into());
+        }
         if self.internal_tangent_member(id)
             || self.midpoint_links.values().any(|source| *source == id)
             || self.point_curve_links.values().any(|source| *source == id)
@@ -1308,6 +1318,9 @@ impl Document {
 
     pub fn extend_selected_curve(&mut self, click: Point) -> Result<Point, String> {
         let id = self.selected.ok_or("Select an open curve to extend")?;
+        if self.has_offset(id) {
+            return Err("Remove the offset before extending".into());
+        }
         if self.internal_tangent_member(id)
             || self.midpoint_links.values().any(|source| *source == id)
             || self.point_curve_links.values().any(|source| *source == id)

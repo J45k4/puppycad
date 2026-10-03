@@ -527,6 +527,7 @@ impl Document {
             .chain(self.point_links.values())
             .copied()
             .chain(self.symmetry_followers())
+            .chain(self.offset_followers())
             .collect();
         self.shapes
             .iter()

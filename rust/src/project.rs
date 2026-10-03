@@ -2178,6 +2178,15 @@ impl ProjectFile {
                         }
                         if matches!(
                             relation.get("type").and_then(Value::as_str),
+                            Some("offset" | "offsetChain")
+                        ) {
+                            if !load_offset_relation(relation, &entity_ids, &mut document) {
+                                read_only_reason = Some("unsupported offset relation".into());
+                            }
+                            continue;
+                        }
+                        if matches!(
+                            relation.get("type").and_then(Value::as_str),
                             Some("symmetric" | "mirror")
                         ) {
                             let graph_shape = |graph_id: Option<&str>| {
@@ -3392,6 +3401,53 @@ fn serialize_sketches(
                 }
                 return false;
             }
+            if kind == "offset" || kind == "offsetChain" {
+                let resolve = |id: Option<&str>| -> Option<u32> {
+                    let id = id?;
+                    old_graph_shape_ids
+                        .get(id)
+                        .or_else(|| graph_shape_ids.get(id))
+                        .copied()
+                };
+                if kind == "offset" {
+                    let source = resolve(relation.get("a").and_then(Value::as_str));
+                    let target = resolve(relation.get("b").and_then(Value::as_str));
+                    if let (Some(source), Some(target)) = (source, target)
+                        && let Some(&(old_source, distance)) = document.offsets.get(&target)
+                        && old_source == source
+                        && let Some((source_id, target_id)) =
+                            next_ids.get(&source).zip(next_ids.get(&target))
+                    {
+                        relation["a"] = json!(source_id);
+                        relation["b"] = json!(target_id);
+                        relation["value"] = json!(distance);
+                        return true;
+                    }
+                    return false;
+                }
+                let targets: Option<Vec<u32>> = relation
+                    .get("targets")
+                    .and_then(Value::as_array)
+                    .and_then(|targets| {
+                        targets
+                            .iter()
+                            .map(|id| resolve(id.as_str()))
+                            .collect::<Option<Vec<u32>>>()
+                    });
+                let Some(chain) = targets.and_then(|targets| {
+                    document
+                        .offset_chains
+                        .iter()
+                        .find(|chain| chain.targets == targets)
+                }) else {
+                    return false;
+                };
+                let Some(value) = offset_chain_json(chain, &relation["id"], &next_ids) else {
+                    return false;
+                };
+                *relation = value;
+                return true;
+            }
             if kind == "symmetric" || kind == "mirror" {
                 let resolve = |id: Option<&str>| -> Option<u32> {
                     let id = id?;
@@ -4130,6 +4186,65 @@ fn serialize_sketches(
                 "symmetryLine": axis_id
             }));
         }
+        let mut offsets: Vec<_> = document.offsets.iter().collect();
+        offsets.sort_by_key(|(target, _)| **target);
+        for (&target, &(source, distance)) in offsets {
+            let source_id = next_ids.get(&source).ok_or("Offset source is missing")?;
+            let target_id = next_ids.get(&target).ok_or("Offset target is missing")?;
+            if relations.iter().any(|relation| {
+                relation["type"] == "offset"
+                    && relation["a"] == *source_id
+                    && relation["b"] == *target_id
+            }) {
+                continue;
+            }
+            let base = format!("native-offset-{source_id}-{target_id}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(json!({
+                "id": relation_id,
+                "type": "offset",
+                "a": source_id,
+                "b": target_id,
+                "value": distance
+            }));
+        }
+        for chain in &document.offset_chains {
+            let targets: Vec<Value> = chain
+                .targets
+                .iter()
+                .map(|id| {
+                    next_ids
+                        .get(id)
+                        .map(|id| json!(id))
+                        .ok_or("Offset chain target is missing")
+                })
+                .collect::<Result<_, _>>()?;
+            if relations.iter().any(|relation| {
+                relation["type"] == "offsetChain"
+                    && relation["targets"].as_array() == Some(&targets)
+            }) {
+                continue;
+            }
+            let base = format!(
+                "native-offset-chain-{}",
+                targets[0].as_str().unwrap_or_default()
+            );
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(
+                offset_chain_json(chain, &json!(relation_id), &next_ids)
+                    .ok_or("Offset chain source is missing")?,
+            );
+        }
         for pair in &document.symmetric_points {
             let anchor = |(id, index): (u32, usize)| -> Result<Value, String> {
                 let graph_id = next_ids.get(&id).ok_or("Symmetric point is missing")?;
@@ -4328,6 +4443,213 @@ fn symmetry_anchor_name(shape: &Shape, index: usize) -> Option<String> {
             Some(format!("point{index}"))
         }
         _ => None,
+    }
+}
+
+/// Web `offsetChain` relation JSON for a native offset chain.
+fn offset_chain_json(
+    chain: &crate::model::OffsetChain,
+    id: &Value,
+    next_ids: &HashMap<u32, String>,
+) -> Option<Value> {
+    let sources = chain
+        .sources
+        .iter()
+        .map(|&(source, reversed)| {
+            next_ids
+                .get(&source)
+                .map(|id| json!({"entityId": id, "reversed": reversed}))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let targets = chain
+        .targets
+        .iter()
+        .map(|target| next_ids.get(target).map(|id| json!(id)))
+        .collect::<Option<Vec<_>>>()?;
+    Some(json!({
+        "id": id,
+        "type": "offsetChain",
+        "sources": sources,
+        "closed": chain.closed,
+        "side": chain.side,
+        "targets": targets,
+        "value": chain.distance
+    }))
+}
+
+/// Load a web `offset` or `offsetChain` relation into `document`. Returns
+/// false when the relation is invalid or its geometry does not match.
+fn load_offset_relation(
+    relation: &Value,
+    entity_ids: &HashMap<u32, String>,
+    document: &mut Document,
+) -> bool {
+    let shape_of = |graph_id: Option<&str>| {
+        graph_id.and_then(|graph_id| {
+            entity_ids
+                .iter()
+                .find_map(|(shape_id, id)| (id == graph_id).then_some(*shape_id))
+        })
+    };
+    let plain = relation.get("id").and_then(Value::as_str).is_some()
+        && relation.get("reference") != Some(&Value::Bool(true))
+        && relation.get("expression").is_none();
+    let value = relation
+        .get("value")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && value.abs() <= f32::MAX as f64)
+        .map(|value| value as f32);
+    let (true, Some(value)) = (plain, value) else {
+        return false;
+    };
+    let taken = |document: &Document, id: u32| {
+        document.offsets.contains_key(&id)
+            || document
+                .offset_chains
+                .iter()
+                .any(|chain| chain.targets.contains(&id))
+    };
+    let find = |document: &Document, id: u32| -> Option<Shape> {
+        document
+            .shapes
+            .iter()
+            .find(|shape| shape.id() == id)
+            .cloned()
+    };
+    if relation["type"] == "offset" {
+        let source = shape_of(relation.get("a").and_then(Value::as_str));
+        let target = shape_of(relation.get("b").and_then(Value::as_str));
+        let (Some(source), Some(target)) = (source, target) else {
+            return false;
+        };
+        if source == target || taken(document, target) {
+            return false;
+        }
+        let (Some(source_shape), Some(target_shape)) =
+            (find(document, source), find(document, target))
+        else {
+            return false;
+        };
+        let Ok(expected) = crate::model::offset_shape(&source_shape, value) else {
+            return false;
+        };
+        if !offset_geometry_matches(&expected, &target_shape) {
+            return false;
+        }
+        document.offsets.insert(target, (source, value));
+        return true;
+    }
+    let sources: Option<Vec<(u32, bool)>> = relation
+        .get("sources")
+        .and_then(Value::as_array)
+        .and_then(|sources| {
+            sources
+                .iter()
+                .map(|source| {
+                    Some((
+                        shape_of(source.get("entityId")?.as_str())?,
+                        source.get("reversed")?.as_bool()?,
+                    ))
+                })
+                .collect()
+        });
+    let targets: Option<Vec<u32>> = relation
+        .get("targets")
+        .and_then(Value::as_array)
+        .and_then(|targets| targets.iter().map(|id| shape_of(id.as_str())).collect());
+    let closed = relation.get("closed").and_then(Value::as_bool);
+    let side = relation.get("side").and_then(Value::as_i64);
+    let (Some(sources), Some(targets), Some(closed), Some(side @ (1 | -1))) =
+        (sources, targets, closed, side)
+    else {
+        return false;
+    };
+    let mut ids: HashSet<u32> = sources.iter().map(|(id, _)| *id).collect();
+    ids.extend(targets.iter().copied());
+    if sources.len() < 2
+        || targets.len() != sources.len()
+        || ids.len() != sources.len() * 2
+        || targets.iter().any(|&id| taken(document, id))
+    {
+        return false;
+    }
+    let segment = |shape: Option<Shape>, reversed: bool| match shape {
+        Some(Shape::Line { a, b, .. }) => {
+            let (a, b) = if reversed { (b, a) } else { (a, b) };
+            Some(((a.x as f64, a.y as f64), (b.x as f64, b.y as f64)))
+        }
+        _ => None,
+    };
+    let Some(source_segments) = sources
+        .iter()
+        .map(|&(id, reversed)| segment(find(document, id), reversed))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let Some(target_segments) = targets
+        .iter()
+        .map(|&id| segment(find(document, id), false))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let (expected, _) =
+        crate::solver::mitered_offset(&source_segments, closed, value as f64 * side as f64);
+    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1) < 1e-3;
+    if !expected
+        .iter()
+        .zip(&target_segments)
+        .all(|(e, t)| near(e.0, t.0) && near(e.1, t.1))
+    {
+        return false;
+    }
+    document.offset_chains.push(crate::model::OffsetChain {
+        sources,
+        targets,
+        closed,
+        side: side as i8,
+        distance: value,
+    });
+    true
+}
+
+/// Whether `actual` matches the `expected` offset geometry.
+fn offset_geometry_matches(expected: &Shape, actual: &Shape) -> bool {
+    match (expected, actual) {
+        (Shape::Line { a, b, .. }, Shape::Line { a: c, b: d, .. }) => {
+            a.distance(*c) < 1e-3 && b.distance(*d) < 1e-3
+        }
+        (
+            Shape::Circle { center, radius, .. },
+            Shape::Circle {
+                center: c,
+                radius: q,
+                ..
+            },
+        ) => center.distance(*c) < 1e-3 && (radius - q).abs() < 1e-3,
+        (
+            Shape::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep,
+                ..
+            },
+            Shape::Arc {
+                center: c,
+                radius: q,
+                start_angle: t,
+                sweep: v,
+                ..
+            },
+        ) => {
+            center.distance(*c) < 1e-3
+                && (radius - q).abs() < 1e-3
+                && (start_angle - t).abs() < 1e-6
+                && (sweep - v).abs() < 1e-6
+        }
+        _ => false,
     }
 }
 
@@ -6883,6 +7205,94 @@ mod tests {
                 ..
             }
         ));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn offset_relations_round_trip_with_the_web_format() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/offset.pcad");
+        let path = test_path("offset");
+        fs::copy(&fixture, &path).unwrap();
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        assert_eq!(project.read_only_reason(), None);
+        assert_eq!(document.offsets.get(&6), Some(&(5, 3.0)));
+        assert_eq!(document.offsets.get(&8), Some(&(7, -4.0)));
+        assert_eq!(
+            document.offset_chains,
+            vec![crate::model::OffsetChain {
+                sources: vec![(1, false), (2, false)],
+                targets: vec![3, 4],
+                closed: false,
+                side: 1,
+                distance: 5.0,
+            }]
+        );
+        // Edit a loaded distance and add a native offset, then save.
+        document.selected = Some(8);
+        document.set_offset_distance(-6.0).unwrap();
+        document.selected = Some(5);
+        let copy = document.offset_selected(-2.0).unwrap()[0];
+        project.save(&document).unwrap();
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let relations = saved
+            .pointer("/items/0/data/cad/nodes")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .find(|node| node["type"] == "sketch")
+            .unwrap()["relations"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert!(relations.iter().any(|r| r["id"] == "offset-chain-1"
+            && r["type"] == "offsetChain"
+            && r["sources"]
+                == json!([
+                    {"entityId": "native-entity-1", "reversed": false},
+                    {"entityId": "native-entity-2", "reversed": false}
+                ])
+            && r["targets"] == json!(["native-entity-3", "native-entity-4"])
+            && r["closed"] == false
+            && r["side"] == 1
+            && r["value"] == 5.0));
+        assert!(relations.iter().any(|r| r["id"] == "offset-distance-2"
+            && r["a"] == "native-entity-7"
+            && r["b"] == "native-entity-8"
+            && r["value"] == -6.0));
+        assert_eq!(
+            relations.iter().filter(|r| r["type"] == "offset").count(),
+            3
+        );
+        let (reopened, loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(reopened.read_only_reason(), None);
+        assert_eq!(loaded.offsets.len(), 3);
+        assert_eq!(loaded.offsets.get(&copy), Some(&(5, -2.0)));
+        assert_eq!(loaded.offsets.get(&8), Some(&(7, -6.0)));
+        assert_eq!(loaded.offset_chains.len(), 1);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn natively_made_offset_chains_save_as_web_offset_chains() {
+        let path = test_path("offset-chain-native");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/offset.pcad");
+        fs::copy(&fixture, &path).unwrap();
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        // Drop the loaded chain, then offset the L again natively.
+        document.selected = Some(3);
+        assert!(document.delete_selected());
+        document.selected = Some(4);
+        assert!(document.delete_selected());
+        assert!(document.offset_chains.is_empty());
+        document.selected = Some(2);
+        let targets = document.offset_selected(-3.0).unwrap();
+        project.save(&document).unwrap();
+        let (_, loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(loaded.offset_chains.len(), 1);
+        let chain = &loaded.offset_chains[0];
+        assert_eq!(chain.sources, vec![(1, false), (2, false)]);
+        assert_eq!(chain.distance, -3.0);
+        assert_eq!(chain.targets.len(), targets.len());
         fs::remove_file(path).unwrap();
     }
 

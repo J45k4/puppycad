@@ -494,3 +494,46 @@ fn fillet_and_chamfer_prompts_use_defaults_and_modes() {
         (ChamferMode::DistanceAngle, 4.0, 45.0)
     );
 }
+
+#[test]
+fn offset_prompt_creates_and_edits_an_offset() {
+    let line = |id, a: (f32, f32), b: (f32, f32)| Shape::Line {
+        id,
+        a: Point { x: a.0, y: a.1 },
+        b: Point { x: b.0, y: b.1 },
+    };
+    let mut app = App {
+        document: Document::from_shapes(vec![
+            line(1, (0.0, 0.0), (40.0, 0.0)),
+            line(2, (40.0, 0.0), (40.0, 30.0)),
+        ]),
+        ..App::default()
+    };
+    // Nothing selected: the command only explains itself.
+    app.begin_offset();
+    assert!(app.editing.is_none());
+    app.document.selected = Some(1);
+    app.begin_offset();
+    assert!(matches!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(EditField::OffsetCreate)
+    ));
+    // Enter keeps the 5 mm default and offsets the whole L chain.
+    app.finish_dimension_edit();
+    assert_eq!(app.document.offset_chains.len(), 1);
+    assert_eq!(app.document.shapes.len(), 4);
+    // The driving distance is edited from Properties.
+    app.editing = Some(DimensionEdit {
+        field: EditField::OffsetDistance,
+        buffer: "-2".into(),
+    });
+    app.finish_dimension_edit();
+    assert_eq!(app.document.offset_chains[0].distance, -2.0);
+    // A zero distance is rejected without creating anything.
+    app.document.selected = Some(1);
+    app.begin_offset();
+    app.editing.as_mut().unwrap().buffer = "0".into();
+    app.finish_dimension_edit();
+    assert_eq!(app.document.shapes.len(), 4);
+    assert!(app.status_message.contains("non-zero"));
+}

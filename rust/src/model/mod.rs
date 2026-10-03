@@ -6,6 +6,7 @@ mod dimensions;
 mod drag;
 mod edit;
 mod geometry;
+mod offset;
 mod relations;
 mod selection;
 mod shapes;
@@ -16,6 +17,7 @@ mod tests;
 
 pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
+pub use offset::{OffsetChain, offset_chain_segments, offset_shape};
 pub use selection::SelectionFilter;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
@@ -144,6 +146,8 @@ struct DocumentState {
     fixed_anchors: HashMap<(u32, usize), Point>,
     symmetric_points: Vec<SymmetricPoints>,
     mirrors: HashMap<u32, (u32, u32)>,
+    offsets: HashMap<u32, (u32, f32)>,
+    offset_chains: Vec<OffsetChain>,
 }
 
 #[derive(Clone, Debug)]
@@ -206,6 +210,11 @@ pub struct Document {
     pub symmetric_points: Vec<SymmetricPoints>,
     /// Whole-shape symmetry (web `mirror`): target -> (source, axis line).
     pub mirrors: HashMap<u32, (u32, u32)>,
+    /// Single-shape offsets (web `offset`): target -> (source, signed
+    /// distance in mm).
+    pub offsets: HashMap<u32, (u32, f32)>,
+    /// Mitered line chain offsets (web `offsetChain`).
+    pub offset_chains: Vec<OffsetChain>,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -256,6 +265,8 @@ impl Default for Document {
             fixed_anchors: HashMap::new(),
             symmetric_points: Vec::new(),
             mirrors: HashMap::new(),
+            offsets: HashMap::new(),
+            offset_chains: Vec::new(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -384,6 +395,8 @@ impl Document {
             fixed_anchors: self.fixed_anchors.clone(),
             symmetric_points: self.symmetric_points.clone(),
             mirrors: self.mirrors.clone(),
+            offsets: self.offsets.clone(),
+            offset_chains: self.offset_chains.clone(),
         }
     }
 
@@ -412,6 +425,8 @@ impl Document {
         self.fixed_anchors = state.fixed_anchors;
         self.symmetric_points = state.symmetric_points;
         self.mirrors = state.mirrors;
+        self.offsets = state.offsets;
+        self.offset_chains = state.offset_chains;
         self.selected = None;
         self.selection_extra.clear();
         self.selection_primary = None;

@@ -317,6 +317,10 @@ impl Document {
             sized.extend([target, source]);
             angled.extend([target, source]);
         }
+        for id in self.offset_curves() {
+            sized.insert(id);
+            angled.insert(id);
+        }
         for &(id, field) in self.driving_dimensions.keys() {
             match field {
                 DimensionField::CircleDiameter
@@ -382,6 +386,7 @@ impl Document {
             .chain(self.chamfers.keys())
             .copied()
             .chain(self.symmetry_followers())
+            .chain(self.offset_followers())
             .chain(self.endpoint_joins.values().map(|(id, _)| *id))
             .chain(self.projected_targets())
             .collect();
@@ -728,6 +733,7 @@ impl Document {
             }
         }
         self.symmetry_constraints(&mut b, &mut constraints);
+        self.offset_constraints(&mut b, &mut constraints);
         for (&target, &source) in &self.equal_ellipses {
             if let (Some(t), Some(s)) = (b.ellipse(target), b.ellipse(source)) {
                 constraints.push(Constraint::SameValue(s.rx, t.rx));

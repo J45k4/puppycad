@@ -5653,3 +5653,305 @@ fn whole_shape_drag_moves_every_selected_shape() {
     assert!(doc.undo());
     assert!(matches!(doc.shapes[1], Shape::Circle { center, .. } if center == p(30.0, 0.0)));
 }
+
+fn offset_line(id: u32, a: (f32, f32), b: (f32, f32)) -> Shape {
+    Shape::Line {
+        id,
+        a: Point { x: a.0, y: a.1 },
+        b: Point { x: b.0, y: b.1 },
+    }
+}
+
+fn offset_line_ends(doc: &Document, id: u32) -> (Point, Point) {
+    match doc.shapes.iter().find(|shape| shape.id() == id) {
+        Some(Shape::Line { a, b, .. }) => (*a, *b),
+        other => panic!("expected line {id}, found {other:?}"),
+    }
+}
+
+fn assert_offset_near(actual: Point, x: f32, y: f32) {
+    assert!(
+        (actual.x - x).abs() < 1e-3 && (actual.y - y).abs() < 1e-3,
+        "{actual:?} != ({x}, {y})"
+    );
+}
+
+#[test]
+fn offset_single_entities_follow_the_web_side_and_sign() {
+    // A line moves to the left of its direction for positive distances.
+    let mut doc = Document::from_shapes(vec![offset_line(1, (0.0, 0.0), (10.0, 0.0))]);
+    doc.selected = Some(1);
+    let created = doc.offset_selected(5.0).unwrap();
+    assert_eq!(created, vec![2]);
+    assert_eq!(doc.offsets.get(&2), Some(&(1, 5.0)));
+    let (a, b) = offset_line_ends(&doc, 2);
+    assert_offset_near(a, 0.0, 5.0);
+    assert_offset_near(b, 10.0, 5.0);
+    assert_eq!(doc.selected, Some(2));
+    assert_eq!(doc.offset_distance(2), Some(5.0));
+    // A negative distance moves it to the right; offset results never join
+    // the source into a chain.
+    doc.selected = Some(1);
+    let other = doc.offset_selected(-3.0).unwrap();
+    assert_eq!(other.len(), 1);
+    assert_offset_near(offset_line_ends(&doc, other[0]).0, 0.0, -3.0);
+
+    // Circles and arcs grow by positive distances and keep center and angles.
+    let circle = Shape::Circle {
+        id: 1,
+        center: Point { x: 5.0, y: 5.0 },
+        radius: 10.0,
+        segments: 32,
+    };
+    let arc = Shape::Arc {
+        id: 2,
+        center: Point { x: -5.0, y: 0.0 },
+        radius: 8.0,
+        start_angle: 0.25,
+        sweep: 1.5,
+        segments: 32,
+    };
+    let mut doc = Document::from_shapes(vec![circle, arc]);
+    doc.selected = Some(1);
+    let grown = doc.offset_selected(2.5).unwrap()[0];
+    assert!(matches!(
+        doc.shapes.iter().find(|s| s.id() == grown),
+        Some(Shape::Circle { center: Point { x: 5.0, y: 5.0 }, radius, .. }) if (radius - 12.5).abs() < 1e-4
+    ));
+    doc.selected = Some(2);
+    let inner = doc.offset_selected(-3.0).unwrap()[0];
+    assert!(matches!(
+        doc.shapes.iter().find(|s| s.id() == inner),
+        Some(Shape::Arc { radius, start_angle, sweep, .. })
+            if (radius - 5.0).abs() < 1e-4 && (start_angle - 0.25).abs() < 1e-9 && (sweep - 1.5).abs() < 1e-9
+    ));
+    // Offsets that would collapse an arc are rejected without changes.
+    doc.selected = Some(2);
+    let count = doc.shapes.len();
+    assert!(doc.offset_selected(-8.0).is_err());
+    assert_eq!(doc.shapes.len(), count);
+}
+
+#[test]
+fn offset_rejects_zero_distance_and_unsupported_shapes() {
+    let ellipse = Shape::Ellipse {
+        id: 2,
+        center: Point { x: 0.0, y: 0.0 },
+        rx: 10.0,
+        ry: 5.0,
+        rotation: 0.0,
+        segments: 32,
+    };
+    let spline = Shape::Spline {
+        id: 3,
+        mode: crate::spline::SplineMode::Fit,
+        points: vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 5.0, y: 5.0 },
+            Point { x: 10.0, y: 0.0 },
+        ],
+        closed: false,
+    };
+    let mut doc = Document::from_shapes(vec![
+        offset_line(1, (0.0, 0.0), (10.0, 0.0)),
+        ellipse,
+        spline,
+    ]);
+    doc.selected = Some(1);
+    assert!(doc.offset_selected(0.0).is_err());
+    assert!(doc.offset_selected(f32::NAN).is_err());
+    for id in [2, 3] {
+        doc.selected = Some(id);
+        assert!(doc.offset_selected(5.0).is_err());
+    }
+    assert_eq!(doc.shapes.len(), 3);
+    assert!(doc.offsets.is_empty());
+    assert!(!doc.undo());
+    doc.selected = None;
+    assert!(doc.offset_selected(5.0).is_err());
+}
+
+#[test]
+fn offset_follows_its_source_and_its_distance_is_driving() {
+    let mut doc = Document::from_shapes(vec![
+        offset_line(1, (0.0, 0.0), (10.0, 0.0)),
+        Shape::Circle {
+            id: 2,
+            center: Point { x: 30.0, y: 0.0 },
+            radius: 5.0,
+            segments: 32,
+        },
+    ]);
+    doc.selected = Some(1);
+    let line = doc.offset_selected(4.0).unwrap()[0];
+    doc.selected = Some(2);
+    let circle = doc.offset_selected(2.0).unwrap()[0];
+    // Moving the source moves the offset with it.
+    doc.selected = Some(1);
+    assert!(doc.move_selected(Point { x: 3.0, y: 7.0 }));
+    let (a, b) = offset_line_ends(&doc, line);
+    assert_offset_near(a, 3.0, 11.0);
+    assert_offset_near(b, 13.0, 11.0);
+    assert_eq!(offset_line_ends(&doc, 1).0, Point { x: 3.0, y: 7.0 });
+    // Resizing the source circle resizes its offset.
+    doc.selected = Some(2);
+    doc.set_dimension(DimensionField::CurveRadius, 8.0).unwrap();
+    assert!(matches!(
+        doc.shapes.iter().find(|s| s.id() == circle),
+        Some(Shape::Circle { center, radius, .. })
+            if (radius - 10.0).abs() < 1e-3 && center.distance(Point { x: 30.0, y: 0.0 }) < 1e-3
+    ));
+    // Editing the driving distance moves only the offset; one undo restores it.
+    doc.selected = Some(line);
+    doc.set_offset_distance(-2.0).unwrap();
+    assert_eq!(doc.offset_distance(line), Some(-2.0));
+    assert_offset_near(offset_line_ends(&doc, line).0, 3.0, 5.0);
+    assert_eq!(offset_line_ends(&doc, 1).0, Point { x: 3.0, y: 7.0 });
+    assert!(doc.set_offset_distance(0.0).is_err());
+    assert!(doc.undo());
+    assert_eq!(doc.offset_distance(line), Some(4.0));
+    assert_offset_near(offset_line_ends(&doc, line).0, 3.0, 11.0);
+    // Split and trim are refused while the offset exists.
+    doc.selected = Some(1);
+    assert!(doc.split_selected_curve(Point { x: 8.0, y: 7.0 }).is_err());
+    // Deleting the source drops the relation.
+    assert!(doc.delete_selected());
+    assert!(!doc.has_offset(line));
+}
+
+#[test]
+fn offset_creation_is_one_undo_step() {
+    let shapes = vec![
+        offset_line(1, (0.0, 0.0), (40.0, 0.0)),
+        offset_line(2, (40.0, 0.0), (40.0, 30.0)),
+    ];
+    let mut doc = Document::from_shapes(shapes.clone());
+    doc.selected = Some(2);
+    assert_eq!(doc.offset_selected(5.0).unwrap().len(), 2);
+    assert_eq!(doc.shapes.len(), 4);
+    assert!(doc.undo());
+    assert_eq!(doc.shapes, shapes);
+    assert!(doc.offset_chains.is_empty());
+}
+
+#[test]
+fn offset_chain_miters_an_l_shape() {
+    // Lines stored in mixed directions still order into one chain, which
+    // starts at the first loose end found: (0, 0).
+    let mut doc = Document::from_shapes(vec![
+        offset_line(1, (40.0, 0.0), (0.0, 0.0)),
+        offset_line(2, (40.0, 0.0), (40.0, 30.0)),
+        offset_line(3, (100.0, 100.0), (110.0, 100.0)),
+    ]);
+    assert_eq!(doc.connected_line_chain(1), vec![1, 2]);
+    assert_eq!(doc.connected_line_chain(3), vec![3]);
+    doc.selected = Some(1);
+    let targets = doc.offset_selected(5.0).unwrap();
+    let chain = doc.offset_chains[0].clone();
+    assert!(!chain.closed);
+    assert_eq!(chain.side, 1);
+    assert_eq!(chain.sources, vec![(1, true), (2, false)]);
+    assert_eq!(chain.targets, targets);
+    let ends: Vec<(Point, Point)> = targets
+        .iter()
+        .map(|&id| offset_line_ends(&doc, id))
+        .collect();
+    assert_offset_near(ends[0].0, 0.0, 5.0);
+    assert_offset_near(ends[0].1, 35.0, 5.0);
+    assert_offset_near(ends[1].0, 35.0, 5.0);
+    assert_offset_near(ends[1].1, 35.0, 30.0);
+    // Editing the chain distance re-miters every piece.
+    doc.selected = Some(targets[1]);
+    doc.set_offset_distance(-2.0).unwrap();
+    let ends: Vec<(Point, Point)> = targets
+        .iter()
+        .map(|&id| offset_line_ends(&doc, id))
+        .collect();
+    assert_offset_near(ends[0].1, 42.0, -2.0);
+    assert_offset_near(ends[1].0, 42.0, -2.0);
+    assert_eq!(doc.offset_chains[0].distance, -2.0);
+}
+
+#[test]
+fn offset_chain_miters_a_u_shape_and_follows_its_sources() {
+    // U opening upwards: positive offsets move left of the chain direction,
+    // i.e. into the U.
+    let mut doc = Document::from_shapes(vec![
+        offset_line(1, (0.0, 30.0), (0.0, 0.0)),
+        offset_line(2, (0.0, 0.0), (40.0, 0.0)),
+        offset_line(3, (40.0, 0.0), (40.0, 30.0)),
+    ]);
+    doc.selected = Some(2);
+    let targets = doc.offset_selected(5.0).unwrap();
+    assert_eq!(
+        doc.offset_chains[0].sources,
+        vec![(1, false), (2, false), (3, false)]
+    );
+    let ends: Vec<(Point, Point)> = targets
+        .iter()
+        .map(|&id| offset_line_ends(&doc, id))
+        .collect();
+    assert_offset_near(ends[0].0, 5.0, 30.0);
+    assert_offset_near(ends[0].1, 5.0, 5.0);
+    assert_offset_near(ends[1].1, 35.0, 5.0);
+    assert_offset_near(ends[2].1, 35.0, 30.0);
+    // Too large a distance would reverse the bottom edge.
+    let count = doc.shapes.len();
+    doc.selected = Some(1);
+    assert!(doc.offset_selected(25.0).is_err());
+    assert_eq!(doc.shapes.len(), count);
+    // Moving one source line keeps it where it was put (source wins); the
+    // chain stays joined and the offset pieces follow as its mitered offset.
+    doc.selected = Some(3);
+    assert!(doc.move_selected(Point { x: 10.0, y: 0.0 }));
+    assert_eq!(
+        offset_line_ends(&doc, 3),
+        (Point { x: 50.0, y: 0.0 }, Point { x: 50.0, y: 30.0 })
+    );
+    let chain = doc.offset_chains[0].clone();
+    let sources = doc.chain_segments(&chain.sources).unwrap();
+    let expected = offset_chain_segments(&sources, chain.closed, 5.0).unwrap();
+    for (&id, (a, b)) in targets.iter().zip(expected) {
+        let (c, d) = offset_line_ends(&doc, id);
+        assert_offset_near(c, a.0 as f32, a.1 as f32);
+        assert_offset_near(d, b.0 as f32, b.1 as f32);
+    }
+    assert_offset_near(offset_line_ends(&doc, targets[2]).0, 45.0, 5.0);
+}
+
+#[test]
+fn offset_closed_chain_grows_outward_for_positive_distances() {
+    for clockwise in [false, true] {
+        let mut square = vec![
+            offset_line(1, (0.0, 0.0), (10.0, 0.0)),
+            offset_line(2, (10.0, 0.0), (10.0, 10.0)),
+            offset_line(3, (10.0, 10.0), (0.0, 10.0)),
+            offset_line(4, (0.0, 10.0), (0.0, 0.0)),
+        ];
+        if clockwise {
+            for shape in &mut square {
+                if let Shape::Line { a, b, .. } = shape {
+                    std::mem::swap(a, b);
+                }
+            }
+        }
+        let mut doc = Document::from_shapes(square);
+        doc.selected = Some(1);
+        let targets = doc.offset_selected(2.0).unwrap();
+        assert!(doc.offset_chains[0].closed);
+        assert_eq!(targets.len(), 4);
+        let mut xs: Vec<f32> = targets
+            .iter()
+            .flat_map(|&id| {
+                let (a, b) = offset_line_ends(&doc, id);
+                [a.x, b.x]
+            })
+            .collect();
+        xs.sort_by(f32::total_cmp);
+        assert!((xs[0] + 2.0).abs() < 1e-3 && (xs[7] - 12.0).abs() < 1e-3);
+        // Inward offsets that collapse the loop are rejected.
+        doc.selected = Some(2);
+        assert!(doc.offset_selected(-6.0).is_err());
+        assert_eq!(doc.offset_chains.len(), 1);
+    }
+}

@@ -243,6 +243,74 @@ pub enum Constraint {
         second: Curve,
         side: f64,
     },
+    /// `target` is `source` moved `distance` to the left of its direction
+    /// (the web `offset` relation for lines).
+    OffsetLine {
+        source: LineVar,
+        target: LineVar,
+        distance: f64,
+    },
+    /// Mitered offset of a connected line chain (the web `offsetChain`
+    /// relation): each target is its directed source (reversed when the
+    /// flag is set) offset by `distance` to the left, joined at the
+    /// intersections of neighboring offset lines; consecutive sources stay
+    /// joined end to start.
+    OffsetChain {
+        sources: Vec<(LineVar, bool)>,
+        targets: Vec<LineVar>,
+        closed: bool,
+        distance: f64,
+    },
+}
+
+/// A line segment as two `(x, y)` points.
+pub type Segment = ((f64, f64), (f64, f64));
+
+/// Offset a directed segment `distance` to its left.
+pub fn offset_segment((a, b): Segment, distance: f64) -> Segment {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let length = dx.hypot(dy).max(1e-300);
+    let (nx, ny) = (-dy / length * distance, dx / length * distance);
+    ((a.0 + nx, a.1 + ny), (b.0 + nx, b.1 + ny))
+}
+
+/// Mitered offset of directed chain segments, ported from
+/// `offsetLineChain` in `src/sketch-offset-chain.ts`: neighbors are joined
+/// at the intersection of their offset lines (the midpoint of the offset
+/// ends for parallel neighbors). The second value is false when a join
+/// reverses direction (no miter exists).
+pub fn mitered_offset(source: &[Segment], closed: bool, distance: f64) -> (Vec<Segment>, bool) {
+    let mut lines: Vec<Segment> = source
+        .iter()
+        .map(|&line| offset_segment(line, distance))
+        .collect();
+    let mut ok = true;
+    let count = lines.len();
+    let joins = if closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    for i in 0..joins {
+        let j = (i + 1) % count;
+        let (sa, sb) = (source[i], source[j]);
+        let da = (sa.1.0 - sa.0.0, sa.1.1 - sa.0.1);
+        let db = (sb.1.0 - sb.0.0, sb.1.1 - sb.0.1);
+        let determinant = cross(da, db);
+        let (a, b) = (lines[i], lines[j]);
+        let join = if determinant.abs() < 1e-10 * da.0.hypot(da.1) * db.0.hypot(db.1) {
+            if dot(da, db) <= 0.0 {
+                ok = false;
+            }
+            ((a.1.0 + b.0.0) * 0.5, (a.1.1 + b.0.1) * 0.5)
+        } else {
+            let t = cross((b.0.0 - a.0.0, b.0.1 - a.0.1), db) / determinant;
+            (a.0.0 + t * da.0, a.0.1 + t * da.1)
+        };
+        lines[i].1 = join;
+        lines[j].0 = join;
+    }
+    (lines, ok)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -675,9 +743,26 @@ impl Constraint {
                 curve_vars(&mut out, &Curve::Arc(arc));
                 point(&mut out, q);
             }
-            Constraint::Chamfer { a, b, .. } => {
+            Constraint::Chamfer { a, b, .. }
+            | Constraint::OffsetLine {
+                source: a,
+                target: b,
+                ..
+            } => {
                 line(&mut out, a);
                 line(&mut out, b);
+            }
+            Constraint::OffsetChain {
+                ref sources,
+                ref targets,
+                ..
+            } => {
+                for &(l, _) in sources {
+                    line(&mut out, l);
+                }
+                for &l in targets {
+                    line(&mut out, l);
+                }
             }
             Constraint::InternalTangent {
                 outer: ref a,
@@ -992,6 +1077,43 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             let (x, y) = pt(p, point);
             let (cx, cy) = pt(p, circle.center);
             out.push((x - cx).hypot(y - cy) - p[circle.radius]);
+        }
+        Constraint::OffsetLine {
+            source,
+            target,
+            distance,
+        } => {
+            let (a, b) = offset_segment((pt(p, source.a), pt(p, source.b)), distance);
+            let (c, d) = (pt(p, target.a), pt(p, target.b));
+            out.extend([c.0 - a.0, c.1 - a.1, d.0 - b.0, d.1 - b.1]);
+        }
+        Constraint::OffsetChain {
+            sources,
+            targets,
+            closed,
+            distance,
+        } => {
+            let source: Vec<Segment> = sources
+                .iter()
+                .map(|&(line, reversed)| {
+                    let (a, b) = (pt(p, line.a), pt(p, line.b));
+                    if reversed { (b, a) } else { (a, b) }
+                })
+                .collect();
+            let (expected, _) = mitered_offset(&source, closed, distance);
+            for ((a, b), target) in expected.into_iter().zip(&targets) {
+                let (c, d) = (pt(p, target.a), pt(p, target.b));
+                out.extend([c.0 - a.0, c.1 - a.1, d.0 - b.0, d.1 - b.1]);
+            }
+            let joins = if closed {
+                source.len()
+            } else {
+                source.len().saturating_sub(1)
+            };
+            for i in 0..joins {
+                let (end, start) = (source[i].1, source[(i + 1) % source.len()].0);
+                out.extend([end.0 - start.0, end.1 - start.1]);
+            }
         }
         _ => {}
     }

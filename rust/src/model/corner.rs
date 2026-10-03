@@ -74,6 +74,9 @@ impl Document {
         if first == second {
             return Err("Select two different lines".into());
         }
+        if self.has_offset(first) || self.has_offset(second) {
+            return Err("Remove the offset before a fillet or chamfer".into());
+        }
         if self.construction.contains(&first) != self.construction.contains(&second) {
             return Err("Select lines with matching construction status".into());
         }
