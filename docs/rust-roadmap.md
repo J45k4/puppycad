@@ -45,7 +45,7 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 1. Dimensions drawn in the viewport with click-to-edit labels; point
    distance / X / Y dimensions; driving vs. reference; expressions and sketch
    variables (`sketch-value.ts`, `sketch-variables.ts`).
-2. Fillet and chamfer.
+2. (Done for line-line corners, matching the web scope) Fillet and chamfer.
 3. Mirror and the symmetry constraint.
 4. Offset, single and chain.
 5. Linear and circular patterns.

@@ -123,6 +123,29 @@ With a line, circular arc, or elliptic arc selected, hover near the endpoint to 
 press **U**. The curve reaches the nearest boundary in that direction. For a
 line, existing length and endpoint coincidence relations on the changed
 endpoint are removed. The edit is undoable and survives save/reopen.
+**Fillet** a line-line corner: select one line, hover a second line whose
+endpoint meets (or nearly meets, within a few pixels) the selected line's
+endpoint, and press **Shift+W** (or pick **MORE → FILLET** and click the two
+lines). Type the radius in the Properties prompt and press Enter; an empty
+prompt keeps the last radius (5 mm by default). Both lines are trimmed back
+from their intersection and a new arc is inserted, joined to each line by a
+web `coincident` relation and kept tangent by an `endpointTangent` (smooth
+join) relation. Its radius is a driving `radius` relation, editable in
+Properties like any arc radius. **Chamfer** uses the same gesture with
+**Shift+H** or **MORE → CHAMFER**: the prompt asks for the first setback and
+then the second setback; **Tab** switches to distance-angle mode, where the
+second value is the angle in degrees between the first line and the chamfer.
+The chamfer line is joined to both trimmed lines with `coincident` relations
+and its values are stored as the web `chamfer` relation (`value`,
+`secondValue`, `mode`), which the solver keeps driving. Press Shift+H with a
+chamfer line selected and nothing hovered to edit its values. Fillet and
+chamfer are single undo steps and reject parallel lines, lines that do not
+meet at a corner, and values too large for the lines. As in the web app,
+relations at the cut corner (fixes, coincidences, joins, non-reference
+lengths) are removed; relations at the far ends and line-wide relations stay.
+Split and Trim move fillet/chamfer joins to the retained piece. Native
+rectangle corners and curved edges are not supported (the web app does not
+support them either).
 Set **CX** and **CY** to the transform center in millimeters. The default is the sketch origin. Set a positive scale factor in Properties and click **Scale selected** or **Scale copy** to resize about that center. Existing driving dimension values scale with the selected shape.
 The **Rotate** tab uses a signed angle in degrees and offers **Rotate selected** and **Rotate copy** about the same editable center. Rotating an axis-aligned rectangle converts it to a rotated rectangle primitive that the web app can open.
 Move, scale, and rotate copies retain their editable driving dimensions.
@@ -420,6 +443,8 @@ Library crate (`rust/src/lib.rs`):
 - `model/` — the sketch `Document`: `mod.rs` (document state, snapping,
   selection, drafting, undo), `shapes.rs` (`Point`, `Shape` and per-shape
   geometry), `relations.rs` (fixed anchors and relation toggles),
+  `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
+  shared with split/trim),
   `dimensions.rs` (`set_dimension`), `edit.rs` (delete, split, trim, extend,
   copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
@@ -432,6 +457,7 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
   `input.rs` (mouse/keyboard handling and the `winit` handler),
   `panels.rs` (toolbar and properties panels, dimension editing),
+  `corner.rs` (fillet/chamfer gestures and prompts),
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
   preview projection, dragging and painting), `view_sketch.rs` (sketch grid
   and shape painting), `tests.rs`.
@@ -524,6 +550,10 @@ A graph-constraint fixture checks that an existing horizontal line and length
 constraint render correctly and that a length edit updates its graph node.
 A three-point circle scenario draws the circle, checks its screenshot, and saves
 the web circle primitive.
+A fillet scenario draws two lines meeting at a corner, fillets it with Shift+W
+(`rust-native-fillet.png`), chamfers a second corner with Shift+H in
+distance-angle mode (`rust-native-chamfer.png`), and checks the saved
+`endpointTangent` and `chamfer` relations.
 It does not open a host desktop
 window.
 
