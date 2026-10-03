@@ -47,6 +47,9 @@ everything after it. Each item shows its final status.
 6. Vertex / edge / face selection in the 3D views (hover priority,
    multi-select, measure, selection-driven chamfer/fillet, sketch on face and
    mates, right-click context menu). **Done.**
+7. Face sketch body context from the evaluated body and projected geometry
+   (Use edges / Project into sketch, native `projected` relation,
+   re-projection, mixed projected/drawn profiles). **Done.**
 
 ## Phase 4 — Assembly
 

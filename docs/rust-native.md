@@ -130,7 +130,9 @@ middle-drag pans, the wheel zooms about the pointer.
 
 Placement snaps within 8 px to anchors, midpoints and finite intersections
 of lines, circles, arcs, ellipses, elliptic arcs, splines and
-rectangle/polygon/slot boundaries, then to the origin or grid. A square marks
+rectangle/polygon/slot boundaries (projected entities included), the ends,
+midpoints and crossings with sketch geometry of a face sketch's dashed
+context edges, then to the origin or grid. A square marks
 the target. **N** toggles geometry snapping, **Shift+G** grid snapping.
 Snapping a new line or open spline endpoint onto a sketch point adds a
 persistent coincidence; other snaps only place a coordinate.
@@ -140,6 +142,42 @@ a hint with a dashed guide shows `H`/`V` (within 2°), `//`/`T` to a line
 within 30 px, or `TAN`. Hints are visual; with automatic constraints on
 (**7**, `AUTO`, default on) a line committed under an `H`/`V` hint snaps to
 the axis and gets the relation in the same undo step.
+
+### Projecting body edges
+
+In a face sketch, **O** (MORE → USE EDGES) projects body geometry into the
+sketch as ordinary entities: with nothing picked it takes every boundary
+loop of the sketch face (outer boundary, holes, notches); edges and faces
+selected in the 3D view before **4** created the sketch are projected
+instead. While Use edges is armed (until Esc or a click elsewhere), a click
+on a dashed context edge projects just that body edge. In the 3D view the
+context menu of an edge or face offers **Project into sketch**: into the
+open face sketch, or into a new sketch on the clicked face (with its loops).
+
+Straight edges become lines, closed circular loops circles, circular runs
+arcs, and any other curve a polyline of lines (no splines are fitted).
+Every projected entity carries a native `projected` relation (see
+[Files](#files)); the solver locks it, so it adds no degrees of freedom and
+cannot be dragged, moved or rotated. Projected entities are profile
+geometry by default; **O** with projected entities selected toggles them
+between construction and geometry. Delete removes the entity and its
+relation; every projection is one undo step.
+
+Projections follow the body: they are re-projected when a sketch opens,
+when returning from the 3D view, after undo and after depth, end-condition
+or feature value edits (in every face sketch, the same rule that lets face
+sketches follow their source). Face loops are matched to their entities by
+kind and position, edges by their end points, else (after the body changed)
+by the two face planes they lie between. When a source is gone the entities
+stay as plain geometry and the status bar says so. A sketch only sees the
+features before the first feature built from it, so its own cuts never feed
+back into its projections.
+
+In a sketch with projected geometry, drawn curves may branch from or cross
+the projected outline: the bounded regions of that arrangement are the
+profiles (a line across a projected face gives two profiles, a projected
+hole stays a hole of the region around it). Plain sketches keep the web's
+simple-loop rule.
 
 ### Selection
 
@@ -351,8 +389,14 @@ and named (**TOP FACE**); faces not belonging to an extrusion prism are grey.
 **4** (MORE → SKETCH ON FACE) adds a sketch on it, saved like the web: a
 graph `face` node `face-<extrudeId>-<faceId>` targeted by the sketch.
 Frames follow `getExtrudedFaceDescriptors` and are recomputed on every
-evaluation, so the sketch follows depth changes. The supporting extrusion's
-edges are drawn dashed and snap; **5** toggles them.
+evaluation, so the sketch follows depth changes; symmetric and flipped
+blind prisms are placed where the native evaluation puts them (the web
+treats them as blind from the sketch plane). The body context comes from
+the evaluated bodies the sketch sees (the features before the first one
+built from it): every loop of the face, including holes and notches from
+later cuts, is drawn dashed and snaps; the rest of the body's edges,
+projected along the normal, are drawn dashed and dimmer. **5** toggles the
+context; **F** frames it.
 
 **Profiles.** Closed rectangles, rotated rectangles, circles, ellipses,
 polygons, slots, closed fit splines and simple loops of lines and arcs
@@ -536,6 +580,7 @@ shown, for example:
 | `"suppressed": true` on feature nodes, `data.tree.rollbackIndex` | Suppression, rollback bar | All features active; `rollbackIndex` dropped on re-save. |
 | `revolve`, `loft`, `edgeFinish` graph nodes (`native-…` ids) | Native features | Dropped when the graph is normalized. |
 | Assembly instance `name` | Instance label | Dropped. |
+| Sketch relation `{"type":"projected", "entityId", "sketchId", "sourceFaceId"}` or `{…, "sourceEdge": {"a", "b", "via", "normals"}}` | Projected entity (Use edges): the entity is an ordinary `sketchLine` / `sketchArc` / circle primitive; `sourceFaceId` names a web face whose loops it follows, `sourceEdge` a body edge by its ends, a middle point and its two face normals (zero for curved edges). A source that no longer resolves leaves a plain entity. | Ignored; the entities load as plain geometry. |
 
 Feature order is the order of feature nodes in `data.cad.nodes`, mirrored in
 `rootNodeIds` and `data.tree.orderedNodeIds`. Defaults are omitted, so plain
@@ -589,6 +634,7 @@ duplicate bindings within a context.
 | palette / MORE | Control spline | sketch |
 | `Enter` | Finish spline | placing a spline |
 | `Shift+Enter` | Finish closed spline | placing a spline |
+| `O` | Use edges: project the face loops / selection (again: construction) | sketch, editable |
 
 ### Edit
 
@@ -650,6 +696,7 @@ duplicate bindings within a context.
 | `Shift+X` | Extrude cut | any view |
 | `4` | Sketch on hovered face | any view |
 | `5` | Toggle face body context | any view |
+| palette / MORE | Project selected edges / faces into a face sketch | 3D preview |
 | `E` | Cycle extrusion end condition | 3D preview |
 | `F` | Flip extrusion direction | 3D preview |
 | `U` | Pick up-to body | 3D preview |
@@ -744,8 +791,12 @@ Library crate (`rust/src/lib.rs`, also hosts `roundtrip` and `export`):
 - `solver.rs` least-squares solver and DOF analysis; `sketch_value.rs`
   expressions; `spline.rs` cubic splines; `stl.rs` STL writing; `threemf.rs`
   3MF package
+- `model/projection.rs` projected entities (Use edges) and polyline
+  recognition
 - `project.rs` `.pcad` load/save, parts, profiles, extrusions;
   `project/face.rs` plane frames, face descriptors, face sketches;
+  `project/context.rs` face sketch body context; `project/regions.rs`
+  arrangement profiles;
   `project/features.rs` feature tree, evaluation cache, revolve, loft, edge
   finishes; `project/assemblies.rs` assembly items
 - `assembly.rs` assembly documents and poses; `assembly/solver.rs` mate
@@ -762,7 +813,7 @@ Binary (`rust/src/main.rs` parses arguments and runs the event loop):
   `settings.rs` settings, units, themes, UI scale
 - `app/view_sketch.rs` sketch painting, labels, glyphs, hints; `corner.rs`,
   `tangent.rs`, `pattern.rs` tool prompts
-- `app/topology.rs` vertices/edges/faces, picking and measurement; `topology_view.rs` hover, selection, Properties; `context_menu.rs` right-click menu.
+- `app/topology.rs` vertices/edges/faces, picking and measurement; `topology_view.rs` hover, selection, Properties; `context_menu.rs` right-click menu; `projection.rs` Use edges, re-projection.
 - `app/solid.rs` 3D projection, picking, painting; `extrude.rs` extrude
   prompt and edits; `feature_tree.rs` feature rows; `features.rs` revolve,
   loft and edge finish interaction; `assembly.rs` assembly view
@@ -774,7 +825,8 @@ Tests: `model/tests.rs`, `model/dimension_tests.rs`, `model/glyph_tests.rs`,
 `project/face_tests.rs`, `project/feature_tests.rs`,
 `project/features_tests.rs`, `assembly/tests.rs`, `app/tests.rs`,
 `app/input_tests.rs`, `app/history_tests.rs`, `app/settings_tests.rs`,
-`app/status_tests.rs`, `app/assembly_tests.rs`, `renderer_tests.rs`;
+`app/status_tests.rs`, `app/assembly_tests.rs`, `app/projection_tests.rs`,
+`renderer_tests.rs`;
 integration tests `rust/tests/roundtrip.rs` and `rust/tests/export.rs`.
 
 ## Testing
@@ -825,6 +877,7 @@ docker --context rootless run --rm -v "$PWD/workdir:/out" \
 | Parts and files | sketches per plane, parts, rename, save failure | `two-parts`, `part-switch`, `part-list`, `created-part`, `renamed-part`, `save-failed` |
 | Solids | extrude profiles, holes, two bodies, cut, join, depth, delete, STL/3MF, orbit, options | `solid*`, `*-solid`, `two-bodies`, `two-profiles-two-bodies`, `profile-selection`, `cut-extrusion`, `join-extrusion`, `deleted-solid`, `stl-export`, `extrude-preview`, `extrude-symmetric*` |
 | Face sketches | hover, sketch, cut | `face-hover`, `face-sketch`, `face-cut` |
+| Use edges | extrude-options top face: context, projected loops, split line, cut | `use-edges-context`, `use-edges-projected`, `use-edges-split`, `use-edges-cut` |
 | Feature tree | suppress, reorder, rollback | `tree-*` |
 | Revolve / loft / finish | revolve, edge chamfer, loft join | `revolve*`, `edge-chamfer*`, `loft*` |
 | Topology | vertex hover, vertex–edge measure, two-edge chamfer, right-click → sketch on face | `topology-vertex-hover`, `topology-measure`, `topology-edges`, `topology-chamfer`, `topology-context-menu`, `topology-face-sketch` |
@@ -857,6 +910,10 @@ docker --context rootless run --rm -v "$PWD/workdir:/out" \
   into a tangent fillet is one face; non-parallel edge–edge and
   curved-face distances are not measured. The context menu has no "Edit
   feature", "Extrude from face sketch" or "Hide body" items yet.
+- Use edges projects only into face sketches; other curves become line
+  polylines (no fitted splines); projections are re-linked after body
+  changes only on the listed events, and a sketch's stored geometry is
+  stale until then (it is never re-projected while saving).
 - Faces of cut features cannot carry sketches; face-sketch cuts run inward
   by a native rule the web graph cannot express.
 - Pattern prompts ignore the display unit.

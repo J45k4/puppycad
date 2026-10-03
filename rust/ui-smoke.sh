@@ -3911,3 +3911,55 @@ grep -q '"type": "face"' /tmp/native-topology.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Use edges: right-click the extrude-options block's top face, Sketch on
+# face, F frames the dashed context (the top face with its through hole,
+# the lower step dimmer), O projects its loops, a line across splits it,
+# Shift+X cuts the region holding the hole.
+cp fixtures/extrude-options.pcad /tmp/native-use-edges.pcad
+./target/debug/puppycad /tmp/native-use-edges.pcad >/tmp/puppycad-use-edges.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-use-edges.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-use-edges.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool mousemove 744 290
+xdotool mousedown 3 mouseup 3
+sleep 0.3
+xdotool key --window "$window_id" Return
+sleep 0.5
+xdotool key --window "$window_id" f
+sleep 0.3
+import -window root /out/rust-native-use-edges-context.png
+xdotool key --window "$window_id" o
+sleep 0.5
+import -window root /out/rust-native-use-edges-projected.png
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" l
+xdotool mousemove 453 160 click 1
+xdotool mousemove 453 700 click 1
+sleep 0.3
+import -window root /out/rust-native-use-edges-split.png
+xdotool key --window "$window_id" shift+x
+sleep 0.3
+xdotool type --window "$window_id" 10
+xdotool key --window "$window_id" Return
+sleep 0.8
+import -window root /out/rust-native-use-edges-cut.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test "$(grep -c '"type": "projected"' /tmp/native-use-edges.pcad)" -eq 8
+test "$(grep -c '"type": "extrude"' /tmp/native-use-edges.pcad)" -eq 4
+cp /tmp/native-use-edges.pcad /out/rust-native-use-edges.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
