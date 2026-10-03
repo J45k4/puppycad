@@ -2,6 +2,7 @@ mod assembly;
 mod commands;
 mod context_menu;
 mod corner;
+mod draft_controls;
 mod extrude;
 mod feature_tree;
 mod features;
@@ -46,6 +47,7 @@ pub(crate) use commands::shortcuts_markdown;
 use commands::*;
 use context_menu::ContextMenu;
 use corner::*;
+use draft_controls::*;
 use extrude::*;
 use features::*;
 use palette::*;
@@ -354,6 +356,10 @@ pub(crate) struct App {
     solid_redo: Vec<SolidUndo>,
     /// Next viewport click picks the up-to-body target.
     body_pick: bool,
+    /// The draft prompt was clicked: its value row shows a caret.
+    draft_focus: bool,
+    /// Left-drag on the extrusion ghost's end cap.
+    depth_drag: Option<DepthDrag>,
     /// Select-mode hover target; the viewport only repaints on pointer
     /// moves when this changes (see `pointer_moved`).
     hover: Hover,
@@ -529,6 +535,8 @@ impl Default for App {
             solid_undo: Vec::new(),
             solid_redo: Vec::new(),
             body_pick: false,
+            draft_focus: false,
+            depth_drag: None,
             hover: Hover::default(),
             show_glyphs: true,
             auto_constraints: true,

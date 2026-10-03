@@ -121,8 +121,7 @@ impl App {
             (_, Some(_)) => Some("click an axis line, or X / Y".into()),
             _ => None,
         };
-        let mut text =
-            format!("{kind} preview - not created yet  |  Enter commit  |  Esc cancel");
+        let mut text = format!("{kind} preview - not created yet  |  Enter commit  |  Esc cancel");
         if let Some(error) = error.filter(|error| !error.is_empty()) {
             text.push_str("  |  ");
             text.push_str(&error);
@@ -157,17 +156,19 @@ impl App {
         }
         self.extrude_draft = Some(draft);
         self.body_pick = false;
+        self.draft_focus = false;
+        self.depth_drag = None;
         self.solid_preview = true;
         self.status_message = Self::draft_hint(operation);
     }
 
     fn draft_hint(operation: &str) -> String {
         format!(
-            "Extrude {operation}: type depth, Enter commits (empty = {DEFAULT_DEPTH:.0} mm)  |  E end  F flip  |  Esc cancel"
+            "Extrude {operation}: type depth, Enter commits (empty = {DEFAULT_DEPTH:.0} mm)  |  E end  F flip  O op  |  Esc cancel"
         )
     }
 
-    fn refresh_ghost(&mut self, draft: &mut ExtrudeDraft) {
+    pub(super) fn refresh_ghost(&mut self, draft: &mut ExtrudeDraft) {
         let Some(project) = self.project.as_mut() else {
             draft.ghost = Err("no project".into());
             return;
@@ -196,6 +197,8 @@ impl App {
             }
             KeyCode::Escape => {
                 self.solid_preview = false;
+                self.body_pick = false;
+                self.depth_drag = None;
                 self.status_message = "Extrusion cancelled".into();
                 return;
             }
@@ -208,6 +211,24 @@ impl App {
                     next_end_condition(&draft.options.end, draft.operation, target.as_deref());
             }
             KeyCode::KeyF => draft.options.flip = !draft.options.flip,
+            KeyCode::KeyO => {
+                let next = next_operation(draft.operation);
+                if next != "newBody" && self.default_target(None).is_none() {
+                    self.status_message =
+                        format!("Extrude: {next} needs an existing body - create a new body first");
+                    self.extrude_draft = Some(draft);
+                    return;
+                }
+                draft.operation = next;
+                if next == "newBody"
+                    && matches!(
+                        draft.options.end,
+                        EndCondition::ThroughAll | EndCondition::UpToBody(_)
+                    )
+                {
+                    draft.options.end = EndCondition::Blind;
+                }
+            }
             _ => {
                 for ch in text.unwrap_or_default().chars() {
                     if (ch.is_ascii_digit() || ch == '.') && draft.buffer.len() < 12 {
@@ -481,54 +502,16 @@ impl App {
             .and_then(|solid| stl::solid_triangles(solid).ok())
             .unwrap_or_default();
         let prompt = format!(
-            "DEPTH  {}_ mm   {}{}",
+            "DEPTH {}_ mm  {}  {}{}",
             if draft.buffer.is_empty() {
                 format!("{DEFAULT_DEPTH:.0}")
             } else {
                 draft.buffer.clone()
             },
             draft.options.end.label(),
+            draft.operation.to_uppercase(),
             if draft.options.flip { "  FLIPPED" } else { "" }
         );
         self.paint_ghost(painter, layout, &ghost, draft.operation == "cut", &prompt);
-    }
-
-    /// Properties panel while the extrude prompt is open.
-    pub(super) fn paint_draft_panel(&self, painter: &mut Painter, layout: Layout) {
-        let Some(draft) = &self.extrude_draft else {
-            return;
-        };
-        let x = layout.right.x + 18.0;
-        let y = layout.right.y;
-        painter.text(x, y + 66.0, "NEW EXTRUSION", 1.7, ACCENT);
-        let resolved = draft
-            .ghost
-            .as_ref()
-            .map_or_else(|_| "--".to_string(), |solid| format!("{:.1}", solid.depth));
-        for (row, line) in [
-            format!("DEPTH   {resolved} mm"),
-            format!("END     {}", draft.options.end.label()),
-            format!("FLIP    {}", if draft.options.flip { "ON" } else { "OFF" }),
-            format!("OP      {}", draft.operation.to_uppercase()),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            painter.text(x, y + 113.0 + row as f32 * 30.0, &line, 1.25, TEXT);
-        }
-        for (row, line) in [
-            "TYPE DEPTH, ENTER COMMIT",
-            "EMPTY ENTER = 50 MM",
-            "E END CONDITION  F FLIP",
-            "ESC CANCEL",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            painter.text(x, y + 250.0 + row as f32 * 22.0, line, 1.0, MUTED);
-        }
-        if let Err(error) = &draft.ghost {
-            painter.text(x, y + 345.0, &error.to_uppercase(), 0.9, ACCENT);
-        }
     }
 }

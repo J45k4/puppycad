@@ -19,6 +19,9 @@ impl App {
             None => {}
         }
         self.cursor = next;
+        if self.depth_drag.is_some() {
+            self.drag_depth_to(next);
+        }
         self.context_menu_hover();
         if let Some(drag) = &mut self.label_drag
             && drag.start.distance(next) > 3.0
@@ -107,6 +110,18 @@ impl App {
         if let Some(crumb) = self.breadcrumb_at(layout, point) {
             self.more_open = false;
             self.open_breadcrumb(crumb);
+            self.redraw();
+            return;
+        }
+        if self.body_pick
+            && self.extrude_draft.is_some()
+            && layout.viewport.contains(point.x, point.y)
+        {
+            self.pick_draft_target(layout, point);
+            self.redraw();
+            return;
+        }
+        if self.draft_control_click(layout, point) || self.begin_depth_drag(layout, point) {
             self.redraw();
             return;
         }
@@ -823,6 +838,7 @@ impl App {
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
                 (ElementState::Pressed, MouseButton::Left) => self.handle_left_press(),
                 (ElementState::Released, MouseButton::Left) => {
+                    self.finish_depth_drag();
                     if std::mem::take(&mut self.rollback_drag) {
                         self.drop_rollback(self.cursor.y);
                     }

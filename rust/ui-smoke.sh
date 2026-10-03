@@ -3410,7 +3410,18 @@ import -window root /out/rust-native-extrude-preview.png
 xdotool key --window "$window_id" e
 sleep 0.3
 import -window root /out/rust-native-extrude-symmetric-preview.png
-xdotool key --window "$window_id" Return
+# Mouse controls: the END row cycles symmetric -> blind, the FLIP row
+# flips; then FLIP and END again return to symmetric and COMMIT commits.
+xdotool mousemove 1145 241 click 1
+sleep 0.2
+xdotool mousemove 1145 271 click 1
+sleep 0.3
+import -window root /out/rust-native-extrude-mouse-preview.png
+xdotool mousemove 1145 271 click 1
+sleep 0.2
+xdotool mousemove 1145 241 click 1
+sleep 0.2
+xdotool mousemove 1145 449 click 1
 sleep 0.3
 import -window root /out/rust-native-extrude-symmetric.png
 # E cycles symmetric -> blind on the committed body; Ctrl+Z restores it.
