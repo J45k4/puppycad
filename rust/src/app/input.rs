@@ -285,8 +285,11 @@ impl App {
                 .row(index + solid_count, part_rows.len(), self.sketch_count())
                 .contains(point.x, point.y)
             {
-                self.document.selected = Some(shape.id());
-                self.document.selected_spline_point = None;
+                if self.modifiers.shift_key() {
+                    self.document.toggle_selected(shape.id());
+                } else {
+                    self.document.select_only(Some(shape.id()));
+                }
                 self.solid_preview = false;
                 self.select_tool(Tool::Select);
                 self.redraw();
@@ -1376,7 +1379,7 @@ impl ApplicationHandler for App {
                             } else {
                                 self.document.draft_start = None;
                                 self.document.draft_end = None;
-                                self.document.selected = None;
+                                self.document.clear_selection();
                             }
                         }
                         KeyCode::Delete | KeyCode::Backspace => {

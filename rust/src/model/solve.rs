@@ -978,7 +978,9 @@ impl Document {
         if let Err(error) = self.solve_constraints(pins) {
             if let Some(state) = self.history.pop() {
                 let selected = (self.selected, self.selected_spline_point);
+                let selection = self.selected_ids();
                 self.restore(state);
+                self.set_selection(&selection);
                 (self.selected, self.selected_spline_point) = selected;
             }
             return Err(error);

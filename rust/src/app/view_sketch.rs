@@ -92,13 +92,9 @@ impl App {
 
     pub(super) fn paint_shapes(&self, painter: &mut Painter, layout: Layout) {
         let origin = self.viewport_origin();
+        let selected = self.document.selected_ids();
         for shape in &self.document.shapes {
-            self.paint_shape(
-                painter,
-                shape,
-                origin,
-                self.document.selected == Some(shape.id()),
-            );
+            self.paint_shape(painter, shape, origin, selected.contains(&shape.id()));
         }
         self.paint_anchor_handles(painter, layout);
         if let Some(start) = self.document.draft_start

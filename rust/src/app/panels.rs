@@ -451,6 +451,7 @@ impl App {
                 if active { TEXT } else { MUTED },
             );
         }
+        let selected_ids = self.document.selected_ids();
         for (index, shape) in self.document.shapes.iter().enumerate() {
             if layout
                 .row(index + solids.len(), part_rows.len(), self.sketch_count())
@@ -461,7 +462,7 @@ impl App {
                 break;
             }
             let row = layout.row(index + solids.len(), part_rows.len(), self.sketch_count());
-            if self.document.selected == Some(shape.id()) {
+            if selected_ids.contains(&shape.id()) {
                 painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
             }
             painter.text(
@@ -685,10 +686,15 @@ impl App {
             .iter()
             .find(|shape| Some(shape.id()) == self.document.selected)
         {
+            let count = self.document.selection_count();
             painter.text(
                 layout.right.x + 18.0,
                 layout.right.y + 66.0,
-                shape.name(),
+                &if count > 1 {
+                    format!("{}  ({count} selected)", shape.name())
+                } else {
+                    shape.name().to_string()
+                },
                 1.7,
                 ACCENT,
             );

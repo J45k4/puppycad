@@ -5,7 +5,10 @@ impl Document {
         let Some(id) = self.selected else {
             return false;
         };
-        if let Some((anchor_id, index)) = self.anchor_at(start) {
+        // A multi-selection always drags as a whole group.
+        if self.selection_count() <= 1
+            && let Some((anchor_id, index)) = self.anchor_at(start)
+        {
             // Anchors that cannot be dragged on their own fall back to
             // moving the whole shape.
             if self.begin_anchor_drag(anchor_id, index, start) {
@@ -37,6 +40,20 @@ impl Document {
         {
             return false;
         }
+        let mut group = Vec::new();
+        if self.selected_spline_point.is_none() {
+            for other in self.selected_ids() {
+                if other == id {
+                    continue;
+                }
+                if !self.movable(other) {
+                    return false;
+                }
+                if let Some(shape) = self.shapes.iter().find(|shape| shape.id() == other) {
+                    group.push(shape.clone());
+                }
+            }
+        }
         self.drag = Some(DragState {
             id,
             start,
@@ -44,6 +61,7 @@ impl Document {
             before: self.snapshot(),
             spline_point: self.selected_spline_point,
             anchor: None,
+            group,
         });
         true
     }
@@ -65,6 +83,9 @@ impl Document {
         }
         if let Some(index) = drag.anchor {
             return self.drag_anchor_to(index, point);
+        }
+        if !drag.group.is_empty() {
+            return self.drag_group_to(delta, drag.start.distance(point) > 2.0 / self.zoom);
         }
         let mut next = if drag.start.distance(point) > 2.0 / self.zoom {
             if let (
@@ -133,6 +154,45 @@ impl Document {
         true
     }
 
+    /// Whole-shape drag of a multi-selection: translate every member from
+    /// its original by `delta` and solve with all of them pinned.
+    fn drag_group_to(&mut self, delta: Point, moved: bool) -> bool {
+        let Some(drag) = &self.drag else {
+            return false;
+        };
+        let delta = if moved {
+            delta
+        } else {
+            Point { x: 0.0, y: 0.0 }
+        };
+        let targets: Vec<Shape> = std::iter::once(&drag.original)
+            .chain(drag.group.iter())
+            .map(|shape| shape.translated(delta))
+            .collect();
+        let frame_before = self.shapes.clone();
+        let mut changed = false;
+        for target in &targets {
+            if let Some(index) = self
+                .shapes
+                .iter()
+                .position(|shape| shape.id() == target.id())
+                && self.shapes[index] != *target
+            {
+                self.shapes[index] = target.clone();
+                changed = true;
+            }
+        }
+        if !changed {
+            return false;
+        }
+        let pins: Vec<Pin> = targets.iter().map(|shape| Pin::Shape(shape.id())).collect();
+        if self.solve_constraints(&pins).is_err() {
+            self.shapes = frame_before;
+            return false;
+        }
+        true
+    }
+
     pub fn finish_drag(&mut self) -> bool {
         let Some(drag) = self.drag.take() else {
             return false;
@@ -140,7 +200,12 @@ impl Document {
         let changed = self
             .shapes
             .iter()
-            .any(|shape| shape.id() == drag.id && *shape != drag.original);
+            .any(|shape| shape.id() == drag.id && *shape != drag.original)
+            || drag.group.iter().any(|original| {
+                self.shapes
+                    .iter()
+                    .any(|shape| shape.id() == original.id() && shape != original)
+            });
         if changed {
             self.history.push(drag.before);
             self.future.clear();
@@ -278,6 +343,7 @@ impl Document {
             before: self.snapshot(),
             spline_point: None,
             anchor: Some(index),
+            group: Vec::new(),
         });
         true
     }

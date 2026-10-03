@@ -1,7 +1,12 @@
 use super::*;
 
 impl Document {
+    /// Delete every selected shape as one undo step.
     pub fn delete_selected(&mut self) -> bool {
+        self.for_each_selected(Self::delete_one)
+    }
+
+    fn delete_one(&mut self) -> bool {
         let Some(id) = self.selected else {
             return false;
         };
@@ -1510,7 +1515,13 @@ impl Document {
         Ok(target.1)
     }
 
+    /// Copy every selected shape by `delta` as one undo step; the copies
+    /// become the selection.
     pub fn copy_selected(&mut self, delta: Point) -> bool {
+        self.for_each_selected(|document| document.copy_one(delta))
+    }
+
+    fn copy_one(&mut self, delta: Point) -> bool {
         if !delta.x.is_finite() || !delta.y.is_finite() {
             return false;
         }
@@ -1547,7 +1558,51 @@ impl Document {
         true
     }
 
+    /// Move every selected shape by `delta` as one undo step. All shapes
+    /// are translated first and solved together, so shapes linked to each
+    /// other move rigidly instead of being dragged twice.
     pub fn move_selected(&mut self, delta: Point) -> bool {
+        let ids = self.selected_ids();
+        if ids.len() <= 1 {
+            return self.move_one(delta);
+        }
+        if !delta.x.is_finite() || !delta.y.is_finite() || (delta.x == 0.0 && delta.y == 0.0) {
+            return false;
+        }
+        let mut moved = Vec::new();
+        for id in &ids {
+            if !self.movable(*id) {
+                return false;
+            }
+            let Some(index) = self.shapes.iter().position(|shape| shape.id() == *id) else {
+                return false;
+            };
+            moved.push((index, self.shapes[index].translated(delta)));
+        }
+        self.history.push(self.snapshot());
+        self.future.clear();
+        for (index, next) in moved {
+            self.shapes[index] = next;
+        }
+        let pins: Vec<Pin> = ids.iter().map(|id| Pin::Shape(*id)).collect();
+        self.solve_or_rollback(&pins).is_ok()
+    }
+
+    /// Whether shape `id` may be moved as a whole (no midpoint link or fixed
+    /// anchor on it or its shared-ellipse / concentric partners).
+    pub(super) fn movable(&self, id: u32) -> bool {
+        !self.midpoint_links.contains_key(&id)
+            && !self.has_fixed_anchor(id)
+            && !self
+                .shared_ellipse_partners(id)
+                .into_iter()
+                .any(|partner| self.has_fixed_anchor(partner))
+            && !self
+                .concentric_partner(id)
+                .is_some_and(|partner| self.has_fixed_anchor(partner))
+    }
+
+    fn move_one(&mut self, delta: Point) -> bool {
         if !delta.x.is_finite() || !delta.y.is_finite() || (delta.x == 0.0 && delta.y == 0.0) {
             return false;
         }
@@ -1595,7 +1650,12 @@ impl Document {
         self.solve_or_rollback(&[Pin::Shape(id)]).is_ok()
     }
 
+    /// Scale every selected shape about `center` as one undo step.
     pub fn scale_selected(&mut self, factor: f32, center: Point, copy: bool) -> bool {
+        self.for_each_selected(|document| document.scale_one(factor, center, copy))
+    }
+
+    fn scale_one(&mut self, factor: f32, center: Point, copy: bool) -> bool {
         let Some(index) = self
             .selected
             .and_then(|id| self.shapes.iter().position(|shape| shape.id() == id))
@@ -1707,7 +1767,12 @@ impl Document {
         self.solve_or_rollback(&[Pin::Shape(pinned)]).is_ok()
     }
 
+    /// Rotate every selected shape about `center` as one undo step.
     pub fn rotate_selected(&mut self, degrees: f32, center: Point, copy: bool) -> bool {
+        self.for_each_selected(|document| document.rotate_one(degrees, center, copy))
+    }
+
+    fn rotate_one(&mut self, degrees: f32, center: Point, copy: bool) -> bool {
         if !copy && degrees % 360.0 == 0.0 {
             return false;
         }

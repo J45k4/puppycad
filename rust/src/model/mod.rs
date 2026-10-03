@@ -6,12 +6,14 @@ mod drag;
 mod edit;
 mod geometry;
 mod relations;
+mod selection;
 mod shapes;
 mod solve;
 #[cfg(test)]
 mod tests;
 
 use geometry::*;
+pub use selection::SelectionFilter;
 pub use shapes::{Point, Shape};
 pub use solve::{Pin, SketchAnalysis};
 
@@ -135,6 +137,9 @@ struct DragState {
     spline_point: Option<usize>,
     /// Single anchor being dragged (see `Document::drag_anchors`).
     anchor: Option<usize>,
+    /// Originals of the other selected shapes moved along in a
+    /// whole-shape drag of a multi-selection.
+    group: Vec<Shape>,
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +147,12 @@ pub struct Document {
     pub shapes: Vec<Shape>,
     pub selected: Option<u32>,
     pub selected_spline_point: Option<usize>,
+    /// Which kinds of shapes click and box selection may pick.
+    pub selection_filter: SelectionFilter,
+    /// Additional selected shapes besides the primary `selected`, valid only
+    /// while `selected == selection_primary` (see `selection.rs`).
+    selection_extra: Vec<u32>,
+    selection_primary: Option<u32>,
     pub tool: Tool,
     pub zoom: f32,
     pub pan: Point,
@@ -185,6 +196,9 @@ impl Default for Document {
             shapes: Vec::new(),
             selected: None,
             selected_spline_point: None,
+            selection_filter: SelectionFilter::default(),
+            selection_extra: Vec::new(),
+            selection_primary: None,
             tool: Tool::Select,
             zoom: 1.0,
             pan: Point { x: 0.0, y: 0.0 },
@@ -358,6 +372,8 @@ impl Document {
         self.line_relations = state.line_relations;
         self.fixed_anchors = state.fixed_anchors;
         self.selected = None;
+        self.selection_extra.clear();
+        self.selection_primary = None;
         self.selected_spline_point = None;
         self.draft_start = None;
         self.draft_end = None;
@@ -417,12 +433,8 @@ impl Document {
             self.selected_spline_point = Some(index);
             return;
         }
-        self.selected = self
-            .shapes
-            .iter()
-            .rev()
-            .find(|shape| shape.hit(point, 5.0 / self.zoom))
-            .map(Shape::id);
+        let hit = self.pick_at(point);
+        self.select_only(hit);
         self.selected_spline_point = self.selected.and_then(|id| {
             self.shapes
                 .iter()
@@ -897,19 +909,23 @@ impl Document {
         self.drag = None;
     }
 
+    /// Toggle construction on every selected shape as one undo step. With a
+    /// mixed selection everything becomes construction. Returns the new state.
     pub fn toggle_construction(&mut self) -> Option<bool> {
-        let id = self.selected?;
-        if !self.shapes.iter().any(|shape| shape.id() == id) {
+        let ids = self.selected_ids();
+        if ids.is_empty() {
             return None;
         }
         self.history.push(self.snapshot());
         self.future.clear();
-        let enabled = if self.construction.remove(&id) {
-            false
-        } else {
-            self.construction.insert(id);
-            true
-        };
+        let enabled = !ids.iter().all(|id| self.construction.contains(id));
+        for id in ids {
+            if enabled {
+                self.construction.insert(id);
+            } else {
+                self.construction.remove(&id);
+            }
+        }
         Some(enabled)
     }
 }
