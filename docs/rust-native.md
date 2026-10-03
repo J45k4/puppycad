@@ -12,7 +12,9 @@ cargo run
 The current implementation establishes the project tree, sketch viewport, and
 properties layout. The header shows a clickable breadcrumb trail:
 Projects / project (file name) / part / sketch, then the selected shape; in the
-solid preview the trail ends at the selected extrusion instead of the sketch.
+solid preview the trail ends at the selected feature (extrusion, revolve,
+loft or edge finish) instead of the sketch. Project panel rows too long for
+the panel are clipped with `...`.
 Click the project to clear the selection, the part to open its solid preview (or
 clear the selection when it has no extrusions), or the sketch to return to sketch
 view. The last crumb is the current item and is not a link.
@@ -1051,7 +1053,8 @@ or dimension):
 ### Status bar, tooltips and toolbar glyphs
 
 The status bar keeps the message on the left (truncated with `...` before
-the info block) and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
+the info block; a message too long for the full block narrows the block by
+110 px, scaling its text down, to give the message more room) and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
 the right. Between them a two-line block shows the cursor's world
 coordinates in display units (`X - Y -` outside the sketch viewport), the
 current tool, the DOF label (also still in the header) and the snap state

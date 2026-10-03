@@ -4,6 +4,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+/// Pixels a long status message takes from the status fields block.
+const STATUS_INFO_SHRINK: f32 = 110.0;
+
 /// Delay before a hovered toolbar button shows its tooltip.
 pub(crate) const TOOLTIP_DELAY: Duration = Duration::from_millis(400);
 
@@ -316,6 +319,21 @@ impl Layout {
         }
     }
 
+    /// Status fields for a status message of `chars` characters: the full
+    /// block when the message fits left of it, else a block narrowed by
+    /// `STATUS_INFO_SHRINK` from the left (its text is scaled to fit).
+    pub(crate) fn status_info_for(self, chars: usize) -> Rect {
+        let full = self.status_info();
+        if 15.0 + chars as f32 * 9.6 + 10.0 <= full.x {
+            return full;
+        }
+        Rect {
+            x: full.x + STATUS_INFO_SHRINK,
+            w: full.w - STATUS_INFO_SHRINK,
+            ..full
+        }
+    }
+
     /// Toolbar button or MORE row at a point (MORE rows only when open).
     pub(crate) fn hover_target(self, point: Point, more_open: bool) -> Option<HoverTarget> {
         if more_open
@@ -361,11 +379,10 @@ impl App {
         }
     }
 
-    pub(super) fn paint_status_info(&self, painter: &mut Painter, layout: Layout) {
+    pub(super) fn paint_status_info(&self, painter: &mut Painter, layout: Layout, rect: Rect) {
         let info = self.status_info(layout);
         let mut cache = self.status_cache.borrow_mut();
         cache.update(info);
-        let rect = layout.status_info();
         painter.rect(rect, PANEL);
         let [first, second] = cache.lines();
         let fit = |text: &str, max: f32| {

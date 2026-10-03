@@ -244,10 +244,14 @@ impl App {
             painter.text(
                 row.x + 9.0,
                 row.y + 9.0,
-                &format!(
-                    "{} {} / {name}{glyph}",
-                    if active { ">" } else { "v" },
-                    project.feature_label(index).to_uppercase(),
+                &clip_text(
+                    &format!(
+                        "{} {} / {name}{glyph}",
+                        if active { ">" } else { "v" },
+                        project.feature_label(index).to_uppercase(),
+                    ),
+                    ((row.w - 18.0) / 8.0) as usize,
+                    false,
                 ),
                 1.0,
                 color,

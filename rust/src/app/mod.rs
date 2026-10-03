@@ -208,8 +208,10 @@ impl Layout {
         } else {
             (1.0, index - MORE_COLUMN_ROWS)
         };
-        // The second column is wider so its longer labels stay inside.
-        let width = button.w + column * 90.0;
+        // Both columns are wider than the MORE button so labels such as
+        // "CHAMFER [SHIFT H]" stay inside; the first column keeps the
+        // button's x origin and grows to the right.
+        let width = button.w + if column == 0.0 { 30.0 } else { 90.0 };
         Rect {
             x: button.x - column * (width + 4.0),
             y: 96.0 + row as f32 * 36.0,
@@ -1061,7 +1063,7 @@ impl App {
             let row = layout.more_item(index);
             painter.rect(row, PANEL_LIGHT);
             painter.outline(row, 1.0, ACCENT);
-            painter.text(row.x + 9.0, row.y + 9.0, label, 1.0, TEXT);
+            painter.text(row.x + 6.0, row.y + 9.0, label, 1.0, TEXT);
         }
     }
 }

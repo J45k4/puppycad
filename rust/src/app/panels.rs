@@ -641,7 +641,11 @@ impl App {
             painter.text(
                 row.x + 9.0,
                 row.y + 9.0,
-                &format!("{} {name} / {plane}", if active { ">" } else { "v" }),
+                &clip_text(
+                    &format!("{} {name} / {plane}", if active { ">" } else { "v" }),
+                    ((row.w - 18.0) / 8.8) as usize,
+                    false,
+                ),
                 1.1,
                 if active { TEXT } else { MUTED },
             );
@@ -1795,8 +1799,10 @@ impl App {
         } else {
             &self.status_message
         };
-        // Keep the message left of the status fields (cursor, tool, snap).
-        let room = ((layout.status_info().x - 25.0) / 9.6).max(0.0) as usize;
+        // Keep the message left of the status fields (cursor, tool, snap);
+        // a long message narrows the fields to get more room.
+        let info = layout.status_info_for(status.chars().count());
+        let room = ((info.x - 25.0) / 9.6).max(0.0) as usize;
         let status: String = if status.chars().count() > room {
             status
                 .chars()
@@ -1807,7 +1813,7 @@ impl App {
             status.to_string()
         };
         painter.text(15.0, layout.bottom.y + 10.0, &status, 1.2, MUTED);
-        self.paint_status_info(painter, layout);
+        self.paint_status_info(painter, layout, info);
         if !self.solid_preview {
             let filter = self.selection_filter;
             for (index, (label, on)) in [

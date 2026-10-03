@@ -1352,6 +1352,12 @@ fn edge_pick_chamfers_the_clicked_edge() {
         (volume - (8000.0 - 0.5 * target.length() as f64)).abs() < 1e-2,
         "{volume}"
     );
+    let crumbs = app.breadcrumbs(layout);
+    assert_eq!(
+        crumbs.last().map(|crumb| crumb.1.as_str()),
+        Some("Chamfer 1"),
+        "the breadcrumb names the selected feature"
+    );
     app.delete_selected_feature();
     assert!(
         app.project

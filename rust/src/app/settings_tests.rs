@@ -137,6 +137,21 @@ fn layout_scales_linearly() {
 #[test]
 fn more_items_do_not_overlap() {
     let layout = Layout::new(1280.0, 800.0);
+    let (button, first) = (layout.tool_button(9), layout.more_item(0));
+    assert_eq!(
+        (first.x, first.y),
+        (button.x, 96.0),
+        "smoke clicks still land"
+    );
+    // Labels start 6 px in; a glyph's last font column is blank spacing.
+    for (index, (_, label)) in MORE_MENU.iter().enumerate() {
+        let item = layout.more_item(index);
+        assert!(
+            6.0 + label.len() as f32 * 8.0 - 2.0 <= item.w,
+            "{label} overflows its {} px row",
+            item.w
+        );
+    }
     let items: Vec<Rect> = (0..MORE_MENU.len())
         .map(|index| layout.more_item(index))
         .collect();

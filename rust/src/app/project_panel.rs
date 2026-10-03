@@ -182,13 +182,21 @@ impl App {
             segments.push((Crumb::Part, project.part_name().to_string()));
         }
         if self.solid_preview {
-            if let Some(solid) = self
-                .project
-                .as_ref()
-                .and_then(ProjectFile::extrusion_previews)
-                .and_then(|solids| solids.into_iter().nth(self.selected_solid))
-            {
-                segments.push((Crumb::Solid, solid.name));
+            // The selected tree feature (extrusion, revolve, loft or finish).
+            let name = self.project.as_ref().and_then(|project| {
+                project
+                    .feature_node(self.selected_solid)
+                    .and_then(|node| node["name"].as_str().map(str::to_string))
+                    .or_else(|| {
+                        project
+                            .extrusion_previews()?
+                            .into_iter()
+                            .nth(self.selected_solid)
+                            .map(|solid| solid.name)
+                    })
+            });
+            if let Some(name) = name {
+                segments.push((Crumb::Solid, name));
             }
         } else {
             let sketch_name = self
