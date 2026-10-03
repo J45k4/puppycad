@@ -166,26 +166,6 @@ fn part_edges(bodies: &Result<Vec<stl::Body>, String>) -> Vec<project::SolidEdge
         .collect()
 }
 
-/// File-name-safe form of an instance name.
-pub(super) fn file_stem_part(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = cleaned.trim_matches('-');
-    if trimmed.is_empty() {
-        "instance".into()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 impl AssemblyView {
     /// Every instance's bodies in world coordinates, one body per instance
     /// named after it.
@@ -955,7 +935,7 @@ impl App {
                 .map(|body| {
                     let path = project
                         .path()
-                        .with_file_name(format!("{stem}-{}.stl", file_stem_part(&body.name)));
+                        .with_file_name(format!("{stem}-{}.stl", asm::file_stem_part(&body.name)));
                     let bytes = match format {
                         stl::StlFormat::Ascii => stl::ascii_stl(&body.triangles).into_bytes(),
                         stl::StlFormat::Binary => stl::binary_stl(

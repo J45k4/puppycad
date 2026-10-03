@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let argument = std::env::args().nth(1);
     if argument.as_deref() == Some("--help") {
         println!(
-            "Usage: puppycad [PROJECT.pcad]\n       puppycad --roundtrip IN.pcad OUT.pcad\n       puppycad --export IN.pcad OUT.stl|OUT.3mf\n       puppycad --print-shortcuts"
+            "Usage: puppycad [PROJECT.pcad]\n       puppycad --roundtrip IN.pcad OUT.pcad\n       puppycad --export IN.pcad OUT.stl|OUT.3mf [--assembly NAME]\n       puppycad --print-shortcuts"
         );
         return Ok(());
     }
@@ -32,11 +32,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if argument.as_deref() == Some("--export") {
         let args: Vec<String> = std::env::args().skip(2).collect();
-        let [input, output] = args.as_slice() else {
-            eprintln!("Usage: puppycad --export IN.pcad OUT.stl|OUT.3mf");
-            std::process::exit(2);
+        let (input, output, assembly) = match args.as_slice() {
+            [input, output] => (input, output, None),
+            [input, output, flag, name] if flag == "--assembly" => {
+                (input, output, Some(name.as_str()))
+            }
+            _ => {
+                eprintln!("Usage: puppycad --export IN.pcad OUT.stl|OUT.3mf [--assembly NAME]");
+                std::process::exit(2);
+            }
         };
-        match puppycad::export(Path::new(input), Path::new(output)) {
+        match puppycad::export(Path::new(input), Path::new(output), assembly) {
             Ok(paths) => {
                 for path in paths {
                     println!("{}", path.display());
