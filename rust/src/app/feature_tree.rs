@@ -88,7 +88,11 @@ impl App {
     }
 
     /// Run a feature tree edit as one undo step.
-    fn tree_edit(&mut self, edit: impl FnOnce(&mut ProjectFile) -> Result<String, String>) -> bool {
+    fn tree_edit(
+        &mut self,
+        label: String,
+        edit: impl FnOnce(&mut ProjectFile) -> Result<String, String>,
+    ) -> bool {
         let Some(project) = self.project.as_mut() else {
             return false;
         };
@@ -99,10 +103,8 @@ impl App {
         let snapshot = project.feature_tree_snapshot();
         match edit(project) {
             Ok(message) => {
-                self.solid_undo.push(SolidUndo::Tree {
-                    snapshot,
-                    selected: self.selected_solid,
-                });
+                self.solid_undo
+                    .push(SolidUndo::tree(snapshot, self.selected_solid, label));
                 self.solid_redo.clear();
                 self.status_message = format!("{message}  |  Ctrl+Z to undo  |  Ctrl+S to save");
                 true
@@ -117,7 +119,7 @@ impl App {
     pub(super) fn move_selected_feature(&mut self, delta: isize) {
         let index = self.selected_solid;
         let mut moved = index;
-        if self.tree_edit(|project| {
+        if self.tree_edit("Reorder feature".into(), |project| {
             moved = project.move_feature(index, delta)?;
             Ok(format!(
                 "Moved feature {}",
@@ -130,7 +132,19 @@ impl App {
 
     pub(super) fn toggle_selected_suppressed(&mut self) {
         let index = self.selected_solid;
-        self.tree_edit(|project| {
+        let Some(project) = self.project.as_ref() else {
+            return;
+        };
+        let label = format!(
+            "{} {}",
+            if project.feature_suppressed(index) {
+                "Unsuppress"
+            } else {
+                "Suppress"
+            },
+            project.feature_label(index)
+        );
+        self.tree_edit(label, |project| {
             let suppressed = !project.feature_suppressed(index);
             project.set_feature_suppressed(index, suppressed)?;
             Ok(if suppressed {
@@ -148,7 +162,7 @@ impl App {
         if position == self.rollback_position() {
             return;
         }
-        self.tree_edit(|project| {
+        self.tree_edit("Move rollback".into(), |project| {
             project.set_rollback_index((position < total).then_some(position))?;
             Ok(if position < total {
                 format!("Rolled back to {position} of {total} features")

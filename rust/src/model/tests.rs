@@ -814,10 +814,13 @@ fn point_coordinate_edits_move_linked_line_and_respect_driving_length() {
     document
         .driving_dimensions
         .insert((2, DimensionField::LineLength), 40.0);
-    assert!(document.set_selected_point_coordinate(true, 20.0).is_err());
-    assert!(
-        matches!(document.shapes[0], Shape::Point { at, .. } if at == Point { x: 10.0, y: 20.0 })
-    );
+    assert_eq!(document.selected, Some(1), "undo restores the selection");
+    // The driving length survives: the linked line follows rigidly.
+    assert_eq!(document.set_selected_point_coordinate(true, 20.0), Ok(()));
+    assert!(matches!(
+        document.shapes[1],
+        Shape::Line { a, b, .. } if a == Point { x: 20.0, y: 20.0 } && b == Point { x: 60.0, y: 20.0 }
+    ));
 }
 
 #[test]
@@ -6770,4 +6773,103 @@ fn rectangles_polygons_and_slots_offset_and_follow_their_source() {
     assert!(
         matches!(find(&doc, copies[2]), Shape::Capsule { width, .. } if (width - 6.0).abs() < 1e-4)
     );
+}
+
+fn undo_labels(doc: &Document) -> Vec<String> {
+    doc.undo_steps()
+        .into_iter()
+        .map(|step| step.label)
+        .collect()
+}
+
+#[test]
+fn undo_steps_carry_operation_labels() {
+    let mut doc = Document {
+        tool: Tool::Line,
+        ..Document::default()
+    };
+    doc.draft_start = Some(Point { x: 0.0, y: 0.0 });
+    assert!(doc.finish_draft(Point { x: 30.0, y: 0.0 }));
+    doc.draft_start = Some(Point { x: 0.0, y: 10.0 });
+    assert!(doc.finish_draft(Point { x: 30.0, y: 15.0 }));
+    let ids: Vec<u32> = doc.shapes.iter().map(Shape::id).collect();
+    doc.select_only(Some(ids[0]));
+    doc.set_dimension(DimensionField::LineLength, 40.0).unwrap();
+    doc.select_only(Some(ids[1]));
+    doc.toggle_line_relation_with(ids[0], LineRelationKind::Parallel)
+        .unwrap();
+    doc.set_selection(&ids);
+    assert!(doc.move_selected(Point { x: 5.0, y: 5.0 }));
+    assert_eq!(
+        undo_labels(&doc),
+        [
+            "Draw line",
+            "Draw line",
+            "Set length 40 mm",
+            "Add Parallel",
+            "Move 2 shapes",
+        ]
+    );
+    let stamps: Vec<u64> = doc.undo_steps().iter().map(|step| step.stamp).collect();
+    assert!(stamps.windows(2).all(|pair| pair[0] < pair[1]));
+    // Undo moves the label to the redo stack and back.
+    assert!(doc.undo());
+    assert_eq!(doc.redo_steps()[0].label, "Move 2 shapes");
+    assert!(doc.redo());
+    assert_eq!(undo_labels(&doc).last().unwrap(), "Move 2 shapes");
+    assert!(doc.redo_steps().is_empty());
+}
+
+#[test]
+fn fillet_and_multi_delete_labels() {
+    let mut doc = Document::from_shapes(vec![
+        Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 50.0, y: 0.0 },
+        },
+        Shape::Line {
+            id: 2,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 0.0, y: 50.0 },
+        },
+    ]);
+    doc.fillet_lines(1, 2, 5.0).unwrap();
+    assert_eq!(undo_labels(&doc), ["Fillet R5"]);
+    doc.set_selection(&[1, 2]);
+    assert!(doc.delete_selected());
+    assert_eq!(undo_labels(&doc)[1], "Delete 2 shapes");
+}
+
+#[test]
+fn undo_restores_the_selection_of_the_snapshot() {
+    let mut doc = Document::from_shapes(vec![
+        Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 50.0, y: 0.0 },
+        },
+        Shape::Line {
+            id: 2,
+            a: Point { x: 0.0, y: 10.0 },
+            b: Point { x: 50.0, y: 10.0 },
+        },
+    ]);
+    doc.set_selection(&[1, 2]);
+    assert!(doc.move_selected(Point { x: 0.0, y: 5.0 }));
+    doc.clear_selection();
+    assert!(doc.undo());
+    let mut selected = doc.selected_ids();
+    selected.sort_unstable();
+    assert_eq!(selected, [1, 2]);
+    // Redo restores the selection that was current when it was undone.
+    doc.select_only(Some(1));
+    assert!(doc.redo());
+    assert!(doc.selected_ids().is_empty());
+    // Ids of shapes the restored state lacks are dropped.
+    doc.select_only(Some(2));
+    assert!(doc.delete_selected());
+    doc.clear_selection();
+    assert!(doc.undo());
+    assert_eq!(doc.selected_ids(), [2]);
 }

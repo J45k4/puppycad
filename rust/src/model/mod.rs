@@ -12,6 +12,7 @@ mod geometry;
 #[cfg(test)]
 mod glyph_tests;
 mod glyphs;
+mod history;
 mod offset;
 mod pattern;
 mod relations;
@@ -30,6 +31,7 @@ pub use annotations::{
 pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
 pub use glyphs::{GLYPH_PAD, Inference, InferenceKind, PlacedGlyph, RelationGlyph};
+pub use history::{HistoryStep, next_step_stamp, number_label as history_number_label};
 pub use offset::{OffsetChain, offset_chain_segments, offset_shape};
 pub use pattern::{PatternKind, SketchPattern};
 pub use selection::SelectionFilter;
@@ -169,6 +171,12 @@ struct DocumentState {
     offset_chains: Vec<OffsetChain>,
     dims: DimensionMeta,
     patterns: Vec<SketchPattern>,
+    /// Selected shape ids when the snapshot was taken (restored on undo).
+    selection: Vec<u32>,
+    /// Undo step label (see `history.rs`); set by `record_undo`.
+    label: String,
+    /// Global ordering stamp (see `history::next_step_stamp`).
+    stamp: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -472,6 +480,9 @@ impl Document {
             offset_chains: self.offset_chains.clone(),
             dims: self.dims.clone(),
             patterns: self.patterns.clone(),
+            selection: self.selected_ids(),
+            label: String::new(),
+            stamp: 0,
         }
     }
 
@@ -505,9 +516,12 @@ impl Document {
         self.offset_chains = state.offset_chains;
         self.dims = state.dims;
         self.patterns = state.patterns;
-        self.selected = None;
-        self.selection_extra.clear();
-        self.selection_primary = None;
+        let selection: Vec<u32> = state
+            .selection
+            .into_iter()
+            .filter(|id| self.shapes.iter().any(|shape| shape.id() == *id))
+            .collect();
+        self.set_selection(&selection);
         self.selected_spline_point = None;
         self.draft_start = None;
         self.draft_end = None;
@@ -625,7 +639,7 @@ impl Document {
         if changed == *points {
             return Ok(());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Move spline point");
         self.future.clear();
         if let Shape::Spline { points, .. } = &mut self.shapes[index] {
             *points = changed;
@@ -693,7 +707,7 @@ impl Document {
                 let Some(shape) = shape else {
                     return false;
                 };
-                self.history.push(self.snapshot());
+                self.record_undo(self.snapshot(), "Draw rectangle");
                 self.future.clear();
                 self.selected = Some(self.next_id);
                 self.next_id += 1;
@@ -721,7 +735,7 @@ impl Document {
                 ) else {
                     return false;
                 };
-                self.history.push(self.snapshot());
+                self.record_undo(self.snapshot(), "Draw arc");
                 self.future.clear();
                 self.selected = Some(self.next_id);
                 self.next_id += 1;
@@ -749,7 +763,7 @@ impl Document {
                 {
                     return false;
                 }
-                self.history.push(self.snapshot());
+                self.record_undo(self.snapshot(), "Draw circle");
                 self.future.clear();
                 self.selected = Some(self.next_id);
                 self.next_id += 1;
@@ -777,7 +791,7 @@ impl Document {
                 {
                     return false;
                 }
-                self.history.push(self.snapshot());
+                self.record_undo(self.snapshot(), "Draw slot");
                 self.future.clear();
                 self.selected = Some(self.next_id);
                 self.next_id += 1;
@@ -801,7 +815,7 @@ impl Document {
                 else {
                     return false;
                 };
-                self.history.push(self.snapshot());
+                self.record_undo(self.snapshot(), "Draw ellipse");
                 self.future.clear();
                 self.selected = Some(self.next_id);
                 self.next_id += 1;
@@ -824,7 +838,7 @@ impl Document {
                 else {
                     return false;
                 };
-                self.history.push(self.snapshot());
+                self.record_undo(self.snapshot(), "Draw arc");
                 self.future.clear();
                 self.selected = Some(self.next_id);
                 self.next_id += 1;
@@ -892,7 +906,7 @@ impl Document {
             Tool::ThreePointRectangle | Tool::ThreePointCenterRectangle => return false,
             _ => return false,
         };
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), history::draw_label(&shape));
         self.future.clear();
         if let Shape::Line { id, a, b } = &shape {
             for (endpoint, position) in [(0, *a), (1, *b)] {
@@ -916,7 +930,7 @@ impl Document {
         if !at.x.is_finite() || !at.y.is_finite() {
             return false;
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add point");
         self.future.clear();
         self.selected = Some(self.next_id);
         self.shapes.push(Shape::Point {
@@ -935,7 +949,7 @@ impl Document {
     ) -> Result<u32, String> {
         spline::beziers(mode, &points, closed)?;
         let id = self.next_id;
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Draw spline");
         self.future.clear();
         self.selected = Some(id);
         self.selected_spline_point = None;
@@ -980,7 +994,7 @@ impl Document {
             {
                 return Err("polygon vertex is fixed".into());
             }
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), format!("Set polygon sides {sides}"));
             self.future.clear();
             if let Shape::Polygon { sides: current, .. } = &mut self.shapes[index] {
                 *current = sides;
@@ -1003,7 +1017,10 @@ impl Document {
             return Err("select a slot first".into());
         };
         if *current != width {
-            self.history.push(self.snapshot());
+            self.record_undo(
+                self.snapshot(),
+                format!("Set slot width {} mm", history::number_label(width)),
+            );
             self.future.clear();
             if let Shape::Capsule { width: current, .. } = &mut self.shapes[index] {
                 *current = width;
@@ -1019,7 +1036,10 @@ impl Document {
         let Some(previous) = self.history.pop() else {
             return false;
         };
-        self.future.push(self.snapshot());
+        let mut current = self.snapshot();
+        current.label.clone_from(&previous.label);
+        current.stamp = previous.stamp;
+        self.future.push(current);
         self.restore(previous);
         true
     }
@@ -1031,7 +1051,10 @@ impl Document {
         let Some(next) = self.future.pop() else {
             return false;
         };
-        self.history.push(self.snapshot());
+        let mut current = self.snapshot();
+        current.label.clone_from(&next.label);
+        current.stamp = next.stamp;
+        self.history.push(current);
         self.restore(next);
         true
     }
@@ -1050,7 +1073,7 @@ impl Document {
         if ids.is_empty() {
             return None;
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Toggle construction");
         self.future.clear();
         let enabled = !ids.iter().all(|id| self.construction.contains(id));
         for id in ids {

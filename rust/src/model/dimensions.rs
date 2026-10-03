@@ -243,7 +243,7 @@ impl Document {
         // Relation partners (Equal, radial distance, tangency, shared
         // ellipses, ...) follow through the solver.
         if next != self.shapes[index] || self.driving_dimensions.get(&(id, field)) != Some(&value) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), history::dimension_label(field, value));
             self.future.clear();
             self.shapes[index] = next;
             self.driving_dimensions.insert((id, field), value);

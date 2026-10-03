@@ -3693,3 +3693,41 @@ cp /tmp/native-edge-chamfer.pcad /out/rust-native-edge-chamfer.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Undo history panel: draw three lines, Ctrl+Shift+H opens HISTORY over the
+# Project panel, clicking the second entry (newest first) undoes back to it.
+./target/debug/puppycad /tmp/native-history.pcad >/tmp/puppycad-history.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-history.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-history.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" l
+xdotool mousemove 450 300 click 1
+xdotool mousemove 750 300 click 1
+xdotool mousemove 450 400 click 1
+xdotool mousemove 750 420 click 1
+xdotool mousemove 450 500 click 1
+xdotool mousemove 750 560 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" ctrl+shift+h
+sleep 0.2
+xdotool mousemove 100 167 click 1
+xdotool mousemove 640 700
+sleep 0.3
+import -window root /out/rust-native-history.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.3
+cp /tmp/native-history.pcad /out/rust-native-history.pcad
+test "$(grep -o '"type": *"sketchLine"' /tmp/native-history.pcad | wc -l)" -eq 2
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

@@ -840,7 +840,9 @@ that has its edges. They appear as feature tree rows (`REVOLVE NEWBODY`,
 `LOFT JOIN`, `CHAMFER`, ...); selecting one shows its value (ANGLE,
 DISTANCE or RADIUS) in Properties, where clicking the value edits it (one
 undo step, **Ctrl+Z** / **Ctrl+Shift+Z** in the solid view), and **Delete**
-removes it unless a later feature depends on it.
+removes it unless a later feature depends on it. Creating and deleting these
+features are undo steps too ("Revolve 360°", "Loft", "Chamfer 2 mm",
+"Delete loft join").
 
 - **Revolve** — key **8** or **MORE → REVOLVE** in a sketch with a closed
   profile selected (**[ ]** cycle profiles as for extrude). Click a sketch
@@ -898,6 +900,34 @@ or loft lock like extruded sketches. STL/3MF export uses the evaluated bodies.
 Fixture: `rust/fixtures/revolve-loft-finish.pcad`; tests in
 `rust/src/project/feature_tests.rs`, `rust/src/project/features_tests.rs`
 and `rust/src/app/tests.rs`.
+
+### Undo history
+
+Every undo step has a short label: "Draw line", "Move 2 shapes", "Set length
+40 mm", "Add Parallel", "Fillet R5", "Delete 3 shapes", "Extrude 50 mm",
+"Set end Through all", and on the feature tree "Reorder feature", "Suppress
+newBody", "Move rollback", "Revolve 360°", "Loft", "Chamfer 2 mm",
+"Fillet R2", "Set angle 90°", "Delete loft join". Feature tree edits,
+revolve/loft/edge finish creation and deletion are whole-tree snapshot steps
+(`SolidUndoKind::Tree`); extrusion edits store just the node. Sketch snapshots (`model/history.rs`,
+`Document::record_undo`) also store the selected shape ids, so undo and redo
+restore the selection the snapshot had (ids of shapes that no longer exist are
+dropped) instead of clearing it.
+
+The sketch and the 3D preview keep separate stacks (the `Document` snapshot
+stack and the app's solid steps), but every step carries a stamp from one
+global counter (`model::next_step_stamp`). Ctrl+Z reverts the newest applied
+step of either stack and Ctrl+Y / Ctrl+Shift+Z reapplies the oldest undone
+one (`app/history.rs`), switching between the sketch and the 3D preview as
+needed, so after Tab the most recent edit is undone regardless of the view.
+Sketch steps of a read-only (extruded) sketch are skipped. The status bar
+shows `Undo: <label>`.
+
+**Ctrl+Shift+H** toggles the HISTORY panel over the Project panel. It lists
+the steps newest first with a SKETCH or SOLID tag; the current position is
+highlighted with `>`, undone (redoable) steps are dimmed above it, and a
+`Start` row at the bottom stands for everything undone. Clicking an older row
+undoes back to it, clicking a dimmed row redoes up to it.
 
 ## Shortcuts
 
@@ -974,8 +1004,8 @@ or dimension):
 | `Ctrl+D` | Copy selected | any view, editable, selection |
 | `Delete` / `Backspace` | Delete selection / extrusion | any view |
 | `K` | Toggle construction | any view, editable, selection |
-| `Ctrl+Z` | Undo | any view, editable |
-| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo | any view, editable |
+| `Ctrl+Z` | Undo | any view |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo | any view |
 | `Esc` | Cancel / clear selection | any view |
 
 #### Constrain
@@ -1048,6 +1078,7 @@ or dimension):
 | `M` | MORE menu | any view |
 | `Ctrl+K` / `Ctrl+Shift+P` | Command palette | any view |
 | `?` / `F1` | Keyboard shortcuts | any view |
+| `Ctrl+Shift+H` | Undo history panel | any view |
 | `Ctrl+,` | Settings | any view |
 
 #### Project
@@ -1136,7 +1167,8 @@ monitor. The UI smoke test runs with an empty `PUPPYCAD_CONFIG_DIR` and
 Library crate (`rust/src/lib.rs`):
 
 - `model/` — the sketch `Document`: `mod.rs` (document state, snapping,
-  selection, drafting, undo), `shapes.rs` (`Point`, `Shape` and per-shape
+  selection, drafting, undo), `history.rs` (undo labels and ordering
+  stamps), `shapes.rs` (`Point`, `Shape` and per-shape
   geometry), `relations.rs` (fixed anchors and relation toggles),
   `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
   `offset.rs` (single-shape and mitered chain offsets, the Offset tool),
@@ -1174,7 +1206,9 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
   `commands.rs` (command registry, key resolution and the actions behind
   keyboard/MORE/palette), `palette.rs` (Ctrl+K command palette),
-  `shortcut_overlay.rs` (? / F1 cheat sheet),
+  `shortcut_overlay.rs` (? / F1 cheat sheet), `history.rs` (cross-view
+  undo/redo and the Ctrl+Shift+H HISTORY panel; tests in
+  `history_tests.rs`),
   `input.rs` (mouse/keyboard handling; the `winit` handler forwards to
   `App::handle_window_event` and `App::handle_key`, which tests drive
   headlessly),
@@ -1259,6 +1293,10 @@ A palette scenario draws a line, presses Ctrl+K and types `mirr`
 (`rust-native-palette.png`: Mirror highlighted first), presses F1
 (`rust-native-shortcuts.png`: the three-column cheat sheet), then runs
 Circle from the palette with `circ` + Enter and checks the saved circle.
+A history scenario draws three lines, opens the HISTORY panel with
+Ctrl+Shift+H, clicks the second entry (`rust-native-history.png`: the second
+`Draw line` row highlighted, the newest dimmed above it, two lines left) and
+checks that the saved sketch has two lines.
 It also creates and renames a second part, switches between parts, renames a
 sketch, and saves geometry in both parts. A two-body scenario creates extrusions
 on Top and Front sketches, saves their graph, and exports both STLs.

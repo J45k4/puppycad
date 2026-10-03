@@ -378,7 +378,7 @@ impl Document {
         }
         self.driving_dimensions
             .insert((arc, DimensionField::CurveRadius), radius);
-        self.history.push(before);
+        self.record_undo(before, format!("Fillet R{}", history::number_label(radius)));
         self.future.clear();
         self.selected = Some(arc);
         Ok(arc)
@@ -461,7 +461,7 @@ impl Document {
                 mode,
             },
         );
-        self.history.push(before);
+        self.record_undo(before, "Chamfer");
         self.future.clear();
         self.selected = Some(line);
         Ok(line)
@@ -497,7 +497,7 @@ impl Document {
             self.selected = Some(id);
             return Err(error);
         }
-        self.history.push(before);
+        self.record_undo(before, "Edit chamfer");
         self.future.clear();
         self.selected = Some(id);
         Ok(())

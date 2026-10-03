@@ -29,11 +29,38 @@ impl ExtrudeDraft {
     }
 }
 
-/// One undoable solid change: an edit of one extrusion node, or a feature
-/// tree edit (reorder, suppress, rollback) restored from a snapshot.
-pub(super) enum SolidUndo {
+/// What an undoable solid step restores: one extrusion node, or the whole
+/// feature tree (reorder, suppress, rollback, revolve/loft/finish edits).
+pub(super) enum SolidUndoKind {
     Node { index: usize, node: Value },
     Tree { snapshot: Value, selected: usize },
+}
+
+/// One undoable solid change.
+pub(super) struct SolidUndo {
+    pub(super) kind: SolidUndoKind,
+    /// History panel label ("Extrude 50 mm").
+    pub(super) label: String,
+    /// Ordering stamp shared with sketch steps (`model::next_step_stamp`).
+    pub(super) stamp: u64,
+}
+
+impl SolidUndo {
+    pub(super) fn new(index: usize, node: Value, label: String) -> Self {
+        Self {
+            kind: SolidUndoKind::Node { index, node },
+            label,
+            stamp: model::next_step_stamp(),
+        }
+    }
+
+    pub(super) fn tree(snapshot: Value, selected: usize, label: String) -> Self {
+        Self {
+            kind: SolidUndoKind::Tree { snapshot, selected },
+            label,
+            stamp: model::next_step_stamp(),
+        }
+    }
 }
 
 /// Blind -> Symmetric -> Through all -> Up to body -> Blind. Through all and
@@ -202,9 +229,14 @@ impl App {
         let Some(node) = project.extrude_node_snapshot(index) else {
             return;
         };
+        let label = format!(
+            "Set end {}{}",
+            options.end.label(),
+            if options.flip { ", flipped" } else { "" }
+        );
         self.status_message = match project.set_extrusion_options_at(index, &options) {
             Ok(()) => {
-                self.solid_undo.push(SolidUndo::Node { index, node });
+                self.solid_undo.push(SolidUndo::new(index, node, label));
                 self.solid_redo.clear();
                 format!(
                     "{}{}  |  Ctrl+Z to undo  |  Ctrl+S to save",
@@ -224,7 +256,8 @@ impl App {
             .extrude_node_snapshot(index)
             .ok_or("extrusion node is missing")?;
         project.set_extrusion_depth_at(index, depth)?;
-        self.solid_undo.push(SolidUndo::Node { index, node });
+        let label = format!("Extrude {} mm", model::history_number_label(depth));
+        self.solid_undo.push(SolidUndo::new(index, node, label));
         self.solid_redo.clear();
         Ok(())
     }
@@ -245,10 +278,9 @@ impl App {
         let up_to = matches!(options.end, EndCondition::UpToBody(_));
         self.apply_solid_options(options);
         if up_to
-            && self
-                .solid_undo
-                .last()
-                .is_some_and(|undo| matches!(undo, SolidUndo::Node { index: i, .. } if *i == index))
+            && self.solid_undo.last().is_some_and(
+                |undo| matches!(&undo.kind, SolidUndoKind::Node { index: i, .. } if *i == index),
+            )
         {
             self.status_message
                 .push_str("  |  U then click a body to change the target");
@@ -349,23 +381,24 @@ impl App {
         let Some(project) = self.project.as_mut() else {
             return;
         };
-        let (index, node) = match step {
-            SolidUndo::Node { index, node } => (index, node),
-            SolidUndo::Tree { snapshot, selected } => {
+        let SolidUndo { kind, label, stamp } = step;
+        let (index, node) = match kind {
+            SolidUndoKind::Node { index, node } => (index, node),
+            SolidUndoKind::Tree { snapshot, selected } => {
                 let current = project.feature_tree_snapshot();
                 self.status_message = match project.restore_feature_tree(snapshot) {
                     Ok(()) => {
-                        to.push(SolidUndo::Tree {
-                            snapshot: current,
-                            selected: self.selected_solid,
+                        let message = format!("{}: {}", if redo { "Redo" } else { "Undo" }, label);
+                        to.push(SolidUndo {
+                            kind: SolidUndoKind::Tree {
+                                snapshot: current,
+                                selected: self.selected_solid,
+                            },
+                            label,
+                            stamp,
                         });
                         self.selected_solid = selected;
-                        if redo {
-                            "Redo feature tree edit"
-                        } else {
-                            "Undo feature tree edit"
-                        }
-                        .into()
+                        message
                     }
                     Err(error) => format!("Undo: {error}"),
                 };
@@ -377,17 +410,17 @@ impl App {
         };
         self.status_message = match project.restore_extrude_node(index, node) {
             Ok(()) => {
-                to.push(SolidUndo::Node {
-                    index,
-                    node: current,
+                let message = format!("{}: {}", if redo { "Redo" } else { "Undo" }, label);
+                to.push(SolidUndo {
+                    kind: SolidUndoKind::Node {
+                        index,
+                        node: current,
+                    },
+                    label,
+                    stamp,
                 });
                 self.selected_solid = index;
-                if redo {
-                    "Redo extrusion edit"
-                } else {
-                    "Undo extrusion edit"
-                }
-                .into()
+                message
             }
             Err(error) => format!("Undo: {error}"),
         };

@@ -190,7 +190,7 @@ impl Document {
         if let Some(index) = self.symmetric_points.iter().position(|pair| {
             pair.axis == axis && ((pair.a == a && pair.b == b) || (pair.a == b && pair.b == a))
         }) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Symmetric");
             self.future.clear();
             self.symmetric_points.remove(index);
             return Ok(false);
@@ -205,7 +205,7 @@ impl Document {
         if self.symmetry_anchor_point(a).is_none() || self.symmetry_anchor_point(b).is_none() {
             return Err("Pick line ends, points, centers or spline points".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Symmetric");
         self.future.clear();
         self.symmetric_points.push(SymmetricPoints { a, b, axis });
         self.solve_or_rollback(&[Pin::Shape(a.0)])?;
@@ -222,7 +222,7 @@ impl Document {
     ) -> Result<bool, String> {
         let existing = self.mirrors.get(&target).copied();
         if existing.is_some_and(|(s, a)| s == source && a == axis) {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Mirror");
             self.future.clear();
             self.mirrors.remove(&target);
             return Ok(false);
@@ -231,7 +231,7 @@ impl Document {
             && s == target
             && a == axis
         {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Mirror");
             self.future.clear();
             self.mirrors.remove(&source);
             return Ok(false);
@@ -261,7 +261,7 @@ impl Document {
         {
             return Err("Mirrored polygons need the same number of sides".into());
         }
-        self.history.push(self.snapshot());
+        self.record_undo(self.snapshot(), "Add Mirror");
         self.future.clear();
         self.mirrors.insert(target, (source, axis));
         self.solve_or_rollback(&[Pin::Shape(source)])?;
@@ -337,7 +337,10 @@ impl Document {
                     .with_id(next),
             );
         }
-        self.history.push(self.snapshot());
+        self.record_undo(
+            self.snapshot(),
+            format!("Mirror {}", history::count_label(ids.len(), "shape")),
+        );
         self.future.clear();
         let mut created = Vec::new();
         for (source, copy) in ids.into_iter().zip(copies) {

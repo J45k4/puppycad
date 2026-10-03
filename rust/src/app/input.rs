@@ -86,6 +86,10 @@ impl App {
             self.redraw();
             return;
         }
+        if self.history_click(layout, point) {
+            self.redraw();
+            return;
+        }
         if self.select_projection(layout, point) {
             self.redraw();
             return;

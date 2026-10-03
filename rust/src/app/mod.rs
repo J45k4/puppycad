@@ -3,6 +3,7 @@ mod corner;
 mod extrude;
 mod feature_tree;
 mod features;
+mod history;
 mod input;
 mod palette;
 mod panels;
@@ -15,6 +16,8 @@ mod status;
 mod tangent;
 mod view_sketch;
 
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod input_tests;
 #[cfg(test)]
@@ -339,6 +342,8 @@ pub(crate) struct App {
     loft_start: Option<(usize, usize)>,
     /// Edge chamfer/fillet picking in the 3D preview.
     edge_pick: Option<EdgePick>,
+    /// HISTORY panel over the Project panel (Ctrl+Shift+H).
+    history_open: bool,
 }
 
 /// What the pointer is over in Select mode.
@@ -483,6 +488,7 @@ impl Default for App {
             revolve_draft: None,
             loft_start: None,
             edge_pick: None,
+            history_open: false,
         }
     }
 }
@@ -1044,6 +1050,7 @@ impl App {
             self.paint_revolve_axis_prompt(&mut painter, layout);
         }
         self.paint_panels(&mut painter, layout);
+        self.paint_history_panel(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
         self.paint_settings(&mut painter, layout);
         self.paint_palette(&mut painter, layout);

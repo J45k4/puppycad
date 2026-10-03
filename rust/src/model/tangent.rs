@@ -171,7 +171,7 @@ impl Document {
             self.construction.insert(id);
         }
         self.smooth_joins.insert((id, 0), source);
-        self.history.push(before);
+        self.record_undo(before, "Draw tangent arc");
         self.future.clear();
         self.selected = Some(id);
         self.draft_start = None;
@@ -198,7 +198,7 @@ impl Document {
             .map(|(key, _)| *key)
             .collect();
         if !existing.is_empty() {
-            self.history.push(self.snapshot());
+            self.record_undo(self.snapshot(), "Remove Smooth");
             self.future.clear();
             for key in existing {
                 self.smooth_joins.remove(&key);
@@ -240,7 +240,7 @@ impl Document {
             self.selected = Some(selected);
             return Err(error);
         }
-        self.history.push(before);
+        self.record_undo(before, "Add Smooth");
         self.future.clear();
         self.selected = Some(selected);
         Ok(true)

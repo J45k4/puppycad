@@ -211,6 +211,7 @@ impl App {
             return;
         };
         let project = self.project.as_mut().expect("draft has project");
+        let snapshot = project.feature_tree_snapshot();
         match project.create_revolve(
             &self.document,
             self.selected_profile,
@@ -219,6 +220,8 @@ impl App {
             draft.operation,
         ) {
             Ok(id) => {
+                let label = format!("Revolve {}°", model::history_number_label(angle));
+                self.push_tree_step(snapshot, label);
                 self.select_feature(&id);
                 self.solid_preview = true;
                 self.status_message = format!(
@@ -254,8 +257,10 @@ impl App {
         match self.loft_start {
             Some(start) if start.0 != here.0 => {
                 let operation = if join { "join" } else { "newBody" };
+                let snapshot = project.feature_tree_snapshot();
                 match project.create_loft(&self.document, start, here.1, operation) {
                     Ok(id) => {
+                        self.push_tree_step(snapshot, "Loft".into());
                         self.loft_start = None;
                         self.select_feature(&id);
                         self.solid_preview = true;
@@ -371,8 +376,15 @@ impl App {
                     return;
                 };
                 let project = self.project.as_mut().expect("edge pick has project");
+                let snapshot = project.feature_tree_snapshot();
                 match project.create_edge_finish(pick.kind, size, &pick.edges) {
                     Ok(id) => {
+                        let size_label = model::history_number_label(size);
+                        let label = match pick.kind {
+                            FinishKind::Chamfer => format!("Chamfer {size_label} mm"),
+                            FinishKind::Fillet => format!("Fillet R{size_label}"),
+                        };
+                        self.push_tree_step(snapshot, label);
                         self.select_feature(&id);
                         self.status_message = format!(
                             "Created {size:.1} mm {} on {} edge{}  |  Ctrl+S to save",
@@ -441,23 +453,46 @@ impl App {
         let id = self.selected_feature_id().ok_or("no feature selected")?;
         let project = self.project.as_mut().ok_or("no project")?;
         let snapshot = project.feature_tree_snapshot();
+        let kind = project
+            .feature_index(&id)
+            .and_then(|index| project.feature_node(index))
+            .and_then(|node| node["type"].as_str().map(str::to_string))
+            .unwrap_or_default();
         project.set_feature_value(&id, value)?;
-        self.solid_undo.push(SolidUndo::Tree {
-            snapshot,
-            selected: self.selected_solid,
-        });
-        self.solid_redo.clear();
+        let number = model::history_number_label(value);
+        let label = if kind == "edgeFinish" {
+            format!("Set size {number} mm")
+        } else {
+            format!("Set angle {number}°")
+        };
+        self.push_tree_step(snapshot, label);
         Ok(())
+    }
+
+    /// Record a whole-tree snapshot taken before an edit as one undo step.
+    pub(super) fn push_tree_step(&mut self, snapshot: serde_json::Value, label: String) {
+        self.solid_undo
+            .push(SolidUndo::tree(snapshot, self.selected_solid, label));
+        self.solid_redo.clear();
     }
 
     pub(super) fn delete_selected_feature(&mut self) {
         let (Some(id), Some(project)) = (self.selected_feature_id(), self.project.as_mut()) else {
             return;
         };
-        self.status_message = match project.delete_feature(&id) {
-            Ok(()) => {
-                self.solid_preview = project.evaluated_solids().is_some();
-                "Feature removed  |  Ctrl+S to save".into()
+        let snapshot = project.feature_tree_snapshot();
+        let name = project
+            .feature_index(&id)
+            .map(|index| project.feature_label(index))
+            .unwrap_or_else(|| "feature".into());
+        let result = project
+            .delete_feature(&id)
+            .map(|()| project.evaluated_solids().is_some());
+        self.status_message = match result {
+            Ok(solid_preview) => {
+                self.push_tree_step(snapshot, format!("Delete {name}"));
+                self.solid_preview = solid_preview;
+                "Feature removed  |  Ctrl+Z to undo  |  Ctrl+S to save".into()
             }
             Err(error) => format!("Delete feature: {error}"),
         };
