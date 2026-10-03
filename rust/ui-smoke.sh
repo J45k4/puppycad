@@ -2948,3 +2948,62 @@ cp /tmp/native-anchor-drag.pcad /out/rust-native-anchor-drag.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Dimension objects: a point-to-point distance with the D tool, an absolute
+# X dimension driven by a sketch variable.
+./target/debug/puppycad /tmp/native-dims.pcad >/tmp/puppycad-dims.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-dims.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-dims.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" p
+xdotool mousemove 523 431 click 1
+xdotool key --window "$window_id" l
+xdotool mousemove 623 331 click 1
+xdotool mousemove 783 331 click 1
+# D: point, then line start -> distance; type its value in the label.
+xdotool key --window "$window_id" d
+xdotool mousemove 523 431 click 1
+xdotool mousemove 623 331 click 1
+xdotool type --clearmodifiers '150'
+import -window root /out/rust-native-dimension-edit.png
+xdotool key Return
+# Add a sketch variable in the Properties Variables section.
+xdotool key --window "$window_id" v
+xdotool key --window "$window_id" Escape
+xdotool mousemove 1100 281 click 1
+xdotool type --clearmodifiers 'w = 40 mm'
+xdotool key Return
+# D: point, Shift+origin -> absolute X dimension from a variable.
+xdotool key --window "$window_id" d
+xdotool mousemove 523 431 click 1
+xdotool keydown shift
+xdotool mousemove 623 431 click 1
+xdotool keyup shift
+xdotool type --clearmodifiers '#w*-2'
+xdotool key Return
+xdotool mousemove 900 200
+xdotool key --window "$window_id" v
+xdotool key --window "$window_id" Escape
+sleep 0.5
+import -window root /out/rust-native-dimensions.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test -s /tmp/native-dims.pcad
+grep -q '"type": "distance"' /tmp/native-dims.pcad
+grep -q '"axis": "x"' /tmp/native-dims.pcad
+grep -q '"expression": "#w\*-2"' /tmp/native-dims.pcad
+grep -q '"name": "w"' /tmp/native-dims.pcad
+cp /tmp/native-dims.pcad /out/rust-native-dimensions.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

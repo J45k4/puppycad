@@ -150,7 +150,7 @@ fn axis_dimensions_between_points_and_from_origin() {
         .filter(|shape| matches!(shape, Shape::Point { at, .. } if *at == p(0.0, 0.0)))
         .count();
     assert_eq!(origins, 1);
-    assert_eq!(doc.dimension_text(y).unwrap(), "Y5");
+    assert_eq!(doc.dimension_text(y).unwrap(), "Y 5");
     doc.set_dimension_value(y, 12.0).unwrap();
     doc.set_dimension_value(x, 7.0).unwrap();
     assert!(doc.dimension_anchor((a, 0)).unwrap().distance(p(7.0, 12.0)) < 1e-3);

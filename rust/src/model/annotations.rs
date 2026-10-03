@@ -527,8 +527,8 @@ impl Document {
             DimensionKey::Field(_, DimensionField::CircleDiameter) => format!("D{value}"),
             DimensionKey::Field(_, DimensionField::CurveRadius) => format!("R{value}"),
             DimensionKey::Point(id) => match self.dims.point_dimensions.get(&id)?.axis {
-                Some(PointAxis::X) => format!("X{value}"),
-                Some(PointAxis::Y) => format!("Y{value}"),
+                Some(PointAxis::X) => format!("X {value}"),
+                Some(PointAxis::Y) => format!("Y {value}"),
                 None => value,
             },
             key if Self::dimension_is_angle(key) => format!("{value}deg"),
@@ -771,13 +771,14 @@ impl Document {
                     (at, scaled(add(a, b), 0.5), lines)
                 }
                 Some(PointAxis::X) => {
-                    // Horizontal dimension line at the higher point.
-                    let y = a.y.max(b.y) + offset * 1.5;
+                    // Horizontal dimension line below the lower point, clear of
+                    // aligned distance labels.
+                    let y = a.y.min(b.y) - offset * 1.5;
                     let (pa, pb) = (Point { x: a.x, y }, Point { x: b.x, y });
                     (
                         Point {
                             x: (a.x + b.x) * 0.5,
-                            y: y + offset,
+                            y: y - offset,
                         },
                         scaled(add(pa, pb), 0.5),
                         vec![(a, pa), (b, pb), (pa, pb)],
