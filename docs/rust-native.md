@@ -91,8 +91,10 @@ crossings on rectangle, polygon, and slot boundaries, within 8 screen pixels, th
 grid. A square marks the previewed snap target.
 Press **N** to toggle geometry snapping and **Shift+G** to toggle grid snapping.
 Snapping a new line or open spline endpoint onto a sketch point creates a persistent coincidence
-relation. Moving that point moves the linked endpoint, and the relation survives
-save, reopen, and undo. Intersection snaps currently place a coordinate; other
+relation. Moving that point moves the linked endpoint, moving, scaling, or
+rotating a linked line carries the point with it, and length or axis edits on a
+linked line end move the point too. The relation survives save, reopen, and
+undo. Intersection snaps currently place a coordinate; other
 inferred relations still need to be ported.
 Finite line and spline crossings, including tangencies, are available as
 intersection snap points. A line segment must actually reach the spline.
@@ -139,6 +141,40 @@ angles. These values save as web `arcSweep` and `rotation` relations. Scaling
 preserves angular values; rotating a shape updates its driving rotation value.
 Existing line rotation relations also load and can drive Parallel or
 Perpendicular targets.
+### Constraint solver
+
+`rust/src/solver.rs` is a least-squares solver ported from the structure of
+`src/sketch-solver.ts`. Every anchor coordinate (line endpoints, sketch points,
+circle and arc centers) and every circle or arc radius is a parameter; each
+relation contributes a residual. Levenberg–Marquardt with numeric Jacobians
+first solves the relations together with soft "stay close" weights and then
+solves the relations alone, damped by those weights. A solve reports its
+residual norm and whether it converged.
+
+Moves, drags, dimension edits, scale, rotate, and creating a relation all apply
+the edit, solve, and then either commit everything as one undo step or roll the
+edit back. The edited shape (or, for a length or rotation edit, the line's first
+endpoint) is held exactly. The remaining intent is a cascade: relation sources
+stay put and only targets move; if that fails, sources may move but keep their
+first endpoint; if that fails too, only the edited geometry is held. Targets
+rotate or stretch about their first endpoint, and direction targets keep their
+length when nothing else sets it. A solution that collapses a line is rejected.
+
+Solver-backed relations: horizontal and vertical, line length and line rotation
+dimensions, Equal lines, Parallel, Perpendicular, Collinear, signed Angle,
+endpoint coincidence between a line and a sketch point, fixed line endpoints,
+points and circle/arc centers, Midpoint and point-on-curve on a line,
+point-on-curve on a circle, circle and arc radius and diameter dimensions,
+Equal radius, radial distance, and Concentric between circles and arcs.
+
+Still hand-propagated: normal and endpoint tangency, internal and external
+tangency, Midpoint and point-on-curve on arcs, ellipses, and splines, point
+links to spline ends, shared and Equal ellipses, concentric pairs that include
+an ellipse, and fixed arc endpoints. Shapes in these relations are constants in
+the solve, so an edit that would need them to move is rejected. Rotating a
+direction target and rotating axis-constrained lines by other than quarter turns
+stay blocked; dragging still moves whole shapes rather than single anchors.
+
 Press **K** with a shape selected to toggle construction geometry. Its tree row
 and viewport outline dim, the flag persists in the web project graph, and
 construction geometry cannot be used as the native extrusion profile. Copies
@@ -164,7 +200,13 @@ Select a target line, hover another line, and press **Shift+E** to make their
 lengths equal. The target resizes about its first endpoint. Editing the source
 length then updates both lines in one undo step. Press Shift+E again over the
 same source to remove the relation. Equal pairs save as web `equal` relations;
-line split, trim, extend, and scaling require removing Equal first.
+line split, trim, and extend require removing Equal first. A length typed on the
+Equal target drives the source as well.
+A line can carry Equal, a direction relation, an axis constraint, a driving
+length, and endpoint point links at the same time, and relations can chain
+(A parallel to B, B perpendicular to C). Each line can be the target of at most
+one Equal and one direction relation. Combinations that cannot be satisfied are
+rejected and leave the sketch unchanged.
 The same **Shift+E** gesture also matches the radius of two circles or arcs.
 Editing a source circle's diameter updates the dependent circle or arc in one
 undo step. The target diameter is driven by Equal and cannot be edited directly.
