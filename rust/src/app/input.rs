@@ -1807,7 +1807,11 @@ impl ApplicationHandler for App {
                         KeyCode::KeyE
                             if self.modifiers.control_key() || self.modifiers.super_key() =>
                         {
-                            self.export_stl();
+                            self.export_stl(if self.modifiers.shift_key() {
+                                stl::StlFormat::Ascii
+                            } else {
+                                stl::StlFormat::Binary
+                            });
                         }
                         KeyCode::KeyZ
                             if self.modifiers.control_key() || self.modifiers.super_key() =>
