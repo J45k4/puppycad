@@ -947,6 +947,11 @@ impl App {
         self.handle_key_press(event);
         self.follow_panel_selection();
         self.follow_props_edit();
+        // A key can open the 3D view under a still cursor: refresh the
+        // hovered face so NEXT and MORE see it without a pointer move.
+        if self.solid_preview && self.assembly.is_none() {
+            self.update_face_hover();
+        }
     }
 
     fn handle_key_press(&mut self, event: KeyPress) {
