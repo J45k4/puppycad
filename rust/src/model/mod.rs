@@ -1,7 +1,10 @@
 use crate::solver;
 use crate::spline::{self, SplineMode};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+mod annotations;
 mod corner;
+#[cfg(test)]
+mod dimension_tests;
 mod dimensions;
 mod drag;
 mod edit;
@@ -16,6 +19,10 @@ mod tangent;
 #[cfg(test)]
 mod tests;
 
+pub use annotations::{
+    DimensionKey, DimensionLabel, DimensionMeta, LABEL_SCALE, PointAxis, PointDimension,
+    format_value, label_size,
+};
 pub use corner::{ChamferMode, ChamferSpec};
 use geometry::*;
 pub use offset::{OffsetChain, offset_chain_segments, offset_shape};
@@ -44,6 +51,8 @@ pub enum Tool {
     Slot,
     /// Arc tangent to a line, arc or open spline endpoint.
     TangentArc,
+    /// Point distance, point X / Y and entity dimensions (D).
+    Dimension,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,7 +70,7 @@ pub struct SnapResult {
     pub kind: SnapKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DimensionField {
     LineLength,
     RectangleWidth,
@@ -152,6 +161,7 @@ struct DocumentState {
     mirrors: HashMap<u32, (u32, u32)>,
     offsets: HashMap<u32, (u32, f32)>,
     offset_chains: Vec<OffsetChain>,
+    dims: DimensionMeta,
 }
 
 #[derive(Clone, Debug)]
@@ -226,6 +236,9 @@ pub struct Document {
     pub offsets: HashMap<u32, (u32, f32)>,
     /// Mitered line chain offsets (web `offsetChain`).
     pub offset_chains: Vec<OffsetChain>,
+    /// Dimension annotations: label positions, point dimensions, reference
+    /// dimensions, expressions and sketch variables.
+    pub dims: DimensionMeta,
     next_id: u32,
     history: Vec<DocumentState>,
     future: Vec<DocumentState>,
@@ -280,6 +293,7 @@ impl Default for Document {
             mirrors: HashMap::new(),
             offsets: HashMap::new(),
             offset_chains: Vec::new(),
+            dims: DimensionMeta::default(),
             next_id: 1,
             history: Vec::new(),
             future: Vec::new(),
@@ -411,6 +425,7 @@ impl Document {
             mirrors: self.mirrors.clone(),
             offsets: self.offsets.clone(),
             offset_chains: self.offset_chains.clone(),
+            dims: self.dims.clone(),
         }
     }
 
@@ -442,6 +457,7 @@ impl Document {
         self.mirrors = state.mirrors;
         self.offsets = state.offsets;
         self.offset_chains = state.offset_chains;
+        self.dims = state.dims;
         self.selected = None;
         self.selection_extra.clear();
         self.selection_primary = None;

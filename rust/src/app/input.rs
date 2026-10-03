@@ -127,6 +127,52 @@ impl App {
             }
             self.more_open = false;
         }
+        if !self.solid_preview
+            && self.document.selected.is_none()
+            && !self
+                .selected_dimension
+                .is_some_and(|key| self.document.dimension_keys().contains(&key))
+            && let Some(index) = (0..=self.document.dims.variables.len())
+                .find(|index| Self::variable_row(layout, *index).contains(point.x, point.y))
+        {
+            if self.read_only() {
+                self.status_message =
+                    "READ ONLY: this sketch has unsupported native features".into();
+            } else {
+                let variable = self.document.dims.variables.get(index);
+                self.editing = Some(DimensionEdit {
+                    field: EditField::Variable(variable.map(|_| index)),
+                    buffer: variable
+                        .map(|variable| format!("{} = {}", variable.name, variable.expression))
+                        .unwrap_or_default(),
+                });
+                self.status_message =
+                    "Type name = expression (units, #variables), Enter  |  empty: delete  |  Esc"
+                        .into();
+            }
+            self.redraw();
+            return;
+        }
+        if !self.solid_preview
+            && layout.right.contains(point.x, point.y)
+            && let Some(key) = self
+                .selected_dimension
+                .filter(|key| self.document.dimension_keys().contains(key))
+        {
+            let y = point.y - layout.right.y;
+            if (Self::DIMENSION_VALUE_ROW..Self::DIMENSION_VALUE_ROW + 25.0).contains(&y) {
+                if self.read_only() {
+                    self.status_message =
+                        "READ ONLY: this sketch has unsupported native features".into();
+                } else {
+                    self.begin_label_edit(key);
+                }
+            } else if (Self::DIMENSION_MODE_ROW..Self::DIMENSION_MODE_ROW + 28.0).contains(&y) {
+                self.toggle_selected_reference();
+            }
+            self.redraw();
+            return;
+        }
         if let Some(field) = self.editable_field_at(point) {
             if self.read_only() && !matches!(field, EditField::ExtrusionDepth) {
                 self.status_message =
@@ -384,8 +430,24 @@ impl App {
             return;
         }
         match self.document.tool {
+            Tool::Dimension => self.dimension_click(point, raw_world),
             Tool::Select => {
                 self.split_circle_start = None;
+                if let Some(key) = self
+                    .document
+                    .dimension_label_at(point, self.viewport_origin())
+                {
+                    self.selected_dimension = Some(key);
+                    self.document.clear_selection();
+                    self.label_drag = Some(LabelDrag {
+                        key,
+                        start: point,
+                        moved: false,
+                    });
+                    self.redraw();
+                    return;
+                }
+                self.selected_dimension = None;
                 self.document.selection_filter = self.selection_filter;
                 let hit = self.document.pick_at(world);
                 let on_anchor = self.document.handle_at(world);
@@ -491,6 +553,110 @@ impl App {
     }
 }
 
+/// Characters accepted while typing a dimension expression.
+pub(super) fn expression_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || " .+-*/()#_".contains(ch)
+}
+
+impl App {
+    /// A label click opens the inline editor; a drag moves the label.
+    fn release_label(&mut self, drag: LabelDrag) {
+        if self.read_only() {
+            self.status_message = "READ ONLY: this sketch has unsupported native features".into();
+            return;
+        }
+        if drag.moved {
+            let at = self
+                .document
+                .screen_to_world(self.cursor, self.viewport_origin());
+            self.status_message = match self
+                .document
+                .set_dimension_label_position(drag.key, Some(at))
+            {
+                Ok(()) => "Moved dimension label  |  Ctrl+S to save".into(),
+                Err(error) => format!("Label: {error}"),
+            };
+        } else {
+            self.begin_label_edit(drag.key);
+        }
+    }
+
+    /// D tool: an entity gets its own dimension; two anchors (or an anchor
+    /// and the origin) get a distance, Shift for X and Ctrl for Y. The new
+    /// dimension's label opens for typing its value.
+    fn dimension_click(&mut self, screen: Point, world: Point) {
+        let tolerance = 8.0 / self.document.zoom.max(0.2);
+        let anchor = self.document.dimension_anchor_near(world, tolerance);
+        let origin = world.distance(Point { x: 0.0, y: 0.0 }) <= tolerance;
+        let Some(start) = self.dimension_start else {
+            if let Some(anchor) = anchor {
+                self.dimension_start = Some(anchor);
+                self.status_message =
+                    "Dimension: pick the second point or the origin  |  Shift: X  Ctrl: Y  |  Esc: cancel"
+                        .into();
+            } else if let Some(key) = self
+                .document
+                .dimension_label_at(screen, self.viewport_origin())
+            {
+                self.begin_label_edit(key);
+            } else if let Some(id) = self
+                .document
+                .shapes
+                .iter()
+                .rev()
+                .find(|shape| shape.hit(world, 5.0 / self.document.zoom.max(0.2)))
+                .map(Shape::id)
+            {
+                match self.document.add_entity_dimension(id) {
+                    Ok(key) => self.begin_label_edit(key),
+                    Err(error) => self.status_message = format!("Dimension: {error}"),
+                }
+            } else {
+                self.status_message =
+                    "Dimension: click an entity, a point, line end or curve center".into();
+            }
+            return;
+        };
+        let axis = if self.modifiers.shift_key() {
+            Some(model::PointAxis::X)
+        } else if self.modifiers.control_key() {
+            Some(model::PointAxis::Y)
+        } else {
+            None
+        };
+        let target = match anchor {
+            Some(anchor) => Some(anchor),
+            None if origin => None,
+            None => {
+                self.status_message =
+                    "Dimension: pick a point, line end, curve center or the origin".into();
+                return;
+            }
+        };
+        self.dimension_start = None;
+        match self.document.add_point_dimension(start, target, axis) {
+            Ok(key) => self.begin_label_edit(key),
+            Err(error) => self.status_message = format!("Dimension: {error}"),
+        }
+    }
+
+    pub(super) fn begin_label_edit(&mut self, key: DimensionKey) {
+        self.selected_dimension = Some(key);
+        self.document.selected = None;
+        if self.document.is_reference(key) {
+            self.editing = None;
+            self.status_message =
+                "Reference dimensions are measured  |  R: make driving to edit".into();
+            return;
+        }
+        self.editing = Some(DimensionEdit {
+            field: EditField::Label(key),
+            buffer: String::new(),
+        });
+        self.status_message = "Type a value, then Enter  |  Esc to cancel".into();
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -549,6 +715,11 @@ impl ApplicationHandler for App {
                     None => {}
                 }
                 self.cursor = next;
+                if let Some(drag) = &mut self.label_drag
+                    && drag.start.distance(next) > 3.0
+                {
+                    drag.moved = true;
+                }
                 if self.document.dragging() && !self.pan_drag && self.solid_drag.is_none() {
                     let world = self.document.screen_to_world(next, self.viewport_origin());
                     self.document.drag_to(world);
@@ -560,6 +731,9 @@ impl ApplicationHandler for App {
                 (ElementState::Released, MouseButton::Left) => {
                     if let Some(start) = self.box_start.take() {
                         self.finish_box_select(start, self.cursor);
+                    }
+                    if let Some(drag) = self.label_drag.take() {
+                        self.release_label(drag);
                     }
                     if self.document.finish_drag() {
                         self.status_message = "Moved geometry  |  Ctrl+S to save".into();
@@ -726,6 +900,23 @@ impl ApplicationHandler for App {
                                     (&mut self.editing, &event.text)
                                 {
                                     for ch in text.chars() {
+                                        if matches!(
+                                            editing.field,
+                                            EditField::Label(_)
+                                                | EditField::Dimension(_)
+                                                | EditField::Variable(_)
+                                        ) {
+                                            let allowed = expression_char(ch)
+                                                || (ch == '='
+                                                    && matches!(
+                                                        editing.field,
+                                                        EditField::Variable(_)
+                                                    ));
+                                            if allowed && editing.buffer.len() < 64 {
+                                                editing.buffer.push(ch);
+                                            }
+                                            continue;
+                                        }
                                         if (ch.is_ascii_digit()
                                             || ch == '.'
                                             || ((ch == '-' || ch == '+')
@@ -1086,6 +1277,13 @@ impl ApplicationHandler for App {
                         KeyCode::KeyL if !self.modifiers.shift_key() => {
                             self.select_tool(Tool::Line)
                         }
+                        KeyCode::KeyR
+                            if self.selected_dimension.is_some()
+                                && !self.modifiers.shift_key()
+                                && !self.solid_preview =>
+                        {
+                            self.toggle_selected_reference();
+                        }
                         KeyCode::KeyR if self.modifiers.shift_key() => {
                             self.select_tool(Tool::CenterRectangle)
                         }
@@ -1342,6 +1540,7 @@ impl ApplicationHandler for App {
                             };
                         }
                         KeyCode::KeyP => self.select_tool(Tool::Point),
+                        KeyCode::KeyD => self.select_tool(Tool::Dimension),
                         KeyCode::KeyG if self.modifiers.shift_key() => {
                             self.snap_grid = !self.snap_grid;
                             self.status_message = format!(
@@ -1546,6 +1745,8 @@ impl ApplicationHandler for App {
                             self.box_start = None;
                             self.split_circle_start = None;
                             self.corner_pick = None;
+                            self.dimension_start = None;
+                            self.selected_dimension = None;
                             self.spline_points.clear();
                             if self.document.cancel_drag() {
                                 self.status_message = "Move cancelled".into();
@@ -1577,7 +1778,15 @@ impl ApplicationHandler for App {
                                     }
                                 }
                             } else if !self.read_only() {
-                                self.document.delete_selected();
+                                if let Some(key) = self.selected_dimension.take() {
+                                    self.status_message = match self.document.delete_dimension(key)
+                                    {
+                                        Ok(()) => "Dimension removed  |  Ctrl+S to save".into(),
+                                        Err(error) => format!("Dimension: {error}"),
+                                    };
+                                } else {
+                                    self.document.delete_selected();
+                                }
                             }
                         }
                         KeyCode::KeyS

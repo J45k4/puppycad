@@ -216,7 +216,7 @@ Set **CX** and **CY** to the transform center in millimeters. The default is the
 The **Rotate** tab uses a signed angle in degrees and offers **Rotate selected** and **Rotate copy** about the same editable center. Rotating an axis-aligned rectangle converts it to a rotated rectangle primitive that the web app can open.
 Move, scale, and rotate copies retain their editable driving dimensions.
 Click line length, rectangle or ellipse width or height, or circle diameter in Properties
-to enter a new millimeter value. Press Enter to apply it or Escape to cancel;
+to enter a new value or expression (see Dimensions). Press Enter to apply it or Escape to cancel;
 Ctrl+Y or Ctrl+Shift+Z redoes an undone edit. These edits are stored as native
 driving dimension relations and remain editable after reopening the file.
 Arc radius and regular polygon radius are editable in Properties and save as
@@ -230,6 +230,65 @@ angles. These values save as web `arcSweep` and `rotation` relations. Scaling
 preserves angular values; rotating a shape updates its driving rotation value.
 Existing line rotation relations also load and can drive Parallel or
 Perpendicular targets.
+
+### Dimensions
+
+Dimensions are sketch objects (`model/annotations.rs`), keyed by
+`DimensionKey`: a per-shape dimension (`Field`), a line angle relation
+(`Angle`), or a point dimension (`Point`).
+
+**Canvas labels.** Every dimension is drawn in the viewport: a line length
+parallel to the line and offset to one side, rectangle and ellipse width and
+height along their edges or axes, a diameter with a leader through the
+circle, a radius with a leader from the center, arc sweep inside the arc,
+rotation next to the pivot, an angle at the vertex of its two lines, and
+point distances along an aligned, horizontal (below the points) or vertical
+(right of the points) dimension line. Offsets are fixed screen pixels, so the
+default placement is deterministic per zoom. In Select, click a label to edit
+it inline (type, Enter applies, Esc cancels) or drag it to move it; a moved
+label is stored as the web `labelPosition` (absolute sketch coordinates) and
+gets a leader back to its geometry. Clicking a label selects the dimension;
+Properties then shows its kind, value, a **[R] MAKE REFERENCE / MAKE
+DRIVING** button, and Del removes it.
+
+**D tool.** Press **D**. Click an entity to add its next missing driving
+dimension at its current size (length, diameter, radius, or width then
+height), or click two anchors (sketch points, line ends, curve centers,
+spline handles) for an aligned distance; hold Shift on the second click for
+an X distance and Ctrl for a Y distance. Picking the origin as the second
+point makes an absolute X/Y (or radial) dimension, measured from a fixed
+construction point at the origin that is created once and reused (the web
+format has no origin anchor). The new label opens for typing its value.
+Point dimensions save as web `distance` relations
+(`{a, b, value, axis?}`, signed `b - a` along an axis) and solve as the
+`PointDistance` and `AxisDistance` residuals. Web `distance` relations with a
+`direction` keep the sketch read-only. Line-to-point distance is not offered:
+the web app has no such relation.
+
+**Driving and reference.** **R** (or the Properties button) toggles the
+selected dimension. A reference dimension shows its measured value in
+parentheses, adds no solver constraint, and saves as the web relation with
+`reference: true` and the measured value. Making it driving again starts
+from the measured value. Angle relations cannot be references.
+
+**Expressions and variables.** Dimension values (labels and the Properties
+fields) accept expressions as in `src/sketch-value.ts`: `+ - * / ( )`, `pi`,
+units `mm cm m um in inch ft deg rad`, and `#name` sketch variables
+(`rust/src/sketch_value.rs`). Adding mismatched units is an error, as in the
+web app. A label with an expression shows `expression = value`. With nothing
+selected, Properties lists **SKETCH VARIABLES**: click a row to edit it as
+`name = expression` (an empty expression deletes an unused variable,
+renaming rewrites `#name` references), or **+ ADD VARIABLE**. A variable's
+kind is inferred (its previous kind, else length, angle, scalar). Changing a
+variable re-evaluates every dependent dimension and solves as one undo step;
+any failure rolls everything back. Expressions save as the web relation
+`expression` next to the exactly evaluated `value` (the web loader checks
+they match), and variables as the sketch node's `variables` array. An
+expression that no longer produces the stored value (after a direct edit such
+as scaling) is dropped on save. Dimensions stored as graph `sketchConstraint`
+nodes move to sketch relations once they get a label position, reference
+flag or expression.
+
 ### Constraint solver
 
 `rust/src/solver.rs` is a least-squares solver ported from the structure of
@@ -260,7 +319,7 @@ rotate or stretch about their first endpoint, and direction targets keep their
 length when nothing else sets it. A solution that collapses a line is rejected.
 
 Every relation is solver-backed: horizontal and vertical, line length and line
-rotation dimensions, Equal lines, Parallel, Perpendicular, Collinear, signed
+rotation dimensions, point distance and point X / Y dimensions, Equal lines, Parallel, Perpendicular, Collinear, signed
 Angle, endpoint coincidence between a sketch point and a line or spline end,
 fixed line endpoints, points, centers, spline handles, and arc, elliptic arc
 and ellipse axis endpoints, Midpoint on lines, arcs and elliptic arcs,
@@ -539,25 +598,31 @@ Library crate (`rust/src/lib.rs`):
   `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
   shared with split/trim), `tangent.rs` (tangent arc, smooth join gesture,
   endpoint tangents),
-  `dimensions.rs` (`set_dimension`), `selection.rs` (multi-selection,
+  `dimensions.rs` (`set_dimension`), `annotations.rs` (dimension objects:
+  labels and hit-testing, point dimensions, reference dimensions,
+  expressions and variables), `selection.rs` (multi-selection,
   `SelectionFilter`, box and toggle selection, `for_each_selected`),
   `edit.rs` (delete, split, trim, extend,
   copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
-  `geometry.rs` (curve intersections and boundaries), `tests.rs`.
-- `project.rs` (`.pcad` load/save, parts, extrusion profiles), `solver.rs`,
+  `geometry.rs` (curve intersections and boundaries), `tests.rs`,
+  `dimension_tests.rs`.
+- `project.rs` (`.pcad` load/save, parts, extrusion profiles; dimension
+  round-trip tests in `project/dimension_tests.rs`), `solver.rs`,
+  `sketch_value.rs` (dimension expressions and sketch variables),
   `spline.rs`, `stl.rs`.
 
 Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
   `input.rs` (mouse/keyboard handling and the `winit` handler),
-  `panels.rs` (toolbar and properties panels, dimension editing),
+  `panels.rs` (toolbar and properties panels, dimension and variable
+  editing),
   `corner.rs` (fillet/chamfer gestures and prompts), `tangent.rs` (tangent
   arc tool and smooth join key),
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
   preview projection, dragging and painting), `view_sketch.rs` (sketch grid
-  and shape painting), `tests.rs`.
+  and shape painting, dimension labels), `tests.rs`.
 - `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
 
 ## Cross-loader round-trip
@@ -580,7 +645,11 @@ Two tests guard against format drift between the apps:
   TypeScript loader and checks its part and sketch counts. It also builds a
   web-side project (rectangle and line on the XY plane), passes it through
   `--roundtrip`, and checks the TypeScript loader reads the same entities back.
-  That part is skipped, with a warning, when `cargo` is not installed.
+  A second web project with length (expression and label position),
+  reference distance, X and Y distance relations and a sketch variable must
+  come back with identical relations and variables. These parts are skipped,
+  with a warning, when `cargo` is not installed. `rust/fixtures/dimensions.pcad`
+  holds every dimension kind the native app writes, so both loaders check it.
 
 ## Isolated UI check
 
@@ -604,6 +673,12 @@ on Top and Front sketches, saves their graph, and exports both STLs.
 It also clicks each extrusion row and edits the selected body's depth.
 An axis-constraint scenario snaps one line horizontally and vertically, then
 undoes the second constraint before saving.
+A dimension scenario adds a point and a line, uses the D tool to add a
+point-to-line-start distance and types 150 into its label
+(`rust-native-dimension-edit.png`), adds the sketch variable `w = 40 mm` in
+Properties, adds an absolute X dimension with Shift+origin driven by
+`#w*-2`, and saves; the file must contain the `distance` relations, the X
+axis, the expression and the variable (`rust-native-dimensions.png`).
 A fixed-line scenario pins an endpoint with Shift+K, checks the saved relation,
 and captures the Properties panel.
 A fixed-center scenario pins a circle center and checks its saved web relation

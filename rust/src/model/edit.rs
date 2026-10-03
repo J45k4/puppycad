@@ -58,6 +58,7 @@ impl Document {
             .retain(|(shape_id, _), _| *shape_id != id);
         self.fixed_anchors
             .retain(|(shape_id, _), _| *shape_id != id);
+        self.prune_dimension_meta();
         self.selected = None;
         true
     }

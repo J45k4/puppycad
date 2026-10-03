@@ -13,7 +13,7 @@ use corner::*;
 use project_panel::*;
 use solid::*;
 
-use puppycad::{model, project, spline, stl};
+use puppycad::{model, project, sketch_value, spline, stl};
 
 use std::{
     path::{Path, PathBuf},
@@ -24,7 +24,7 @@ use crate::renderer::{Color, Painter, Rect, Renderer};
 use crate::view3d::{self, OrbitView};
 use manifold_rust::manifold::Manifold;
 use model::{
-    AxisConstraint, ChamferMode, DimensionField, Document, LineRelationKind, Point,
+    AxisConstraint, ChamferMode, DimensionField, DimensionKey, Document, LineRelationKind, Point,
     SelectionFilter, Shape, SketchAnalysis, SnapKind, Tool,
 };
 use project::{
@@ -53,6 +53,8 @@ const SHAPE: Color = [0.96, 0.72, 0.38, 1.0];
 const FULLY_CONSTRAINED: Color = [0.46, 0.84, 0.52, 1.0];
 const CONFLICT: Color = [0.96, 0.36, 0.36, 1.0];
 const REDUNDANT: Color = [0.78, 0.56, 0.96, 1.0];
+/// Driving dimension labels and their dimension lines.
+const DIMENSION: Color = [0.62, 0.80, 0.98, 1.0];
 
 #[derive(Clone, Copy, Debug)]
 struct Layout {
@@ -214,6 +216,19 @@ pub(crate) struct App {
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
+    /// Dimension picked by clicking its label.
+    selected_dimension: Option<DimensionKey>,
+    /// Label press in progress: a click edits it, a drag moves it.
+    label_drag: Option<LabelDrag>,
+    /// First anchor picked with the D tool.
+    dimension_start: Option<(u32, usize)>,
+}
+
+#[derive(Clone, Copy)]
+struct LabelDrag {
+    key: DimensionKey,
+    start: Point,
+    moved: bool,
 }
 
 /// Viewport clicks a relation gesture is waiting for.
@@ -267,6 +282,10 @@ enum EditField {
     OffsetCreate,
     /// Driving distance of the selected offset shape.
     OffsetDistance,
+    /// Inline edit of a dimension label in the viewport.
+    Label(DimensionKey),
+    /// Sketch variable row (`None`: add a variable).
+    Variable(Option<usize>),
 }
 
 impl Default for App {
@@ -306,6 +325,9 @@ impl Default for App {
             corner_values: CornerValues::default(),
             offset_value: 5.0,
             analysis: Default::default(),
+            selected_dimension: None,
+            label_drag: None,
+            dimension_start: None,
         }
     }
 }
@@ -423,6 +445,7 @@ impl App {
     fn select_tool(&mut self, tool: Tool) {
         self.document.finish_drag();
         self.split_circle_start = None;
+        self.dimension_start = None;
         if self.document.tool != tool {
             self.document.draft_start = None;
             self.document.draft_end = None;

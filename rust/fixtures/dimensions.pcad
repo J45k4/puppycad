@@ -1,0 +1,37 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Dimensions",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Dimension sketch", "targetId": "plane-top",
+              "relations": [
+                { "id": "len", "type": "length", "entityId": "line", "value": 50.8, "expression": "#w * 2", "labelPosition": { "x": 25, "y": -12 } },
+                { "id": "dist", "type": "distance", "a": { "entityId": "line", "point": "p0" }, "b": { "entityId": "point", "point": "center" }, "value": 31.622776601683793, "reference": true },
+                { "id": "dx", "type": "distance", "a": { "entityId": "line", "point": "p1" }, "b": { "entityId": "point", "point": "center" }, "axis": "x", "value": -40.8 },
+                { "id": "oy", "type": "distance", "a": { "entityId": "origin", "point": "center" }, "b": { "entityId": "point", "point": "center" }, "axis": "y", "value": 30, "expression": "#w + 4.6 mm" },
+                { "id": "origin-fixed", "type": "fixed", "anchor": { "entityId": "origin", "point": "center" }, "position": { "x": 0, "y": 0 }, "fixation": "origin" }
+              ],
+              "variables": [{ "name": "w", "kind": "length", "expression": "1 in" }],
+              "dimensions": [] },
+            { "id": "line", "type": "sketchLine", "sketchId": "native-sketch-1", "p0": { "x": 0, "y": 0 }, "p1": { "x": 50.8, "y": 0 } },
+            { "id": "point", "type": "sketchPrimitive", "sketchId": "native-sketch-1", "primitive": { "id": "point", "type": "point", "center": { "x": 10, "y": 30 } } },
+            { "id": "origin", "type": "sketchPrimitive", "sketchId": "native-sketch-1", "primitive": { "id": "origin", "type": "point", "center": { "x": 0, "y": 0 }, "construction": true } }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}
