@@ -1,5 +1,6 @@
 mod corner;
 mod extrude;
+mod feature_tree;
 mod input;
 mod panels;
 mod pattern;
@@ -215,6 +216,8 @@ pub(crate) struct App {
     transform_center: Point,
     solid_preview: bool,
     solid_drag: Option<SolidDrag>,
+    /// The ROLLBACK row is being dragged in the Project panel.
+    rollback_drag: bool,
     solid_view: OrbitView,
     /// Face under the cursor at the last pointer move in the 3D preview
     /// (kept while the MORE menu is open, for MORE → SKETCH ON FACE).
@@ -348,6 +351,7 @@ impl Default for App {
             transform_center: Point { x: 0.0, y: 0.0 },
             solid_preview: false,
             solid_drag: None,
+            rollback_drag: false,
             solid_view: OrbitView::default(),
             hovered_face: None,
             face_context: true,

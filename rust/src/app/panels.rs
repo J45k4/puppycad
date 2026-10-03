@@ -640,48 +640,19 @@ impl App {
                 if active { TEXT } else { MUTED },
             );
         }
-        let solids = self
-            .project
-            .as_ref()
-            .and_then(ProjectFile::extrusion_previews)
-            .unwrap_or_default();
-        for (index, solid) in solids.iter().enumerate() {
-            let row = layout.solid_row(index, part_rows.len(), self.sketch_count());
-            if row.y + row.h >= layout.bottom.y {
-                break;
-            }
-            let active = self.solid_preview && self.selected_solid == index;
-            if active {
-                painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
-            }
-            painter.text(
-                row.x + 9.0,
-                row.y + 9.0,
-                &format!(
-                    "{} {} / {}",
-                    if active { ">" } else { "v" },
-                    self.project
-                        .as_ref()
-                        .and_then(|project| project.extrusion_operation_at(index))
-                        .unwrap_or("EXTRUDE")
-                        .to_uppercase(),
-                    solid.name
-                ),
-                1.0,
-                if active { TEXT } else { MUTED },
-            );
-        }
+        self.paint_feature_tree(painter, layout);
+        let tree_rows = self.tree_row_count();
         let selected_ids = self.document.selected_ids();
         for (index, shape) in self.document.shapes.iter().enumerate() {
             if layout
-                .row(index + solids.len(), part_rows.len(), self.sketch_count())
+                .row(index + tree_rows, part_rows.len(), self.sketch_count())
                 .y
                 + 31.0
                 >= layout.bottom.y
             {
                 break;
             }
-            let row = layout.row(index + solids.len(), part_rows.len(), self.sketch_count());
+            let row = layout.row(index + tree_rows, part_rows.len(), self.sketch_count());
             if selected_ids.contains(&shape.id()) {
                 painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
             }
