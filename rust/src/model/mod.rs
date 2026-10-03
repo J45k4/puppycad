@@ -12,6 +12,7 @@ mod selection;
 mod shapes;
 mod solve;
 mod symmetry;
+mod tangent;
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +42,8 @@ pub enum Tool {
     Point,
     Polygon,
     Slot,
+    /// Arc tangent to a line, arc or open spline endpoint.
+    TangentArc,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,6 +141,7 @@ struct DocumentState {
     normal_links: HashMap<u32, (u32, u8)>,
     endpoint_tangents: HashMap<(u32, u8), (u32, i8, i8)>,
     endpoint_joins: HashMap<(u32, u8), (u32, u8)>,
+    smooth_joins: HashMap<(u32, u8), (u32, u8)>,
     chamfers: HashMap<u32, ChamferSpec>,
     equal_ellipses: HashMap<u32, u32>,
     shared_ellipses: HashMap<u32, u32>,
@@ -181,6 +185,8 @@ pub struct Document {
     pub draft_start: Option<Point>,
     pub draft_end: Option<Point>,
     pub arc_clockwise: bool,
+    /// Tangent arc source endpoint while [`Tool::TangentArc`] is placing.
+    pub tangent_source: Option<(u32, u8)>,
     pub driving_dimensions: HashMap<(u32, DimensionField), f32>,
     pub construction: HashSet<u32>,
     pub axis_constraints: HashMap<u32, AxisConstraint>,
@@ -199,6 +205,11 @@ pub struct Document {
     /// Line endpoint coincident with another line or arc endpoint:
     /// (line, endpoint) -> (other shape, endpoint 0/1).
     pub endpoint_joins: HashMap<(u32, u8), (u32, u8)>,
+    /// Smooth (tangent) join of two curve endpoints, the web `smoothJoin`
+    /// relation: (follower curve, endpoint) -> (source curve, endpoint).
+    /// Endpoints are 0 start / 1 end of a line, arc or open spline. The
+    /// endpoints coincide and continue each other's tangent.
+    pub smooth_joins: HashMap<(u32, u8), (u32, u8)>,
     /// Chamfer line -> its driving setbacks (web `chamfer` relation).
     pub chamfers: HashMap<u32, ChamferSpec>,
     pub equal_ellipses: HashMap<u32, u32>,
@@ -243,6 +254,7 @@ impl Default for Document {
             draft_start: None,
             draft_end: None,
             arc_clockwise: false,
+            tangent_source: None,
             driving_dimensions: HashMap::new(),
             construction: HashSet::new(),
             axis_constraints: HashMap::new(),
@@ -257,6 +269,7 @@ impl Default for Document {
             normal_links: HashMap::new(),
             endpoint_tangents: HashMap::new(),
             endpoint_joins: HashMap::new(),
+            smooth_joins: HashMap::new(),
             chamfers: HashMap::new(),
             equal_ellipses: HashMap::new(),
             shared_ellipses: HashMap::new(),
@@ -387,6 +400,7 @@ impl Document {
             normal_links: self.normal_links.clone(),
             endpoint_tangents: self.endpoint_tangents.clone(),
             endpoint_joins: self.endpoint_joins.clone(),
+            smooth_joins: self.smooth_joins.clone(),
             chamfers: self.chamfers.clone(),
             equal_ellipses: self.equal_ellipses.clone(),
             shared_ellipses: self.shared_ellipses.clone(),
@@ -417,6 +431,7 @@ impl Document {
         self.normal_links = state.normal_links;
         self.endpoint_tangents = state.endpoint_tangents;
         self.endpoint_joins = state.endpoint_joins;
+        self.smooth_joins = state.smooth_joins;
         self.chamfers = state.chamfers;
         self.equal_ellipses = state.equal_ellipses;
         self.shared_ellipses = state.shared_ellipses;

@@ -485,7 +485,7 @@ impl App {
                 row.x + 10.0,
                 row.y + 9.0,
                 &format!(
-                    "{} {}{}{}{}{}{}{}{}",
+                    "{} {}{}{}{}{}{}{}{}{}",
                     shape.name(),
                     shape.id(),
                     if self.document.construction.contains(&shape.id()) {
@@ -612,6 +612,11 @@ impl App {
                         " [SYM]"
                     } else if self.document.has_offset(shape.id()) {
                         " [OFS]"
+                    } else {
+                        ""
+                    },
+                    if self.document.smooth_join_member(shape.id()) {
+                        " [TJ]"
                     } else {
                         ""
                     },
@@ -1518,6 +1523,9 @@ impl App {
             Tool::Point => "Point: click to place  |  Esc: cancel",
             Tool::Polygon => "Polygon: click center, then vertex  |  Esc: cancel",
             Tool::Slot => "Slot: click two centers, then side wall  |  Esc: cancel",
+            Tool::TangentArc => {
+                "Tangent arc: click a line, arc or spline endpoint, then the arc end"
+            }
         };
         let name_status = self.name_edit.as_ref().map(|edit| {
             format!(

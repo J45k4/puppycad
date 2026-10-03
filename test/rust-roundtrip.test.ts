@@ -22,6 +22,7 @@ const EXPECTED: Record<string, number[]> = {
 	"segmented-primitives.pcad": [1],
 	"segmented-slot.pcad": [1],
 	"splines.pcad": [1],
+	"tangent-arc.pcad": [1],
 	"two-parts.pcad": [1, 1]
 }
 

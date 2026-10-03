@@ -617,6 +617,50 @@ pub struct ProfileLoops {
     pub holes: Vec<Vec<Point>>,
 }
 
+/// Web anchor name of a line/arc (`p0`/`p1`) or open spline
+/// (`point0`/`pointN`) endpoint.
+fn curve_end_name(shapes: &[Shape], (id, end): (u32, u8)) -> Option<String> {
+    match shapes.iter().find(|shape| shape.id() == id)? {
+        Shape::Line { .. } | Shape::Arc { .. } => Some(if end == 0 { "p0" } else { "p1" }.into()),
+        Shape::Spline {
+            points,
+            closed: false,
+            ..
+        } => Some(if end == 0 {
+            "point0".into()
+        } else {
+            format!("point{}", points.len().checked_sub(1)?)
+        }),
+        _ => None,
+    }
+}
+
+/// Endpoint index (0 start, 1 end) of a web anchor name on a line, arc or
+/// open spline.
+fn curve_end_index(shape: &Shape, name: &str) -> Option<u8> {
+    match shape {
+        Shape::Line { .. } | Shape::Arc { .. } => match name {
+            "p0" => Some(0),
+            "p1" => Some(1),
+            _ => None,
+        },
+        Shape::Spline {
+            points,
+            closed: false,
+            ..
+        } => {
+            if name == "point0" {
+                Some(0)
+            } else if name == format!("point{}", points.len().checked_sub(1)?) {
+                Some(1)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 fn profile_from_document(document: &Document) -> Option<ProfileLoops> {
     let mut profiles = profiles_from_document(document)?;
@@ -1570,6 +1614,34 @@ impl ProjectFile {
                             Some("p1") => Some(1u8),
                             _ => None,
                         };
+                        if relation.get("type").and_then(Value::as_str) == Some("smoothJoin") {
+                            let side = |key: &str| {
+                                let id = graph_shape(
+                                    relation
+                                        .pointer(&format!("/{key}/entityId"))
+                                        .and_then(Value::as_str),
+                                )?;
+                                let shape = document.shapes.iter().find(|s| s.id() == id)?;
+                                let name = relation
+                                    .pointer(&format!("/{key}/point"))
+                                    .and_then(Value::as_str)?;
+                                curve_end_index(shape, name).map(|end| (id, end))
+                            };
+                            match side("a").zip(side("b")) {
+                                Some((a, b))
+                                    if a.0 != b.0
+                                        && relation.get("id").and_then(Value::as_str).is_some()
+                                        && !document.smooth_joins.contains_key(&b) =>
+                                {
+                                    document.smooth_joins.insert(b, a);
+                                }
+                                _ => {
+                                    read_only_reason =
+                                        Some("unsupported smooth join relation".into());
+                                }
+                            }
+                            continue;
+                        }
                         if relation.get("type").and_then(Value::as_str) == Some("endpointTangent") {
                             let arc = graph_shape(
                                 relation.pointer("/a/entityId").and_then(Value::as_str),
@@ -3561,6 +3633,33 @@ fn serialize_sketches(
                         .and_then(Value::as_str),
                 ))
             };
+            if kind == "smoothJoin" {
+                let side = |key: &str| {
+                    let id = resolve_id(
+                        relation
+                            .pointer(&format!("/{key}/entityId"))
+                            .and_then(Value::as_str),
+                    )?;
+                    let shape = document.shapes.iter().find(|s| s.id() == id)?;
+                    let name = relation
+                        .pointer(&format!("/{key}/point"))
+                        .and_then(Value::as_str)?;
+                    curve_end_index(shape, name).map(|end| (id, end))
+                };
+                if let Some((a, b)) = side("a").zip(side("b"))
+                    && document.smooth_joins.get(&b) == Some(&a)
+                    && let (Some(a_id), Some(b_id)) = (next_ids.get(&a.0), next_ids.get(&b.0))
+                    && let (Some(a_name), Some(b_name)) = (
+                        curve_end_name(&document.shapes, a),
+                        curve_end_name(&document.shapes, b),
+                    )
+                {
+                    relation["a"] = json!({"entityId": a_id, "point": a_name});
+                    relation["b"] = json!({"entityId": b_id, "point": b_name});
+                    return true;
+                }
+                return false;
+            }
             if kind == "endpointTangent" {
                 let arc = anchor_of(relation, "a");
                 let line = resolve_id(relation.get("b").and_then(Value::as_str));
@@ -3876,6 +3975,37 @@ fn serialize_sketches(
             relations.push(json!({"id":relation_id,"type":"endpointTangent",
                 "a":{"entityId":arc_id,"point":point},"b":line_id,
                 "orientation":{"lineSign":line_sign,"sweepSign":sweep_sign}}));
+        }
+        let mut smooth: Vec<_> = document.smooth_joins.iter().collect();
+        smooth.sort_by_key(|(key, _)| **key);
+        for (&follower, &source) in smooth {
+            let a_id = next_ids
+                .get(&source.0)
+                .ok_or("smooth join references deleted curve")?;
+            let b_id = next_ids
+                .get(&follower.0)
+                .ok_or("smooth join references deleted curve")?;
+            let a_name = curve_end_name(&document.shapes, source)
+                .ok_or("smooth join references unsupported curve")?;
+            let b_name = curve_end_name(&document.shapes, follower)
+                .ok_or("smooth join references unsupported curve")?;
+            if relations.iter().any(|relation| {
+                relation["type"] == "smoothJoin"
+                    && relation["b"]["entityId"] == *b_id
+                    && relation["b"]["point"] == b_name.as_str()
+            }) {
+                continue;
+            }
+            let base = format!("native-smooth-join-{b_id}-{b_name}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            relations.push(json!({"id":relation_id,"type":"smoothJoin",
+                "a":{"entityId":a_id,"point":a_name},
+                "b":{"entityId":b_id,"point":b_name}}));
         }
         let mut chamfers: Vec<_> = document.chamfers.iter().collect();
         chamfers.sort_by_key(|(line, _)| **line);
@@ -6370,6 +6500,71 @@ mod tests {
             1
         );
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn tangent_arc_and_smooth_join_round_trip_as_web_relations() {
+        let path = test_path("tangent-arc");
+        let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+        document.tool = crate::model::Tool::Line;
+        document.draft_start = Some(Point { x: 0.0, y: 0.0 });
+        assert!(document.finish_draft(Point { x: 40.0, y: 0.0 }));
+        let arc = document
+            .add_tangent_arc((1, 1), Point { x: 60.0, y: 20.0 })
+            .unwrap();
+        let spline = document
+            .add_spline(
+                crate::spline::SplineMode::Fit,
+                vec![
+                    Point { x: 61.0, y: 21.0 },
+                    Point { x: 70.0, y: 40.0 },
+                    Point { x: 50.0, y: 60.0 },
+                ],
+                false,
+            )
+            .unwrap();
+        document.selected = Some(arc);
+        assert!(document.toggle_smooth_join_with(spline).unwrap());
+        assert_eq!(document.smooth_joins.len(), 2);
+        project.save(&document).unwrap();
+        if let Ok(target) = std::env::var("PUPPYCAD_WRITE_TANGENT_FIXTURE") {
+            fs::copy(&path, target).unwrap();
+        }
+        let (mut reopened, loaded) = ProjectFile::open(&path).unwrap();
+        assert_eq!(reopened.read_only_reason(), None);
+        assert_eq!(loaded.smooth_joins, document.smooth_joins);
+        let relations = |project: &ProjectFile| {
+            project.value["items"][0]["data"]["cad"]["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|node| node["type"] == "sketch")
+                .unwrap()["relations"]
+                .as_array()
+                .unwrap()
+                .clone()
+        };
+        let saved = relations(&reopened);
+        let joins: Vec<_> = saved.iter().filter(|r| r["type"] == "smoothJoin").collect();
+        assert_eq!(joins.len(), 2);
+        assert!(
+            joins
+                .iter()
+                .any(|r| r["a"]["point"] == "p1" && r["b"]["point"] == "p0")
+        );
+        assert!(joins.iter().any(|r| r["b"]["point"] == "point0"));
+        // Saving again keeps the same relations (ids stable).
+        reopened.save(&loaded).unwrap();
+        assert_eq!(relations(&reopened), saved);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn tangent_arc_fixture_loads_smooth_joins() {
+        let (project, document) =
+            ProjectFile::open(Path::new("fixtures/tangent-arc.pcad")).unwrap();
+        assert_eq!(project.read_only_reason(), None);
+        assert_eq!(document.smooth_joins.len(), 2);
     }
 
     #[test]

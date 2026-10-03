@@ -3,6 +3,7 @@ mod input;
 mod panels;
 mod project_panel;
 mod solid;
+mod tangent;
 mod view_sketch;
 
 #[cfg(test)]
@@ -425,6 +426,7 @@ impl App {
         if self.document.tool != tool {
             self.document.draft_start = None;
             self.document.draft_end = None;
+            self.document.tangent_source = None;
             self.spline_points.clear();
         }
         self.document.tool = tool;
@@ -817,6 +819,7 @@ impl App {
             "FILLET [SHIFT W]",
             "CHAMFER [SHIFT H]",
             "OFFSET [SHIFT U]",
+            "TANGENT ARC [,]",
         ]
         .into_iter()
         .enumerate()

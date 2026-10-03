@@ -38,6 +38,8 @@ impl Document {
             .retain(|(target, _), (source, _, _)| *target != id && *source != id);
         self.endpoint_joins
             .retain(|(line, _), (other, _)| *line != id && *other != id);
+        self.smooth_joins
+            .retain(|(follower, _), (source, _)| *follower != id && *source != id);
         self.chamfers
             .retain(|line, spec| *line != id && spec.a.0 != id && spec.b.0 != id);
         self.equal_ellipses
@@ -207,9 +209,8 @@ impl Document {
                 closed: false,
             },
         );
-        if let Some(point_id) = self.point_links.remove(&(id, 1)) {
-            self.point_links.insert((new_id, 1), point_id);
-        }
+        let relations = self.detach_endpoint_relations((id, 1));
+        self.attach_endpoint_relations((new_id, 1), relations);
         if self.construction.contains(&id) {
             self.construction.insert(new_id);
         }
@@ -453,9 +454,8 @@ impl Document {
                 segments,
             },
         );
-        if let Some(position) = self.fixed_anchors.remove(&(id, 2)) {
-            self.fixed_anchors.insert((new_id, 2), position);
-        }
+        let relations = self.detach_endpoint_relations((id, 1));
+        self.attach_endpoint_relations((new_id, 1), relations);
         if self.construction.contains(&id) {
             self.construction.insert(new_id);
         }
@@ -706,6 +706,28 @@ impl Document {
         }
     }
 
+    /// Endpoint relations of an open curve `id` that is about to be trimmed
+    /// into `pieces` pieces (the first keeps `id`, later ones take the next
+    /// ids): the start stays on the first piece when it survives, the end
+    /// moves to the last piece when it survives, cut-away ends are dropped.
+    fn retarget_trimmed_ends(
+        &mut self,
+        id: u32,
+        pieces: usize,
+        keeps_start: bool,
+        keeps_end: bool,
+    ) {
+        if !keeps_start {
+            self.drop_endpoint_relations((id, 0));
+        }
+        if !keeps_end {
+            self.drop_endpoint_relations((id, 1));
+        } else if pieces > 1 {
+            let relations = self.detach_endpoint_relations((id, 1));
+            self.attach_endpoint_relations((self.next_id + pieces as u32 - 2, 1), relations);
+        }
+    }
+
     pub fn trim_selected_spline(&mut self, click: Point) -> Result<usize, String> {
         let id = self.selected.ok_or("Select a spline to trim")?;
         if self.has_fixed_anchor(id) {
@@ -794,6 +816,11 @@ impl Document {
             return Ok(0);
         }
         let before = self.snapshot();
+        if !closed {
+            self.retarget_trimmed_ends(id, intervals.len(), intervals[0].0 == 0.0, {
+                intervals.last().is_some_and(|(_, end)| *end == length)
+            });
+        }
         let mut pieces = Vec::new();
         for (piece_index, (start, end)) in intervals.iter().copied().enumerate() {
             let points = spline::portion(&curves, start, end, closed)?;
@@ -812,20 +839,6 @@ impl Document {
             });
             if self.construction.contains(&id) {
                 self.construction.insert(piece_id);
-            }
-        }
-        let start_link = self.point_links.remove(&(id, 0));
-        let end_link = self.point_links.remove(&(id, 1));
-        for (piece, &(start, end)) in pieces.iter().zip(intervals.iter()) {
-            if start == 0.0
-                && let Some(point_id) = start_link
-            {
-                self.point_links.insert((piece.id(), 0), point_id);
-            }
-            if end == length
-                && let Some(point_id) = end_link
-            {
-                self.point_links.insert((piece.id(), 1), point_id);
             }
         }
         self.shapes.splice(index..=index, pieces);
@@ -1168,8 +1181,12 @@ impl Document {
         }
         let before = self.snapshot();
         let construction = self.construction.contains(&id);
-        let start_fixed = self.fixed_anchors.remove(&(id, 1));
-        let end_fixed = self.fixed_anchors.remove(&(id, 2));
+        self.retarget_trimmed_ends(
+            id,
+            intervals.len(),
+            intervals[0].0 == 0.0,
+            intervals.last().is_some_and(|(_, end)| *end == 1.0),
+        );
         let mut pieces = Vec::new();
         for (piece_index, (start, end)) in intervals.iter().copied().enumerate() {
             let piece_id = if piece_index == 0 {
@@ -1187,16 +1204,6 @@ impl Document {
                 sweep: sweep * (end - start),
                 segments,
             });
-            if start == 0.0
-                && let Some(position) = start_fixed
-            {
-                self.fixed_anchors.insert((piece_id, 1), position);
-            }
-            if end == 1.0
-                && let Some(position) = end_fixed
-            {
-                self.fixed_anchors.insert((piece_id, 2), position);
-            }
             if construction {
                 self.construction.insert(piece_id);
             }

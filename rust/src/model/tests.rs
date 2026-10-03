@@ -5955,3 +5955,303 @@ fn offset_closed_chain_grows_outward_for_positive_distances() {
         assert_eq!(doc.offset_chains.len(), 1);
     }
 }
+
+fn end_frame(doc: &Document, (id, end): (u32, u8)) -> (Point, (f64, f64)) {
+    let shape = doc.shapes.iter().find(|shape| shape.id() == id).unwrap();
+    Document::endpoint_direction(shape, end).unwrap()
+}
+
+fn assert_smooth(doc: &Document, follower: (u32, u8), source: (u32, u8)) {
+    let (a, da) = end_frame(doc, source);
+    let (b, db) = end_frame(doc, follower);
+    assert!(a.distance(b) < 1e-3, "{a:?} {b:?}");
+    assert!(
+        (da.0 + db.0).abs() < 1e-3 && (da.1 + db.1).abs() < 1e-3,
+        "{da:?} {db:?}"
+    );
+}
+
+#[test]
+fn tangent_arc_starts_tangent_to_line_arc_and_splines() {
+    let sources = [
+        Shape::Line {
+            id: 1,
+            a: p(0.0, 0.0),
+            b: p(20.0, 10.0),
+        },
+        Shape::Arc {
+            id: 1,
+            center: p(0.0, 0.0),
+            radius: 20.0,
+            start_angle: 0.0,
+            sweep: 1.0,
+            segments: 64,
+        },
+        Shape::Spline {
+            id: 1,
+            mode: SplineMode::Fit,
+            points: vec![p(0.0, 0.0), p(10.0, 10.0), p(20.0, 0.0)],
+            closed: false,
+        },
+        Shape::Spline {
+            id: 1,
+            mode: SplineMode::Control,
+            points: vec![p(0.0, 0.0), p(5.0, 10.0), p(15.0, 10.0), p(20.0, 0.0)],
+            closed: false,
+        },
+    ];
+    for source in sources {
+        for end in [0u8, 1] {
+            let mut doc = Document::from_shapes(vec![source.clone()]);
+            doc.tool = Tool::TangentArc;
+            let (start, direction) = end_frame(&doc, (1, end));
+            let target = p(
+                start.x + 15.0 * direction.0 as f32 - 8.0 * direction.1 as f32,
+                start.y + 15.0 * direction.1 as f32 + 8.0 * direction.0 as f32,
+            );
+            let arc = doc.add_tangent_arc((1, end), target).unwrap();
+            assert_eq!(doc.selected, Some(arc));
+            assert_eq!(doc.smooth_joins.get(&(arc, 0)), Some(&(1, end)));
+            assert_smooth(&doc, (arc, 0), (1, end));
+            let (far, _) = end_frame(&doc, (arc, 1));
+            assert!(far.distance(target) < 1e-3, "{far:?} {target:?}");
+            // The relation holds under the solver as well.
+            doc.solve_constraints(&[]).unwrap();
+            assert_smooth(&doc, (arc, 0), (1, end));
+            assert!(doc.undo());
+            assert_eq!(doc.shapes, vec![source.clone()]);
+            assert!(doc.smooth_joins.is_empty());
+        }
+    }
+}
+
+#[test]
+fn tangent_arc_rejects_stationary_spline_endpoint_and_tangent_line() {
+    let mut doc = Document::from_shapes(vec![
+        Shape::Spline {
+            id: 1,
+            mode: SplineMode::Control,
+            points: vec![p(0.0, 0.0), p(0.0, 0.0), p(15.0, 10.0), p(20.0, 0.0)],
+            closed: false,
+        },
+        Shape::Line {
+            id: 2,
+            a: p(0.0, 50.0),
+            b: p(10.0, 50.0),
+        },
+    ]);
+    let error = doc.tangent_arc_source((1, 0)).unwrap_err();
+    assert!(error.contains("nonzero spline endpoint tangent"), "{error}");
+    assert!(doc.add_tangent_arc((1, 0), p(5.0, 5.0)).is_err());
+    // Collinear with the tangent: no arc.
+    assert!(doc.add_tangent_arc((2, 1), p(30.0, 50.0)).is_err());
+    assert_eq!(doc.shapes.len(), 2);
+    assert!(!doc.undo());
+    // The endpoint picker only finds curve endpoints within 8 px.
+    assert_eq!(doc.curve_endpoint_at(p(10.0, 53.0)), Some((2, 1)));
+    assert_eq!(doc.curve_endpoint_at(p(5.0, 60.0)), None);
+}
+
+#[test]
+fn smooth_join_toggles_moves_hovered_curve_and_undoes() {
+    let line = Shape::Line {
+        id: 1,
+        a: p(0.0, 0.0),
+        b: p(20.0, 0.0),
+    };
+    let arc = Shape::Arc {
+        id: 2,
+        center: p(21.0, 12.0),
+        radius: 10.0,
+        start_angle: -1.3,
+        sweep: 1.2,
+        segments: 64,
+    };
+    let mut doc = Document::from_shapes(vec![line.clone(), arc.clone()]);
+    doc.selected = Some(1);
+    assert!(doc.toggle_smooth_join_with(2).unwrap());
+    assert_eq!(doc.smooth_joins.get(&(2, 0)), Some(&(1, 1)));
+    assert_eq!(doc.shapes[0], line, "the selected curve stays put");
+    assert_smooth(&doc, (2, 0), (1, 1));
+    assert!(doc.smooth_join_member(1) && doc.smooth_join_member(2));
+    // Pressing again removes the join.
+    assert!(!doc.toggle_smooth_join_with(2).unwrap());
+    assert!(doc.smooth_joins.is_empty());
+    assert!(doc.undo());
+    assert_eq!(doc.smooth_joins.len(), 1);
+    assert!(doc.undo());
+    assert_eq!(doc.shapes, vec![line, arc]);
+    assert!(doc.smooth_joins.is_empty());
+    // A line continues into a spline end.
+    let mut doc = Document::from_shapes(vec![
+        Shape::Line {
+            id: 1,
+            a: p(0.0, 0.0),
+            b: p(10.0, 0.0),
+        },
+        Shape::Spline {
+            id: 2,
+            mode: SplineMode::Fit,
+            points: vec![p(11.0, 1.0), p(20.0, 8.0), p(30.0, 0.0)],
+            closed: false,
+        },
+    ]);
+    doc.selected = Some(1);
+    assert!(doc.toggle_smooth_join_with(2).unwrap());
+    assert_smooth(&doc, (2, 0), (1, 1));
+    // Deleting a member removes the relation.
+    doc.selected = Some(2);
+    assert!(doc.delete_selected());
+    assert!(doc.smooth_joins.is_empty());
+}
+
+#[test]
+fn spline_smooth_join_and_point_links_follow_split_and_trim() {
+    let mut doc = Document::from_shapes(vec![Shape::Spline {
+        id: 1,
+        mode: SplineMode::Fit,
+        points: vec![p(0.0, 0.0), p(10.0, 10.0), p(20.0, 0.0), p(30.0, 10.0)],
+        closed: false,
+    }]);
+    let arc = doc.add_tangent_arc((1, 1), p(40.0, 30.0)).unwrap();
+    let head = doc.add_tangent_arc((1, 0), p(-10.0, 10.0)).unwrap();
+    let Shape::Spline { mode, points, .. } = &doc.shapes[0] else {
+        unreachable!()
+    };
+    let curves = spline::beziers(*mode, points, false).unwrap();
+    let middle = spline::point(&curves[1], 0.5);
+    doc.selected = Some(1);
+    let piece = doc.split_selected_spline(middle).unwrap();
+    assert_eq!(doc.smooth_joins.get(&(arc, 0)), Some(&(piece, 1)));
+    assert_eq!(doc.smooth_joins.get(&(head, 0)), Some(&(1, 0)));
+    doc.solve_constraints(&[]).unwrap();
+    assert_smooth(&doc, (arc, 0), (piece, 1));
+    assert_smooth(&doc, (head, 0), (1, 0));
+    // Drag a handle of the end piece: the tangent arc follows.
+    let Shape::Spline { points, .. } = doc.shapes.iter().find(|s| s.id() == piece).unwrap() else {
+        unreachable!()
+    };
+    let handle = points.len() - 2;
+    let grab = points[handle];
+    doc.selected = Some(piece);
+    doc.selected_spline_point = Some(handle);
+    assert!(doc.begin_drag(grab));
+    assert!(doc.drag_to(p(grab.x + 2.0, grab.y + 3.0)));
+    assert!(doc.finish_drag());
+    assert_smooth(&doc, (arc, 0), (piece, 1));
+    // Trimming away the start of the spline drops that join only.
+    let mut trimmed = Document::from_shapes(vec![
+        Shape::Spline {
+            id: 1,
+            mode: SplineMode::Control,
+            points: vec![p(0.0, 0.0), p(10.0, 10.0), p(20.0, 10.0), p(30.0, 0.0)],
+            closed: false,
+        },
+        Shape::Line {
+            id: 2,
+            a: p(15.0, -5.0),
+            b: p(15.0, 20.0),
+        },
+    ]);
+    let tail = trimmed.add_tangent_arc((1, 1), p(40.0, 20.0)).unwrap();
+    let start = trimmed.add_tangent_arc((1, 0), p(-10.0, 10.0)).unwrap();
+    let Shape::Spline { mode, points, .. } = &trimmed.shapes[0] else {
+        unreachable!()
+    };
+    let curves = spline::beziers(*mode, points, false).unwrap();
+    let near_start = spline::point(&curves[0], 0.2);
+    trimmed.selected = Some(1);
+    assert_eq!(trimmed.trim_selected_spline(near_start).unwrap(), 1);
+    assert_eq!(trimmed.smooth_joins.get(&(tail, 0)), Some(&(1, 1)));
+    assert!(!trimmed.smooth_joins.contains_key(&(start, 0)));
+}
+
+#[test]
+fn fillet_arc_relations_follow_arc_split() {
+    let mut doc = corner_lines(90.0, 0.0);
+    let arc = doc.fillet_lines(1, 2, 5.0).unwrap();
+    let end_join: Vec<_> = doc
+        .endpoint_joins
+        .iter()
+        .filter(|(_, other)| **other == (arc, 1))
+        .map(|(key, _)| *key)
+        .collect();
+    assert_eq!(end_join.len(), 1);
+    let tangent = doc.endpoint_tangents[&(arc, 1)];
+    let Shape::Arc {
+        center,
+        radius,
+        start_angle,
+        sweep,
+        ..
+    } = *doc.shapes.iter().find(|s| s.id() == arc).unwrap()
+    else {
+        unreachable!()
+    };
+    doc.selected = Some(arc);
+    let middle = Shape::arc_point(center, radius, start_angle, sweep, 0.5);
+    let piece = doc.split_selected_arc(middle).unwrap();
+    assert_eq!(doc.endpoint_joins[&end_join[0]], (piece, 1));
+    assert_eq!(doc.endpoint_tangents.get(&(piece, 1)), Some(&tangent));
+    assert!(!doc.endpoint_tangents.contains_key(&(arc, 1)));
+    doc.solve_constraints(&[]).unwrap();
+}
+
+#[test]
+fn spline_point_on_curve_normal_and_fixed_hold_through_the_solver() {
+    for mode in [SplineMode::Fit, SplineMode::Control] {
+        let mut doc = Document::from_shapes(vec![
+            Shape::Spline {
+                id: 1,
+                mode,
+                points: vec![p(0.0, 0.0), p(10.0, 15.0), p(20.0, 15.0), p(30.0, 0.0)],
+                closed: false,
+            },
+            Shape::Point {
+                id: 2,
+                at: p(15.0, 20.0),
+            },
+            Shape::Line {
+                id: 3,
+                a: p(5.0, 30.0),
+                b: p(5.0, 50.0),
+            },
+        ]);
+        doc.selected = Some(2);
+        assert!(doc.toggle_point_on_curve_with(1).unwrap());
+        doc.selected = Some(3);
+        assert!(doc.toggle_normal_with(1, p(5.0, 30.0)).unwrap());
+        // Midpoint on a spline is rejected, as on the web.
+        doc.selected = Some(2);
+        assert!(doc.toggle_midpoint_with(1).is_err());
+        // Drag an interior handle; the relations follow.
+        doc.selected = Some(1);
+        doc.selected_spline_point = Some(2);
+        assert!(doc.begin_drag(p(20.0, 15.0)));
+        assert!(doc.drag_to(p(22.0, 25.0)));
+        assert!(doc.finish_drag());
+        // A fixed handle holds while the relations re-solve.
+        doc.selected = Some(1);
+        doc.selected_spline_point = Some(0);
+        assert!(doc.toggle_fixed_anchor().unwrap());
+        doc.solve_constraints(&[]).unwrap();
+        let spline = doc.shapes[0].clone();
+        let Shape::Spline { points, .. } = &spline else {
+            unreachable!()
+        };
+        assert_eq!(points[0], p(0.0, 0.0), "fixed handle stays");
+        let Shape::Point { at, .. } = doc.shapes[1] else {
+            unreachable!()
+        };
+        let on = Document::closest_curve_point(&spline, at).unwrap();
+        assert!(on.distance(at) < 1e-2, "{mode:?}: {at:?} vs {on:?}");
+        let Shape::Line { a, .. } = doc.shapes[2] else {
+            unreachable!()
+        };
+        let on = Document::closest_curve_point(&spline, a).unwrap();
+        assert!(
+            on.distance(a) < 1e-2,
+            "{mode:?}: normal foot {a:?} vs {on:?}"
+        );
+    }
+}

@@ -212,6 +212,15 @@ pub enum Constraint {
         line_sign: f64,
         sweep_sign: f64,
     },
+    /// Smooth join (web `smoothJoin`): endpoint `a_end` of `a` and
+    /// endpoint `b_end` of `b` (0 start, 1 end of a line, arc or open
+    /// spline) coincide and their outward tangents are opposite.
+    SmoothJoin {
+        a: Curve,
+        a_end: u8,
+        b: Curve,
+        b_end: u8,
+    },
     /// Arc endpoint (0 start, 1 end) lies on `point`.
     ArcEndpoint {
         arc: ArcVar,
@@ -738,6 +747,14 @@ impl Constraint {
             Constraint::EndpointTangent { line: l, arc, .. } => {
                 line(&mut out, l);
                 curve_vars(&mut out, &Curve::Arc(arc));
+            }
+            Constraint::SmoothJoin {
+                a: ref first,
+                b: ref second,
+                ..
+            } => {
+                curve_vars(&mut out, first);
+                curve_vars(&mut out, second);
             }
             Constraint::ArcEndpoint { arc, point: q, .. } => {
                 curve_vars(&mut out, &Curve::Arc(arc));
@@ -1387,6 +1404,45 @@ pub fn spline_parameter(p: &[f64], spline: &SplineVar, target: (f64, f64)) -> f6
     (left + right) * 0.5
 }
 
+/// Endpoint (0 start, 1 end) of a line, arc or open spline and the unit
+/// tangent pointing outward from the curve there (web
+/// `sketchEndpointDirection`). `None` for other curves or a zero tangent.
+pub fn curve_end(p: &[f64], curve: &Curve, end: u8) -> Option<((f64, f64), (f64, f64))> {
+    let (at, direction) = match curve {
+        Curve::Line(line) => {
+            let (a, b) = (pt(p, line.a), pt(p, line.b));
+            if end == 0 {
+                (a, (a.0 - b.0, a.1 - b.1))
+            } else {
+                (b, (b.0 - a.0, b.1 - a.1))
+            }
+        }
+        Curve::Arc(arc) => {
+            let angle = p[arc.start] + if end == 0 { 0.0 } else { p[arc.sweep] };
+            let (cx, cy) = pt(p, arc.circle.center);
+            let r = p[arc.circle.radius];
+            let sign = p[arc.sweep].signum() * if end == 0 { -1.0 } else { 1.0 };
+            (
+                (cx + r * angle.cos(), cy + r * angle.sin()),
+                (-angle.sin() * sign, angle.cos() * sign),
+            )
+        }
+        Curve::Spline(spline) if !spline.closed => {
+            let curves = spline_curves(p, spline)?;
+            if end == 0 {
+                let c = curves.first()?;
+                (c[0], (c[0].0 - c[1].0, c[0].1 - c[1].1))
+            } else {
+                let c = curves.last()?;
+                (c[3], (c[3].0 - c[2].0, c[3].1 - c[2].1))
+            }
+        }
+        _ => return None,
+    };
+    let length = direction.0.hypot(direction.1);
+    (length > 1e-12).then(|| (at, (direction.0 / length, direction.1 / length)))
+}
+
 fn curve_residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
     match constraint {
         Constraint::PointOnCurve {
@@ -1439,6 +1495,14 @@ fn curve_residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             let target = (ux * radial_sign).atan2(-uy * radial_sign);
             let angle = p[arc.start] + if *endpoint == 0 { 0.0 } else { p[arc.sweep] };
             out.push(wrap(angle - target) * p[arc.circle.radius]);
+        }
+        Constraint::SmoothJoin { a, a_end, b, b_end } => {
+            match (curve_end(p, a, *a_end), curve_end(p, b, *b_end)) {
+                (Some((pa, da)), Some((pb, db))) => {
+                    out.extend([pa.0 - pb.0, pa.1 - pb.1, da.0 + db.0, da.1 + db.1]);
+                }
+                _ => out.extend([1e3; 4]),
+            }
         }
         Constraint::ArcEndpoint {
             arc,
@@ -2044,5 +2108,35 @@ mod tests {
         // Upward line, counter-clockwise arc: the start radial points +x.
         close(wrap(p[a.start]), 0.0);
         close(p[a.start] + p[a.sweep], PI * 0.5);
+    }
+
+    #[test]
+    fn smooth_join_turns_an_arc_into_a_line_continuation() {
+        let mut problem = Problem::default();
+        let l = line(&mut problem, (0.0, 0.0), (10.0, 0.0), true);
+        problem.locked[l.b.x] = true;
+        problem.locked[l.b.y] = true;
+        let center = problem.point(10.0, 4.0, false);
+        let a = ArcVar {
+            circle: CircleVar {
+                center,
+                radius: problem.param(5.0, false),
+            },
+            start: problem.param(-1.2, false),
+            sweep: problem.param(1.0, false),
+        };
+        problem.constraints = vec![Constraint::SmoothJoin {
+            a: Curve::Line(l),
+            a_end: 1,
+            b: Curve::Arc(a),
+            b_end: 0,
+        }];
+        soft_keep_all(&mut problem);
+        let result = solved(&problem);
+        let (at, direction) = curve_end(&result.params, &Curve::Arc(a), 0).unwrap();
+        close(at.0, 10.0);
+        close(at.1, 0.0);
+        close(direction.0, -1.0);
+        close(direction.1, 0.0);
     }
 }

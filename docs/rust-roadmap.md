@@ -52,8 +52,11 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
    MORE → OFFSET; lines, circles, arcs and mitered line chains, matching the
    web scope).
 5. Linear and circular patterns.
-6. Tangent arc and smooth join.
-7. Remaining spline constraints.
+6. Tangent arc and smooth join (**done**: `rust/src/model/tangent.rs`; `,` /
+   MORE → TANGENT ARC, `.` smooth join, web `smoothJoin`).
+7. Remaining spline constraints (**done** to the web scope: fixed,
+   point-on-curve, Normal, coincidence, symmetry, smooth join and tangent-arc
+   attachment on fit and control splines, remapped by split/trim).
 8. Box selection, Shift multi-select, selection filters. **Done.**
 
 ## Phase 3 — Solid modeling

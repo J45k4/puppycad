@@ -3124,3 +3124,47 @@ cp /tmp/native-offset.pcad /out/rust-native-offset.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Tangent arc (,): click a line's end, then the arc end; the arc
+# leaves the line tangentially. Then "." smooth-joins a second line to
+# the first line's start (it swings into a straight continuation), and the
+# project saves web "smoothJoin" relations.
+./target/debug/puppycad /tmp/native-tangent-arc.pcad >/tmp/puppycad-tarc.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-tarc.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-tarc.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" l
+xdotool mousemove 430 420 click 1
+xdotool mousemove 630 420 click 1
+xdotool key --window "$window_id" comma
+xdotool mousemove 631 421 click 1
+xdotool mousemove 760 290
+sleep 0.3
+import -window root /out/rust-native-tangent-arc-preview.png
+xdotool click 1
+xdotool key --window "$window_id" l
+xdotool mousemove 420 440 click 1
+xdotool mousemove 350 520 click 1
+xdotool key --window "$window_id" v
+xdotool mousemove 530 420 click 1
+xdotool mousemove 385 480
+xdotool key --window "$window_id" period
+sleep 0.5
+import -window root /out/rust-native-tangent-arc.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+test "$(grep -c '"type": "smoothJoin"' /tmp/native-tangent-arc.pcad)" -eq 2
+cp /tmp/native-tangent-arc.pcad /out/rust-native-tangent-arc.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

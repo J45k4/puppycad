@@ -142,8 +142,19 @@ impl Document {
         })
     }
 
-    /// Detach every relation at one line endpoint, returning what was there
-    /// so [`Self::attach_endpoint_relations`] can put it on another endpoint.
+    /// Fixed-anchor index of endpoint 0 for a shape kind: line endpoints
+    /// are anchors 0/1, arc endpoints 1/2 (0 is the center).
+    fn endpoint_anchor_offset(&self, id: u32) -> Option<usize> {
+        match self.shapes.iter().find(|shape| shape.id() == id)? {
+            Shape::Line { .. } => Some(0),
+            Shape::Arc { .. } => Some(1),
+            _ => None,
+        }
+    }
+
+    /// Detach every relation at one curve endpoint (line, arc or open
+    /// spline), returning what was there so
+    /// [`Self::attach_endpoint_relations`] can put it on another endpoint.
     pub(super) fn detach_endpoint_relations(&mut self, at: (u32, u8)) -> EndpointRelations {
         let joins_as_key = self.endpoint_joins.remove(&at);
         let joins_as_value: Vec<(u32, u8)> = self
@@ -155,6 +166,16 @@ impl Document {
         for key in &joins_as_value {
             self.endpoint_joins.remove(key);
         }
+        // Arcs joined at this endpoint whose smooth join follows this line.
+        let tangent_arcs: Vec<(u32, u8)> = joins_as_key
+            .into_iter()
+            .chain(joins_as_value.iter().copied())
+            .filter(|arc_end| {
+                self.endpoint_tangents
+                    .get(arc_end)
+                    .is_some_and(|(line, _, _)| *line == at.0)
+            })
+            .collect();
         let chamfers: Vec<(u32, bool)> = self
             .chamfers
             .iter()
@@ -164,12 +185,31 @@ impl Document {
                     .or((spec.b == at).then_some((*line, false)))
             })
             .collect();
+        let fixed = self.endpoint_anchor_offset(at.0).and_then(|offset| {
+            self.fixed_anchors
+                .remove(&(at.0, offset + at.1 as usize))
+                .map(|position| (offset, position))
+        });
+        let smooth_as_key = self.smooth_joins.remove(&at);
+        let smooth_as_value: Vec<(u32, u8)> = self
+            .smooth_joins
+            .iter()
+            .filter(|(_, source)| **source == at)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in &smooth_as_value {
+            self.smooth_joins.remove(key);
+        }
         EndpointRelations {
             point_link: self.point_links.remove(&at),
-            fixed: self.fixed_anchors.remove(&(at.0, at.1 as usize)),
+            fixed,
             joins_as_key,
             joins_as_value,
             chamfers,
+            tangent: self.endpoint_tangents.remove(&at),
+            tangent_arcs,
+            smooth_as_key,
+            smooth_as_value,
         }
     }
 
@@ -181,8 +221,9 @@ impl Document {
         if let Some(point_id) = relations.point_link {
             self.point_links.insert(to, point_id);
         }
-        if let Some(position) = relations.fixed {
-            self.fixed_anchors.insert((to.0, to.1 as usize), position);
+        if let Some((offset, position)) = relations.fixed {
+            self.fixed_anchors
+                .insert((to.0, offset + to.1 as usize), position);
         }
         if let Some(other) = relations.joins_as_key {
             self.endpoint_joins.insert(to, other);
@@ -198,6 +239,20 @@ impl Document {
                     spec.b = to;
                 }
             }
+        }
+        if let Some(tangent) = relations.tangent {
+            self.endpoint_tangents.insert(to, tangent);
+        }
+        for arc_end in relations.tangent_arcs {
+            if let Some((line, _, _)) = self.endpoint_tangents.get_mut(&arc_end) {
+                *line = to.0;
+            }
+        }
+        if let Some(source) = relations.smooth_as_key {
+            self.smooth_joins.insert(to, source);
+        }
+        for key in relations.smooth_as_value {
+            self.smooth_joins.insert(key, to);
         }
     }
 
@@ -475,12 +530,19 @@ impl Document {
     }
 }
 
-/// Relations detached from one line endpoint.
+/// Relations detached from one curve endpoint.
 pub(super) struct EndpointRelations {
     point_link: Option<u32>,
-    fixed: Option<Point>,
+    /// Fixed-anchor index offset of the shape kind and the fixed position.
+    fixed: Option<(usize, Point)>,
     joins_as_key: Option<(u32, u8)>,
     joins_as_value: Vec<(u32, u8)>,
     /// Chamfer line and whether the endpoint was its `a` side.
     chamfers: Vec<(u32, bool)>,
+    /// Smooth join of this arc endpoint to a line (`endpoint_tangents`).
+    tangent: Option<(u32, i8, i8)>,
+    /// Arc endpoints joined here whose `endpoint_tangents` line is this one.
+    tangent_arcs: Vec<(u32, u8)>,
+    smooth_as_key: Option<(u32, u8)>,
+    smooth_as_value: Vec<(u32, u8)>,
 }
