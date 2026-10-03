@@ -1813,6 +1813,26 @@ impl App {
                 );
             }
         }
+        if !self.solid_preview {
+            painter.text(
+                layout.top.w - 520.0,
+                layout.bottom.y + 10.0,
+                if self.auto_constraints {
+                    "AUTO"
+                } else {
+                    "auto"
+                },
+                1.1,
+                if self.auto_constraints { ACCENT } else { MUTED },
+            );
+            painter.text(
+                layout.top.w - 474.0,
+                layout.bottom.y + 10.0,
+                if self.show_glyphs { "GLY" } else { "gly" },
+                1.1,
+                if self.show_glyphs { ACCENT } else { MUTED },
+            );
+        }
         painter.text(
             layout.top.w - 110.0,
             layout.bottom.y + 10.0,

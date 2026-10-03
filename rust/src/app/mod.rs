@@ -57,6 +57,10 @@ const CONFLICT: Color = [0.96, 0.36, 0.36, 1.0];
 const REDUNDANT: Color = [0.78, 0.56, 0.96, 1.0];
 /// Driving dimension labels and their dimension lines.
 const DIMENSION: Color = [0.62, 0.80, 0.98, 1.0];
+/// Select-mode hover pre-highlight (a lighter accent).
+const HOVER: Color = [0.66, 0.92, 1.0, 1.0];
+/// Inference hints while placing.
+const HINT: Color = [0.98, 0.84, 0.42, 1.0];
 /// Hovered planar face outline in the 3D preview.
 const FACE_HOVER: Color = [1.0, 0.86, 0.30, 1.0];
 
@@ -245,6 +249,24 @@ pub(crate) struct App {
     label_drag: Option<LabelDrag>,
     /// First anchor picked with the D tool.
     dimension_start: Option<(u32, usize)>,
+    /// Select-mode hover target; the viewport only repaints on pointer
+    /// moves when this changes (see `pointer_moved`).
+    hover: Hover,
+    /// Draw relation glyphs beside entities; key 6 toggles.
+    show_glyphs: bool,
+    /// Add H/V to a line committed while its inference hint was showing
+    /// (web "Automatic constraints"); key 7 toggles.
+    auto_constraints: bool,
+    /// Redraw requests, counted for tests.
+    redraw_requests: std::cell::Cell<u64>,
+}
+
+/// What the pointer is over in Select mode.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Hover {
+    shape: Option<u32>,
+    anchor: Option<(u32, usize)>,
+    glyph: Option<model::RelationGlyph>,
 }
 
 #[derive(Clone, Copy)]
@@ -359,6 +381,10 @@ impl Default for App {
             selected_dimension: None,
             label_drag: None,
             dimension_start: None,
+            hover: Hover::default(),
+            show_glyphs: true,
+            auto_constraints: true,
+            redraw_requests: Default::default(),
         }
     }
 }
@@ -770,6 +796,52 @@ impl App {
         };
     }
 
+    fn toggle_glyphs(&mut self) {
+        self.show_glyphs = !self.show_glyphs;
+        self.update_hover();
+        self.status_message = format!(
+            "Relation glyphs {}",
+            if self.show_glyphs { "shown" } else { "hidden" }
+        );
+    }
+
+    fn toggle_auto_constraints(&mut self) {
+        self.auto_constraints = !self.auto_constraints;
+        self.status_message = format!(
+            "Automatic constraints {}",
+            if self.auto_constraints { "on" } else { "off" }
+        );
+    }
+
+    /// Inference hint for the segment being placed at the cursor, if any.
+    fn placing_inference(&self) -> Option<model::Inference> {
+        let start = self.document.draft_start?;
+        let segment_phase = match self.document.tool {
+            Tool::Line => true,
+            Tool::ThreePointRectangle
+            | Tool::ThreePointCenterRectangle
+            | Tool::Arc
+            | Tool::Slot => self.document.draft_end.is_none(),
+            _ => false,
+        };
+        if !segment_phase
+            || !self
+                .layout()
+                .viewport
+                .contains(self.cursor.x, self.cursor.y)
+        {
+            return None;
+        }
+        let raw = self
+            .document
+            .screen_to_world(self.cursor, self.viewport_origin());
+        let end = self
+            .document
+            .snap_point(raw, self.snap_grid, self.snap_geometry)
+            .map_or(raw, |snap| snap.point);
+        self.document.infer_segment(start, end)
+    }
+
     fn toggle_face_context(&mut self) {
         let on_face = self
             .project
@@ -804,6 +876,7 @@ impl App {
     }
 
     fn redraw(&self) {
+        self.redraw_requests.set(self.redraw_requests.get() + 1);
         if let Some(window) = &self.window {
             window.request_redraw();
         }
