@@ -73,7 +73,9 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 3. Revolve, loft (`loft.ts`), edge fillet and chamfer (`edge-finish.ts`), all
    through `manifold-rust`.
 4. Feature tree with reorder, suppress and rollback; re-evaluation when an
-   upstream sketch changes.
+   upstream sketch changes. (**done**: `rust/src/project/features.rs`;
+   Ctrl+Up/Down reorder, Ctrl+H suppress, ROLLBACK row drag or Ctrl+[ / ],
+   per-feature evaluation cache; see `rust-native.md`.)
 5. Export: binary STL, then 3MF or STEP (**done** for binary/ASCII STL and 3MF:
    `rust/src/stl.rs`, `rust/src/threemf.rs`, `puppycad --export`; STEP is still
    open).

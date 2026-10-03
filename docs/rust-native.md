@@ -595,8 +595,8 @@ preview shows supported bodies together. Press **Shift+X** on a later closed
 reference-plane sketch to cut its 50 mm extrusion from the most recent body.
 Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion with
 that body. The shaded preview and STL export use the evaluated Boolean mesh.
-The Project panel lists each extrusion feature; select the cut or join
-feature to edit its depth or delete it. Earlier features with dependent cuts or
+The Project panel lists each extrusion feature in tree order (see Feature
+tree); select the cut or join feature to edit its depth or delete it. Earlier features with dependent cuts or
 joins cannot be deleted in isolation. Chamfers still need native support.
 
 ### Sketches on faces
@@ -709,6 +709,57 @@ sketch runs into the body by default and new bodies/joins grow outward; flip
 inverts that default. Through all and up to body measure the target's extent
 from the face plane. Fixture: `rust/fixtures/extrude-options.pcad`.
 
+### Feature tree
+
+Each part's solid features (extrusions — new body, cut, join — and future
+kinds such as revolve or loft; sketches are not features) form an ordered
+list. The Project panel shows one row per feature in that order, then a
+**ROLLBACK** row. Row glyphs: `[S]` and dim text for suppressed features, red
+`[!]` for features in error (clicking the row shows the reason in the status
+bar), dim text for features after the rollback bar.
+
+With a feature row selected in the 3D view:
+
+- **Ctrl+Up / Ctrl+Down** move it one place earlier or later. A move is
+  refused (status message) when a feature would come before something it
+  depends on — its up-to-body target, the extrusion owning its sketch face,
+  graph `sourceId`/`targetId` — or a cut/join would end up applying to a
+  different body (cuts and joins apply to the nearest earlier new body), or
+  the reordered tree would not evaluate.
+- **Ctrl+H** toggles suppression.
+- **Ctrl+[ / Ctrl+]** move the rollback bar up or down; the ROLLBACK row can
+  also be dragged with the left mouse button and dropped between features.
+
+Each of these is one undo step (**Ctrl+Z** / **Ctrl+Shift+Z** in the solid
+view) and re-evaluates the part.
+
+Evaluation runs features in order up to the rollback bar and skips suppressed
+ones. A feature whose inputs are missing (sketch or profile gone, its target
+body suppressed or failed, the face it is sketched on belongs to an inactive
+feature, the end condition reaches no body) or whose Boolean result is empty
+is marked as an error and skipped; the rest of the part still evaluates. The
+3D view, STL/3MF export (UI and `--export`) use only active features, so
+export respects suppression and rollback. Creating a new feature moves the
+rollback bar to the end; deleting a feature above the bar keeps it below the
+same features.
+
+Results are cached per feature, keyed by the feature node, its resolved
+profile and frame, and its position relative to the bar. A feature is rebuilt
+only when it or an earlier feature changed. Sketch edits are copied into the
+project when you return to the 3D view (**Tab** or the part breadcrumb), so
+the features using that sketch and everything after them re-evaluate there.
+
+File format (native extensions the web loader ignores): order is the order of
+the feature nodes in `data.cad.nodes`, mirrored in `data.cad.rootNodeIds` and
+`data.tree.orderedNodeIds`. A suppressed node has `"suppressed": true` (same
+name as the web `BaseFeature.suppressed` flag; omitted when false). The
+rollback bar is `data.tree.rollbackIndex`, the number of features above it,
+omitted when the bar is at the end. The web reads such files with all
+features active and drops `rollbackIndex` when it re-saves the tree. Files
+that already have unresolvable features when opened stay read-only, as
+before. Fixture: `rust/fixtures/feature-tree.pcad` (body, suppressed cut,
+join); tests in `rust/src/project/features_tests.rs`.
+
 ## Code layout
 
 Library crate (`rust/src/lib.rs`):
@@ -733,7 +784,10 @@ Library crate (`rust/src/lib.rs`):
   `dimension_tests.rs`.
 - `project.rs` (`.pcad` load/save, parts, extrusion profiles and end
   conditions; dimension round-trip tests in `project/dimension_tests.rs`,
-  extrude option tests in `project/extrude_option_tests.rs`), `project/face.rs`
+  extrude option tests in `project/extrude_option_tests.rs`),
+  `project/features.rs` (feature tree order, suppression, rollback, error
+  states and the per-feature evaluation cache; tests in
+  `project/features_tests.rs`), `project/face.rs`
   (plane frames, web face descriptors, face lookup, face sketches and their
   support edges; tests in `project/face_tests.rs`), `solver.rs`,
   `sketch_value.rs` (dimension expressions and sketch variables),
@@ -753,7 +807,8 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
   preview projection, dragging, face and body picking and painting), `extrude.rs`
   (extrude prompt with ghost preview, end condition/flip/target edits and
-  their undo), `view_sketch.rs` (sketch grid
+  their undo), `feature_tree.rs` (feature rows, reorder/suppress/rollback
+  keys and drag), `view_sketch.rs` (sketch grid
   and shape painting, dimension labels), `tests.rs`.
 - `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
 
@@ -887,6 +942,13 @@ A face sketch scenario extrudes a rectangle, hovers its top face
 (`rust-native-face-hover.png`), presses 4, draws a circle over the projected
 block outline (`rust-native-face-sketch.png`), cuts it with Shift+X
 (`rust-native-face-cut.png`) and checks the saved `face` node and cut.
+A feature tree scenario opens `fixtures/feature-tree.pcad`, selects the
+suppressed cut (`rust-native-tree-suppressed.png`), unsuppresses it with
+Ctrl+H (`rust-native-tree-unsuppressed.png`), moves the join above the cut
+with Ctrl+Up (`rust-native-tree-reordered.png`), moves the rollback bar with
+Ctrl+[ (`rust-native-tree-rollback.png`), drags the ROLLBACK row above the
+join (`rust-native-tree-rollback-drag.png`) and checks the saved
+`rollbackIndex`.
 It does not open a host desktop
 window.
 
