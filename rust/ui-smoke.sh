@@ -3693,3 +3693,61 @@ cp /tmp/native-edge-chamfer.pcad /out/rust-native-edge-chamfer.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Loft join: extrude a block, start a loft from a wider rectangle on a new
+# Top sketch (9), sketch a circle on the block's top face and pick
+# MORE -> LOFT JOIN (second column, row 9) to loft the rectangle to it.
+./target/debug/puppycad /tmp/native-loft.pcad >/tmp/puppycad-loft.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-loft.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-loft.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 500 330 click 1
+xdotool mousemove 750 530 click 1
+xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
+sleep 0.3
+xdotool key --window "$window_id" 1
+sleep 0.3
+xdotool key --window "$window_id" r
+xdotool mousemove 440 280 click 1
+xdotool mousemove 810 580 click 1
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" 9
+sleep 0.3
+xdotool key --window "$window_id" Tab
+sleep 0.3
+xdotool mousemove 610 420
+sleep 0.3
+xdotool key --window "$window_id" 4
+sleep 0.3
+xdotool key --window "$window_id" c
+xdotool mousemove 625 430 click 1
+xdotool mousemove 675 430 click 1
+sleep 0.3
+xdotool mousemove 1150 63 click 1
+sleep 0.3
+import -window root /out/rust-native-loft-more.png
+xdotool mousemove 995 400 click 1
+sleep 0.5
+xdotool mousemove 300 700
+sleep 0.3
+import -window root /out/rust-native-loft.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"type": "loft"' /tmp/native-loft.pcad
+grep -q '"operation": "join"' /tmp/native-loft.pcad
+cp /tmp/native-loft.pcad /out/rust-native-loft.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

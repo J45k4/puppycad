@@ -828,7 +828,7 @@ removes it unless a later feature depends on it (also one undo step).
   it.
 - **Loft** — key **9** (or **MORE → LOFT**) remembers the selected profile of
   the current sketch; open another sketch, select its profile and press **9**
-  again for a new body or **Shift+9** to join the last body (**Esc** clears the
+  again for a new body or **Shift+9** (or **MORE → LOFT JOIN**) to join the last body (**Esc** clears the
   first pick). Both outer loops are resampled at the union of their
   arc-length parameters (every original vertex is kept) after aligning the
   second loop's start to the point nearest the first loop's start and
@@ -1053,8 +1053,10 @@ or dimension):
 ### Status bar, tooltips and toolbar glyphs
 
 The status bar keeps the message on the left (truncated with `...` before
-the info block; a message too long for the full block narrows the block by
-110 px, scaling its text down, to give the message more room) and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
+the info block). A message too long for the default layout gets more room:
+in the sketch view the info block narrows by 110 px (its text scaled down)
+with the AUTO / GLY toggles kept just left of it; in the 3D view, which has
+no filter toggles, the block moves right next to the zoom and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
 the right. Between them a two-line block shows the cursor's world
 coordinates in display units (`X - Y -` outside the sketch viewport), the
 current tool, the DOF label (also still in the header) and the snap state
@@ -1329,7 +1331,11 @@ A revolve scenario draws a rectangle and a vertical line beside it, presses
 (`rust-native-revolve.png`). An edge chamfer scenario extrudes a block,
 presses 0, hovers a top edge (`rust-native-edge-chamfer-hover.png`), clicks
 it, types 10 and commits (`rust-native-edge-chamfer.png`); both check the
-saved `revolve` / `edgeFinish` nodes.
+saved `revolve` / `edgeFinish` nodes. A loft scenario extrudes a block,
+starts a loft (9) from a wider rectangle on a new Top sketch, sketches a
+circle on the block's top face and picks MORE → LOFT JOIN
+(`rust-native-loft-more.png`, `rust-native-loft.png`), checking the saved
+join `loft` node.
 It does not open a host desktop
 window.
 
