@@ -1321,8 +1321,14 @@ impl ProjectFile {
             .and_then(Value::as_array)
             .is_some_and(|nodes| {
                 nodes.iter().any(|node| {
-                    node.get("type").and_then(Value::as_str) == Some("extrude")
-                        && node.get("sketchId").and_then(Value::as_str) == Some(id)
+                    (matches!(
+                        node.get("type").and_then(Value::as_str),
+                        Some("extrude" | "revolve")
+                    ) && node.get("sketchId").and_then(Value::as_str) == Some(id))
+                        || (node["type"] == "loft"
+                            && node["profiles"]
+                                .as_array()
+                                .is_some_and(|p| p.iter().any(|p| p["sketchId"] == id.as_str())))
                 })
             })
     }

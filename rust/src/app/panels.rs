@@ -6,12 +6,17 @@ impl App {
         if !layout.right.contains(point.x, point.y) || self.extrude_draft.is_some() {
             return None;
         }
+        if self.solid_preview && self.selected_extension().is_some() {
+            return (layout.right.y + 105.0..layout.right.y + 130.0)
+                .contains(&point.y)
+                .then_some(EditField::FeatureValue);
+        }
         if self.solid_preview
             && self
                 .project
                 .as_ref()
                 .and_then(ProjectFile::extrusion_previews)
-                .is_some()
+                .is_some_and(|solids| !solids.is_empty())
         {
             return (layout.right.y + 105.0..layout.right.y + 130.0)
                 .contains(&point.y)
@@ -138,6 +143,13 @@ impl App {
                     Err(error) => format!("Extrusion error: {error}"),
                 },
                 Err(_) => "Extrusion error: enter a positive depth in millimeters".into(),
+            },
+            EditField::FeatureValue => match edit.buffer.parse::<f32>() {
+                Ok(value) => match self.set_feature_value(value) {
+                    Ok(()) => format!("Feature value set to {value:.1}  |  Ctrl+S to save"),
+                    Err(error) => format!("Feature error: {error}"),
+                },
+                Err(_) => "Feature error: enter a positive number".into(),
             },
             EditField::Dimension(field) => match self.document.selected {
                 Some(id) => self.apply_dimension_text(DimensionKey::Field(id, field), &edit.buffer),
@@ -650,7 +662,9 @@ impl App {
             if row.y + row.h >= layout.bottom.y {
                 break;
             }
-            let active = self.solid_preview && self.selected_solid == index;
+            let active = self.solid_preview
+                && self.selected_feature.is_none()
+                && self.selected_solid == index;
             if active {
                 painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
             }
@@ -671,17 +685,46 @@ impl App {
                 if active { TEXT } else { MUTED },
             );
         }
+        let features = self
+            .project
+            .as_ref()
+            .map(ProjectFile::extension_features)
+            .unwrap_or_default();
+        for (offset, feature) in features.iter().enumerate() {
+            let row = layout.solid_row(solids.len() + offset, part_rows.len(), self.sketch_count());
+            if row.y + row.h >= layout.bottom.y {
+                break;
+            }
+            let active =
+                self.solid_preview && self.selected_feature.as_deref() == Some(feature.id.as_str());
+            if active {
+                painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
+            }
+            painter.text(
+                row.x + 9.0,
+                row.y + 9.0,
+                &format!(
+                    "{} {} / {}",
+                    if active { ">" } else { "v" },
+                    feature.operation.to_uppercase(),
+                    feature.name
+                ),
+                1.0,
+                if active { TEXT } else { MUTED },
+            );
+        }
+        let solid_rows = solids.len() + features.len();
         let selected_ids = self.document.selected_ids();
         for (index, shape) in self.document.shapes.iter().enumerate() {
             if layout
-                .row(index + solids.len(), part_rows.len(), self.sketch_count())
+                .row(index + solid_rows, part_rows.len(), self.sketch_count())
                 .y
                 + 31.0
                 >= layout.bottom.y
             {
                 break;
             }
-            let row = layout.row(index + solids.len(), part_rows.len(), self.sketch_count());
+            let row = layout.row(index + solid_rows, part_rows.len(), self.sketch_count());
             if selected_ids.contains(&shape.id()) {
                 painter.rect(row, [0.13, 0.29, 0.37, 1.0]);
             }
@@ -857,11 +900,12 @@ impl App {
         );
         if self.extrude_draft.is_some() {
             self.paint_draft_panel(painter, layout);
+        } else if self.paint_feature_panel(painter, layout) {
         } else if let Some(solids) = self
             .project
             .as_ref()
             .and_then(ProjectFile::extrusion_previews)
-            .filter(|_| self.solid_preview)
+            .filter(|solids| self.solid_preview && !solids.is_empty())
         {
             let selected = self.selected_solid.min(solids.len() - 1);
             let options = self
@@ -1621,7 +1665,7 @@ impl App {
             && !matches!(edit.field, EditField::Label(_) | EditField::Variable(_))
         {
             let row = match edit.field {
-                EditField::ExtrusionDepth => 0,
+                EditField::ExtrusionDepth | EditField::FeatureValue => 0,
                 EditField::Dimension(
                     DimensionField::LineLength
                     | DimensionField::RectangleWidth

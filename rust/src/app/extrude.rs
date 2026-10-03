@@ -306,6 +306,7 @@ impl App {
     /// Click on the END / FLIP / TARGET rows of the solid Properties panel.
     pub(super) fn solid_option_row_click(&mut self, layout: Layout, point: Point) -> bool {
         if !self.solid_preview
+            || self.selected_feature.is_some()
             || self.extrude_draft.is_some()
             || !layout.right.contains(point.x, point.y)
             || self
@@ -347,20 +348,39 @@ impl App {
         let Some(project) = self.project.as_mut() else {
             return;
         };
-        let Some(current) = project.extrude_node_snapshot(step.index) else {
+        let extension = step.node["type"] != "extrude";
+        let current = if extension {
+            step.node["id"]
+                .as_str()
+                .and_then(|id| project.solid_node(id))
+        } else {
+            project.extrude_node_snapshot(step.index)
+        };
+        let Some(current) = current else {
             return;
         };
-        self.status_message = match project.restore_extrude_node(step.index, step.node) {
+        let feature_id = step.node["id"].as_str().map(str::to_string);
+        let restored = if extension {
+            project.restore_solid_node(step.node)
+        } else {
+            project.restore_extrude_node(step.index, step.node)
+        };
+        self.status_message = match restored {
             Ok(()) => {
                 to.push(SolidUndo {
                     index: step.index,
                     node: current,
                 });
-                self.selected_solid = step.index;
-                if redo {
-                    "Redo extrusion edit"
+                if extension {
+                    self.selected_feature = feature_id;
                 } else {
-                    "Undo extrusion edit"
+                    self.selected_solid = step.index;
+                    self.selected_feature = None;
+                }
+                if redo {
+                    "Redo feature edit"
+                } else {
+                    "Undo feature edit"
                 }
                 .into()
             }

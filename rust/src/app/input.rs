@@ -120,6 +120,26 @@ impl App {
                 self.redraw();
                 return;
             }
+            if layout.more_item(21).contains(point.x, point.y) {
+                self.begin_revolve();
+                self.redraw();
+                return;
+            }
+            if layout.more_item(22).contains(point.x, point.y) {
+                self.loft_step(false);
+                self.redraw();
+                return;
+            }
+            for (index, kind) in [
+                (23, project::FinishKind::Chamfer),
+                (24, project::FinishKind::Fillet),
+            ] {
+                if layout.more_item(index).contains(point.x, point.y) {
+                    self.begin_edge_finish(kind);
+                    self.redraw();
+                    return;
+                }
+            }
             if layout.more_item(17).contains(point.x, point.y) {
                 self.start_tangent_arc();
                 self.redraw();
@@ -143,6 +163,21 @@ impl App {
                 }
             }
             self.more_open = false;
+        }
+        if self.edge_pick.is_some() && layout.viewport.contains(point.x, point.y) {
+            self.toggle_edge_at(layout, point);
+            self.redraw();
+            return;
+        }
+        if self
+            .revolve_draft
+            .as_ref()
+            .is_some_and(|draft| draft.axis.is_none())
+            && layout.viewport.contains(point.x, point.y)
+        {
+            self.pick_revolve_axis(point);
+            self.redraw();
+            return;
         }
         if !self.solid_preview
             && self.document.selected.is_none()
@@ -195,7 +230,9 @@ impl App {
             return;
         }
         if let Some(field) = self.editable_field_at(point) {
-            if self.read_only() && !matches!(field, EditField::ExtrusionDepth) {
+            if self.read_only()
+                && !matches!(field, EditField::ExtrusionDepth | EditField::FeatureValue)
+            {
                 self.status_message =
                     "READ ONLY: this sketch has unsupported native features".into();
             } else {
@@ -206,6 +243,9 @@ impl App {
                 self.status_message = match field {
                     EditField::ExtrusionDepth => {
                         "Type positive depth in mm, then Enter  |  Esc to cancel"
+                    }
+                    EditField::FeatureValue => {
+                        "Type the new angle (deg) or size (mm), then Enter  |  Esc to cancel"
                     }
                     EditField::PolygonSides => "Type 3-64 sides, then Enter  |  Esc to cancel",
                     EditField::SlotWidth => "Type slot width in mm, then Enter  |  Esc to cancel",
@@ -373,17 +413,41 @@ impl App {
                 }
             }
         }
-        let solid_count = self
+        let extrusion_count = self
             .project
             .as_ref()
             .and_then(ProjectFile::extrusion_previews)
             .map_or(0, |solids| solids.len());
-        for index in 0..solid_count {
+        let features = self
+            .project
+            .as_ref()
+            .map(ProjectFile::extension_features)
+            .unwrap_or_default();
+        let solid_count = extrusion_count + features.len();
+        for (offset, feature) in features.iter().enumerate() {
+            if layout
+                .solid_row(
+                    extrusion_count + offset,
+                    part_rows.len(),
+                    self.sketch_count(),
+                )
+                .contains(point.x, point.y)
+            {
+                self.selected_feature = Some(feature.id.clone());
+                self.solid_preview = true;
+                self.editing = None;
+                self.status_message = format!("Selected {}  |  Delete to remove", feature.name);
+                self.redraw();
+                return;
+            }
+        }
+        for index in 0..extrusion_count {
             if layout
                 .solid_row(index, part_rows.len(), self.sketch_count())
                 .contains(point.x, point.y)
             {
                 self.selected_solid = index;
+                self.selected_feature = None;
                 self.solid_preview = true;
                 self.editing = None;
                 self.status_message =
@@ -995,7 +1059,21 @@ impl ApplicationHandler for App {
                         self.redraw();
                         return;
                     }
+                    if self.revolve_draft.is_some() {
+                        self.handle_revolve_key(code, event.text.as_deref());
+                        self.redraw();
+                        return;
+                    }
+                    if self.edge_pick.is_some() {
+                        self.handle_edge_key(code, event.text.as_deref());
+                        self.redraw();
+                        return;
+                    }
                     match code {
+                        KeyCode::Escape if self.loft_start.is_some() => {
+                            self.loft_start = None;
+                            self.status_message = "Loft cancelled".into();
+                        }
                         KeyCode::Escape if self.body_pick => {
                             self.body_pick = false;
                             self.status_message = "Body pick cancelled".into();
@@ -1790,6 +1868,10 @@ impl ApplicationHandler for App {
                         KeyCode::Digit3 => self.create_sketch(SketchPlane::Right),
                         KeyCode::Digit4 => self.sketch_on_face(),
                         KeyCode::Digit5 => self.toggle_face_context(),
+                        KeyCode::Digit6 => self.begin_revolve(),
+                        KeyCode::Digit7 => self.loft_step(self.modifiers.shift_key()),
+                        KeyCode::Digit8 => self.begin_edge_finish(project::FinishKind::Chamfer),
+                        KeyCode::Digit9 => self.begin_edge_finish(project::FinishKind::Fillet),
                         KeyCode::KeyF
                             if self.modifiers.shift_key()
                                 && !self.modifiers.control_key()
@@ -1857,7 +1939,9 @@ impl ApplicationHandler for App {
                             }
                         }
                         KeyCode::Delete | KeyCode::Backspace => {
-                            if self.solid_preview {
+                            if self.solid_preview && self.selected_feature.is_some() {
+                                self.delete_selected_feature();
+                            } else if self.solid_preview {
                                 if let Some(project) = &mut self.project {
                                     match project.delete_extrusion_at(self.selected_solid) {
                                         Ok(()) => {

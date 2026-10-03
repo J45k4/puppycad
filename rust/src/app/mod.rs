@@ -1,5 +1,6 @@
 mod corner;
 mod extrude;
+mod features;
 mod input;
 mod panels;
 mod pattern;
@@ -13,6 +14,7 @@ mod tests;
 
 use corner::*;
 use extrude::*;
+use features::*;
 use pattern::*;
 use project_panel::*;
 use solid::*;
@@ -254,6 +256,14 @@ pub(crate) struct App {
     solid_redo: Vec<SolidUndo>,
     /// Next viewport click picks the up-to-body target.
     body_pick: bool,
+    /// Revolve in progress: axis pick, then the angle prompt and ghost.
+    revolve_draft: Option<RevolveDraft>,
+    /// First loft profile (sketch index, profile index).
+    loft_start: Option<(usize, usize)>,
+    /// Edge chamfer/fillet picking in the 3D preview.
+    edge_pick: Option<EdgePick>,
+    /// Selected revolve, loft or edge finish (by node id).
+    selected_feature: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -322,6 +332,8 @@ enum EditField {
     Variable(Option<usize>),
     /// One step of the linear/circular pattern prompt.
     PatternValue,
+    /// Revolve angle or edge finish size of the selected feature.
+    FeatureValue,
 }
 
 impl Default for App {
@@ -372,6 +384,10 @@ impl Default for App {
             solid_undo: Vec::new(),
             solid_redo: Vec::new(),
             body_pick: false,
+            revolve_draft: None,
+            loft_start: None,
+            edge_pick: None,
+            selected_feature: None,
         }
     }
 }
@@ -841,6 +857,12 @@ impl App {
         }
         if self.extrude_draft.is_some() {
             self.paint_extrude_draft(&mut painter, layout);
+        } else if self
+            .revolve_draft
+            .as_ref()
+            .is_some_and(|draft| draft.axis.is_some())
+        {
+            self.paint_revolve_draft(&mut painter, layout);
         } else if self.solid_preview {
             if let Some(solids) = self
                 .project
@@ -848,7 +870,12 @@ impl App {
                 .and_then(ProjectFile::extrusion_previews)
                 && let Some((scene, projector)) = self.solid_projector(layout)
             {
-                if scene.bodies < solids.len() {
+                if scene.bodies < solids.len()
+                    || self
+                        .project
+                        .as_ref()
+                        .is_some_and(ProjectFile::has_extension_features)
+                {
                     self.paint_boolean_preview(
                         &mut painter,
                         layout,
@@ -859,13 +886,18 @@ impl App {
                 } else {
                     self.paint_solid_preview(&mut painter, layout, &solids, &projector);
                 }
-                self.paint_face_hover(&mut painter, layout, &projector);
+                if self.edge_pick.is_some() {
+                    self.paint_edge_pick(&mut painter, layout, &projector);
+                } else {
+                    self.paint_face_hover(&mut painter, layout, &projector);
+                }
             }
         } else {
             self.paint_grid(&mut painter, layout);
             self.paint_reference_edges(&mut painter, layout);
             self.paint_shapes(&mut painter, layout);
             self.paint_profile_choice(&mut painter, layout);
+            self.paint_revolve_axis_prompt(&mut painter, layout);
         }
         self.paint_panels(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
@@ -898,6 +930,10 @@ impl App {
             "LIN PATTERN [SHIFT Z]",
             "CIRC PATTERN [;]",
             "SKETCH ON FACE [4]",
+            "REVOLVE [6]",
+            "LOFT [7]",
+            "EDGE CHAMFER [8]",
+            "EDGE FILLET [9]",
         ]
         .into_iter()
         .enumerate()
