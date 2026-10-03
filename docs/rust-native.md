@@ -1,1043 +1,501 @@
 # Native Rust app
 
-The Rust rewrite lives in [`rust/`](../rust/) and builds a native window with
-`winit` and a custom `wgpu` renderer. The package and executable are named
-`puppycad`.
+The native rewrite lives in [`rust/`](../rust/): a `winit` window with a
+custom `wgpu` renderer. Package and executable are named `puppycad`. The web
+app remains the parity reference ([sketch-parity.md](sketch-parity.md)); the
+plan is in [rust-roadmap.md](rust-roadmap.md).
+
+## Overview and running
 
 ```sh
 cd rust
-cargo run
+cargo run                         # empty untitled sketch
+cargo run -- my-project.pcad      # open a v4 project, or start a new one there
 ```
 
-The current implementation establishes the project tree, sketch viewport, and
-properties layout. The header shows a clickable breadcrumb trail:
-Projects / project (file name) / part / sketch, then the selected shape; in the
-solid preview the trail ends at the selected feature (extrusion, revolve,
-loft or edge finish) instead of the sketch. Project panel rows too long for
-the panel are clipped with `...`.
-Click the project to clear the selection, the part to open its solid preview (or
-clear the selection when it has no extrusions), or the sketch to return to sketch
-view. The last crumb is the current item and is not a link.
+| Invocation | Effect |
+| --- | --- |
+| `puppycad [PROJECT.pcad]` | Open the editor. |
+| `puppycad --roundtrip IN.pcad OUT.pcad` | Load and write back exactly as Ctrl+S would (no revision bump, `IN` untouched); non-zero exit on any error. |
+| `puppycad --export IN.pcad OUT.stl` / `OUT.3mf` | Export the active part bodies: binary STL (`OUT-2.stl`… per extra body) or one 3MF. Prints the paths, overwrites, exits non-zero when the input is missing, has no solid, or the extension is unknown. Assemblies are not exported. |
+| `puppycad --print-shortcuts` | Print the [Shortcuts](#shortcuts) tables as Markdown. |
+| `puppycad --help` | Usage. |
 
-Click **Projects** to open the projects page. It starts in the open project's
-folder (or the working directory when no project is open) and lists the parent
-folder (`..`), subfolders, and `.pcad` files with their part count and revision.
-Click a row or use Up/Down and Enter to open it; Backspace goes to the parent
-folder, PgUp/PgDn and the wheel scroll long lists, and Esc goes back to the
-current project. If the open project has unsaved changes, the first open only
-warns: press Ctrl+S to save, or open the same project again to discard the
-changes. Web projects saved under `workdir/saved-projects/` are not listed, since
-most of them use features the native app cannot open yet.
+`PUPPYCAD_CONFIG_DIR` sets where `settings.json` lives (else
+`$XDG_CONFIG_HOME/puppycad`, else `~/.config/puppycad`).
 
-Select, Rectangle, Circle, Line, rotated Ellipse, and three-point Arc are available through
-the toolbar or V/R/C/L/E/A keys. Click twice to draw a line, rectangle, or circle.
-Choose **MORE → FIT SPLINE** or **MORE → CTRL SPLINE** to place spline points.
-Press Enter to finish an open curve or Shift+Enter to close a fit spline;
-control splines require 3n + 1 points. Esc cancels placement. Existing web
-`sketchSpline` nodes also load in both modes, including periodic closed fit
-splines. The viewport draws the same cubic curves, allows whole-spline
-selection and transforms, and preserves points and closure through
-save/reopen. Select a spline, then drag one of its visible fit points or control
-handles to reshape it; Ctrl+Z restores the previous curve. Click a handle,
-then its X or Y value in Properties to enter an exact millimeter coordinate.
-Each coordinate edit is undoable and persists through save/reopen. Selected control
-splines show a dashed handle polygon. Closed fit splines contribute an extrusion
-profile. Hover over a selected spline and press **I** to split an open curve
-into two editable control splines, or open a closed fit curve at that point.
-The split uses exact cubic subdivision, is undoable, and survives save/reopen.
-Select a spline handle and press **Shift+K** to fix its current position;
-press it again to release the handle. A fixed handle rejects coordinate edits,
-drags, transforms, split, and trim until released. The fixed relation survives
-save/reopen. Other spline constraints remain to be ported.
-Select a standalone sketch point and click X or Y in Properties to enter its
-exact position. Linked line endpoints follow the point; a driving line length
-prevents edits that would break its constraint. **Shift+K** fixes or releases
-the selected point; fixed points cannot be moved until released.
-With a line selected, hover over either endpoint and press **Shift+K** to fix
-or release that endpoint. The fixed endpoint survives save/reopen and undo.
-Moving the line or changing a dimension that would move the fixed end is blocked;
-Split and Trim preserve fixed endpoints on retained pieces.
-Shift+K also fixes or releases the center of a selected circle, arc, ellipse,
-elliptic arc, polygon, or rotated rectangle. A fixed center blocks transforms
-while dimensions such as circle diameter remain editable around that center.
-For a selected circular or elliptic arc, hover over an endpoint and press
-Shift+K to fix that endpoint instead. Split and Trim preserve fixed original
-endpoints on retained pieces; Extend refuses to move a fixed endpoint.
-The same hover gesture fixes ellipse axis points, rotated rectangle corners,
-polygon vertices, and slot end-cap centers. Dimension or side-count edits that
-would move a fixed anchor are rejected; independent dimensions remain editable.
-For a corner rectangle, hover over either opposite corner and press Shift+K.
-Width and height edits keep a fixed corner in place by moving the other corner.
-Use **Shift+R** or **MORE → CENTER RECT** to click a rectangle center and corner;
-it saves as an editable rectangle and can be extruded like a corner rectangle.
-Use **T** or **MORE → 3PT RECT** to set a rotated rectangle's first edge and
-perpendicular height. **Shift+T** or **MORE → 3PT CTR RECT** starts from its
-center, side midpoint, and adjacent side. Both save as editable rotated rectangles.
-For an ellipse, click its center, first axis endpoint, and a point that sets its height;
-for an arc, click its start, end, and a point on the desired curve. Use
-**Shift+C** or **MORE → 3PT CIRCLE** to create a circle through three points on
-its rim. Use **Shift+A** or **MORE → CENTER ARC** to click the center, radial
-start, and end direction. Press **W** while that tool is active to toggle
-clockwise sweep. Both arc tools save as editable web arc nodes. The circle saves
-as the editable web circle primitive. Click a shape or its
-tree row to inspect it, drag a selected shape with the left mouse button to
-move it, set signed Move X and Move Y values in Properties and click **Move
-selected** or **Copy selected** (Ctrl+D also copies using those values), press
-Delete to remove it, Ctrl+Z to undo, drag with the middle mouse button to
-pan, and use the wheel to zoom around the pointer.
-Press **F** in sketch view to fit all sketch geometry inside the viewport.
+## Interface
 
-**Multi-selection.** In Select mode, drag from empty canvas to draw a rubber
-band. Dragging left to right (blue window) selects only shapes fully enclosed
-by the box; dragging right to left (green crossing box) selects every shape the
-box touches, matching the web workspace. Hold Shift while releasing to add to
-the selection. Shift+click a shape (in the viewport or its Project row) to
-toggle it in or out of the selection; a plain click selects only that shape,
-and Esc or a click on empty canvas clears the selection. The last selected
-shape is the primary: Properties shows its fields with the count ("Line
-(2 selected)"), and relation gestures that combine the selection with the
-hovered shape use it. Every selected shape is highlighted in the viewport and
-the Project list. Move/Copy selected, Ctrl+D, Scale/Rotate (about the shared
-CX/CY), Delete and **K** act on the whole selection as one undo step (K makes
-everything construction unless all of it already is), and dragging any
-selected shape moves the whole group; anchors are not individually draggable
-while more than one shape is selected. The **GEOMETRY / CONSTR / POINTS**
-toggles in the status bar limit what click and box selection can pick
-(regular shapes, construction shapes, sketch points); filtered shapes still
-render.
-Sketch placement snaps to existing anchors, midpoints, and finite line-line,
-line-circle, line-arc, line-ellipse, circle-circle, circle-arc, arc-arc,
-circle-ellipse, and ellipse-ellipse intersections, plus
-crossings on rectangle, polygon, and slot boundaries, within 8 screen pixels, then to the origin or a 1 mm
-grid. A square marks the previewed snap target.
-Press **N** to toggle geometry snapping and **Shift+G** to toggle grid snapping.
-Snapping a new line or open spline endpoint onto a sketch point creates a persistent coincidence
-relation. Moving that point moves the linked endpoint, moving, scaling, or
-rotating a linked line carries the point with it, and length or axis edits on a
-linked line end move the point too. The relation survives save, reopen, and
-undo. Intersection snaps currently place a coordinate; other
-inferred relations still need to be ported.
-Finite line and spline crossings, including tangencies, are available as
-intersection snap points. A line segment must actually reach the spline.
-With a line, circular arc, or elliptic arc selected, hover over an interior point and press
-**I** to split it into two editable pieces. The edit is undoable and survives
-save/reopen. Each line
-piece keeps construction and horizontal/vertical state, and an endpoint point
-relation follows its original endpoint. A driving length is removed because the
-original line length has changed. For a selected circle or ellipse, hover over two distinct
-points on its rim and press **I** at each point; this creates two editable arcs
-of the corresponding curve type. Elliptic arcs keep their center, axes, rotation,
-and exact sweep through save/reopen. Splitting an ellipse or elliptic arc adds
-the web `sameEllipse` relation. The resulting pieces share center, axes, and
-rotation when edited; their Project rows show `[SE]`. Press Esc to cancel a
-pending first point.
-With a line, circular arc, circle, ellipse, or elliptic arc selected, hover over the section between
-crossings and press **Q** to trim that section. One crossing keeps the opposite
-side of an open curve; no crossing removes the curve. A trimmed circle becomes
-an editable arc, and a trimmed ellipse becomes an editable elliptic arc. The
-operation is undoable.
-For a selected spline, **Q** trims the clicked span between crossing lines,
-circles, circular arcs, ellipses, elliptic arcs, or other splines.
-The retained spans become editable control splines and survive save/reopen.
-Splitting or trimming a spline preserves coincidence links at retained original endpoints.
-With a line, circular arc, or elliptic arc selected, hover near the endpoint to extend and
-press **U**. The curve reaches the nearest boundary in that direction. For a
-line, existing length and endpoint coincidence relations on the changed
-endpoint are removed. The edit is undoable and survives save/reopen.
-**Fillet** a line-line corner: select one line, hover a second line whose
-endpoint meets (or nearly meets, within a few pixels) the selected line's
-endpoint, and press **Shift+W** (or pick **MORE → FILLET** and click the two
-lines). Type the radius in the Properties prompt and press Enter; an empty
-prompt keeps the last radius (5 mm by default). Both lines are trimmed back
-from their intersection and a new arc is inserted, joined to each line by a
-web `coincident` relation and kept tangent by an `endpointTangent` (smooth
-join) relation. Its radius is a driving `radius` relation, editable in
-Properties like any arc radius. **Chamfer** uses the same gesture with
-**Shift+H** or **MORE → CHAMFER**: the prompt asks for the first setback and
-then the second setback; **Tab** switches to distance-angle mode, where the
-second value is the angle in degrees between the first line and the chamfer.
-The chamfer line is joined to both trimmed lines with `coincident` relations
-and its values are stored as the web `chamfer` relation (`value`,
-`secondValue`, `mode`), which the solver keeps driving. Press Shift+H with a
-chamfer line selected and nothing hovered to edit its values. Fillet and
-chamfer are single undo steps and reject parallel lines, lines that do not
-meet at a corner, and values too large for the lines. As in the web app,
-relations at the cut corner (fixes, coincidences, joins, non-reference
-lengths) are removed; relations at the far ends and line-wide relations stay.
-Split and Trim move fillet/chamfer joins to the retained piece. Native
-rectangle corners and curved edges are not supported (the web app does not
-support them either).
-**Offset**: select a line, circle, arc, rectangle, rotated rectangle,
-polygon or slot and press **Shift+U** (or pick
-**MORE → OFFSET**). Type a signed distance in the Properties prompt and press
-Enter; an empty prompt keeps the last distance (5 mm by default). As in the
-web app, positive distances move a line to the left of its direction and grow
-circles, arcs and closed outlines (a rectangle's width and height grow by twice
-the distance, a slot's width likewise, a polygon's circumradius by
-`distance / cos(pi / sides)` so its edges move by the distance); negative
-distances go the other way. Outline copies keep their kind, so web files with
-offsets of these shapes now open editable. The copy is linked to
-its source by the web `offset` relation (`a` source, `b` copy, signed
-`value`). When the selected line joins other lines end to end (shared
-endpoints, with or without coincident links, through vertices where exactly
-two lines meet), the whole chain is offset with mitered joins at the
-intersections of neighboring offset lines and stored as one web
-`offsetChain` relation (ordered `sources` with `reversed` flags, `targets`,
-`closed`, `side`, `value`), exactly as the web Offset button stores it. A
-closed chain offsets outward for positive distances. The distance is a
-driving value: select an offset copy and click **OFFSET … MM** in Properties
-to edit it. The solver keeps the copy at that distance when the source moves
-or changes size (the source wins, the copy follows); a chain also keeps its
-sources joined. Rows show `[OFS]`. Creating or editing an offset is one undo
-step. Zero distances, radii that would collapse, reversing corners, edges
-that would collapse or reverse, and self-intersecting chain offsets are
-rejected. Like the web app, ellipses, elliptic arcs and splines have no
-offset yet; mixed line/arc chains and rounded joins are out of scope. Split,
-trim, extend, fillet and chamfer refuse offset members; deleting a source or
-copy removes the relation.
-**Tangent arc**: press **,** (or pick **MORE → TANGENT ARC**), click an
-endpoint of a line, arc or open fit/control spline (only curve endpoints
-within 8 px are picked), then click the arc's far end. The arc starts at that
-endpoint continuing the source's direction and is previewed while the pointer
-moves. It is saved with a web `smoothJoin` relation from the source endpoint
-to the arc's `p0`, which the solver keeps (the endpoints coincide and their
-tangents line up). A spline endpoint with a zero tangent (a control spline
-whose first handle sits on its endpoint) is rejected with a status message,
-as is an arc end on the tangent line; neither adds an undo step.
-**Smooth join**: select a line, arc or open spline, hover another one and
-press **.**: the nearest endpoint pair of the two gets a `smoothJoin`, and the
-solver moves the hovered curve so its endpoint meets the selected curve's
-endpoint and continues its tangent. Press **.** again over the same pair to
-remove it. Each endpoint takes at most one smooth join. Joined curves show
-`[TJ]` in the project rows. Web `smoothJoin` relations between line, arc and
-open spline endpoints (`p0`/`p1`, `point0`/`pointN`) load and save; Split
-and Trim move them (and the fillet's joins, fixes and point links) from a
-curve's end to the retained piece and drop them from a cut-away end.
-Spline relations hold on both fit and control splines through the solver:
-fixed handles, point-on-curve, Normal, endpoint coincidence with sketch
-points, symmetry/mirror, smooth joins and tangent-arc attachment. Midpoint
-on a spline is rejected, as in the web app; closed control splines,
-curvature constraints and handle continuity are not supported (they are open
-on the web as well).
-Set **CX** and **CY** to the transform center in millimeters. The default is the sketch origin. Set a positive scale factor in Properties and click **Scale selected** or **Scale copy** to resize about that center. Existing driving dimension values scale with the selected shape.
-The **Rotate** tab uses a signed angle in degrees and offers **Rotate selected** and **Rotate copy** about the same editable center. Rotating an axis-aligned rectangle converts it to a rotated rectangle primitive that the web app can open.
-Move, scale, and rotate copies retain their editable driving dimensions.
-Click line length, rectangle or ellipse width or height, or circle diameter in Properties
-to enter a new value or expression (see Dimensions). Press Enter to apply it or Escape to cancel;
-Ctrl+Y or Ctrl+Shift+Z redoes an undone edit. These edits are stored as native
-driving dimension relations and remain editable after reopening the file.
-Arc radius and regular polygon radius are editable in Properties and save as
-web `radius` relations. An arc with fixed endpoints rejects a radius change;
-a polygon with a fixed vertex does the same. An arc that sources an Equal
-radius pair updates its dependent circle or arc in the same undo step.
-Click **SWEEP** on a circular or elliptic arc to enter signed degrees between
--360 and 360, excluding zero. Click **ANGLE** on an ellipse, elliptic arc,
-regular polygon, or rotated rectangle to set its rotation, including negative
-angles. These values save as web `arcSweep` and `rotation` relations. Scaling
-preserves angular values; rotating a shape updates its driving rotation value.
-Existing line rotation relations also load and can drive Parallel or
-Perpendicular targets.
+**Layout.** Header with breadcrumbs, toolbar, Project panel (left), viewport,
+Properties (right) and status bar. Default window 1280×800 logical pixels.
 
-### Dimensions
+**Pixel font.** The 8×8 ASCII pixel font is an intentional visual direction
+for the native interface (hence `//`, `T` and `TAN` glyphs instead of
+Unicode symbols).
 
-Dimensions are sketch objects (`model/annotations.rs`), keyed by
-`DimensionKey`: a per-shape dimension (`Field`), a line angle relation
-(`Angle`), or a point dimension (`Point`).
+**Header.** Breadcrumbs Projects / project (file name) / part / sketch /
+selected shape; in the 3D view the trail ends at the selected feature. The
+project crumb clears the selection, the part crumb opens the 3D view (or
+clears the selection when the part has no solid), the sketch crumb returns
+to the sketch; the last crumb is not a link. The right edge shows the DOF
+state in the sketch and **PERSPECTIVE / ORTHO** in the 3D view.
 
-**Canvas labels.** Every dimension is drawn in the viewport: a line length
-parallel to the line and offset to one side, rectangle and ellipse width and
-height along their edges or axes, a diameter with a leader through the
-circle, a radius with a leader from the center, arc sweep inside the arc,
-rotation next to the pivot, an angle at the vertex of its two lines, and
-point distances along an aligned, horizontal (below the points) or vertical
-(right of the points) dimension line. Offsets are fixed screen pixels, so the
-default placement is deterministic per zoom. In Select, click a label to edit
-it inline (type, Enter applies, Esc cancels) or drag it to move it; a moved
-label is stored as the web `labelPosition` (absolute sketch coordinates) and
-gets a leader back to its geometry. Clicking a label selects the dimension;
-Properties then shows its kind, value, a **[R] MAKE REFERENCE / MAKE
-DRIVING** button, and Del removes it.
+**Projects page** (click **Projects**). Lists `..`, subfolders and `.pcad`
+files (part count, revision) of the open project's folder, or the working
+directory. Click or Up/Down + Enter opens, Backspace goes up, PgUp/PgDn and
+the wheel scroll, Esc returns. With unsaved changes the first open only
+warns: Ctrl+S saves, opening again discards.
 
-**D tool.** Press **D**. Click an entity to add its next missing driving
-dimension at its current size (length, diameter, radius, or width then
-height), or click two anchors (sketch points, line ends, curve centers,
-spline handles) for an aligned distance; hold Shift on the second click for
-an X distance and Ctrl for a Y distance. Picking the origin as the second
-point makes an absolute X/Y (or radial) dimension, measured from a fixed
-construction point at the origin that is created once and reused (the web
-format has no origin anchor). The new label opens for typing its value.
-Point dimensions save as web `distance` relations
-(`{a, b, value, axis?}`, signed `b - a` along an axis) and solve as the
-`PointDistance` and `AxisDistance` residuals. Web `distance` relations with a
-`direction` keep the sketch read-only. Line-to-point distance is not offered:
-the web app has no such relation.
+**Project panel.** Part rows (click to switch), the active part's sketches,
+solid features plus a ROLLBACK row, an `ASM` row per assembly, and the active
+sketch's entities with relation tags (`[H]`, `[//]`, `[SYM]`, `[PAT]`, `[!]`,
+…). Long rows are clipped with `...`. The wheel scrolls one row per notch;
+when a key changes the selected feature or active sketch its row scrolls into
+view. Shift+click toggles a shape in the selection.
 
-**Driving and reference.** **R** (or the Properties button) toggles the
-selected dimension. A reference dimension shows its measured value in
-parentheses, adds no solver constraint, and saves as the web relation with
-`reference: true` and the measured value. Making it driving again starts
-from the measured value. Angle relations cannot be references.
+**Properties.** Fields of the primary selection (with a count for
+multi-selection), click-to-edit values (Enter applies, Esc cancels), the
+Move / Scale / Rotate tabs, prompts of the active tool, and **SKETCH
+VARIABLES** when nothing is selected.
 
-**Expressions and variables.** Dimension values (labels and the Properties
-fields) accept expressions as in `src/sketch-value.ts`: `+ - * / ( )`, `pi`,
-units `mm cm m um in inch ft deg rad`, and `#name` sketch variables
-(`rust/src/sketch_value.rs`). Adding mismatched units is an error, as in the
-web app. A label with an expression shows `expression = value`. With nothing
-selected, Properties lists **SKETCH VARIABLES**: click a row to edit it as
-`name = expression` (an empty expression deletes an unused variable,
-renaming rewrites `#name` references), or **+ ADD VARIABLE**. A variable's
-kind is inferred (its previous kind, else length, angle, scalar). Changing a
-variable re-evaluates every dependent dimension and solves as one undo step;
-any failure rolls everything back. Expressions save as the web relation
-`expression` next to the exactly evaluated `value` (the web loader checks
-they match), and variables as the sketch node's `variables` array. As in
-the web `transformSketchSelection`, scaling a shape clears the expressions of
-the dimensions whose value it changes, rotating clears a rotation
-dimension's expression, and both move moved label positions with the shape
-(a copy gets transformed copies). An expression that still no longer produces
-the stored value is dropped on save. Dimensions stored as graph
-`sketchConstraint` nodes move to sketch relations once they get a label
-position, reference flag or expression.
+**Status bar.** Message on the left (truncated with `...`; long messages get
+more room), GEOMETRY / CONSTR / POINTS selection filters, `AUTO` and `GLY`
+toggles, a two-line block with cursor coordinates in display units, the
+tool, DOF and snap state (`SNAP GEOM+GRID`, `GEOM`, `GRID`, `OFF`), and
+zoom. It is rebuilt only when a field changes. Toolbar buttons have 16×16
+pixel-art glyphs; hovering a button or MORE row for 400 ms shows a tooltip
+with the command and shortcut.
 
-**Split and trim.** As in the web `splitSketchCurve`/`trimSketchCurve`, a
-point dimension on a split or trimmed shape moves to the retained piece that
-still has its anchor at the same position (a dimension on a line's far end
-follows the new piece); one whose anchor is cut away is dropped with its
-label position, reference flag and expression. Driving lengths and sweeps of
-the cut shape are dropped (reference ones keep measuring), ellipse width and
-height stay on the first piece, and a circle's diameter dimension becomes
-the arc's radius dimension, keeping its reference flag, label position and
-expression (as `(expression) / 2`).
-
-### Constraint solver
-
-`rust/src/solver.rs` is a least-squares solver ported from the structure of
-`src/sketch-solver.ts`. Every anchor coordinate (line endpoints, sketch points,
-curve centers, spline handles), every circle or arc radius, ellipse semi-axes
-and rotation, and arc start and sweep angles are parameters; each relation
-contributes a residual. A smooth join (web `smoothJoin`) is four residuals:
-the two endpoints coincide and their outward unit tangents sum to zero; it
-works between any line, arc and open spline endpoints. Point-on-curve and Normal relations on a spline add an
-auxiliary curve parameter. A curve keeps its size and its angles unless a
-relation or driving value may change them (Equal, radial distance, shared
-ellipses, radius, axis, sweep or rotation dimensions, smooth joins, fixed arc
-or axis endpoints), so tangency and point relations move curves rigidly. Levenberg–Marquardt with numeric Jacobians
-first solves the relations together with soft "stay close" weights and then
-solves the relations alone, damped by those weights. A solve reports its
-residual norm and whether it converged.
-
-Moves, drags, dimension edits, scale, rotate, and creating a relation all apply
-the edit, solve, and then either commit everything as one undo step or roll the
-edit back. The edited shape (or, for a length or rotation edit, the line's first
-endpoint) is held exactly; an edited shape that is the target of a
-projecting relation (point-on-curve, Normal, tangency, smooth join) is instead
-held as a strong preference, so the relation snaps it back onto its source.
-The remaining intent is a cascade: relation sources
-stay put and only targets move; if that fails, sources may move but keep their
-first endpoint; if that fails too, only the edited geometry is held. Targets
-rotate or stretch about their first endpoint, and direction targets keep their
-length when nothing else sets it. A solution that collapses a line is rejected.
-
-Every relation is solver-backed: horizontal and vertical, line length and line
-rotation dimensions, point distance and point X / Y dimensions, Equal lines, Parallel, Perpendicular, Collinear, signed
-Angle, endpoint coincidence between a sketch point and a line or spline end,
-fixed line endpoints, points, centers, spline handles, and arc, elliptic arc
-and ellipse axis endpoints, Midpoint on lines, arcs and elliptic arcs,
-point-on-curve on lines, circles, arcs, ellipses, elliptic arcs and splines,
-Normal and smooth-join (endpoint) tangency, internal tangency between circles
-and arcs, external tangency between circles and arcs and between a line and a
-circle, arc, ellipse or elliptic arc, circle and arc radius and diameter
-dimensions, Equal radius, radial distance, shared and Equal ellipses, ellipse
-axis, rotation and sweep dimensions of related curves, and Concentric between
-any circular or elliptic curves. Point-on-curve keeps the point on the finite
-segment, sweep, or spline span, and tangency keeps the contact inside an arc's
-sweep. Point symmetry (the axis line is the perpendicular bisector of
-the two anchors) and whole-shape mirror relations of lines, points, circles,
-arcs, ellipses, elliptic arcs and splines (anchor pairs, equal radii or axes,
-mirrored arc start and ellipse rotation, negated sweeps) are solver residuals
-too, as are offsets (a line copy at a signed distance to the left of its
-source, concentric circles and arcs with a radius difference and equal
-angles, outline copies with the same center, cap centers and rotation and
-grown sizes, and a mitered line chain offset that also keeps its sources
-joined).
-Rectangles, rotated rectangles, regular polygons and slots are solver
-entities too (`solver::ShapeVar`): a corner rectangle is its two corner
-points, a rotated rectangle its center, half-axes and rotation, a polygon its
-center, circumradius and rotation, and a slot its two cap centers and width.
-Their corners, vertices and cap centers are derived anchors, so a mirror copy
-of any of them is a solver residual (reflected center, equal sizes, mirrored
-rotation; a mirrored corner rectangle is a rotated rectangle, as in the web
-app), and their width, height, radius and rotation dimensions and fixed
-anchors become hard relations once they take part in one. The only
-hand-propagated relation left is a pattern: copies (see **Patterns**) are
-regenerated from their sources after every solve, for every shape kind.
-
-Rotating a direction target now turns its source with it; Equal ellipses can
-be scaled; splines with linked end points can be moved, scaled, rotated, and
-have their end handles edited or dragged, carrying the points along. Rotating
-axis-constrained lines by other than quarter turns stays blocked.
-
-**Anchor dragging.** A selected shape shows small squares on its draggable
-anchors: line endpoints, sketch points, circle and arc centers, all four
-rectangle corners, rotated-rectangle corners, ellipse axis points, polygon
-vertices, and slot cap centers (spline handles keep their own circles). The
-hovered or dragged anchor is filled. Left-dragging an anchor (same 7 px pick
-radius as spline handles) moves only that anchor; dragging elsewhere on the
-shape still moves the whole shape. For lines, points, circles, and arcs the
-anchor becomes a strong soft target that is re-solved every frame with every
-hard relation, so it slides along what they allow: a line end with a driving
-length moves on a circle around the other end, and coincident points follow.
-A dragged line endpoint keeps the other endpoint in place. Rectangle corners,
-rotated-rectangle corners, polygon vertices and slot cap centers work the
-same way: the derived anchor is a 1e3 soft target (`Soft::Anchor`) re-solved
-with every relation, after a first guess that keeps driving width, height,
-radius and rotation dimensions. Ellipse axis points still keep those
-dimensions directly and re-solve like a whole-shape drag (all relations,
-including tangency and shared ellipses, follow). Release commits one undo step, Esc cancels. A fixed anchor
-(or any fixed anchor on a non-line shape) refuses to drag; every relation
-the shape takes part in follows through the solver.
-
-#### Degrees of freedom and diagnostics
-
-`Problem::analyze` ports `src/sketch-redundancy.ts`: it builds the numeric
-Jacobian of the relation residuals over the free parameters, orthonormalizes
-it relation by relation (two-pass Gram–Schmidt), and reports the rank, the
-remaining degrees of freedom, which parameters are fully determined, and for
-each relation whether it is satisfied, conflicting (residual above tolerance at
-the current geometry) or redundant (adds no rank after earlier relations).
-`Document::analyze_constraints` runs it over every solver-modeled shape: lines,
-sketch points, circles, arcs, ellipses, elliptic arcs, splines, rectangles,
-rotated rectangles, polygons and slots. A free line has 4 DOF, a point 2, a
-circle 3, an arc 5 (center, radius, start, sweep), an ellipse 5 (center, axes,
-rotation), an elliptic arc 7, a spline 2 per handle, a corner rectangle 4 (two
-corners), a rotated rectangle 5, a polygon 4 (center, radius, rotation) and a
-slot 5 (cap centers, width). Point-on-curve, tangency and other curve
-relations count toward the rank like every other relation. Pattern copies
-follow their sources, so their parameters are not free: a six-copy circular
-pattern of one free line reads DOF 4, and a copy is drawn fully constrained
-only when every source of its pattern is.
-
-In the sketch view the header's right edge shows **DOF n** (green at 0),
-**OVER-CONSTRAINED** (purple) when a relation is redundant, or **CONFLICT**
-(red) when a relation is unmet. Project rows of shapes in a conflicting
-relation get **[!]** and red text, shapes in a redundant relation **[R]** and
-purple text; the viewport tints those shapes the same way and draws fully
-constrained shapes green. The analysis is cached by `Document::revision()` and
-recomputed once per committed edit, undo or redo, never during a drag. Because
-edits that cannot be solved are rolled back, a conflict normally appears only
-in documents loaded that way.
-
-#### Viewport feedback
-
-In Select mode the shape under the cursor (honoring the selection filters)
-is pre-highlighted in a lighter accent and its anchors show as faint squares
-before any click. Pointer moves in idle Select mode repaint only when the
-hovered shape, anchor or glyph changes; placing, dragging, panning and the 3D
-view still repaint on every move.
-
-Every relation draws a small glyph beside each entity it involves
-(`model/glyphs.rs`, `Document::placed_glyphs`): `H`/`V`, `//` parallel, `T`
-perpendicular, `COL`, `ANG`, `=` equal, `O` concentric, `TAN` tangent
-(including endpoint tangents), `MID`, `POC`, `NORM`, `TJ` smooth join, `SE`,
-`RD`, `SYM`, `OFS`, `PAT`, and `FIX` with a lock square at each fixed anchor.
-The 8x8 font is ASCII only, hence `//`, `T` and `TAN` instead of the Unicode
-symbols. A line's glyphs start at its midpoint and a circle's or arc's on its
-rim; they stack outward along the entity's normal (above/right of a line,
-radially for curves) so the glyphs of one entity never overlap, and use the
-entity's DOF tint. Hovering a glyph highlights every partner of its relation;
-clicking it selects the entity it sits beside. Key **6** hides or shows all
-glyphs (`GLY` in the status bar).
-
-While placing a segment (a line, the first edge of a three-point rectangle,
-an arc chord or a slot axis) an inference hint appears at the cursor with a
-dashed guide when the segment is within 2° of horizontal/vertical (`H`/`V`),
-parallel or perpendicular (`//`/`T`) to a line within 30 px of the cursor, or
-tangent (`TAN`) to a circle it ends on or an arc whose end it starts from.
-Hints are visual only, except that with automatic constraints on (the web
-"Automatic constraints" checkbox; key **7**, `AUTO` in the status bar, on by
-default) a line committed while its `H`/`V` hint showed snaps exactly to the
-axis and gets that relation in the same undo step.
-
-Press **K** with a shape selected to toggle construction geometry. Its tree row
-and viewport outline dim, the flag persists in the web project graph, and
-construction geometry cannot be used as the native extrusion profile. Copies
-keep the flag; Ctrl+Z and Ctrl+Y undo and redo the toggle.
-With a line selected, press **H** for a horizontal constraint or **J** for a
-vertical constraint. The line snaps about its first endpoint while retaining
-its length. Press the same key again to remove the constraint; the Project row
-shows `[H]` or `[V]`. The relation survives copies, undo/redo, and save/reopen.
-Select a target line, hover a source line, and press **Shift+P** to make the
-lines parallel or **Shift+N** to make them perpendicular. The target rotates
-about its first endpoint without changing length. Rotating the source or
-applying a horizontal/vertical constraint to it updates the target in the same
-undo step. Press the same shortcut over the source again to remove the relation.
-The Project rows show `[//]` or `[T]`, and both relations save in the web graph.
-**Shift+L** makes the target collinear with the hovered source: it projects the
-target onto the source's infinite line while preserving its length. Moving or
-rotating the source keeps the target on that line. The Project row shows `[CL]`.
-**Shift+B** records the signed Angle between the selected target line and the
-hovered source line. Click the Angle value in Properties to enter signed degrees;
-rotating the source updates the target in the same undo step. The Project row
-shows `[A]`, and the web `angle` relation survives save/reopen.
-Select a target line, hover another line, and press **Shift+E** to make their
-lengths equal. The target resizes about its first endpoint. Editing the source
-length then updates both lines in one undo step. Press Shift+E again over the
-same source to remove the relation. Equal pairs save as web `equal` relations;
-line split, trim, and extend require removing Equal first. A length typed on the
-Equal target drives the source as well.
-A line can carry Equal, a direction relation, an axis constraint, a driving
-length, and endpoint point links at the same time, and relations can chain
-(A parallel to B, B perpendicular to C). Each line can be the target of at most
-one Equal and one direction relation. Combinations that cannot be satisfied are
-rejected and leave the sketch unchanged.
-The same **Shift+E** gesture also matches the radius of two circles or arcs.
-Editing a source circle's diameter updates the dependent circle or arc in one
-undo step. The target diameter is driven by Equal and cannot be edited directly.
-For two circles, select the target, hover the source, and press **Shift+D** to
-record their signed radial distance. Click the Diff value in Properties to
-edit it; changing the source diameter updates the target radius. The Project
-rows show `[RD]`, and the web `radiusDifference` relation survives save/reopen.
-Select a circle or arc, hover another circle or arc, and press **Shift+Y** to
-make them internally tangent. The smaller curve moves inside the larger one;
-their shared contact must lie on each arc sweep. Changing the outer radius or
-moving either curve keeps contact. Press Shift+Y again to unlink them. Project
-rows show `[IT]`, and the web `internalTangent` relation survives save/reopen.
-Select a circle or arc, hover another circle or arc, and press **Shift+Q** to
-make them externally tangent. The selected curve moves to contact the hovered
-curve, and edits to either curve keep the contact on both arc sweeps. Press
-Shift+Q again to unlink them. Project rows show `[T]`, and the web `tangent`
-relation survives save/reopen for these curve pairs.
-Shift+Q also makes a line tangent to a circle or circular arc. Select the
-curve or line, hover the other, and press the same shortcut. The selected
-shape moves to contact the other; subsequent moves preserve tangency and arc
-contacts stay on their sweeps.
-The same gesture supports a line tangent to an ellipse or elliptic arc. Its
-contact uses the rotated ellipse's analytic support point; arc contacts must
-fall on the retained sweep.
-Select a sketch point, hover a line, circular arc, or elliptic arc, and press
-**Shift+M** to link the point to the curve's midpoint. Moving, scaling, or
-editing the source keeps the point at its midpoint. Press Shift+M again over
-the same curve to unlink it. Project rows show `[MID]`, and the web `midpoint`
-relation survives save/reopen.
-Select a sketch point, hover a line, circle, arc, ellipse, elliptic arc, or
-spline, and press **Shift+V** to constrain the point to that finite curve. The
-point can slide along the curve; source edits project it back onto the updated
-curve. Press Shift+V over the same source to unlink it. Project rows show
-`[POC]`, and the web `pointOnCurve` relation survives save/reopen.
-Select a line, hover a separate line or curve, and press **Shift+F** to make
-the nearer selected endpoint normal to the hovered geometry. The endpoint
-snaps onto the finite curve while the line keeps its length. Moving the source
-keeps contact and normal direction. Shift+F again over the same source removes
-the relation; Project rows show `[NORM]`, and the web `normal` relation survives
-save/reopen.
-The same gesture matches both width and height for two ellipses or elliptic
-arcs. Editing a source axis updates the dependent curve in one undo step;
-target axes are driven. Elliptic arc width and height can now be edited in
-Properties unless a fixed endpoint would move.
-Select a circle, arc, ellipse, or elliptic arc, hover another such curve, and
-press **Shift+O** to make their centers concentric. The selected curve moves to
-the hovered curve's center. Moving or dragging either curve then moves both
-centers in one undo step. Shift+O over the same source removes the relation;
-the Project rows show `[O]`. A fixed anchor blocks moves that would displace it.
-**Symmetry.** Select a mirror line (usually a construction line) and press
-**Shift+S**, then click the first shape and its mirror. Two shapes of the same
-kind (other than sketch points) become whole-shape symmetric: the second one
-jumps to the mirror image of the first (web `mirror` relation). Otherwise the
-anchors nearest to the two clicks (line ends, points, centers, spline points)
-become symmetric about the line (web `symmetric` relation). Esc cancels; the
-same gesture over the same pair removes the relation. Project rows show
-`[SYM]`. Editing either side, or the mirror line, updates the other side in
-one undo step; the mirror line stays put while a side is edited when it can.
-**Shift+I** or **MORE → MIRROR** mirrors the selected shape across the next
-clicked line: it adds a mirror copy linked by a `mirror` relation, as one
-undo step (a corner rectangle's copy is a rotated rectangle, as in the web
-app). The mirror line must be an existing line. Deleting the line, the source
-or the copy removes the relation.
-**Patterns.** Select one or more shapes (click, Shift+click or box select) and
-press **Shift+Z** or **MORE → LIN PATTERN**: Properties prompts for COUNT
-(cells per row, source included), SPACING X / Y (mm), ROWS (1 for a single
-row) and, for a grid, ROW SPACING X / Y; Enter keeps the shown value. The copies
-are linked by a web `linearPattern` relation (`step`, `columns`, `rowStep`).
-**;** (semicolon) or **MORE → CIRC PATTERN** (the two pattern items open a
-second MORE column left of the first) prompts for COUNT (source included) and
-ANGLE (default 360), then waits for a click on the center: a sketch point, line
-end or curve center under the cursor becomes a referenced center
-(`centerAnchor`, the pattern follows it), a click on the origin uses the
-origin, anywhere else uses that point. Full circles step by angle/count, open
-arcs by angle/(count-1) and include both ends, as in the web app. Each pattern
-is one undo step, copies keep the source's construction flag, and Project rows
-show `[PAT]`. Copies follow the source: editing, moving or dimensioning a
-source updates every copy (copies themselves are not independently editable).
-With a pattern member selected, Shift+Z / ; reopen the prompts with the
-pattern's current values and edit that pattern (copies of surviving cells are
-kept, removed cells are deleted). Deleting the source, a copy or the
-referenced center removes the pattern relation and leaves the remaining
-copies as free geometry, matching the web app. Patterns hold 2-32 cells and at
-most 64 copies; skipped instances are not supported.
-Rotating a constrained line is supported in 90-degree increments, which swaps
-horizontal and vertical when appropriate.
-Web projects that store line length, rectangle width or height, horizontal, or
-vertical constraints as separate CAD graph nodes also open for editing. Native
-edits update those graph nodes in place; deleting an entity removes its attached
-supported constraint nodes. Midpoint relations for sketch points, plus the
-coincident cases documented above, are also supported; other point and curve
-relations still need native solver support.
-The **MORE** menu (M) contains Point (P), a regular Polygon (G), and Slot (S). Click once
-to place a point or twice to set a polygon's center and first vertex. A polygon
-starts with six sides; click its side count in Properties to enter 3–64 sides.
-For a slot, click the two end-cap centers, then a point on its side wall. Click
-its width in Properties to enter a new millimeter value.
-Click **+ TOP**, **+ FRONT**, or **+ RIGHT** (keys 1/2/3) to add a sketch on a
-reference plane, and click a sketch in the project panel to switch between them. Unsaved edits in each sketch
-are retained while switching; Ctrl+S saves them together.
-
-Pass a `.pcad` path to open a v4 project or start a new one. Ctrl+S saves
-supported reference-plane sketch projects in the existing v4 project format. The native
-app opens the selected top-level part when `selectedPath` names one, preserves
-other project documents, and refuses to save when the file changed
-on disk. Projects with unsupported sketch entities, constraints, or solid
-features open read-only until those features are ported. Face sketches open
-editable when their face still exists on the supporting extrusion.
-Rotated rectangle primitives from the web app can now be opened, selected,
-dimensioned, moved, scaled, rendered, and saved while preserving their angle.
-The native rectangle drawing tool starts axis-aligned; use Rotate to turn it.
-For projects with multiple top-level parts, Ctrl+Page Down and Ctrl+Page Up switch
-between them. Their names also appear as clickable rows above the sketch list in
-the Project panel. Unsaved sketch edits in each part stay in memory; Ctrl+S saves the
-edited parts together and records the active part in `selectedPath`.
-Choose **MORE → NEW PART** or press **B** to add a top-level part with an empty
-Top sketch. The current part's unsaved edits remain available when you switch
-back, and Ctrl+S saves both parts.
-Press **F2** to rename the active part or **Shift+F2** to rename its active
-sketch. Enter applies the name and Ctrl+S persists it.
-
-```sh
-cd rust
-cargo run -- my-sketch.pcad
-```
-
-The pixel font is an intentional visual direction for the native interface.
-The web app remains the reference for feature parity: the remaining sketch
-constraints and tools, full solid modeling, assemblies, graph editing, full project
-browsing, SDK/server behavior, and export still need native ports. A project with
-one or more new-body extrusions of closed rectangles, rotated rectangles, circles,
-ellipse, polygon, or slot on the Top, Front, or Right reference plane opens in a shaded
-3D preview. The preview and STL export use the web app's XY, XZ, and YZ plane
-frames. Construction
-guides may coexist with that closed shape and are ignored for the profile. Draw one of
-those closed shapes on a reference-plane sketch and choose **MORE → EXTRUDE** or press **X** and Enter to create a 50 mm new-body
-extrusion (see *Extrude options and preview*), then Ctrl+S to save it in the web graph format.
-Separate open line components and sketch points may also coexist with the
-closed profile; they do not contribute to the extrusion.
-The same extrusion command accepts closed simple loops assembled from line
-entities and sampled arcs, including concave paths, line-drawn through-holes,
-and lines drawn in either direction. Arc segment counts from web projects are
-preserved, as are circle, ellipse, and slot segment counts. A sketch containing only
-open geometry has no extrusion profile; branching and self-intersecting paths
-are rejected.
-When a sketch contains several separate closed regions, the selected region is
-outlined in cyan. Press **[** or **]** to choose a profile, then **X** to extrude
-that region. The selected web `profileId` is saved and reopened. Once a profile
-is extruded, press Tab to return to the locked sketch, choose another profile,
-and press **X** to create another body from the same sketch. Reusing an already
-extruded profile is rejected.
-Separate closed shapes fully nested inside one outer profile can form multiple
-through-holes. The native preview and STL export triangulate the cap around
-them; touching or overlapping boundaries are rejected. A closed island inside a
-hole becomes another selectable profile.
-In the solid preview, click **DEPTH** in Properties, enter a positive millimeter value,
-and press Enter. With several bodies, use **[** and **]** to select the body first.
-Ctrl+S saves the updated depth. Use **PERSPECTIVE / ORTHO** in the top-right
-header to switch the solid camera projection. Orthographic is the default;
-perspective makes nearer geometry appear larger. Switching preserves orbit, pan,
-and zoom. The choice resets when opening another project; sketch view remains flat.
-Press Tab to switch between the solid preview
-and sketch view. The solid viewport uses the web part view's mouse controls:
-right-drag orbits freely in screen axes (0.01 rad per pixel, no pitch limit, so the
-view can roll) around the surface point under the cursor, middle-drag pans so the
-model follows the pointer, and the wheel zooms about the view center with the web's
-sensitivity. Left-click does not orbit. The view starts at the web's default angle
-(pitch π/5, yaw π/4), and orbiting does not change the model's on-screen size. The extruded sketch locks after extrusion, including on reopen;
-add a new reference-plane sketch to create another body in the same part. The 3D
-preview shows supported bodies together. Press **Shift+X** on a later closed
-reference-plane sketch to cut its 50 mm extrusion from the most recent body.
-Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion with
-that body. The shaded preview and STL export use the evaluated Boolean mesh.
-Every body (plain extrusions, cut/join results, revolve, loft and edge
-finish results) is drawn the same way: each triangle is lit per face normal
-by a key light from the upper right plus ambient and a weak head-on fill, and
-sharp edges (adjacent face normals more than 20° apart, the same edges an
-edge finish picks) are drawn as dark lines, with pieces hidden behind the
-mesh left out, so holes and chamfer bevels read clearly.
-The Project panel lists each solid feature in tree order (see Feature
-tree); select the cut or join feature to edit its depth or delete it. Earlier features with dependent cuts or
-joins cannot be deleted in isolation. Revolve, loft and edge chamfer/fillet
-features are described below; web `chamfer` graph nodes still need native
-support.
-
-### Sketches on faces
-
-In the 3D preview, hovering a planar face outlines it in yellow (the
-evaluated mesh is ray-cast under the cursor and its coplanar, edge-connected
-triangles are grouped into one face) and names it, e.g. **TOP FACE**. Press
-**4** or **MORE → SKETCH ON FACE** to add a sketch on that face and open it.
-Faces that do not belong to an extrusion prism (for example the wall of a
-cut) are outlined in grey and cannot carry a sketch.
-
-The face sketch is saved like the web app's: a graph `face` node
-`face-<extrudeId>-<faceId>` with `sourceId` (the extrusion) and `faceId`
-(`<extrudeId>-solid-face-<n>`), targeted by the sketch's `targetId`. Faces and
-plane frames follow `getExtrudedFaceDescriptors` in `src/cad/extrude.ts`: one
-side face per profile point (outer loop, then holes), then the bottom and top
-caps. A side face's origin is its first profile point, x runs along the edge,
-y along the extrusion normal and the normal is x × y; caps keep the source
-sketch's axes, the bottom with a negated normal, the top moved by the depth.
-Frames are recomputed from the graph on every evaluation, so a face sketch
-follows its source when that extrusion's depth changes, as on the web.
-
-While a face sketch is open, the supporting extrusion's edges are projected
-into the sketch plane and drawn dashed between the grid and the sketch (web
-`sketchSupportEdges`); their ends and midpoints snap like sketch geometry.
-Press **5** to hide or show this context. They are display references only and
-take no relations.
-
-**X**, **Shift+J** and **Shift+X** on a face sketch extrude along the face
-normal: new bodies and joins grow outward, cuts run into the body from the
-face. The result joins the same Boolean evaluation as reference-plane
-extrusions. The web graph has no direction field and the web part view does
-not evaluate graph cuts, so the inward cut direction is a native rule; faces
-of such cuts are not offered for further face sketches.
-In the 3D preview, press Delete to remove the selected extrusion. Its graph and
-feature-tree references are removed; when the sketch has no remaining extrusion,
-its geometry is editable again. Supported extrusion projects reopen without a
-project-wide read-only lock, so new reference-plane sketches can be added.
-Extrusions appear as clickable rows in the Project panel between sketches and
-sketch entities. Clicking a row selects that body and opens the 3D preview;
-clicking a sketch or entity row returns to the sketch view.
-Press Ctrl+E in the solid preview to export each supported body as a binary STL
-beside the project file (80-byte header `PuppyCAD <part> / <body>`,
-little-endian facet count, 50 bytes per facet with a per-facet normal and a zero
-attribute). Ctrl+Shift+E writes the same triangles as ASCII STL. Existing files
-are preserved; additional bodies and repeated exports use numbered filenames
-(`name.stl`, `name-2.stl`, …). Ctrl+Alt+E writes one `name.3mf` for the whole
-part: a deflated ZIP with `[Content_Types].xml`, `_rels/.rels` and
-`3D/3dmodel.model` (core 2015/02 namespace, `unit="millimeter"`, the part name
-as `Title` metadata, one welded-vertex `object` and one `build` item per body).
-When cut/join features merge extrusions, every format exports the evaluated
-Boolean bodies. STEP export is not implemented yet.
-
-Headless export uses the same code:
-
-```sh
-cargo run --manifest-path rust/Cargo.toml -- --export IN.pcad OUT.stl   # binary, OUT-2.stl… per extra body
-cargo run --manifest-path rust/Cargo.toml -- --export IN.pcad OUT.3mf
-```
-
-It prints the written paths, replaces existing files at those paths, and exits
-non-zero when the input is missing, has no supported solid, or the output
-extension is not `.stl`/`.3mf`. `rust/tests/export.rs` and
-`test/rust-export.test.ts` cover it.
-
-### Extrude options and preview
-
-**X**, **Shift+X** (cut) and **Shift+J** (join), and the MORE menu entries, do
-not create the extrusion right away. They switch to the 3D view with a
-translucent ghost of the would-be tool solid (orange, red-tinted for cuts) over
-the existing bodies and open a DEPTH prompt in the viewport and Properties.
-Type a depth, press **E** to cycle the end condition and **F** to flip; the
-ghost updates on each key. **Enter** commits (an empty prompt keeps the old
-one-key default of 50 mm blind), **Esc** cancels and returns to the sketch.
-
-For a selected extrusion in the solid view, Properties shows DEPTH, END and
-FLIP rows, plus TARGET for up-to-body. Click END or press **E** to cycle
-Blind → Symmetric → Through all → Up to body → Blind (through all and up to
-body only for cut and join features once a body exists). Click FLIP or press
-**F** to reverse the direction. Click TARGET or press **U** to arm a body pick,
-then click a body in the viewport (**Esc** cancels). Each edit re-evaluates the
-Boolean mesh and is one undo step: **Ctrl+Z** / **Ctrl+Shift+Z** (or Ctrl+Y)
-in the solid view undo and redo extrusion edits, including depth edits. An
-edit that would not evaluate is rejected and leaves the graph unchanged.
-
-End conditions:
-
-- **Blind**: `depth` along the sketch normal (`-depth..0` when flipped).
-- **Symmetric**: `depth` is the total length, centred on the sketch plane;
-  flip has no effect.
-- **Through all**: spans the previous body along the sketch normal in both
-  directions with a small margin, like the web's through-all solid step.
-  Flip has no effect.
-- **Up to body**: from the sketch plane to the far side of the target body's
-  bounding box along the (flipped) normal. The target must be an earlier
-  new-body extrusion.
-
-File format: the `extrude` graph node keeps the fields the web writes
-(`operation`, `depth`) and adds optional `endCondition` (`"symmetric"`,
-`"through-all"` — the web's solid-step spelling — or `"up-to-body"` with
-`targetId` naming the body's extrude node) and `flip: true`. Defaults are
-omitted, so blind extrusions stay byte-identical. The web loader reads such
-files and evaluates them as blind with the stored depth (it ignores the extra
-fields). Unknown end conditions, a non-boolean `flip`, a missing or later
-up-to-body target, or through-all/up-to-body on a new body open read-only with
-an `extrusion options:` reason.
-
-Face sketches use the same options along the face normal. A cut from a face
-sketch runs into the body by default and new bodies/joins grow outward; flip
-inverts that default. Through all and up to body measure the target's extent
-from the face plane. Fixture: `rust/fixtures/extrude-options.pcad`.
-
-### Feature tree
-
-Each part's solid features (`FeatureKind`: extrusions — new body, cut, join
-— revolves, lofts and edge finishes; sketches are not features) form an
-ordered list. The Project panel shows one row per feature in that order, then a
-**ROLLBACK** row. Row glyphs: `[S]` and dim text for suppressed features, red
-`[!]` for features in error (clicking the row shows the reason in the status
-bar), dim text for features after the rollback bar. When the rows do not
-fit, the mouse wheel over the Project panel scrolls them (one row per notch);
-after a key changes the selected feature (or the active sketch) its row is
-scrolled into view.
-
-With a feature row selected in the 3D view:
-
-- **Ctrl+Up / Ctrl+Down** move it one place earlier or later. A move is
-  refused (status message) when a feature would come before something it
-  depends on — its up-to-body target, the extrusion owning its sketch face,
-  graph `sourceId`/`targetId` — or a cut/join would end up applying to a
-  different body (cuts and joins apply to the nearest earlier new body), or
-  the reordered tree would not evaluate.
-- **Ctrl+H** toggles suppression.
-- **Ctrl+[ / Ctrl+]** move the rollback bar up or down; the ROLLBACK row can
-  also be dragged with the left mouse button and dropped between features.
-
-Each of these is one undo step (**Ctrl+Z** / **Ctrl+Shift+Z** in the solid
-view) and re-evaluates the part.
-
-Evaluation runs features in order up to the rollback bar and skips suppressed
-ones. A feature whose inputs are missing (sketch or profile gone, its target
-body suppressed or failed, the face it is sketched on belongs to an inactive
-feature, the end condition reaches no body) or whose Boolean result is empty
-is marked as an error and skipped; the rest of the part still evaluates. The
-3D view, STL/3MF export (UI and `--export`) use only active features, so
-export respects suppression and rollback. Creating a new feature moves the
-rollback bar to the end; deleting a feature above the bar keeps it below the
-same features.
-
-Results are cached per feature, keyed by the feature node, its resolved
-profile and frame, and its position relative to the bar. A feature is rebuilt
-only when it or an earlier feature changed. Sketch edits are copied into the
-project when you return to the 3D view (**Tab** or the part breadcrumb), so
-the features using that sketch and everything after them re-evaluate there.
-
-File format (native extensions the web loader ignores): order is the order of
-the feature nodes in `data.cad.nodes`, mirrored in `data.cad.rootNodeIds` and
-`data.tree.orderedNodeIds`. A suppressed node has `"suppressed": true` (same
-name as the web `BaseFeature.suppressed` flag; omitted when false). The
-rollback bar is `data.tree.rollbackIndex`, the number of features above it,
-omitted when the bar is at the end. The web reads such files with all
-features active and drops `rollbackIndex` when it re-saves the tree. Files
-that already have unresolvable features when opened stay read-only, as
-before. Fixture: `rust/fixtures/feature-tree.pcad` (body, suppressed cut,
-join); tests in `rust/src/project/features_tests.rs`.
-
-### Revolve, loft and edge finishes
-
-These are `FeatureKind` variants (`Revolve`, `Loft`, `EdgeFinish`) of the
-feature tree above, evaluated in tree order together with extrusions through
-`manifold-rust` (`rust/src/project/features.rs`), with the same suppression,
-rollback, error status and per-feature caching (revolve and loft cache keys
-include their resolved profiles). Revolve and loft cuts/joins apply to the
-nearest earlier new body, like extrusions; an edge finish applies to the body
-that has its edges. They appear as feature tree rows (`REVOLVE NEWBODY`,
-`LOFT JOIN`, `CHAMFER`, ...); selecting one shows its value (ANGLE,
-DISTANCE or RADIUS) in Properties, where clicking the value edits it (one
-undo step, **Ctrl+Z** / **Ctrl+Shift+Z** in the solid view), and **Delete**
-removes it unless a later feature depends on it. Creating and deleting these
-features are undo steps too ("Revolve 360°", "Loft", "Chamfer 2 mm",
-"Delete loft join").
-
-- **Revolve** — key **8** or **MORE → REVOLVE** in a sketch with a closed
-  profile selected (**[ ]** cycle profiles as for extrude). Click a sketch
-  line as the axis, or press **X** / **Y** for the sketch axes. The view
-  switches to a translucent ghost with an ANGLE prompt (empty = 360°); **O**
-  cycles new body / cut / join, **Enter** commits, **Esc** cancels. The
-  profile (with holes) is swept in 32 segments per full turn (fewer for
-  partial angles, capped at both ends); it may touch the axis but not cross
-  it.
-- **Loft** — key **9** (or **MORE → LOFT**) remembers the selected profile of
-  the current sketch; open another sketch, select its profile and press **9**
-  again for a new body or **Shift+9** (or **MORE → LOFT JOIN**) to join the last body (**Esc** clears the
-  first pick). Both outer loops are resampled at the union of their
-  arc-length parameters (every original vertex is kept) after aligning the
-  second loop's start to the point nearest the first loop's start and
-  matching winding; the side quads and both caps form the mesh. Profiles with
-  holes, edge-on profiles and self-intersecting results are rejected.
-- **Edge chamfer / fillet** — key **0** (chamfer) or **Shift+0** (fillet), or
-  **MORE → EDGE CHAMFER / EDGE FILLET**, in the solid view. Hovering
-  highlights the nearest sharp edge (adjacent face normals more than 20°
-  apart, collinear mesh segments between the same two planes merged); click
-  edges to add or remove them, type the DISTANCE / RADIUS (empty = 2 mm),
-  **Enter** commits. Only straight edges between planar faces are accepted;
-  facets of tessellated curves are shown grey and rejected. Convex edges are
-  cut with a prism along the edge whose cross-section is the material outside
-  the chamfer line or the fillet arc (16 segments per 90°); concave edges get
-  the same prism added. Hover skips edges hidden behind the bodies (the
-  point of the edge nearest the cursor is ray-cast against the mesh).
-
-File format: none of these exist as web graph nodes (the web `chamfer` node
-references web topology `edge` nodes the native app cannot resolve), so they
-are native extension nodes that the web loader drops when it normalizes the
-graph:
+**Settings** (Ctrl+, or MORE → SETTINGS). Clicking a row cycles it; changes
+apply live and are written to `settings.json`:
 
 ```json
-{"type":"revolve","id":"native-revolve-1","name":"Revolve 1","sketchId":"…","profileId":"<sketchId>-profile-1",
- "axis":{"a":{"x":0,"y":0},"b":{"x":0,"y":1}},"angle":360,"operation":"newBody"}
-{"type":"loft","id":"native-loft-1","name":"Loft 1","operation":"newBody",
- "profiles":[{"sketchId":"…","profileId":"…"},{"sketchId":"…","profileId":"…"}]}
-{"type":"edgeFinish","id":"native-edge-finish-1","name":"Chamfer 1","kind":"chamfer","distance":2,
- "edges":[{"a":[x,y,z],"b":[x,y,z],"normals":[[nx,ny,nz],[nx,ny,nz]]}]}
+{ "units": "mm", "grid_mm": 1.0, "theme": "dark", "ui_scale": null,
+  "window": { "width": 1280, "height": 800, "x": 0, "y": 0 } }
 ```
 
-The axis is in sketch coordinates and the angle in degrees (0, 360]; loft
-operations are `newBody` or `join`; a fillet stores `radius` instead of
-`distance`. Edges are stored by their world endpoints and the outward normals
-of the two faces and are re-identified on every evaluation: first by
-endpoints, then by an edge between the same two planes on the same line, so a
-finish survives upstream changes that keep its edge (for example a deeper
-extrusion under a bottom edge). A finish whose edge no longer exists, an
-invalid angle, axis or operation in a file being opened, and web `chamfer`
-nodes, open the part read-only with the evaluation error as the reason;
-edits made natively mark the feature `[!]` instead. Sketches used by a revolve
-or loft lock like extruded sketches. STL/3MF export uses the evaluated bodies.
-Fixture: `rust/fixtures/revolve-loft-finish.pcad`; tests in
-`rust/src/project/feature_tests.rs`, `rust/src/project/features_tests.rs`
-and `rust/src/app/tests.rs`.
+- `units` (mm, cm, in): display unit for Properties, labels, prompts and the
+  status bar; files stay in millimeters. Plain numbers typed into length
+  fields use the display unit. Pattern prompts still say mm.
+- `grid_mm` (0.5, 1, 2, 5, 10, 25.4): grid snap step.
+- `theme` (dark, light): `ThemePalette::DARK` / `LIGHT`.
+- `ui_scale` (`null` = monitor factor rounded to 1.0/1.5/2.0, or 1.0, 1.5,
+  2.0): `Layout::scaled` divides the surface by it, so layout coordinates are
+  logical units; font pixels snap to whole physical pixels.
+- `window`: logical size and position, saved on close.
 
-### Undo history
+Invalid fields fall back to the defaults.
 
-Every undo step has a short label: "Draw line", "Move 2 shapes", "Set length
-40 mm", "Add Parallel", "Fillet R5", "Delete 3 shapes", "Extrude 50 mm",
-"Set end Through all", and on the feature tree "Reorder feature", "Suppress
-newBody", "Move rollback", "Revolve 360°", "Loft", "Chamfer 2 mm",
-"Fillet R2", "Set angle 90°", "Delete loft join". Feature tree edits,
-revolve/loft/edge finish creation and deletion are whole-tree snapshot steps
-(`SolidUndoKind::Tree`); extrusion edits store just the node. Sketch snapshots (`model/history.rs`,
-`Document::record_undo`) also store the selected shape ids, so undo and redo
-restore the selection the snapshot had (ids of shapes that no longer exist are
-dropped) instead of clearing it.
+**Command palette.** Ctrl+K or Ctrl+Shift+P. Filters by label, category and
+shortcut text (prefix, word start, substring, subsequence: `mirr`,
+`ctrl+s`). Up/Down, Enter runs, Esc or an outside click closes. Commands
+that cannot run now are dimmed and skipped. All commands come from one
+registry (`app/commands.rs`) shared by keys, toolbar, MORE menu, palette and
+overlay.
 
-The sketch and the 3D preview keep separate stacks (the `Document` snapshot
-stack and the app's solid steps), but every step carries a stamp from one
-global counter (`model::next_step_stamp`). Ctrl+Z reverts the newest applied
-step of either stack and Ctrl+Y / Ctrl+Shift+Z reapplies the oldest undone
-one (`app/history.rs`), switching between the sketch and the 3D preview as
-needed, so after Tab the most recent edit is undone regardless of the view.
-Sketch steps of a read-only (extruded) sketch are skipped. The status bar
-shows `Undo: <label>`.
+**Shortcut overlay.** `?` or F1: a full-window cheat sheet by category,
+balanced over as many columns as fit (three at 1280×800).
 
-**Ctrl+Shift+H** toggles the HISTORY panel over the Project panel. It lists
-the steps newest first with a SKETCH or SOLID tag; the current position is
-highlighted with `>`, undone (redoable) steps are dimmed above it, and a
-`Start` row at the bottom stands for everything undone. Clicking an older row
-undoes back to it, clicking a dimmed row redoes up to it.
+**Undo history.** Every step has a label ("Draw line", "Set length 40 mm",
+"Extrude 50 mm", "Suppress newBody", …), shown as `Undo: <label>`. Sketch
+snapshots and solid steps are separate stacks stamped by one global counter,
+so Ctrl+Z undoes the newest step of either (switching views as needed) and
+Ctrl+Y / Ctrl+Shift+Z redoes. Sketch undo restores the selection. Steps of a
+locked sketch are skipped. **Ctrl+Shift+H** shows the HISTORY panel over the
+Project panel: newest first, SKETCH/SOLID tags, `>` marks the position,
+undone rows dimmed, a `Start` row at the bottom; click a row to undo or redo
+to it. The assembly view has its own undo stack.
 
-### Assemblies
+## Sketching
 
-Top-level `"type": "assembly"` items of a `.pcad` are web `Assembly`
-documents (`src/contract.ts`): `instances` (`id`, `partId` of a part in the
-same project, optional `transform` with `translation`, `rotation` as Euler
-XYZ degrees and `scale`), `connectors` (frames with `position` and `rotation`
-on an instance, or on the world when `instanceId` is `null`), `mates`
-(`type` `fasten`, `revolute`, `prismatic`, `planar` or `ball` between two
-connectors) and `actuators` (servos on a mate). `rust/src/assembly.rs` reads
-and writes that shape; `actuators`, `variables` and mate `params` are kept
-verbatim. Native extension: an instance may carry a `name`, which the web
-loader drops. An unknown mate type, a dangling connector reference or a
-non-positive scale opens the assembly read-only with the reason shown in the
-view, and saving never rewrites it.
+### Tools
 
-**Solver** (`rust/src/assembly/solver.rs`). Fasten mates are solved exactly
-like `solveFixedAssembly` in `src/assembly-solver.ts` (breadth-first from the
-world, then from root instances; a loop that disagrees is a conflict), so
-fastened instances land where the web app puts them. The web app stores the
-other kinds without solving them; natively each fasten-connected group is a
-rigid body with 6 DOF and a damped Gauss–Newton pass (numeric Jacobian, like
-the sketch solver) moves the free bodies until every mate holds. The group of
-the first instance and groups fastened to the world are grounded. Residuals:
-revolute = shared origin and Z axis (free angle), prismatic ("slider") =
-same orientation and origin on the `a` frame's Z axis (free offset), planar
-= parallel Z axes and coplanar origins, ball = shared origin. A servo on a
-revolute mate fixes the angle (`homeDeg`, about the `a` frame's Z from its X
-axis to the `b` frame's X axis). Mates are solved when the view opens and
-after every edit; a conflicting edit is rejected and rolled back.
+| Category | Tool | Gesture |
+| --- | --- | --- |
+| Basic | Select `V`, Line `L`, Point `P` | Two clicks for a line, one for a point. |
+| Rectangles | Corner `R`, center `Shift+R`, 3-point `T`, 3-point center `Shift+T` | Two corners; center + corner; edge + height; center + side midpoint + side. 3-point modes save rotated rectangles. |
+| Circles | Center `C`, 3-point `Shift+C` | Center + rim; three rim points. |
+| Arcs | 3-point `A`, center `Shift+A` (`W` flips sweep), tangent `,` | Start, end, point on arc; center, start, end direction; see [Tangent arc](#tangent-arc-and-smooth-join). |
+| Ellipse | `E` | Center, first axis end, height point. |
+| Polygon, slot | `G`, `S` | Center + vertex (6 sides, edit 3–64); two cap centers + wall point. |
+| Splines | MORE → FIT SPLINE / CTRL SPLINE | Click points; Enter finishes, Shift+Enter closes a fit spline; control splines need 3n + 1 points. |
 
-**View.** **Ctrl+B** (MORE → ASSEMBLY, or an `ASM` row in the Project panel)
-opens the first assembly, creating an empty one when the project has none;
-Ctrl+B, Esc with nothing selected, a PART row or Ctrl+PgUp/PgDn return to
-the part. Every instance is drawn with its part's evaluated bodies (the same
-evaluation as export) placed by its transform, in a per-instance color.
-Right-drag orbits, middle-drag pans, the wheel zooms, as in the 3D preview.
-The hovered instance is brightened; a click selects the instance under the
-cursor (per-triangle instance ids, like body picking) or an INSTANCES row.
-Properties shows the name, the part, editable X/Y/Z (mm) and RX/RY/RZ (deg)
-— click a row, type, Enter re-solves — and the mates on the instance with
-the other instance and any servo angle. **I** lists the project's parts;
-a digit inserts an instance beside the current scene. **Delete** removes
-the selected instance with its connectors, mates and their servos. Mate
-gesture: click a face of instance A, hover a face of instance B, press
-**J**, then **1** fastened, **2** revolute, **3** slider (prismatic), **4**
-planar or **5** ball. Two connectors are added at the picked points, A's Z
-along A's outward face normal and B's Z into B, so a fastened mate puts the
-faces flush and revolute/slider use the face normal as the axis. Every edit
-is one undo step (**Ctrl+Z**, **Ctrl+Y** / **Ctrl+Shift+Z**) and is written
-to the project for Ctrl+S.
+Esc cancels placement. All shapes save as editable web nodes (circle, arc,
+rectangle and rotated-rectangle primitives, `sketchSpline` for both spline
+modes, including periodic fit splines). **K** toggles construction (dimmed,
+not part of profiles, kept by copies). **F** fits the sketch to the view;
+middle-drag pans, the wheel zooms about the pointer.
 
-**Export.** In the assembly view **Ctrl+E** / **Ctrl+Shift+E** write one
-binary / ASCII STL per instance, `<project>-<instance name>.stl`, with the
-instance transform applied, and **Ctrl+Alt+E** writes `<project>.3mf` with
-one object per instance named after it.
+### Placement, snapping and inference
 
-Not yet native: editing connectors or mates after creation (delete the
-instance instead), picking edges as mate axes, world (ground) connectors from
-the UI, servo angle editing, mate limits, and assemblies in `--export`.
-Fixture: `rust/fixtures/assembly.pcad` (two parts, three instances, a
-fastened and a servo-driven revolute mate); `test/rust-roundtrip.test.ts`
-checks that the web loader solves it to the same transforms as
-`rust/src/assembly/tests.rs` (within 1e-3). App tests in
-`rust/src/app/assembly_tests.rs`.
+Placement snaps within 8 px to anchors, midpoints and finite intersections
+of lines, circles, arcs, ellipses, elliptic arcs, splines and
+rectangle/polygon/slot boundaries, then to the origin or grid. A square marks
+the target. **N** toggles geometry snapping, **Shift+G** grid snapping.
+Snapping a new line or open spline endpoint onto a sketch point adds a
+persistent coincidence; other snaps only place a coordinate.
+
+While placing a segment (line, 3-point rectangle edge, arc chord, slot axis)
+a hint with a dashed guide shows `H`/`V` (within 2°), `//`/`T` to a line
+within 30 px, or `TAN`. Hints are visual; with automatic constraints on
+(**7**, `AUTO`, default on) a line committed under an `H`/`V` hint snaps to
+the axis and gets the relation in the same undo step.
+
+### Selection
+
+Click a shape or its row. In Select, drag from empty canvas: left-to-right
+(blue) selects enclosed shapes, right-to-left (green) touched shapes; Shift
+on release adds. Shift+click toggles. Esc or an empty click clears. The last
+selected shape is the primary. The status-bar filters limit what clicks and
+boxes pick (filtered shapes still render). Hover pre-highlights a shape and
+its anchors. Move, copy, scale, rotate, delete, **K** and dragging act on the
+whole selection as one undo step.
+
+### Dragging and transforms
+
+Left-drag a selected shape to move it. A selected shape shows squares on its
+anchors (line ends, points, circle/arc centers, rectangle and
+rotated-rectangle corners, ellipse axis points, polygon vertices, slot cap
+centers; spline handles are circles). Dragging an anchor (7 px pick) moves
+only that anchor as a strong soft target re-solved every frame with every
+relation, so it slides along what they allow (a line end with a driving
+length moves on a circle). Release commits, Esc cancels. Fixed anchors do
+not drag. With several shapes selected, anchors are not dragged
+individually.
+
+Properties: Move X/Y with **Move selected** / **Copy selected** (Ctrl+D
+copies with those values); Scale (positive factor) and Rotate (signed
+degrees) about an editable center CX/CY, each with a copy variant. Copies
+keep driving dimensions. Rotating an axis-aligned rectangle makes it a
+rotated rectangle. Lines with H/V rotate only by quarter turns (odd turns
+swap H and V). Scaling clears expressions of dimensions it changes; moved
+label positions move with the shape.
+
+Spline handles and standalone points have exact X/Y fields. **Delete**
+removes the selection.
+
+### Split, trim, extend
+
+Select the shape, hover and press:
+
+- **I** split: lines, arcs, elliptic arcs and open splines at the cursor;
+  circles and ellipses at two rim points (two arcs; ellipse pieces get
+  `sameEllipse`, `[SE]`); a closed fit spline opens there. Splines use exact
+  cubic subdivision.
+- **Q** trim the span between crossings (one crossing keeps the far side,
+  none deletes the curve); circles become arcs, ellipses elliptic arcs,
+  splines control splines.
+- **U** extend a line, arc or elliptic arc to the nearest boundary.
+
+Retained pieces keep construction, H/V, fixed ends, coincidences, smooth
+joins and point dimensions at surviving anchors; driving lengths and sweeps
+of the cut shape are dropped and a circle's diameter becomes the arc's
+radius. Lines carrying Equal, and offset members, are refused. Extend drops
+length and coincidence on the moved end and refuses fixed ends.
+
+### Fillet and chamfer
+
+Select a line, hover a second line meeting it at a corner and press
+**Shift+W** (fillet) or **Shift+H** (chamfer), or pick both lines via MORE →
+FILLET / CHAMFER. Fillet asks for a radius (empty = last, default 5 mm),
+trims both lines and inserts an arc with `coincident` and `endpointTangent`
+relations and a driving `radius`. Chamfer asks for two setbacks; **Tab**
+switches to distance-angle. It saves the web `chamfer` relation, which the
+solver keeps driving; Shift+H on a chamfer line with nothing hovered edits
+it. Relations at the cut corner are removed. Line-line corners only, as on
+the web.
+
+### Offset
+
+**Shift+U** (MORE → OFFSET) on a line, circle, arc, rectangle, rotated
+rectangle, polygon or slot; type a signed distance (empty = last, default
+5 mm). Positive goes left of a line and grows closed shapes. A line joined
+end to end with others offsets the whole chain with mitered joins
+(`offsetChain`); single shapes use `offset`. The distance stays driving
+(**OFFSET … MM** in Properties) and the copy follows its source through the
+solver. Rows show `[OFS]`. Collapsing, reversing or self-intersecting
+results are rejected.
+
+### Mirror and symmetry
+
+**Shift+I** (MORE → MIRROR) mirrors the selection across the next clicked
+line as a linked `mirror` copy (a corner rectangle's copy is a rotated
+rectangle). **Shift+S** with a mirror line selected, then click two shapes:
+same-kind shapes become whole-shape `mirror` symmetric, otherwise the
+nearest anchors become `symmetric`. The same gesture removes it. Rows show
+`[SYM]`.
+
+### Patterns
+
+**Shift+Z** (MORE → LIN PATTERN): COUNT, SPACING X/Y, ROWS and ROW SPACING
+(`linearPattern`). **;** (MORE → CIRC PATTERN): COUNT and ANGLE (default
+360), then a center click; a sketch point, line end or curve center becomes
+a referenced `centerAnchor`. Full circles step angle/count, open sweeps
+angle/(count − 1). 2–32 cells, at most 64 copies. Copies follow their sources
+and are not independently editable; with a member selected the same key
+edits the pattern. Deleting a source, copy or center removes the relation
+and frees the copies. Rows show `[PAT]`.
+
+### Tangent arc and smooth join
+
+**,** (MORE → TANGENT ARC), click an endpoint of a line, arc or open spline,
+then the far end: the arc continues the source tangent (live preview) and
+saves a `smoothJoin`. **.** with one curve selected and another hovered
+joins their nearest endpoints (G1, `[TJ]`); again removes it. Zero-tangent
+spline ends are rejected.
+
+## Constraints
+
+**Solver** (`solver.rs`, structure of `src/sketch-solver.ts`). Parameters:
+anchor coordinates, radii, ellipse axes and rotation, arc start and sweep,
+shape variables of rectangles, rotated rectangles, polygons and slots
+(`solver::ShapeVar`), and auxiliary curve parameters for point-on-spline and
+Normal. Each relation adds residuals. Levenberg–Marquardt with numeric
+Jacobians solves with soft "stay close" weights, then the relations alone.
+Every edit (move, drag, dimension, transform, new relation) is apply → solve
+→ commit as one undo step, or is rolled back. The edited geometry is held;
+relation sources stay put before targets move. Curves keep size and angles
+unless a relation may change them. Pattern copies are regenerated from their
+sources after every solve instead of being solved.
+
+**Relations.** Select the target, hover the source, press the key; the same
+gesture removes it. All save as web sketch relations.
+
+| Relation | Gesture | Web relation | Row tag |
+| --- | --- | --- | --- |
+| Horizontal / vertical | `H` / `J` on a line | `horizontal` / `vertical` | `[H]` `[V]` |
+| Parallel / perpendicular | `Shift+P` / `Shift+N` | `parallel` / `perpendicular` | `[//]` `[T]` |
+| Collinear | `Shift+L` | `collinear` | `[CL]` |
+| Angle | `Shift+B`, value in Properties | `angle` | `[A]` |
+| Equal (lengths, radii, ellipse axes) | `Shift+E` | `equal` | |
+| Radial distance | `Shift+D` on two circles | `radiusDifference` | `[RD]` |
+| Concentric | `Shift+O` | `concentric` | `[O]` |
+| Tangent (circle/arc pairs; line to circle, arc, ellipse, elliptic arc) | `Shift+Q` | `tangent` | `[T]` |
+| Internal tangent (circles/arcs) | `Shift+Y` | `internalTangent` | `[IT]` |
+| Midpoint (point on line/arc/elliptic arc) | `Shift+M` | `midpoint` | `[MID]` |
+| Point on curve (any finite curve, splines included) | `Shift+V` | `pointOnCurve` | `[POC]` |
+| Normal (line end to a curve) | `Shift+F` | `normal` | `[NORM]` |
+| Fix point, endpoint, center, axis point, corner, vertex, handle | `Shift+K` over the anchor | `fixed` | |
+| Coincident | snap onto a sketch point | `coincident` | |
+| Smooth join / endpoint tangent | `.`, tangent arc, fillet | `smoothJoin` / `endpointTangent` | `[TJ]` |
+| Symmetry / mirror | `Shift+S` / `Shift+I` | `symmetric` / `mirror` | `[SYM]` |
+| Shared ellipse | split an ellipse | `sameEllipse` | `[SE]` |
+| Offset | `Shift+U` | `offset` / `offsetChain` | `[OFS]` |
+| Pattern | `Shift+Z` / `;` | `linearPattern` / `circularPattern` | `[PAT]` |
+| Chamfer | `Shift+H` | `chamfer` | |
+
+Fixed anchors block edits, drags, transforms and dimension changes that
+would move them. Web graph `sketchConstraint` nodes (length, width, height,
+horizontal, vertical) are edited in place and move to sketch relations once
+they gain a label position, reference flag or expression.
+
+**DOF and diagnostics.** `Problem::analyze` ports `src/sketch-redundancy.ts`
+(rank of the relation Jacobian by two-pass Gram–Schmidt). Free DOF: line 4,
+point 2, circle 3, arc 5, ellipse 5, elliptic arc 7, spline 2 per handle,
+corner rectangle 4, rotated rectangle 5, polygon 4, slot 5; pattern copies
+add none. The header shows **DOF n** (green at 0), **OVER-CONSTRAINED**
+(purple, redundant relation) or **CONFLICT** (red, unmet relation); rows get
+`[R]`/`[!]` and matching colors, fully constrained shapes draw green. The
+analysis is cached per document revision and never runs during a drag.
+
+**Glyphs** (`model/glyphs.rs`). Each relation draws a glyph beside every
+entity it involves: `H`/`V`, `//`, `T`, `COL`, `ANG`, `=`, `O`, `TAN`,
+`MID`, `POC`, `NORM`, `TJ`, `SE`, `RD`, `SYM`, `OFS`, `PAT`, and `FIX` with
+a lock square per fixed anchor. Glyphs stack outward along the entity normal
+in its DOF tint. Hovering one highlights the relation's partners; clicking
+selects its entity. **6** toggles glyphs (`GLY`).
+
+## Dimensions
+
+Dimensions are sketch objects (`model/annotations.rs`): per-shape fields,
+line angles and point dimensions.
+
+- **Canvas labels.** Every dimension is drawn in the viewport (lengths
+  parallel to the line, widths/heights along edges, diameter and radius
+  leaders, sweep inside the arc, angles at the vertex, point distances on
+  aligned/horizontal/vertical dimension lines). In Select, click a label to
+  edit inline or drag it; a moved label saves as web `labelPosition` and gets
+  a leader. Clicking selects it: Properties shows kind, value and **MAKE
+  REFERENCE / DRIVING**; Delete removes it.
+- **Properties.** Click line length, rectangle/ellipse/elliptic-arc width or
+  height, circle diameter, arc or polygon radius (`radius`), SWEEP
+  (`arcSweep`, signed, ±360 excluding 0), ANGLE (`rotation`), polygon sides
+  or slot width to edit.
+- **D tool.** Click an entity to add its next missing driving dimension, or
+  two anchors for an aligned distance (Shift on the second click: X, Ctrl:
+  Y). Picking the origin second gives an absolute dimension from a fixed
+  construction point created at the origin. Saved as web `distance` (`a`,
+  `b`, `value`, `axis?`). No line-to-point distance (absent on the web).
+- **Reference.** **R** toggles driving/reference. A reference shows its
+  measured value in parentheses, adds no constraint and saves
+  `reference: true`. Angles cannot be references.
+- **Expressions.** Values accept `+ - * / ( )`, `pi`, units `mm cm m um in
+  inch ft deg rad` and `#name` variables (`sketch_value.rs`, port of
+  `src/sketch-value.ts`). Labels show `expression = value`; saved as
+  `expression` beside the evaluated `value`.
+- **Variables.** With nothing selected, **SKETCH VARIABLES** lists
+  `name = expression` rows (empty deletes an unused one, renaming rewrites
+  references) and **+ ADD VARIABLE**. A change re-evaluates all dependents in
+  one undo step or rolls everything back. Saved in the sketch's `variables`.
+
+## Solids
+
+**Sketch planes.** **1 / 2 / 3** (or + TOP / FRONT / RIGHT) add a sketch on
+the XY / XZ / YZ reference plane using the web frames. Click a sketch row to
+switch; unsaved edits of every sketch and part stay in memory. **B** adds a
+part, Ctrl+PgUp/PgDn switch parts, **F2** / **Shift+F2** rename part /
+sketch.
+
+**Face sketches.** In the 3D view a hovered planar face is outlined yellow
+and named (**TOP FACE**); faces not belonging to an extrusion prism are grey.
+**4** (MORE → SKETCH ON FACE) adds a sketch on it, saved like the web: a
+graph `face` node `face-<extrudeId>-<faceId>` targeted by the sketch.
+Frames follow `getExtrudedFaceDescriptors` and are recomputed on every
+evaluation, so the sketch follows depth changes. The supporting extrusion's
+edges are drawn dashed and snap; **5** toggles them.
+
+**Profiles.** Closed rectangles, rotated rectangles, circles, ellipses,
+polygons, slots, closed fit splines and simple loops of lines and arcs
+(concave, either direction) are profiles; nested closed shapes become holes
+and islands inside holes become new profiles. Open geometry, points and
+construction are ignored; branching, self-intersecting and touching
+boundaries are rejected. With several regions, **[ / ]** choose one
+(outlined cyan; saved as `profileId`). Web segment counts are preserved.
+
+**Extrude.** **X** new body, **Shift+X** cut, **Shift+J** join (cuts/joins
+apply to the nearest earlier new body). The 3D view opens with a translucent
+ghost and a DEPTH prompt: **E** cycles the end condition, **F** flips, Enter
+commits (empty = 50 mm blind), Esc cancels. End conditions: Blind; Symmetric
+(total depth centred, no flip); Through all and Up to body (cut/join only,
+target an earlier new body, **U** then click). A selected extrusion shows
+DEPTH, END, FLIP and TARGET in Properties, each edit one undo step; edits
+that fail to evaluate are rejected. Face-sketch extrusions run along the
+face normal: bodies and joins grow outward, cuts go inward (a native rule;
+flip inverts it). The extruded sketch locks; **Tab** returns to it to
+extrude another profile. Delete removes the selected extrusion and unlocks
+its sketch.
+
+**Revolve** (**8**, MORE → REVOLVE). With a profile selected, click a sketch
+line as the axis or press **X** / **Y**; an ANGLE prompt (empty = 360°) with
+ghost, **O** cycles new body / cut / join. 32 segments per full turn; the
+profile may touch but not cross the axis.
+
+**Loft** (**9**, MORE → LOFT). Pick a profile, open another sketch, pick its
+profile and press **9** (new body) or **Shift+9** (MORE → LOFT JOIN). Outer
+loops are resampled and aligned; holes, edge-on profiles and
+self-intersecting results are rejected.
+
+**Edge finishes** (**0** chamfer, **Shift+0** fillet, in the 3D view).
+Hover highlights the nearest visible sharp edge (normals > 20° apart); click
+edges to toggle, type DISTANCE / RADIUS (empty = 2 mm), Enter. Only straight
+edges between planar faces; tessellated facets are grey and rejected.
+Edges are re-identified by endpoints, then by plane pair, on each
+evaluation.
+
+**Feature tree.** Features (extrusions, revolves, lofts, edge finishes) are
+rows in tree order plus ROLLBACK. Selecting one shows its value in
+Properties (editable). **Ctrl+Up/Down** reorder (refused when a dependency
+would come later or a cut would change body), **Ctrl+H** suppresses (`[S]`,
+dim), **Ctrl+[ / ]** or dragging ROLLBACK moves the bar. Features with
+missing inputs or empty results are `[!]` (click for the reason) and
+skipped; the rest still evaluates. Results are cached per feature; sketch
+edits re-evaluate when returning to the 3D view. Delete is refused while a
+later feature depends on the feature.
+
+**3D view.** **Tab** toggles sketch / 3D. Right-drag orbits about the
+surface point under the cursor (free, can roll), middle-drag pans, the wheel
+zooms (web sensitivities and default angle pitch π/5, yaw π/4).
+**PERSPECTIVE / ORTHO** in the header (ortho default, reset per project).
+**[ / ]** select bodies. Shading: per-face normals, key light from the upper
+right plus ambient and a weak fill; sharp edges (> 20°) drawn dark with
+hidden parts removed. Booleans use `manifold-rust`.
+
+## Assemblies
+
+Top-level `"type": "assembly"` items are web `Assembly` documents
+(`src/contract.ts`): `instances` (`partId`, `transform` with translation,
+Euler XYZ degrees, scale), `connectors`, `mates` (`fasten`, `revolute`,
+`prismatic`, `planar`, `ball`) and `actuators` (servos). `actuators`,
+`variables` and mate `params` round-trip verbatim.
+
+**Solver** (`assembly/solver.rs`). Fasten mates are solved exactly like
+`solveFixedAssembly` (`src/assembly-solver.ts`). Natively each fastened group
+is a rigid body and damped Gauss–Newton moves free bodies until revolute
+(shared origin and Z), slider (same orientation, origin on Z), planar
+(parallel Z, coplanar) and ball (shared origin) mates hold; a revolute servo
+fixes its angle (`homeDeg`). The first instance's group and world-fastened
+groups are grounded. The web stores non-fasten mates without solving them.
+
+**View.** **Ctrl+B** (MORE → ASSEMBLY, or an `ASM` row) opens the first
+assembly, creating one if needed; Ctrl+B, Esc with nothing selected, a part
+row or Ctrl+PgUp/PgDn leave. Instances are drawn with their part's evaluated
+bodies in per-instance colors; orbit, pan and zoom as in the 3D view. Click
+an instance or row: Properties shows name, part, editable X/Y/Z and RX/RY/RZ
+and its mates. **I** then a digit inserts a part instance; **Delete** removes
+an instance with its connectors, mates and servos. Mate: click a face of A,
+hover a face of B, **J**, then **1** fasten, **2** revolute, **3** slider,
+**4** planar, **5** ball (connectors at the picked points, Z along the face
+normals). Edits re-solve and are undoable; conflicting edits are rolled
+back. Ctrl+E / Ctrl+Shift+E write one STL per instance
+(`<project>-<instance>.stl`), Ctrl+Alt+E one 3MF with an object per
+instance.
+
+## Files
+
+**Compatibility.** The native app reads and writes the web `.pcad` v4
+format. A project opens editable when every sketch is on a reference plane
+or an existing extrusion face, every entity and relation is supported, and
+every solid feature resolves. Otherwise it opens read-only with the reason
+shown, for example:
+
+- unsupported relations, relation targets or graph constraint kinds
+  (`"unsupported … relation"`), and `distance` relations with a `direction`;
+- legacy sketch `dimensions` arrays;
+- sketches on planes other than XY/XZ/YZ or on missing faces;
+- web `chamfer` graph nodes (they reference topology `edge` nodes the native
+  app cannot resolve), legacy `solidSteps`/`solids` that do not resolve to
+  native features, and features that fail to evaluate;
+- unknown extrusion end conditions, a non-boolean `flip`, a missing or later
+  up-to-body target, through-all/up-to-body on a new body;
+- assemblies with unknown mate types, dangling connectors or non-positive
+  scale (only that assembly is read-only).
+
+**Native extensions the web loader ignores.**
+
+| Field | Meaning | Web behavior |
+| --- | --- | --- |
+| `extrude.endCondition` (`symmetric`, `through-all`, `up-to-body` + `targetId`), `extrude.flip` | Extrude options | Evaluated as blind with the stored depth. |
+| `"suppressed": true` on feature nodes, `data.tree.rollbackIndex` | Suppression, rollback bar | All features active; `rollbackIndex` dropped on re-save. |
+| `revolve`, `loft`, `edgeFinish` graph nodes (`native-…` ids) | Native features | Dropped when the graph is normalized. |
+| Assembly instance `name` | Instance label | Dropped. |
+
+Feature order is the order of feature nodes in `data.cad.nodes`, mirrored in
+`rootNodeIds` and `data.tree.orderedNodeIds`. Defaults are omitted, so plain
+blind extrusions are byte-identical to web output.
+
+**Saving.** Ctrl+S saves every edited part and sketch together, records the
+active part in `selectedPath`, preserves other project documents, and
+refuses when the file changed on disk or the project is read-only. The
+selected top-level part opens first.
+
+**Export** (3D or assembly view). **Ctrl+E** binary STL per body beside the
+project (80-byte header `PuppyCAD <part> / <body>`), **Ctrl+Shift+E** ASCII
+STL, **Ctrl+Alt+E** one `name.3mf` (core 2015/02, millimeters, one object
+per body). Existing files are kept: new files get numbered names
+(`name-2.stl`). Exports use the evaluated Boolean bodies of active features
+(respecting suppression and rollback). `--export` covers parts only.
 
 ## Shortcuts
 
-Every command lives in one registry (`rust/src/app/commands.rs`): label,
-shortcut, category, availability (view, editable sketch, selection) and the
-action it runs. Keyboard bindings, the MORE menu, the command palette and the
-cheat sheet all dispatch through it.
-
-- **Ctrl+K** (or **Ctrl+Shift+P**) opens the command palette over the
-  viewport. Typing filters by label, category and shortcut text (label
-  prefix first, then word starts, substrings and finally subsequences, so
-  `mirr` or `ctrl+s` find their command). Up/Down move, Enter runs the
-  highlighted command, Esc or a click outside closes it; clicking a row runs
-  it. Commands that cannot run right now (wrong view, read-only sketch, no
-  selection) are dimmed and skipped by the selection.
-- **?** (Shift+/) or **F1** toggles a full-window cheat sheet grouped by
-  category, generated from the registry and balanced over as many columns as
-  the window fits (three at 1280×800). Esc, ?, F1 or a click close it.
-
-Some keys mean different things in a modal context: **R** toggles a selected
-dimension between driving and reference instead of drawing a rectangle,
-**W** flips the sweep while the center-arc tool is active, **Enter** finishes
-a spline, **Esc** cancels an armed up-to-body pick, **E**/**F**/**U** edit the
-selected extrusion in the 3D preview (end condition, flip, up-to body) but
-are Ellipse/Fit/Extend in the sketch, and **[** / **]** cycle profiles in the sketch but solids in the 3D
-preview (with Ctrl they move the rollback bar). Revolve, loft and edge
-finishes use **8**, **9** / **Shift+9** and **0** / **Shift+0** because **6** and
-**7** toggle relation glyphs and automatic constraints. A unit test checks that no chord is bound twice within the same
-context. The table below is the output of
-`cargo run --manifest-path rust/Cargo.toml -- --print-shortcuts`
+Generated by `cargo run --manifest-path rust/Cargo.toml -- --print-shortcuts`
 ("editable": not in read-only sketches; "selection": needs a selected shape
-or dimension):
+or dimension). Context-dependent keys: **R** toggles a selected dimension
+instead of drawing a rectangle, **E / F / U** edit the selected extrusion in
+the 3D view, **[ / ]** cycle profiles in the sketch and solids in 3D, **I /
+J / Delete** act on instances in the assembly view. A unit test rejects
+duplicate bindings within a context.
 
-#### Draw
+### Draw
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1062,7 +520,7 @@ or dimension):
 | `Enter` | Finish spline | placing a spline |
 | `Shift+Enter` | Finish closed spline | placing a spline |
 
-#### Edit
+### Edit
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1084,7 +542,7 @@ or dimension):
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo | any view |
 | `Esc` | Cancel / clear selection | any view |
 
-#### Constrain
+### Constrain
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1104,7 +562,7 @@ or dimension):
 | `Shift+K` | Fix anchor at cursor | any view, editable, selection |
 | `.` | Smooth join (G1) | sketch, editable, selection |
 
-#### Dimension
+### Dimension
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1113,7 +571,7 @@ or dimension):
 | `Shift+B` | Angle to hovered line | sketch, editable, selection |
 | `Shift+D` | Radial distance to hovered circle | sketch, editable, selection |
 
-#### Solid
+### Solid
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1142,7 +600,7 @@ or dimension):
 | `0` | Edge chamfer | any view |
 | `Shift+0` | Edge fillet | any view |
 
-#### View
+### View
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1157,7 +615,7 @@ or dimension):
 | `Ctrl+Shift+H` | Undo history panel | any view |
 | `Ctrl+,` | Settings | any view |
 
-#### Project
+### Project
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1170,7 +628,7 @@ or dimension):
 | `F2` | Rename part | any view |
 | `Shift+F2` | Rename sketch | any view |
 
-#### Assembly
+### Assembly
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1182,7 +640,7 @@ or dimension):
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo assembly edit | assembly view |
 | `Escape` | Clear selection / leave assembly | assembly view |
 
-#### File
+### File
 
 | Shortcut | Command | When |
 | --- | --- | --- |
@@ -1191,337 +649,131 @@ or dimension):
 | `Ctrl+Shift+E` | Export ASCII STL | any view |
 | `Ctrl+Alt+E` | Export 3MF | any view |
 
-## Interface
-
-### Status bar, tooltips and toolbar glyphs
-
-The status bar keeps the message on the left (truncated with `...` before
-the info block). A message too long for the default layout gets more room:
-in the sketch view the info block narrows by 110 px (its text scaled down)
-with the AUTO / GLY toggles kept just left of it; in the 3D view, which has
-no filter toggles, the block moves right next to the zoom and the GEOMETRY/CONSTR/POINTS filter toggles and zoom on
-the right. Between them a two-line block shows the cursor's world
-coordinates in display units (`X - Y -` outside the sketch viewport), the
-current tool, the DOF label (also still in the header) and the snap state
-(`SNAP GEOM+GRID`, `GEOM`, `GRID` or `OFF`, toggled with N and Shift+G).
-The text is rebuilt only when one of those values changes (`StatusCache`);
-it adds no repaints of its own.
-
-Hovering a toolbar button or an open MORE row for 400 ms shows a one-line
-tooltip with the command name and shortcut. Label and shortcut come
-from the command registry (`app/commands.rs`). The event loop waits until the tooltip is due and repaints
-once. Every toolbar label is preceded by a 16x16 pixel-art glyph painted as
-rects (select arrow, rectangle, circle, line, ellipse, three planes, arc,
-`...`); button geometry is unchanged.
-
-### Settings
-
-Ctrl+, (or MORE > SETTINGS, the 22nd MORE row) toggles the SETTINGS panel;
-Esc or CLOSE closes it. Clicking a row cycles its value; every change is
-applied live and saved to `settings.json` in `$PUPPYCAD_CONFIG_DIR`, else
-`$XDG_CONFIG_HOME/puppycad`, else `~/.config/puppycad`:
-
-```json
-{ "units": "mm", "grid_mm": 1.0, "theme": "dark", "ui_scale": null,
-  "window": { "width": 1280, "height": 800, "x": 0, "y": 0 } }
-```
-
-- `units` (mm, cm, in): Properties values, viewport dimension labels,
-  numeric prompts and the status bar show this unit; the model and files
-  stay in millimeters. A plain number typed into a length field is read in
-  the display unit; dimension text gets the unit appended (`2` becomes
-  `2in`) while expressions with their own units are kept as typed.
-  Pattern prompts and status messages still say mm.
-- `grid_mm` (0.5, 1, 2, 5, 10, 25.4): grid snap step. Grid lines are drawn
-  on the multiple of the step nearest 25 mm.
-- `theme` (dark, light): all colors come from a `ThemePalette` with `DARK` and
-  `LIGHT` variants (`app/settings.rs`); the `const` colors are the `DARK`
-  fields and the painter substitutes the active palette.
-- `ui_scale` (`null` = monitor scale factor rounded to 1.0/1.5/2.0, or 1.0,
-  1.5, 2.0): see below.
-- `window`: logical size and position, saved when the window closes.
-
-Unknown or invalid fields fall back to the defaults.
-
-### UI scale
-
-`Layout::scaled` divides the physical surface by the UI scale, so all fixed
-layout coordinates are logical units and every rect grows linearly with the
-scale. The pointer is divided by the scale on input; the painter maps the
-logical canvas onto the surface and snaps font pixels to whole physical
-pixels. The default window is 1280x800 logical, so it also scales with the
-monitor. The UI smoke test runs with an empty `PUPPYCAD_CONFIG_DIR` and
-`ui_scale` 1.0, so its click positions match the 1280x800 layout.
-
 ## Code layout
 
-Library crate (`rust/src/lib.rs`):
+Library crate (`rust/src/lib.rs`, also hosts `roundtrip` and `export`):
 
-- `model/` — the sketch `Document`: `mod.rs` (document state, snapping,
-  selection, drafting, undo), `history.rs` (undo labels and ordering
-  stamps), `shapes.rs` (`Point`, `Shape` and per-shape
-  geometry), `relations.rs` (fixed anchors and relation toggles),
-  `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
-  `offset.rs` (single-shape and mitered chain offsets, the Offset tool),
-  `pattern.rs` (linked linear/grid and circular patterns),
-  `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
-  shared with split/trim), `tangent.rs` (tangent arc, smooth join gesture,
-  endpoint tangents),
-  `dimensions.rs` (`set_dimension`), `annotations.rs` (dimension objects:
-  labels and hit-testing, point dimensions, reference dimensions,
-  expressions and variables), `selection.rs` (multi-selection,
-  `SelectionFilter`, box and toggle selection, `for_each_selected`),
-  `edit.rs` (delete, split, trim, extend,
-  copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
-  dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
-  `geometry.rs` (curve intersections and boundaries), `glyphs.rs` (relation
-  glyph layout, placement inference, automatic H/V), `tests.rs`,
-  `dimension_tests.rs`, `glyph_tests.rs`.
-- `assembly.rs` (assembly documents: instances, connectors, mates, servos,
-  rigid poses and Euler XYZ conversion), `assembly/solver.rs` (fasten graph
-  port and the mate least-squares pass; tests in `assembly/tests.rs`),
-  `project/assemblies.rs` (assembly items in a project, any part's bodies).
-- `project.rs` (`.pcad` load/save, parts, extrusion profiles and end
-  conditions; dimension round-trip tests in `project/dimension_tests.rs`,
-  extrude option tests in `project/extrude_option_tests.rs`),
-  `project/features.rs` (feature tree order, suppression, rollback, error
-  states and the per-feature evaluation cache; tests in
-  `project/features_tests.rs`), `project/face.rs`
-  (plane frames, web face descriptors, face lookup, face sketches and their
-  support edges; tests in `project/face_tests.rs`), `project/features.rs`
-  (revolve, loft and edge finish meshes, sharp-edge detection and the native
-  extension nodes; tests in `project/feature_tests.rs`), `solver.rs`,
-  `sketch_value.rs` (dimension expressions and sketch variables),
-  `spline.rs`, `stl.rs` (body triangles, ASCII/binary STL, numbered
-  writes), `threemf.rs` (3MF package). `lib.rs` also hosts `roundtrip` and
-  `export` for the CLI.
+- `model/` — the sketch `Document`:
+  - `mod.rs` state, snapping, drafting, undo; `history.rs` undo labels and
+    stamps; `shapes.rs` `Point`, `Shape` and per-shape geometry
+  - `relations.rs` fixed anchors and relation toggles; `symmetry.rs` mirror
+    and symmetry; `offset.rs` offsets; `pattern.rs` patterns; `corner.rs`
+    fillet/chamfer; `tangent.rs` tangent arc and smooth join
+  - `dimensions.rs` `set_dimension`; `annotations.rs` dimension objects,
+    references, expressions, variables
+  - `selection.rs` multi-selection and filters; `edit.rs` delete, split,
+    trim, extend, copy, move, scale, rotate; `drag.rs` shape and anchor drags
+  - `solve.rs` problem building and analysis; `geometry.rs` intersections and
+    boundaries; `glyphs.rs` glyph layout, inference, automatic H/V
+- `solver.rs` least-squares solver and DOF analysis; `sketch_value.rs`
+  expressions; `spline.rs` cubic splines; `stl.rs` STL writing; `threemf.rs`
+  3MF package
+- `project.rs` `.pcad` load/save, parts, profiles, extrusions;
+  `project/face.rs` plane frames, face descriptors, face sketches;
+  `project/features.rs` feature tree, evaluation cache, revolve, loft, edge
+  finishes; `project/assemblies.rs` assembly items
+- `assembly.rs` assembly documents and poses; `assembly/solver.rs` mate
+  solver
 
-Binary (`rust/src/main.rs` parses arguments and starts the event loop):
+Binary (`rust/src/main.rs` parses arguments and runs the event loop):
 
-- `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
-  `assembly.rs` (assembly view: scene, picking, panels, insert/delete/mate,
-  property edits, undo and per-instance export; tests in
-  `assembly_tests.rs`),
-  `commands.rs` (command registry, key resolution and the actions behind
-  keyboard/MORE/palette), `palette.rs` (Ctrl+K command palette),
-  `shortcut_overlay.rs` (? / F1 cheat sheet), `history.rs` (cross-view
-  undo/redo and the Ctrl+Shift+H HISTORY panel; tests in
-  `history_tests.rs`),
-  `input.rs` (mouse/keyboard handling; the `winit` handler forwards to
-  `App::handle_window_event` and `App::handle_key`, which tests drive
-  headlessly),
-  `panels.rs` (toolbar and properties panels, dimension and variable
-  editing),
-  `corner.rs` (fillet/chamfer gestures and prompts), `tangent.rs` (tangent
-  arc tool and smooth join key),
-  `pattern.rs` (linear/circular pattern prompts and center pick),
-  `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
-  preview projection, dragging, face and body picking and painting), `extrude.rs`
-  (extrude prompt with ghost preview, end condition/flip/target edits and
-  their undo), `feature_tree.rs` (feature rows, reorder/suppress/rollback
-  keys and drag), `features.rs` (revolve axis pick and ANGLE prompt, loft
-  picks, edge hover/pick and size prompt, extension feature Properties),
-  `view_sketch.rs` (sketch grid
-  and shape painting, dimension labels, hover highlight, relation glyphs and
-  inference hints), `settings.rs` (settings file, units, theme palettes,
-  SETTINGS panel, UI scale), `status.rs` (status bar fields, tooltips,
-  toolbar glyphs), `tests.rs`, `input_tests.rs` (headless keyboard/mouse
-  tests), `settings_tests.rs`, `status_tests.rs`.
-- `renderer.rs` (CPU `Painter` that builds the triangle list, and the
-  `wgpu` `Renderer` that uploads it; `Painter` tests in
-  `renderer_tests.rs`), `view3d.rs` (orbit camera).
+- `app/mod.rs` `App` state, layout, painting; `input.rs` mouse/keyboard
+  (`App::handle_window_event`, `App::handle_key`); `commands.rs` command
+  registry; `palette.rs`; `shortcut_overlay.rs`; `history.rs` cross-view
+  undo and HISTORY panel
+- `app/panels.rs` toolbar and Properties; `project_panel.rs` breadcrumbs and
+  projects page; `status.rs` status bar, tooltips, toolbar glyphs;
+  `settings.rs` settings, units, themes, UI scale
+- `app/view_sketch.rs` sketch painting, labels, glyphs, hints; `corner.rs`,
+  `tangent.rs`, `pattern.rs` tool prompts
+- `app/solid.rs` 3D projection, picking, painting; `extrude.rs` extrude
+  prompt and edits; `feature_tree.rs` feature rows; `features.rs` revolve,
+  loft and edge finish interaction; `assembly.rs` assembly view
+- `renderer.rs` CPU `Painter` and `wgpu` `Renderer`; `view3d.rs` orbit
+  camera; `shader.wgsl`
 
-## Cross-loader round-trip
+Tests: `model/tests.rs`, `model/dimension_tests.rs`, `model/glyph_tests.rs`,
+`project/dimension_tests.rs`, `project/extrude_option_tests.rs`,
+`project/face_tests.rs`, `project/feature_tests.rs`,
+`project/features_tests.rs`, `assembly/tests.rs`, `app/tests.rs`,
+`app/input_tests.rs`, `app/history_tests.rs`, `app/settings_tests.rs`,
+`app/status_tests.rs`, `app/assembly_tests.rs`, `renderer_tests.rs`;
+integration tests `rust/tests/roundtrip.rs` and `rust/tests/export.rs`.
 
-The project, model, spline and STL code is a library crate (`rust/src/lib.rs`);
-the windowed app in `main.rs` builds on it. For headless use,
+## Testing
 
-```sh
-cargo run --manifest-path rust/Cargo.toml -- --roundtrip IN.pcad OUT.pcad
-```
+**Unit tests.** `cd rust && cargo test --workspace` (the app tests drive
+`App` headlessly). CI (`.github/workflows/rust.yml`, pushes and PRs to
+`master` and `rust`) runs `cargo fmt --check`, build, test and
+`cargo clippy --workspace --all-targets -- -D warnings`, then the UI smoke
+job, uploading screenshots as the `rust-ui-smoke` artifact.
 
-loads a project and writes it back exactly as Ctrl+S would, without bumping the
-revision or touching `IN.pcad`. It exits non-zero on any load or save error.
+**Round trip.** `rust/tests/roundtrip.rs` loads every `rust/fixtures/*.pcad`,
+saves, reloads and saves again; both saves must match.
+`test/rust-roundtrip.test.ts` (`bun run test`) loads every fixture in the
+TypeScript loader, passes web-built projects (geometry, dimensions with
+expressions and variables, face sketches) through `--roundtrip` and checks
+they come back identical; it checks web face frames against
+`project/face_tests.rs` and the assembly fixture's solved transforms against
+`assembly/tests.rs` (1e-3). `rust/tests/export.rs` and
+`test/rust-export.test.ts` cover `--export`. The cargo-dependent parts are
+skipped with a warning when `cargo` is missing.
 
-Two tests guard against format drift between the apps:
-
-- `rust/tests/roundtrip.rs` (`cargo test`) loads every `rust/fixtures/*.pcad`,
-  saves it, reloads the saved copy and saves again; both saves must be identical.
-- `test/rust-roundtrip.test.ts` (`bun run test`) loads every Rust fixture in the
-  TypeScript loader and checks its part and sketch counts. It also builds a
-  web-side project (rectangle and line on the XY plane), passes it through
-  `--roundtrip`, and checks the TypeScript loader reads the same entities back.
-  A second web project with length (expression and label position),
-  reference distance, X and Y distance relations and a sketch variable must
-  come back with identical relations and variables. These parts are skipped,
-  with a warning, when `cargo` is not installed. `rust/fixtures/dimensions.pcad`
-  holds every dimension kind the native app writes, so both loaders check it.
-  `rust/fixtures/face-sketch.pcad` has a pocket cut from a top-face sketch and
-  a boss joined from a side-face sketch; the TypeScript test checks the web
-  resolves the same face frames as `project/face_tests.rs`, and a web-built
-  face sketch keeps its face target through `--roundtrip`.
-
-## Isolated UI check
-
-The UI smoke test uses a rootless Docker container, Xvfb, and software Vulkan.
-It runs Rust unit tests, opens the native app in a virtual display, draws a
-rectangle, center rectangle, both three-point rectangle modes, circle, line, ellipse, three-point arc, center arc, point, polygon, and slot with simulated clicks, edits dimensions, polygon sides, and slot width,
-copies, moves, scales, and rotates selected shapes, switches units to inches and the theme to light in the SETTINGS panel, adds Front and Right sketches and switches between them, saves a v4 project, opens a single-extrusion fixture and toggles its view, then authors and saves an extrusion. It writes
-screenshots and a project file to `workdir/`. It also extrudes a concave line
-loop, line-drawn through-hole, slot, arc-and-line profile, and rectangle with two circular through-holes,
-and exports their STLs (ASCII via Ctrl+Shift+E so facet counts can be grepped).
-The existing-solid scenario also checks a binary STL (header and 684-byte size)
-and a 3MF (ZIP parts, 12 triangles, millimeter unit). The authored extrusion scenario also checks a separate
-open line and point beside its closed profile. A web-compatible fixture checks
-an ellipse with 16 segments and a circular hole with 12 segments, plus a slot
-with 12 segments per end cap. Another scenario extrudes both disconnected
-regions from one sketch and checks their saved profile IDs.
-A mirror scenario draws a line and a circle, mirrors the circle across the line
-with Shift+I (`rust-native-mirror.png`: both circle rows show `[SYM]`), and
-checks that the saved project holds a web `mirror` relation.
-A pattern scenario box-selects a circle and makes a 3x1 linear pattern with
-Shift+Z (`rust-native-pattern-linear.png`), then rotates a line six times about
-a sketch point with ; (`rust-native-pattern-circular.png`: a six-spoke
-star around the point, every row `[PAT]`), and checks the saved
-`linearPattern`, `circularPattern` and `centerAnchor` fields. The
-`rust/fixtures/patterns.pcad` fixture (a 3x2 circle grid and a four-way line
-pattern about a referenced point) is opened by both the Rust round-trip test
-and `test/rust-roundtrip.test.ts`.
-A palette scenario draws a line, presses Ctrl+K and types `mirr`
-(`rust-native-palette.png`: Mirror highlighted first), presses F1
-(`rust-native-shortcuts.png`: the three-column cheat sheet), then runs
-Circle from the palette with `circ` + Enter and checks the saved circle.
-A history scenario draws three lines, opens the HISTORY panel with
-Ctrl+Shift+H, clicks the second entry (`rust-native-history.png`: the second
-`Draw line` row highlighted, the newest dimmed above it, two lines left) and
-checks that the saved sketch has two lines.
-It also creates and renames a second part, switches between parts, renames a
-sketch, and saves geometry in both parts. A two-body scenario creates extrusions
-on Top and Front sketches, saves their graph, and exports both STLs.
-It also clicks each extrusion row and edits the selected body's depth.
-An axis-constraint scenario snaps one line horizontally and vertically, then
-undoes the second constraint before saving.
-A dimension scenario adds a point and a line, uses the D tool to add a
-point-to-line-start distance and types 150 into its label
-(`rust-native-dimension-edit.png`), adds the sketch variable `w = 40 mm` in
-Properties, adds an absolute X dimension with Shift+origin driven by
-`#w*-2`, and saves; the file must contain the `distance` relations, the X
-axis, the expression and the variable (`rust-native-dimensions.png`).
-A fixed-line scenario pins an endpoint with Shift+K, checks the saved relation,
-and captures the Properties panel.
-A fixed-center scenario pins a circle center and checks its saved web relation
-and screenshot.
-A fixed-arc scenario pins its end anchor and checks the saved `p1` relation
-and screenshot.
-An ellipse-axis scenario pins `p0` and checks the saved relation and screenshot.
-A corner-rectangle scenario pins `p0`, edits its width, and captures the saved
-relation and screenshot.
-An Equal scenario creates two lines, matches their lengths with Shift+E,
-checks the saved relation, and captures the resulting geometry.
-A concentric scenario matches a circle to an ellipse with Shift+O, checks the
-saved relation, and captures both curves in the viewport.
-Parallel, Perpendicular, and Collinear scenarios match two lines with Shift+P,
-Shift+N, and Shift+L,
-check their saved relations, and capture each result.
-An Angle scenario creates a signed line angle with Shift+B, edits its value,
-checks the saved relation, and captures the result.
-A Radial distance scenario links two circles with Shift+D, edits the signed
-difference, checks the saved relation, and captures both circles.
-An Internal tangent scenario links two nested circles with Shift+Y, checks the
-saved relation, and captures their contact in the viewport.
-An external tangent scenario links two circles with Shift+Q, checks the saved
-relation, and captures their contact in the viewport.
-A line-circle tangent scenario creates the same web `tangent` relation and
-captures the line touching the circle.
-A line-ellipse tangent scenario checks the saved relation and captures the
-line touching the ellipse's curved boundary.
-A midpoint scenario links a point to a line with Shift+M, checks the saved
-relation, and captures the point at the line's midpoint.
-A Point on curve scenario links a point to a circle with Shift+V, checks the
-saved relation, and captures the point on the circle's rim.
-A Normal scenario links a line endpoint to a circle with Shift+F, checks the
-saved relation, and captures the radial line touching the circle.
-An ellipse Equal scenario matches both axes with Shift+E, checks the saved
-relation, and captures the two curves.
-A radius scenario edits an arc and polygon in Properties, checks both saved
-`radius` relations, and captures the result.
-An angular scenario edits an arc's signed sweep and a polygon's rotation,
-checks the saved relations, and captures both shapes.
-A deletion scenario opens a saved extrusion, removes its solid, draws new sketch
-geometry, and saves the updated graph.
-A graph-constraint fixture checks that an existing horizontal line and length
-constraint render correctly and that a length edit updates its graph node.
-A three-point circle scenario draws the circle, checks its screenshot, and saves
-the web circle primitive.
-A fillet scenario draws two lines meeting at a corner, fillets it with Shift+W
-(`rust-native-fillet.png`), chamfers a second corner with Shift+H in
-distance-angle mode (`rust-native-chamfer.png`), and checks the saved
-`endpointTangent` and `chamfer` relations.
-An offset scenario draws an L of two lines, offsets the chain by 20 mm with
-Shift+U (`rust-native-offset.png`), and checks the saved `offsetChain`
-relation.
-A tangent arc scenario draws a line, presses `,`, clicks the line's end and
-captures the live preview (`rust-native-tangent-arc-preview.png`), places the
-arc, then smooth-joins a second line to the first line's start with `.`
-(`rust-native-tangent-arc.png`) and checks the two saved `smoothJoin`
-relations.
-A face sketch scenario extrudes a rectangle, hovers its top face
-(`rust-native-face-hover.png`), presses 4, draws a circle over the projected
-block outline (`rust-native-face-sketch.png`), cuts it with Shift+X
-(`rust-native-face-cut.png`) and checks the saved `face` node and cut.
-A viewport feedback scenario draws two lines, makes them parallel with
-Shift+P, hovers one in Select mode (`rust-native-glyphs-hover.png`: hover
-highlight plus `//` glyphs on both lines), places a near-horizontal line
-(`rust-native-glyphs-hint.png`: dashed guide and `H` hint), commits it
-(`rust-native-glyphs-auto.png`: the line is horizontal with an `H` glyph) and
-checks the saved `parallel` and `horizontal` relations.
-A feature tree scenario opens `fixtures/feature-tree.pcad`, selects the
-suppressed cut (`rust-native-tree-suppressed.png`), unsuppresses it with
-Ctrl+H (`rust-native-tree-unsuppressed.png`), moves the join above the cut
-with Ctrl+Up (`rust-native-tree-reordered.png`), moves the rollback bar with
-Ctrl+[ (`rust-native-tree-rollback.png`), drags the ROLLBACK row above the
-join (`rust-native-tree-rollback-drag.png`) and checks the saved
-`rollbackIndex`.
-A revolve scenario draws a rectangle and a vertical line beside it, presses
-8 (`rust-native-revolve-axis.png`), clicks the line as the axis
-(`rust-native-revolve-preview.png`) and commits a 360° ring
-(`rust-native-revolve.png`). An edge chamfer scenario extrudes a block,
-presses 0, hovers a top edge (`rust-native-edge-chamfer-hover.png`), clicks
-it, types 10 and commits (`rust-native-edge-chamfer.png`); both check the
-saved `revolve` / `edgeFinish` nodes. A loft scenario extrudes a block,
-starts a loft (9) from a wider rectangle on a new Top sketch, sketches a
-circle on the block's top face and picks MORE → LOFT JOIN
-(`rust-native-loft-more.png`, `rust-native-loft.png`), checking the saved
-join `loft` node.
-
-saved `revolve` / `edgeFinish` nodes. The assembly scenario opens
-`fixtures/assembly.pcad`, presses Ctrl+B, clicks an instance
-(`rust-native-assembly-selected.png`), exports three instance STLs and a
-3MF with three objects, deletes the instance and checks the saved file.
-It does not open a host desktop
-window.
+**UI smoke.** A rootless Docker container with Xvfb and software Vulkan
+runs the unit tests, then drives the app with simulated input
+(`rust/ui-smoke.sh`), checking saved files and exports and writing
+`rust-native-*.png` screenshots to `workdir/`. Settings come from an empty
+`PUPPYCAD_CONFIG_DIR` at UI scale 1.0, so clicks match the 1280×800 layout.
 
 ```sh
 docker --context rootless build -f rust/Dockerfile.ui-test -t puppycad-ui-test rust
 docker --context rootless run --rm -v "$PWD/workdir:/out" puppycad-ui-test
-```
-
-For a focused projection check, run the following after building the image. It
-captures both modes in `workdir/rust-projection-*.png`, checks that the rendered
-model changes, and verifies that switching back restores it exactly.
-
-```sh
+# projection-only check (rust-projection-*.png):
 docker --context rootless run --rm -v "$PWD/workdir:/out" \
   -v "$PWD/rust/ui-projection-smoke.sh:/app/ui-projection-smoke.sh:ro" \
   puppycad-ui-test sh /app/ui-projection-smoke.sh
 ```
 
-## Continuous integration
+| Area | Scenarios | Screenshots (`rust-native-…`) |
+| --- | --- | --- |
+| Drawing | all tools, 3-point circle, center arc, rectangles, splines, fit view | `container`, `three-point-circle`, `center-arc`, `center-rectangle`, `three-point-rectangles`, `author-splines`, `splines`, `fit-before/after`, `tools-menu` |
+| Editing | copy, move, scale, rotate, construction, box select, anchor drag | `copy`, `scale`, `rotate`, `construction`, `construction-dimmed`, `box-select*`, `anchor-drag` |
+| Split / trim / extend | lines, arcs, circles, ellipses, splines | `split-*`, `trim-*`, `extend-*`, `*-trim-spline` |
+| Snapping | anchor, intersections, linked move | `snap-target`, `intersection-snap`, `*-intersection`, `snap-linked-move` |
+| Spline edits | handle drag, coordinates, fix | `spline-handle`, `spline-coordinates`, `fixed-spline`, `point-coordinates` |
+| Relations | fixed anchors, Equal, Concentric, Parallel/Perp/Collinear, Angle, radial distance, tangents, Midpoint, POC, Normal, H/V, graph constraints | `fixed-*`, `equal-*`, `concentric`, `line-angle`, `radius-difference`, `internal-tangent`, `external-tangent`, `line-*-tangent`, `midpoint`, `point-on-curve`, `normal`, `horizontal-line`, `vertical-line`, `graph-constraint-*`, `dof-header` |
+| Dimensions | Properties edits, D tool, variables, radius, sweep/rotation | `dimension-edit`, `dimensions`, `dimension-copy`, `curve-radius`, `angular-dimensions` |
+| Sketch tools | mirror, fillet/chamfer, offset, patterns, tangent arc | `mirror`, `fillet`, `chamfer`, `offset`, `pattern-*`, `tangent-arc`, `tangent-arc-preview` |
+| Feedback / UI | glyphs and hints, palette, cheat sheet, history, settings | `glyphs-hover/hint/auto`, `palette`, `shortcuts`, `history`, `settings-*` |
+| Parts and files | sketches per plane, parts, rename, save failure | `two-parts`, `part-switch`, `part-list`, `created-part`, `renamed-part`, `save-failed` |
+| Solids | extrude profiles, holes, two bodies, cut, join, depth, delete, STL/3MF, orbit, options | `solid*`, `*-solid`, `two-bodies`, `two-profiles-two-bodies`, `profile-selection`, `cut-extrusion`, `join-extrusion`, `deleted-solid`, `stl-export`, `extrude-preview`, `extrude-symmetric*` |
+| Face sketches | hover, sketch, cut | `face-hover`, `face-sketch`, `face-cut` |
+| Feature tree | suppress, reorder, rollback | `tree-*` |
+| Revolve / loft / finish | revolve, edge chamfer, loft join | `revolve*`, `edge-chamfer*`, `loft*` |
+| Assembly | open, select, export, delete | `assembly`, `assembly-selected`, `assembly-deleted` |
 
-`.github/workflows/rust.yml` runs on pushes and pull requests to `master` and
-`rust`. The `build-test` job runs `cargo fmt --check`, `cargo build --workspace`,
-and `cargo test --workspace` in `rust/`; `cargo clippy --workspace -- -D warnings`
-also runs but is non-blocking until existing lints are fixed. The `ui-smoke`
-job builds `rust/Dockerfile.ui-test` with plain Docker, runs the smoke test
-with `workdir/` mounted at `/out`, and uploads the screenshots as the
-`rust-ui-smoke` artifact.
+## Known gaps
+
+- STEP export.
+- Assemblies: connectors and mates cannot be edited after creation (delete
+  the instance instead); no edge axes or world connectors from the UI; servo
+  angles are not editable; no mate limits; `--export` skips assemblies.
+- The web app does not read the native extensions (extrude options,
+  suppression, rollback, revolve, loft, edge finish, instance names) and
+  does not solve non-fasten mates.
+- Web `chamfer` graph nodes (topology edges) open read-only.
+- Pattern copies are regenerated after each solve, not solved; skipped
+  instances and more than 64 copies are unsupported.
+- Snaps infer only coincidence with sketch points; midpoint and
+  intersection snaps add no relation (the web infers both).
+- Lines carrying Equal, and offset members, cannot be split, trimmed or
+  extended; H/V lines rotate only by quarter turns.
+- No diameter-circle tool, conics or text.
+- Fillet and chamfer are line-line only; no ellipse, elliptic-arc or spline
+  offset, mixed line/arc chains or rounded joins (all open on the web too).
+- Splines: no closed control splines, curvature or handle-continuity
+  constraints; midpoint on a spline is rejected (as on the web).
+- Edge finishes accept only straight edges between planar faces.
+- Faces of cut features cannot carry sketches; face-sketch cuts run inward
+  by a native rule the web graph cannot express.
+- Pattern prompts ignore the display unit.
