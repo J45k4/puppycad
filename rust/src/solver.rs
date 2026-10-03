@@ -108,6 +108,20 @@ pub enum Constraint {
         at: (f64, f64),
     },
     Coincident(PointVar, PointVar),
+    /// Point-to-point distance: `|b - a| == value` (web `distance`).
+    PointDistance {
+        a: PointVar,
+        b: PointVar,
+        value: Value,
+    },
+    /// Signed coordinate difference `b.x - a.x` (or `b.y - a.y` when
+    /// `vertical`) equals `value` (web `distance` with `axis`).
+    AxisDistance {
+        a: PointVar,
+        b: PointVar,
+        vertical: bool,
+        value: Value,
+    },
     Horizontal(LineVar),
     Vertical(LineVar),
     Length {
@@ -532,6 +546,12 @@ impl Constraint {
                 point(&mut out, a);
                 point(&mut out, b);
             }
+            Constraint::PointDistance { a, b, value: v }
+            | Constraint::AxisDistance { a, b, value: v, .. } => {
+                point(&mut out, a);
+                point(&mut out, b);
+                value(&mut out, v);
+            }
             Constraint::Horizontal(l) | Constraint::Vertical(l) => line(&mut out, l),
             Constraint::Length { line: l, value: v }
             | Constraint::Rotation {
@@ -853,6 +873,21 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
             let (ax, ay) = pt(p, first);
             let (bx, by) = pt(p, second);
             out.extend([ax - bx, ay - by]);
+        }
+        Constraint::PointDistance { a, b, value: v } => {
+            let (ax, ay) = pt(p, a);
+            let (bx, by) = pt(p, b);
+            out.push((bx - ax).hypot(by - ay) - value(p, v));
+        }
+        Constraint::AxisDistance {
+            a,
+            b,
+            vertical,
+            value: v,
+        } => {
+            let (ax, ay) = pt(p, a);
+            let (bx, by) = pt(p, b);
+            out.push(if vertical { by - ay } else { bx - ax } - value(p, v));
         }
         Constraint::Horizontal(line) => out.push(delta(p, line).1),
         Constraint::Vertical(line) => out.push(delta(p, line).0),
@@ -1375,6 +1410,52 @@ mod tests {
         let result = problem.solve(Options::default());
         assert!(!result.converged);
         assert!(result.residual_norm > 1e-3);
+    }
+
+    #[test]
+    fn point_distance_residual_and_solve() {
+        let mut problem = Problem::default();
+        let a = problem.point(0.0, 0.0, true);
+        let b = problem.point(3.0, 4.0, false);
+        let constraint = Constraint::PointDistance {
+            a,
+            b,
+            value: Value::Const(10.0),
+        };
+        let mut out = Vec::new();
+        residual(&constraint, &problem.params, &mut out);
+        assert_eq!(out, vec![-5.0]);
+        assert_eq!(constraint.vars(), vec![a.x, a.y, b.x, b.y]);
+        problem.constraints = vec![constraint];
+        let p = solved(&problem).params;
+        close(p[b.x].hypot(p[b.y]), 10.0);
+    }
+
+    #[test]
+    fn axis_distance_residual_is_signed_and_solves_one_axis() {
+        let mut problem = Problem::default();
+        let a = problem.point(1.0, 2.0, true);
+        let b = problem.point(4.0, 6.0, false);
+        let x = Constraint::AxisDistance {
+            a,
+            b,
+            vertical: false,
+            value: Value::Const(-5.0),
+        };
+        let y = Constraint::AxisDistance {
+            a,
+            b,
+            vertical: true,
+            value: Value::Const(4.0),
+        };
+        let mut out = Vec::new();
+        residual(&x, &problem.params, &mut out);
+        residual(&y, &problem.params, &mut out);
+        assert_eq!(out, vec![8.0, 0.0]);
+        problem.constraints = vec![x, y];
+        let p = solved(&problem).params;
+        close(p[b.x], -4.0);
+        close(p[b.y], 6.0);
     }
 
     #[test]

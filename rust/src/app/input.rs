@@ -314,6 +314,7 @@ impl App {
             return;
         }
         match self.document.tool {
+            Tool::Dimension => self.dimension_click(point, raw_world),
             Tool::Select => {
                 self.split_circle_start = None;
                 if let Some(key) = self
@@ -440,6 +441,65 @@ impl App {
             };
         } else {
             self.begin_label_edit(drag.key);
+        }
+    }
+
+    /// D tool: an entity gets its own dimension; two anchors (or an anchor
+    /// and the origin) get a distance, Shift for X and Ctrl for Y. The new
+    /// dimension's label opens for typing its value.
+    fn dimension_click(&mut self, screen: Point, world: Point) {
+        let tolerance = 8.0 / self.document.zoom.max(0.2);
+        let anchor = self.document.dimension_anchor_near(world, tolerance);
+        let origin = world.distance(Point { x: 0.0, y: 0.0 }) <= tolerance;
+        let Some(start) = self.dimension_start else {
+            if let Some(anchor) = anchor {
+                self.dimension_start = Some(anchor);
+                self.status_message =
+                    "Dimension: pick the second point or the origin  |  Shift: X  Ctrl: Y  |  Esc: cancel"
+                        .into();
+            } else if let Some(key) = self
+                .document
+                .dimension_label_at(screen, self.viewport_origin())
+            {
+                self.begin_label_edit(key);
+            } else if let Some(id) = self
+                .document
+                .shapes
+                .iter()
+                .rev()
+                .find(|shape| shape.hit(world, 5.0 / self.document.zoom.max(0.2)))
+                .map(Shape::id)
+            {
+                match self.document.add_entity_dimension(id) {
+                    Ok(key) => self.begin_label_edit(key),
+                    Err(error) => self.status_message = format!("Dimension: {error}"),
+                }
+            } else {
+                self.status_message =
+                    "Dimension: click an entity, a point, line end or curve center".into();
+            }
+            return;
+        };
+        let axis = if self.modifiers.shift_key() {
+            Some(model::PointAxis::X)
+        } else if self.modifiers.control_key() {
+            Some(model::PointAxis::Y)
+        } else {
+            None
+        };
+        let target = match anchor {
+            Some(anchor) => Some(anchor),
+            None if origin => None,
+            None => {
+                self.status_message =
+                    "Dimension: pick a point, line end, curve center or the origin".into();
+                return;
+            }
+        };
+        self.dimension_start = None;
+        match self.document.add_point_dimension(start, target, axis) {
+            Ok(key) => self.begin_label_edit(key),
+            Err(error) => self.status_message = format!("Dimension: {error}"),
         }
     }
 
@@ -1234,6 +1294,7 @@ impl ApplicationHandler for App {
                             };
                         }
                         KeyCode::KeyP => self.select_tool(Tool::Point),
+                        KeyCode::KeyD => self.select_tool(Tool::Dimension),
                         KeyCode::KeyG if self.modifiers.shift_key() => {
                             self.snap_grid = !self.snap_grid;
                             self.status_message = format!(
@@ -1436,6 +1497,8 @@ impl ApplicationHandler for App {
                         }
                         KeyCode::Escape => {
                             self.split_circle_start = None;
+                            self.dimension_start = None;
+                            self.selected_dimension = None;
                             self.spline_points.clear();
                             if self.document.cancel_drag() {
                                 self.status_message = "Move cancelled".into();
@@ -1467,7 +1530,15 @@ impl ApplicationHandler for App {
                                     }
                                 }
                             } else if !self.read_only() {
-                                self.document.delete_selected();
+                                if let Some(key) = self.selected_dimension.take() {
+                                    self.status_message = match self.document.delete_dimension(key)
+                                    {
+                                        Ok(()) => "Dimension removed  |  Ctrl+S to save".into(),
+                                        Err(error) => format!("Dimension: {error}"),
+                                    };
+                                } else {
+                                    self.document.delete_selected();
+                                }
                             }
                         }
                         KeyCode::KeyS

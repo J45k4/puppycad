@@ -206,7 +206,7 @@ impl App {
                 },
                 Tool::Point => None,
                 Tool::FitSpline | Tool::ControlSpline => None,
-                Tool::Select => None,
+                Tool::Select | Tool::Dimension => None,
             };
             if let Some(shape) = draft {
                 self.paint_shape(painter, &shape, origin, true);
@@ -676,6 +676,16 @@ impl App {
             EditField::Label(key) => Some((key, edit.buffer.as_str())),
             _ => None,
         });
+        if let Some(start) = self
+            .dimension_start
+            .and_then(|anchor| self.document.dimension_anchor(anchor))
+        {
+            let at = self.document.world_to_screen(start, origin);
+            painter.circle(at.x, at.y, 6.0, 2.0, ACCENT);
+            if layout.viewport.contains(self.cursor.x, self.cursor.y) {
+                painter.line(at.x, at.y, self.cursor.x, self.cursor.y, 1.0, ACCENT);
+            }
+        }
         for label in self.document.dimension_labels() {
             let dragged = self
                 .label_drag

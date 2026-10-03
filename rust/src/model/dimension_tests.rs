@@ -98,3 +98,113 @@ fn moving_a_label_is_one_undo_step_and_editing_by_key_keeps_selection() {
     assert!(doc.delete_selected());
     assert!(doc.dims.label_positions.is_empty());
 }
+
+fn point(document: &mut Document, at: Point) -> u32 {
+    document.add_point(at);
+    document.shapes.last().unwrap().id()
+}
+
+#[test]
+fn point_distance_dimension_drives_the_second_point() {
+    let mut doc = Document::default();
+    let a = point(&mut doc, p(0.0, 0.0));
+    let l = line(&mut doc, p(30.0, 40.0), p(80.0, 40.0));
+    let key = doc.add_point_dimension((a, 0), Some((l, 0)), None).unwrap();
+    assert_eq!(doc.dimension_value(key), Some(50.0));
+    assert_eq!(doc.dimension_labels()[0].text, "50");
+    doc.set_dimension_value(key, 100.0).unwrap();
+    let start = doc.dimension_anchor((l, 0)).unwrap();
+    assert!((start.distance(p(0.0, 0.0)) - 100.0).abs() < 1e-2);
+    assert_eq!(doc.dimension_anchor((a, 0)), Some(p(0.0, 0.0)));
+    doc.undo();
+    assert_eq!(doc.dimension_value(key), Some(50.0));
+    doc.undo();
+    assert!(doc.dimension_keys().is_empty());
+    assert!(doc.dimension_value(key).is_none());
+    assert!(doc.add_point_dimension((a, 0), Some((a, 0)), None).is_err());
+    assert!(doc.set_dimension_value(key, -1.0).is_err());
+}
+
+#[test]
+fn axis_dimensions_between_points_and_from_origin() {
+    let mut doc = Document::default();
+    let a = point(&mut doc, p(10.0, 5.0));
+    let b = point(&mut doc, p(30.0, 25.0));
+    let dx = doc
+        .add_point_dimension((a, 0), Some((b, 0)), Some(PointAxis::X))
+        .unwrap();
+    assert_eq!(doc.dimension_value(dx), Some(20.0));
+    doc.set_dimension_value(dx, -15.0).unwrap();
+    let at = doc.dimension_anchor((b, 0)).unwrap();
+    assert!((at.x + 5.0).abs() < 1e-3 && (at.y - 25.0).abs() < 1e-3);
+    // Absolute Y from the origin creates one fixed origin point, reused.
+    let y = doc
+        .add_point_dimension((a, 0), None, Some(PointAxis::Y))
+        .unwrap();
+    let x = doc
+        .add_point_dimension((a, 0), None, Some(PointAxis::X))
+        .unwrap();
+    let origins = doc
+        .shapes
+        .iter()
+        .filter(|shape| matches!(shape, Shape::Point { at, .. } if *at == p(0.0, 0.0)))
+        .count();
+    assert_eq!(origins, 1);
+    assert_eq!(doc.dimension_text(y).unwrap(), "Y5");
+    doc.set_dimension_value(y, 12.0).unwrap();
+    doc.set_dimension_value(x, 7.0).unwrap();
+    assert!(doc.dimension_anchor((a, 0)).unwrap().distance(p(7.0, 12.0)) < 1e-3);
+    let origin_id = doc.dims.point_dimensions[&match y {
+        DimensionKey::Point(id) => id,
+        _ => unreachable!(),
+    }]
+        .a
+        .0;
+    assert_eq!(doc.dimension_anchor((origin_id, 0)), Some(p(0.0, 0.0)));
+    // Deleting a dimensioned point removes its dimensions.
+    doc.selected = Some(a);
+    assert!(doc.delete_selected());
+    assert!(doc.dims.point_dimensions.is_empty());
+}
+
+#[test]
+fn conflicting_point_dimension_rolls_back() {
+    let mut doc = Document::default();
+    let l = line(&mut doc, p(0.0, 0.0), p(40.0, 0.0));
+    doc.selected = Some(l);
+    doc.set_dimension(DimensionField::LineLength, 40.0).unwrap();
+    let key = doc.add_point_dimension((l, 0), Some((l, 1)), None).unwrap();
+    assert!(doc.set_dimension_value(key, 60.0).is_err());
+    assert_eq!(doc.dimension_value(key), Some(40.0));
+    assert!(matches!(doc.shapes[0], Shape::Line { b, .. } if (b.x - 40.0).abs() < 1e-3));
+    doc.delete_dimension(key).unwrap();
+    assert_eq!(doc.dimension_keys().len(), 1);
+}
+
+#[test]
+fn entity_dimension_picks_the_next_missing_field() {
+    let mut doc = Document {
+        tool: Tool::Rectangle,
+        draft_start: Some(p(0.0, 0.0)),
+        ..Document::default()
+    };
+    assert!(doc.finish_draft(p(30.0, 20.0)));
+    let rect = doc.shapes[0].id();
+    assert_eq!(
+        doc.add_entity_dimension(rect),
+        Ok(DimensionKey::Field(rect, DimensionField::RectangleWidth))
+    );
+    assert_eq!(
+        doc.add_entity_dimension(rect),
+        Ok(DimensionKey::Field(rect, DimensionField::RectangleHeight))
+    );
+    assert!(doc.add_entity_dimension(rect).is_err());
+    assert_eq!(
+        doc.dimension_value(DimensionKey::Field(rect, DimensionField::RectangleHeight)),
+        Some(20.0)
+    );
+    let a = point(&mut doc, p(50.0, 50.0));
+    assert!(doc.add_entity_dimension(a).is_err());
+    assert_eq!(doc.dimension_anchor_near(p(50.5, 50.0), 2.0), Some((a, 0)));
+    assert_eq!(doc.dimension_anchor_near(p(55.0, 50.0), 2.0), None);
+}

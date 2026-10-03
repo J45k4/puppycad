@@ -1448,6 +1448,9 @@ impl App {
             Tool::Arc => "Arc: click start, end, then through point  |  Esc: cancel",
             Tool::CenterArc => "Center arc: center, start, end direction  |  W: clockwise",
             Tool::Point => "Point: click to place  |  Esc: cancel",
+            Tool::Dimension => {
+                "Dimension: click an entity, or two points (Shift: X, Ctrl: Y; origin for absolute)"
+            }
             Tool::Polygon => "Polygon: click center, then vertex  |  Esc: cancel",
             Tool::Slot => "Slot: click two centers, then side wall  |  Esc: cancel",
         };

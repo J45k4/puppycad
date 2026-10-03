@@ -15,7 +15,8 @@ mod solve;
 mod tests;
 
 pub use annotations::{
-    DimensionKey, DimensionLabel, DimensionMeta, LABEL_SCALE, format_value, label_size,
+    DimensionKey, DimensionLabel, DimensionMeta, LABEL_SCALE, PointAxis, PointDimension,
+    format_value, label_size,
 };
 use geometry::*;
 pub use shapes::{Point, Shape};
@@ -39,6 +40,8 @@ pub enum Tool {
     Point,
     Polygon,
     Slot,
+    /// Point distance, point X / Y and entity dimensions (D).
+    Dimension,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -193,6 +193,8 @@ pub(crate) struct App {
     selected_dimension: Option<DimensionKey>,
     /// Label press in progress: a click edits it, a drag moves it.
     label_drag: Option<LabelDrag>,
+    /// First anchor picked with the D tool.
+    dimension_start: Option<(u32, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -272,6 +274,7 @@ impl Default for App {
             analysis: Default::default(),
             selected_dimension: None,
             label_drag: None,
+            dimension_start: None,
         }
     }
 }
@@ -389,6 +392,7 @@ impl App {
     fn select_tool(&mut self, tool: Tool) {
         self.document.finish_drag();
         self.split_circle_start = None;
+        self.dimension_start = None;
         if self.document.tool != tool {
             self.document.draft_start = None;
             self.document.draft_end = None;

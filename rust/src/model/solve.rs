@@ -375,6 +375,7 @@ impl Document {
             .chain(self.equal_ellipses.keys())
             .chain(self.shared_ellipses.keys())
             .chain(self.point_links.values())
+            .chain(self.dims.point_dimensions.values().map(|d| &d.b.0))
             .copied()
             .chain(self.projected_targets())
             .collect();
@@ -555,6 +556,33 @@ impl Document {
                 }
                 _ => {}
             }
+        }
+        for dimension in self.dims.point_dimensions.values() {
+            let anchor = |b: &mut SolverBuilder, (id, index): (u32, usize)| match b.entity(id)? {
+                SolverEntity::Line(line) => match index {
+                    0 => Some(line.a),
+                    1 => Some(line.b),
+                    _ => None,
+                },
+                SolverEntity::Point(point) if index == 0 => Some(point),
+                SolverEntity::Spline(spline) => spline.points.get(index).copied(),
+                found if index == 0 => found.center(),
+                _ => None,
+            };
+            let (Some(a), Some(p)) = (anchor(&mut b, dimension.a), anchor(&mut b, dimension.b))
+            else {
+                continue;
+            };
+            let value = Value::Const(dimension.value as f64);
+            constraints.push(match dimension.axis {
+                None => Constraint::PointDistance { a, b: p, value },
+                Some(axis) => Constraint::AxisDistance {
+                    a,
+                    b: p,
+                    vertical: axis == PointAxis::Y,
+                    value,
+                },
+            });
         }
         for (&(curve, endpoint), &point_id) in &self.point_links {
             let end = match b.entity(curve) {

@@ -2,7 +2,7 @@
 //! dimensions, reference dimensions, expressions and sketch variables).
 
 use super::*;
-use crate::model::Tool;
+use crate::model::{PointAxis, Tool};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn test_path(name: &str) -> PathBuf {
@@ -64,5 +64,94 @@ fn dimension_label_position_round_trips_as_web_label_position() {
         loaded.dims.label_positions.get(&key),
         Some(&Point { x: 25.0, y: 12.0 })
     );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn point_dimensions_round_trip_as_web_distance_relations() {
+    let path = test_path("distance");
+    let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+    document.add_point(Point { x: 10.0, y: 5.0 });
+    let point = document.shapes.last().unwrap().id();
+    let line = draw_line(
+        &mut document,
+        Point { x: 40.0, y: 45.0 },
+        Point { x: 90.0, y: 45.0 },
+    );
+    let distance = document
+        .add_point_dimension((point, 0), Some((line, 0)), None)
+        .unwrap();
+    document.set_dimension_value(distance, 60.0).unwrap();
+    let dx = document
+        .add_point_dimension((point, 0), Some((line, 1)), Some(PointAxis::X))
+        .unwrap();
+    let absolute_y = document
+        .add_point_dimension((point, 0), None, Some(PointAxis::Y))
+        .unwrap();
+    document
+        .set_dimension_label_position(dx, Some(Point { x: 1.0, y: 2.0 }))
+        .unwrap();
+    project.save(&document).unwrap();
+    let relations = sketch_relations(&project);
+    let distances: Vec<&Value> = relations
+        .iter()
+        .filter(|relation| relation["type"] == "distance")
+        .collect();
+    assert_eq!(distances.len(), 3);
+    assert_eq!(distances[0]["a"]["point"], "center");
+    assert_eq!(distances[0]["b"]["point"], "p0");
+    assert!((distances[0]["value"].as_f64().unwrap() - 60.0).abs() < 1e-4);
+    assert!(distances[0].get("axis").is_none());
+    assert_eq!(distances[1]["axis"], "x");
+    assert_eq!(distances[1]["b"]["point"], "p1");
+    assert_eq!(distances[1]["labelPosition"], json!({"x": 1.0, "y": 2.0}));
+    assert_eq!(distances[2]["axis"], "y");
+    assert_eq!(distances[2]["value"], 5.0);
+    // The origin anchor is a fixed construction point.
+    assert!(relations.iter().any(|relation| relation["type"] == "fixed"
+        && relation["anchor"]["entityId"] == distances[2]["a"]["entityId"]));
+
+    let (mut reopened, mut loaded) = ProjectFile::open(&path).unwrap();
+    assert_eq!(reopened.read_only_reason(), None);
+    assert_eq!(loaded.dims.point_dimensions.len(), 3);
+    assert_eq!(loaded.dimension_keys().len(), 3);
+    assert!(loaded.dims.label_positions.contains_key(&dx));
+    let y = loaded.dimension_keys()[2];
+    assert_eq!(loaded.dimension_value(y), Some(5.0));
+    loaded.set_dimension_value(y, 8.0).unwrap();
+    reopened.save(&loaded).unwrap();
+    let relations = sketch_relations(&reopened);
+    let ids: Vec<&Value> = relations
+        .iter()
+        .filter(|relation| relation["type"] == "distance")
+        .map(|relation| &relation["id"])
+        .collect();
+    let original: Vec<&Value> = distances.iter().map(|relation| &relation["id"]).collect();
+    assert_eq!(ids, original);
+    let _ = absolute_y;
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn unsupported_distance_relation_keeps_sketch_read_only() {
+    let path = test_path("distance-direction");
+    let (mut project, mut document) = ProjectFile::open(&path).unwrap();
+    document.add_point(Point { x: 0.0, y: 0.0 });
+    document.add_point(Point { x: 3.0, y: 4.0 });
+    document
+        .add_point_dimension((1, 0), Some((2, 0)), None)
+        .unwrap();
+    project.save(&document).unwrap();
+    let mut value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let sketch = value["items"][0]["data"]["cad"]["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|node| node["type"] == "sketch")
+        .unwrap();
+    sketch["relations"][0]["direction"] = json!({"x": 1.0, "y": 0.0});
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let (reopened, _) = ProjectFile::open(&path).unwrap();
+    assert!(reopened.read_only_reason().is_some());
     fs::remove_file(path).unwrap();
 }

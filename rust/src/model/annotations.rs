@@ -13,6 +13,38 @@ pub enum DimensionKey {
     Field(u32, DimensionField),
     /// The signed angle relation whose target line is this shape.
     Angle(u32),
+    /// A point dimension (`DimensionMeta::point_dimensions`).
+    Point(u32),
+}
+
+/// Axis of a point X / Y dimension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointAxis {
+    X,
+    Y,
+}
+
+impl PointAxis {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::X => "x",
+            Self::Y => "y",
+        }
+    }
+}
+
+/// Web `distance` relation between two anchors: aligned distance, or the
+/// signed `b - a` coordinate difference along `axis`. Absolute X / Y
+/// dimensions measure from a fixed sketch point at the origin.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointDimension {
+    /// Shape id and anchor index (see [`Document::dimension_anchor`]).
+    pub a: (u32, usize),
+    pub b: (u32, usize),
+    pub axis: Option<PointAxis>,
+    pub value: f32,
+    /// Relation id in the project file, kept across saves.
+    pub graph_id: Option<String>,
 }
 
 /// Per-dimension annotation state kept with the document (and its undo
@@ -21,6 +53,7 @@ pub enum DimensionKey {
 pub struct DimensionMeta {
     /// Absolute label positions in sketch coordinates (web `labelPosition`).
     pub label_positions: BTreeMap<DimensionKey, Point>,
+    pub point_dimensions: BTreeMap<u32, PointDimension>,
 }
 
 impl DimensionMeta {
@@ -119,6 +152,16 @@ impl Document {
                     .map(|(&target, _)| DimensionKey::Angle(target)),
             )
             .filter(|key| self.dimension_shape(*key).is_some())
+            .chain(
+                self.dims
+                    .point_dimensions
+                    .iter()
+                    .filter(|(_, dimension)| {
+                        self.dimension_anchor(dimension.a).is_some()
+                            && self.dimension_anchor(dimension.b).is_some()
+                    })
+                    .map(|(&id, _)| DimensionKey::Point(id)),
+            )
             .collect();
         keys.sort();
         keys
@@ -127,6 +170,7 @@ impl Document {
     fn dimension_shape(&self, key: DimensionKey) -> Option<&Shape> {
         let id = match key {
             DimensionKey::Field(id, _) | DimensionKey::Angle(id) => id,
+            DimensionKey::Point(id) => self.dims.point_dimensions.get(&id)?.a.0,
         };
         self.shapes.iter().find(|shape| shape.id() == id)
     }
@@ -136,7 +180,179 @@ impl Document {
         match key {
             DimensionKey::Field(id, field) => self.driving_dimensions.get(&(id, field)).copied(),
             DimensionKey::Angle(id) => self.line_relations.get(&id)?.1.angle_value(),
+            DimensionKey::Point(id) => Some(self.dims.point_dimensions.get(&id)?.value),
         }
+    }
+
+    /// Position of a dimension anchor. Only anchors the solver models as
+    /// points can be dimensioned: sketch points, line endpoints, curve
+    /// centers and spline handles.
+    pub fn dimension_anchor(&self, (id, index): (u32, usize)) -> Option<Point> {
+        let shape = self.shapes.iter().find(|shape| shape.id() == id)?;
+        match shape {
+            Shape::Point { at, .. } if index == 0 => Some(*at),
+            Shape::Line { a, b, .. } => match index {
+                0 => Some(*a),
+                1 => Some(*b),
+                _ => None,
+            },
+            Shape::Circle { center, .. }
+            | Shape::Arc { center, .. }
+            | Shape::Ellipse { center, .. }
+            | Shape::EllipticArc { center, .. }
+                if index == 0 =>
+            {
+                Some(*center)
+            }
+            Shape::Spline { points, .. } => points.get(index).copied(),
+            _ => None,
+        }
+    }
+
+    /// Dimensionable anchor nearest to `point` within `tolerance`.
+    pub fn dimension_anchor_near(&self, point: Point, tolerance: f32) -> Option<(u32, usize)> {
+        let mut best = None;
+        let mut distance = tolerance;
+        for shape in &self.shapes {
+            let count = match shape {
+                Shape::Line { .. } => 2,
+                Shape::Spline { points, .. } => points.len(),
+                _ => 1,
+            };
+            for index in 0..count {
+                let anchor = (shape.id(), index);
+                if let Some(at) = self.dimension_anchor(anchor)
+                    && at.distance(point) <= distance
+                {
+                    distance = at.distance(point);
+                    best = Some(anchor);
+                }
+            }
+        }
+        best
+    }
+
+    /// Current measured value of a point dimension.
+    pub fn measure_point_dimension(&self, dimension: &PointDimension) -> Option<f32> {
+        let a = self.dimension_anchor(dimension.a)?;
+        let b = self.dimension_anchor(dimension.b)?;
+        Some(match dimension.axis {
+            None => a.distance(b),
+            Some(PointAxis::X) => b.x - a.x,
+            Some(PointAxis::Y) => b.y - a.y,
+        })
+    }
+
+    /// The fixed construction point at the sketch origin that absolute X / Y
+    /// dimensions measure from, created when missing. Call inside an edit
+    /// whose snapshot is already on the undo stack.
+    fn origin_anchor(&mut self) -> (u32, usize) {
+        let origin = Point { x: 0.0, y: 0.0 };
+        if let Some(id) = self.shapes.iter().find_map(|shape| match shape {
+            Shape::Point { id, at }
+                if *at == origin && self.fixed_anchors.get(&(*id, 0)) == Some(&origin) =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        }) {
+            return (id, 0);
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.shapes.push(Shape::Point { id, at: origin });
+        self.construction.insert(id);
+        self.fixed_anchors.insert((id, 0), origin);
+        (id, 0)
+    }
+
+    /// Adds a point dimension at the measured value; `b == None` measures
+    /// from the sketch origin. One undo step.
+    pub fn add_point_dimension(
+        &mut self,
+        a: (u32, usize),
+        b: Option<(u32, usize)>,
+        axis: Option<PointAxis>,
+    ) -> Result<DimensionKey, String> {
+        self.dimension_anchor(a)
+            .ok_or("Pick a point, line end or curve center")?;
+        if let Some(b) = b {
+            self.dimension_anchor(b)
+                .ok_or("Pick a point, line end or curve center")?;
+            if a == b {
+                return Err("Pick two different points".into());
+            }
+        }
+        let before = self.snapshot();
+        let (a, b) = match b {
+            Some(b) => (a, b),
+            None => {
+                let origin = self.origin_anchor();
+                (origin, a)
+            }
+        };
+        if self.dims.point_dimensions.values().any(|existing| {
+            existing.axis == axis
+                && ((existing.a, existing.b) == (a, b) || (existing.a, existing.b) == (b, a))
+        }) {
+            self.restore_keeping_selection(before);
+            return Err("These points already have that dimension".into());
+        }
+        let mut dimension = PointDimension {
+            a,
+            b,
+            axis,
+            value: 0.0,
+            graph_id: None,
+        };
+        let value = self
+            .measure_point_dimension(&dimension)
+            .ok_or("Dimension anchor is missing")?;
+        if axis.is_none() && value <= 1e-6 {
+            self.restore_keeping_selection(before);
+            return Err("Points coincide; a distance needs two separate points".into());
+        }
+        dimension.value = value;
+        let id = self
+            .dims
+            .point_dimensions
+            .keys()
+            .next_back()
+            .map_or(1, |last| last + 1);
+        self.dims.point_dimensions.insert(id, dimension);
+        self.history.push(before);
+        self.future.clear();
+        Ok(DimensionKey::Point(id))
+    }
+
+    fn restore_keeping_selection(&mut self, state: DocumentState) {
+        let selected = (self.selected, self.selected_spline_point);
+        self.restore(state);
+        (self.selected, self.selected_spline_point) = selected;
+    }
+
+    fn set_point_dimension(&mut self, id: u32, value: f32) -> Result<(), String> {
+        let dimension = self
+            .dims
+            .point_dimensions
+            .get(&id)
+            .ok_or("Dimension no longer exists")?;
+        if !value.is_finite() {
+            return Err("dimension must be finite".into());
+        }
+        if dimension.axis.is_none() && value <= 0.0 {
+            return Err("dimension must be positive".into());
+        }
+        if dimension.value == value {
+            return Ok(());
+        }
+        let pin = Pin::Anchor(dimension.a.0, dimension.a.1);
+        self.history.push(self.snapshot());
+        self.future.clear();
+        if let Some(dimension) = self.dims.point_dimensions.get_mut(&id) {
+            dimension.value = value;
+        }
+        self.solve_or_rollback(&[pin])
     }
 
     /// Whether a dimension measures an angle (degrees) rather than a length.
@@ -153,6 +369,11 @@ impl Document {
         Some(match key {
             DimensionKey::Field(_, DimensionField::CircleDiameter) => format!("D{value}"),
             DimensionKey::Field(_, DimensionField::CurveRadius) => format!("R{value}"),
+            DimensionKey::Point(id) => match self.dims.point_dimensions.get(&id)?.axis {
+                Some(PointAxis::X) => format!("X{value}"),
+                Some(PointAxis::Y) => format!("Y{value}"),
+                None => value,
+            },
             key if Self::dimension_is_angle(key) => format!("{value}deg"),
             _ => value,
         })
@@ -162,6 +383,50 @@ impl Document {
     /// number of screen pixels so labels stay readable at any zoom.
     fn default_label(&self, key: DimensionKey) -> Option<LabelPlacement> {
         let offset = 14.0 / self.zoom.max(0.2);
+        if let DimensionKey::Point(id) = key {
+            let dimension = self.dims.point_dimensions.get(&id)?;
+            let a = self.dimension_anchor(dimension.a)?;
+            let b = self.dimension_anchor(dimension.b)?;
+            return Some(match dimension.axis {
+                None => {
+                    let (at, lines) = edge_dimension(
+                        a,
+                        b,
+                        Point {
+                            x: (a.x + b.x) * 0.5 + (a.y - b.y),
+                            y: (a.y + b.y) * 0.5 + (b.x - a.x),
+                        },
+                        offset,
+                    );
+                    (at, scaled(add(a, b), 0.5), lines)
+                }
+                Some(PointAxis::X) => {
+                    // Horizontal dimension line at the higher point.
+                    let y = a.y.max(b.y) + offset * 1.5;
+                    let (pa, pb) = (Point { x: a.x, y }, Point { x: b.x, y });
+                    (
+                        Point {
+                            x: (a.x + b.x) * 0.5,
+                            y: y + offset,
+                        },
+                        scaled(add(pa, pb), 0.5),
+                        vec![(a, pa), (b, pb), (pa, pb)],
+                    )
+                }
+                Some(PointAxis::Y) => {
+                    let x = a.x.max(b.x) + offset * 1.5;
+                    let (pa, pb) = (Point { x, y: a.y }, Point { x, y: b.y });
+                    (
+                        Point {
+                            x: x + offset * 2.5,
+                            y: (a.y + b.y) * 0.5,
+                        },
+                        scaled(add(pa, pb), 0.5),
+                        vec![(a, pa), (b, pb), (pa, pb)],
+                    )
+                }
+            });
+        }
         let shape = self.dimension_shape(key)?;
         let center = shape.center();
         let ray = |dir: Point, from: f32, to: f32, label: f32| {
@@ -445,6 +710,7 @@ impl Document {
                 self.selected = Some(id);
                 self.set_line_relation_angle(value)
             }
+            DimensionKey::Point(id) => self.set_point_dimension(id, value),
         };
         self.selected = selected;
         self.selected_spline_point = spline_point;
@@ -453,9 +719,82 @@ impl Document {
 
     /// Drops annotation state of dimensions that no longer exist.
     pub(super) fn prune_dimension_meta(&mut self) {
+        let points: Vec<u32> = self
+            .dims
+            .point_dimensions
+            .iter()
+            .filter(|(_, dimension)| {
+                self.dimension_anchor(dimension.a).is_none()
+                    || self.dimension_anchor(dimension.b).is_none()
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in points {
+            self.dims.point_dimensions.remove(&id);
+        }
         let keys: HashSet<DimensionKey> = self.dimension_keys().into_iter().collect();
         self.dims
             .label_positions
             .retain(|key, _| keys.contains(key));
+    }
+
+    /// Deletes a dimension and its annotations. One undo step.
+    pub fn delete_dimension(&mut self, key: DimensionKey) -> Result<(), String> {
+        if !self.dimension_keys().contains(&key) {
+            return Err("Dimension no longer exists".into());
+        }
+        self.history.push(self.snapshot());
+        self.future.clear();
+        match key {
+            DimensionKey::Field(id, field) => {
+                self.driving_dimensions.remove(&(id, field));
+            }
+            DimensionKey::Angle(id) => {
+                self.line_relations.remove(&id);
+            }
+            DimensionKey::Point(id) => {
+                self.dims.point_dimensions.remove(&id);
+            }
+        }
+        self.prune_dimension_meta();
+        Ok(())
+    }
+
+    /// Adds the next missing driving dimension of a shape at its current
+    /// size (web "Add driving dimension"): length, diameter, radius, or
+    /// width then height.
+    pub fn add_entity_dimension(&mut self, id: u32) -> Result<DimensionKey, String> {
+        let shape = self
+            .shapes
+            .iter()
+            .find(|shape| shape.id() == id)
+            .ok_or("Shape no longer exists")?;
+        let candidates: Vec<(DimensionField, f32)> = match shape {
+            Shape::Line { a, b, .. } => vec![(DimensionField::LineLength, a.distance(*b))],
+            Shape::Circle { radius, .. } => vec![(DimensionField::CircleDiameter, radius * 2.0)],
+            Shape::Arc { radius, .. } | Shape::Polygon { radius, .. } => {
+                vec![(DimensionField::CurveRadius, *radius)]
+            }
+            Shape::Rectangle { a, b, .. } => vec![
+                (DimensionField::RectangleWidth, (b.x - a.x).abs()),
+                (DimensionField::RectangleHeight, (b.y - a.y).abs()),
+            ],
+            Shape::RotatedRectangle { width, height, .. } => vec![
+                (DimensionField::RectangleWidth, *width),
+                (DimensionField::RectangleHeight, *height),
+            ],
+            Shape::Ellipse { rx, ry, .. } | Shape::EllipticArc { rx, ry, .. } => vec![
+                (DimensionField::RectangleWidth, rx * 2.0),
+                (DimensionField::RectangleHeight, ry * 2.0),
+            ],
+            _ => return Err("Pick two points to dimension this entity".into()),
+        };
+        let (field, value) = candidates
+            .into_iter()
+            .find(|(field, _)| !self.driving_dimensions.contains_key(&(id, *field)))
+            .ok_or("Entity is already dimensioned")?;
+        let key = DimensionKey::Field(id, field);
+        self.set_dimension_value(key, value)?;
+        Ok(key)
     }
 }
