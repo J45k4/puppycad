@@ -392,11 +392,156 @@ pub struct SolidPreview {
     pub profile: Vec<Point>,
     pub holes: Vec<Vec<Point>>,
     pub depth: f32,
+    /// Offset of the bottom cap along the sketch normal; the solid spans
+    /// `start..start + depth`.
+    pub start: f32,
     pub plane: SketchPlane,
+}
+
+/// How far an extrusion goes. Depth for blind and symmetric lives in the
+/// node's `depth` field so the web loader keeps reading it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EndCondition {
+    Blind,
+    /// `depth` is the total length, centred on the sketch plane.
+    Symmetric,
+    /// Spans the previous body along the sketch normal in both directions.
+    ThroughAll,
+    /// Reaches the far side of the body started by this extrusion id.
+    UpToBody(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtrudeOptions {
+    pub end: EndCondition,
+    pub flip: bool,
+}
+
+impl EndCondition {
+    pub fn label(&self) -> &'static str {
+        match self {
+            EndCondition::Blind => "BLIND",
+            EndCondition::Symmetric => "SYMMETRIC",
+            EndCondition::ThroughAll => "THROUGH ALL",
+            EndCondition::UpToBody(_) => "UP TO BODY",
+        }
+    }
+}
+
+/// Read `endCondition`, `flip` and `targetId` from an extrude node.
+pub fn extrude_options(node: &Value) -> Result<ExtrudeOptions, String> {
+    let flip = match node.get("flip") {
+        None | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err("extrusion flip must be a boolean".into()),
+    };
+    let end = match node.get("endCondition").map(|value| value.as_str()) {
+        None | Some(Some("blind")) => EndCondition::Blind,
+        Some(Some("symmetric")) => EndCondition::Symmetric,
+        Some(Some("through-all")) => EndCondition::ThroughAll,
+        Some(Some("up-to-body")) => EndCondition::UpToBody(
+            node.get("targetId")
+                .and_then(Value::as_str)
+                .ok_or("up-to-body extrusion has no target body")?
+                .to_string(),
+        ),
+        Some(Some(other)) => {
+            return Err(format!("unsupported extrusion end condition \"{other}\""));
+        }
+        Some(None) => return Err("extrusion end condition must be a string".into()),
+    };
+    let operation = node.get("operation").and_then(Value::as_str);
+    if matches!(end, EndCondition::ThroughAll | EndCondition::UpToBody(_))
+        && operation == Some("newBody")
+    {
+        return Err(format!(
+            "{} needs a cut or join extrusion",
+            end.label().to_lowercase()
+        ));
+    }
+    Ok(ExtrudeOptions { end, flip })
+}
+
+/// Write the options back onto a node, omitting defaults so blind extrusions
+/// stay byte-identical to what the web writes.
+fn write_extrude_options(node: &mut Value, options: &ExtrudeOptions) {
+    let Some(object) = node.as_object_mut() else {
+        return;
+    };
+    object.remove("endCondition");
+    object.remove("flip");
+    object.remove("targetId");
+    match &options.end {
+        EndCondition::Blind => {}
+        EndCondition::Symmetric => {
+            object.insert("endCondition".into(), json!("symmetric"));
+        }
+        EndCondition::ThroughAll => {
+            object.insert("endCondition".into(), json!("through-all"));
+        }
+        EndCondition::UpToBody(target) => {
+            object.insert("endCondition".into(), json!("up-to-body"));
+            object.insert("targetId".into(), json!(target));
+        }
+    }
+    if options.flip {
+        object.insert("flip".into(), json!(true));
+    }
+}
+
+/// Turn the stored depth plus end condition into the tool's start and depth.
+fn resolve_extent(
+    preview: &mut SolidPreview,
+    options: &ExtrudeOptions,
+    bodies: &[Manifold],
+    body_ids: &[String],
+) -> Option<()> {
+    let normal = preview.normal();
+    match &options.end {
+        EndCondition::Blind => {
+            preview.start = if options.flip { -preview.depth } else { 0.0 };
+        }
+        EndCondition::Symmetric => preview.start = -preview.depth / 2.0,
+        EndCondition::ThroughAll => {
+            let (min, max) = body_extent(bodies.last()?, normal);
+            let margin = ((max - min) * 1e-3).max(0.01);
+            preview.start = min - margin;
+            preview.depth = max - min + 2.0 * margin;
+        }
+        EndCondition::UpToBody(target) => {
+            let index = body_ids.iter().position(|id| id == target)?;
+            let (min, max) = body_extent(&bodies[index], normal);
+            let reach = if options.flip { -min } else { max };
+            if reach <= 1e-4 {
+                return None;
+            }
+            preview.depth = reach;
+            preview.start = if options.flip { -reach } else { 0.0 };
+        }
+    }
+    Some(())
+}
+
+/// Signed extent of a body along `normal`, as (min, max).
+fn body_extent(body: &Manifold, normal: [f32; 3]) -> (f32, f32) {
+    let bounds = body.bounding_box();
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for x in [bounds.min.x, bounds.max.x] {
+        for y in [bounds.min.y, bounds.max.y] {
+            for z in [bounds.min.z, bounds.max.z] {
+                let d = x as f32 * normal[0] + y as f32 * normal[1] + z as f32 * normal[2];
+                min = min.min(d);
+                max = max.max(d);
+            }
+        }
+    }
+    (min, max)
 }
 
 impl SolidPreview {
     pub fn world_point(&self, point: Point, offset: f32) -> [f32; 3] {
+        let offset = self.start + offset;
         match self.plane {
             SketchPlane::Top => [point.x, point.y, offset],
             SketchPlane::Front => [point.x, offset, -point.y],
@@ -961,56 +1106,99 @@ impl ProjectFile {
     }
 
     pub fn extrusion_previews(&self) -> Option<Vec<SolidPreview>> {
-        let nodes = self
-            .value
-            .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
-            .as_array()?;
-        let extrudes: Vec<_> = nodes
-            .iter()
-            .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
-            .collect();
-        if extrudes.is_empty()
-            || nodes
-                .iter()
-                .any(|node| node.get("type").and_then(Value::as_str) == Some("chamfer"))
-        {
-            return None;
-        }
-        extrudes
-            .into_iter()
-            .map(|extrude| self.preview_for_extrude(extrude))
-            .collect()
+        self.evaluate_extrusions().map(|(previews, _)| previews)
     }
 
     pub fn extrusion_operation_at(&self, index: usize) -> Option<&str> {
-        self.value
-            .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
-            .as_array()?
-            .iter()
-            .filter(|node| node["type"] == "extrude")
-            .nth(index)?
-            .get("operation")?
-            .as_str()
+        self.extrude_node_at(index)?.get("operation")?.as_str()
+    }
+
+    fn extrude_nodes(&self) -> Option<Vec<&Value>> {
+        Some(
+            self.value
+                .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
+                .as_array()?
+                .iter()
+                .filter(|node| node.get("type").and_then(Value::as_str) == Some("extrude"))
+                .collect(),
+        )
+    }
+
+    fn extrude_node_at(&self, index: usize) -> Option<&Value> {
+        self.extrude_nodes()?.into_iter().nth(index)
+    }
+
+    pub fn extrusion_options_at(&self, index: usize) -> Option<ExtrudeOptions> {
+        extrude_options(self.extrude_node_at(index)?).ok()
+    }
+
+    pub fn extrusion_id_at(&self, index: usize) -> Option<&str> {
+        self.extrude_node_at(index)?.get("id")?.as_str()
+    }
+
+    /// First reason an extrusion's options cannot be evaluated natively.
+    fn extrusion_options_error(&self) -> Option<String> {
+        let extrudes = self.extrude_nodes()?;
+        let mut bodies = HashSet::new();
+        for node in extrudes {
+            let options = match extrude_options(node) {
+                Ok(options) => options,
+                Err(error) => return Some(error),
+            };
+            if let EndCondition::UpToBody(target) = &options.end
+                && !bodies.contains(target.as_str())
+            {
+                return Some(format!(
+                    "up-to-body target \"{target}\" is not an earlier body"
+                ));
+            }
+            if node.get("operation").and_then(Value::as_str) == Some("newBody")
+                && let Some(id) = node.get("id").and_then(Value::as_str)
+            {
+                bodies.insert(id);
+            }
+        }
+        None
     }
 
     pub fn evaluated_solids(&self) -> Option<Vec<Manifold>> {
+        self.evaluate_extrusions().map(|(_, bodies)| bodies)
+    }
+
+    /// Evaluate every extrusion in order: per-feature tool solids (with
+    /// resolved start and depth) and the resulting Boolean bodies.
+    fn evaluate_extrusions(&self) -> Option<(Vec<SolidPreview>, Vec<Manifold>)> {
         let nodes = self
             .value
             .pointer(&format!("/items/{}/data/cad/nodes", self.part_index))?
             .as_array()?;
-        let extrudes: Vec<_> = nodes
+        if nodes
             .iter()
-            .filter(|node| node["type"] == "extrude")
-            .collect();
-        let previews = self.extrusion_previews()?;
+            .any(|node| node.get("type").and_then(Value::as_str) == Some("chamfer"))
+        {
+            return None;
+        }
+        let extrudes = self.extrude_nodes()?;
+        if extrudes.is_empty() {
+            return None;
+        }
+        let mut previews = Vec::new();
         let mut bodies: Vec<Manifold> = Vec::new();
-        for (node, preview) in extrudes.into_iter().zip(previews.iter()) {
-            let tool = crate::stl::manifold_from_solid(preview).ok()?;
-            match node["operation"].as_str()? {
-                "newBody" => bodies.push(tool),
+        let mut body_ids: Vec<String> = Vec::new();
+        for node in extrudes {
+            let operation = node.get("operation")?.as_str()?;
+            let options = extrude_options(node).ok()?;
+            let mut preview = self.preview_for_extrude(node)?;
+            resolve_extent(&mut preview, &options, &bodies, &body_ids)?;
+            let tool = crate::stl::manifold_from_solid(&preview).ok()?;
+            match operation {
+                "newBody" => {
+                    bodies.push(tool);
+                    body_ids.push(node.get("id")?.as_str()?.to_string());
+                }
                 "cut" | "join" => {
                     let previous = bodies.last_mut()?;
-                    let result = if node["operation"] == "cut" {
+                    let result = if operation == "cut" {
                         previous.difference(&tool)
                     } else {
                         previous.union(&tool)
@@ -1022,8 +1210,9 @@ impl ProjectFile {
                 }
                 _ => return None,
             }
+            previews.push(preview);
         }
-        Some(bodies)
+        Some((previews, bodies))
     }
 
     fn preview_for_extrude(&self, extrude: &Value) -> Option<SolidPreview> {
@@ -1047,7 +1236,7 @@ impl ProjectFile {
         let loops = profiles_from_document(&workspace.document)?
             .into_iter()
             .nth(profile_index)?;
-        let solid = SolidPreview {
+        Some(SolidPreview {
             name: extrude
                 .get("name")
                 .and_then(Value::as_str)
@@ -1056,10 +1245,9 @@ impl ProjectFile {
             profile: loops.outer,
             holes: loops.holes,
             depth,
+            start: 0.0,
             plane,
-        };
-        crate::stl::manifold_from_solid(&solid).ok()?;
-        Some(solid)
+        })
     }
 
     #[cfg(test)]
@@ -1126,6 +1314,54 @@ impl ProjectFile {
             return Err("depth would make the evaluated solid invalid".into());
         }
         Ok(())
+    }
+
+    /// Replace an extrusion's end condition and flip; rejected when the
+    /// result would not evaluate, leaving the graph unchanged.
+    pub fn set_extrusion_options_at(
+        &mut self,
+        index: usize,
+        options: &ExtrudeOptions,
+    ) -> Result<(), String> {
+        if self
+            .extrusion_previews()
+            .is_none_or(|solids| index >= solids.len())
+        {
+            return Err("this extrusion cannot be edited natively".into());
+        }
+        let path = format!("/items/{}/data/cad/nodes", self.part_index);
+        let nodes = self
+            .value
+            .pointer_mut(&path)
+            .and_then(Value::as_array_mut)
+            .ok_or("project CAD graph changed unexpectedly")?;
+        let position = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.get("type").and_then(Value::as_str) == Some("extrude"))
+            .nth(index)
+            .map(|(position, _)| position)
+            .ok_or("extrusion node is missing")?;
+        let old = nodes[position].clone();
+        write_extrude_options(&mut nodes[position], options);
+        let error = extrude_options(&nodes[position]).err();
+        if error.is_none()
+            && self.extrusion_options_error().is_none()
+            && self.evaluated_solids().is_some()
+        {
+            return Ok(());
+        }
+        self.value
+            .pointer_mut(&path)
+            .and_then(Value::as_array_mut)
+            .expect("nodes checked above")[position] = old;
+        Err(error.unwrap_or_else(|| match options.end {
+            EndCondition::ThroughAll => "through all needs an earlier body to cut".into(),
+            EndCondition::UpToBody(_) => {
+                "the target body is not reachable in that direction".into()
+            }
+            _ => "options would make the evaluated solid invalid".into(),
+        }))
     }
 
     pub fn delete_extrusion_at(&mut self, index: usize) -> Result<(), String> {
@@ -1252,6 +1488,21 @@ impl ProjectFile {
         profile_index: usize,
         operation: &str,
     ) -> Result<(), String> {
+        let options = ExtrudeOptions {
+            end: EndCondition::Blind,
+            flip: false,
+        };
+        self.create_extrusion_with_options(current, depth, profile_index, operation, &options)
+    }
+
+    pub fn create_extrusion_with_options(
+        &mut self,
+        current: &Document,
+        depth: f32,
+        profile_index: usize,
+        operation: &str,
+        options: &ExtrudeOptions,
+    ) -> Result<(), String> {
         if !matches!(operation, "newBody" | "cut" | "join") {
             return Err("unsupported extrusion operation".into());
         }
@@ -1314,6 +1565,11 @@ impl ProjectFile {
             index += 1;
         };
         nodes.push(json!({"id":id,"type":"extrude","name":format!("Extrusion {index}"),"sketchId":sketch_id,"profileId":profile_id,"operation":operation,"depth":depth}));
+        write_extrude_options(nodes.last_mut().expect("just pushed"), options);
+        if let Err(error) = extrude_options(nodes.last().expect("just pushed")) {
+            nodes.pop();
+            return Err(error);
+        }
         if self.evaluated_solids().is_none() {
             self.value
                 .pointer_mut(&format!("/items/{}/data/cad/nodes", self.part_index))
@@ -2763,6 +3019,11 @@ impl ProjectFile {
             metadata_dirty: false,
             clean_value: Value::Null,
         };
+        if project.read_only_reason.as_deref() == Some("solid features need native support")
+            && let Some(error) = project.extrusion_options_error()
+        {
+            project.read_only_reason = Some(format!("extrusion options: {error}"));
+        }
         if project.read_only_reason.as_deref() == Some("solid features need native support")
             && project.evaluated_solids().is_some()
             && project.all_extrusions_registered()
@@ -8856,6 +9117,7 @@ mod tests {
             profile: profile_from_document(&concave).unwrap().outer,
             holes: Vec::new(),
             depth: 15.0,
+            start: 0.0,
             plane: SketchPlane::Top,
         };
         assert!(concave_solid.cap_mesh().is_some());
@@ -9653,3 +9915,7 @@ mod tests {
 #[cfg(test)]
 #[path = "project/dimension_tests.rs"]
 mod dimension_tests;
+
+#[cfg(test)]
+#[path = "project/extrude_option_tests.rs"]
+mod extrude_option_tests;

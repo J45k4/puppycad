@@ -214,6 +214,7 @@ mod tests {
                 Point { x: 0.0, y: 5.0 },
             ],
             depth: 20.0,
+            start: 0.0,
             plane: SketchPlane::Top,
             holes: Vec::new(),
         };
@@ -246,6 +247,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 10.0,
+            start: 0.0,
             plane: SketchPlane::Top,
         };
         let cutter = SolidPreview {
@@ -258,6 +260,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 10.0,
+            start: 0.0,
             plane: SketchPlane::Top,
         };
         let result = manifold_from_solid(&base)
@@ -279,6 +282,7 @@ mod tests {
                     Point { x: 10.0, y: 40.0 },
                 ],
                 depth: 30.0,
+                start: 0.0,
                 plane,
                 holes: Vec::new(),
             };
@@ -319,6 +323,7 @@ mod tests {
                 ],
             ],
             depth: 10.0,
+            start: 0.0,
             plane: SketchPlane::Top,
         };
         let stl = export_solid(&solid).unwrap();
@@ -372,6 +377,7 @@ mod tests {
             ],
             holes: Vec::new(),
             depth: 10.0,
+            start: 0.0,
             plane: SketchPlane::Top,
         };
         let stl = export_solid(&solid).unwrap();
