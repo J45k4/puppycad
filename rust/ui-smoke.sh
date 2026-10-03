@@ -3849,3 +3849,53 @@ cp /tmp/native-asm/robot.pcad /out/rust-native-assembly.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Topology selection: extrude the chamfer block, hover its front-right top
+# corner (vertex square), click it, Shift+click a far top edge (Properties
+# shows the distance), then select two top edges, 0, Enter chamfers both.
+./target/debug/puppycad /tmp/native-topology.pcad >/tmp/puppycad-topology.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-topology.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-topology.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" r
+xdotool mousemove 500 330 click 1
+xdotool mousemove 750 530 click 1
+xdotool key --window "$window_id" x
+xdotool key --window "$window_id" Return
+sleep 0.3
+xdotool mousemove 595 558
+sleep 0.3
+import -window root /out/rust-native-topology-vertex-hover.png
+xdotool click 1
+xdotool mousemove 499 323
+xdotool keydown shift click 1 keyup shift
+sleep 0.3
+import -window root /out/rust-native-topology-measure.png
+xdotool key --window "$window_id" Escape
+xdotool mousemove 469 487 click 1
+xdotool mousemove 747 469
+xdotool keydown shift click 1 keyup shift
+sleep 0.3
+import -window root /out/rust-native-topology-edges.png
+xdotool key --window "$window_id" 0
+xdotool key --window "$window_id" Return
+sleep 0.5
+import -window root /out/rust-native-topology-chamfer.png
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+grep -q '"type": "edgeFinish"' /tmp/native-topology.pcad
+grep -Eq '"distance": ?2' /tmp/native-topology.pcad
+cp /tmp/native-topology.pcad /out/rust-native-topology.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
