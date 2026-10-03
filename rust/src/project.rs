@@ -19,7 +19,9 @@ mod assemblies;
 mod face;
 mod features;
 pub use face::{FaceDescriptor, FaceRef, Frame};
-pub use features::{EdgeRef, FeatureInfo, FinishKind, SolidEdge, Tri, sharp_edges};
+pub use features::{
+    EdgeRef, FeatureInfo, FinishKind, SHARP_EDGE_DEGREES, SolidEdge, Tri, sharp_edges,
+};
 pub use features::{FeatureKind, FeatureStatus};
 
 fn line_relation_matches(source: &Shape, target: &Shape, kind: LineRelationKind) -> bool {

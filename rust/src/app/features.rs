@@ -65,22 +65,6 @@ fn next_operation(operation: &'static str) -> &'static str {
     }
 }
 
-/// Screen distance from `p` to segment `a`-`b` and the segment parameter
-/// of the closest point.
-fn segment_distance(p: Point, a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
-    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-    let length = dx * dx + dy * dy;
-    let t = if length < 1e-9 {
-        0.0
-    } else {
-        (((p.x - a[0]) * dx + (p.y - a[1]) * dy) / length).clamp(0.0, 1.0)
-    };
-    (
-        ((p.x - a[0] - t * dx).powi(2) + (p.y - a[1] - t * dy).powi(2)).sqrt(),
-        t,
-    )
-}
-
 impl App {
     /// Key 8 / MORE → REVOLVE: starts the axis pick on the active sketch.
     pub(super) fn begin_revolve(&mut self) {

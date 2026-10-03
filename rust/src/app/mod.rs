@@ -15,6 +15,7 @@ mod shortcut_overlay;
 mod solid;
 mod status;
 mod tangent;
+mod topology;
 mod view_sketch;
 
 #[cfg(test)]
@@ -29,6 +30,8 @@ mod settings_tests;
 mod status_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod topology_tests;
 
 use assembly::*;
 pub(crate) use commands::shortcuts_markdown;
@@ -44,6 +47,7 @@ use settings::*;
 use shortcut_overlay::*;
 use solid::*;
 use status::*;
+use topology::*;
 
 use puppycad::{model, project, sketch_value, spline, stl, threemf};
 
