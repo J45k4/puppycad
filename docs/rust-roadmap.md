@@ -51,7 +51,7 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
 5. Linear and circular patterns.
 6. Tangent arc and smooth join.
 7. Remaining spline constraints.
-8. Box selection, Shift multi-select, selection filters.
+8. Box selection, Shift multi-select, selection filters. **Done.**
 
 ## Phase 3 — Solid modeling
 
