@@ -415,6 +415,8 @@ pub(crate) struct App {
     assembly: Option<AssemblyView>,
     /// NEXT suggestions keyed by the state they were built from.
     quick_cache: QuickCache,
+    /// NEXT list rebuilds (tests check the cache key).
+    quick_builds: std::cell::Cell<u32>,
 }
 
 /// What the pointer is over in Select mode.
@@ -575,6 +577,7 @@ impl Default for App {
             history_open: false,
             assembly: None,
             quick_cache: Default::default(),
+            quick_builds: Default::default(),
         }
     }
 }

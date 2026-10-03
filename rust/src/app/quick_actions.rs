@@ -30,7 +30,9 @@ pub(super) struct QuickKey {
     selected: Vec<u32>,
     dimension: bool,
     hover_shape: Option<u32>,
-    hovered_face: bool,
+    /// Hover target kind + id in 3D (face label, topology element).
+    hovered_face: Option<String>,
+    topo_hover: Option<TopoRef>,
     topo: Vec<TopoRef>,
     selected_solid: usize,
     assembly: Option<(Option<usize>, u64)>,
@@ -154,9 +156,11 @@ fn solid_rules(rules: &mut Rules) {
     } else {
         "Shift+click another element"
     };
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
     if edges > 0 {
-        rules.push(Cmd::EdgeChamfer, "Chamfer", "bevel the selected edges");
-        rules.push(Cmd::EdgeFillet, "Fillet", "round the selected edges");
+        let reason = format!("{edges} edge{} selected", plural(edges));
+        rules.push(Cmd::EdgeChamfer, "Chamfer", reason.clone());
+        rules.push(Cmd::EdgeFillet, "Fillet", reason);
         rules.push(Cmd::Measure, "Measure", measure_reason);
     }
     if faces > 0 {
@@ -190,16 +194,30 @@ fn solid_rules(rules: &mut Rules) {
         );
     }
     if selection.is_empty() {
-        rules.push(
-            Cmd::SketchOnFace,
-            "Sketch on face",
-            if app.hovered_face.is_some() {
-                "on the hovered face"
-            } else {
-                "hover a face first"
-            },
-        );
+        let hovered_edge = matches!(app.topo_hover, Some(TopoRef::Edge(_)));
+        if hovered_edge {
+            rules.push(
+                Cmd::EdgeChamfer,
+                "Chamfer",
+                "1 edge hovered - click to select it",
+            );
+        }
+        let face_reason = match &app.hovered_face {
+            Some(face) => format!("Sketch on face - {}", face.label),
+            None => "hover a face first".to_string(),
+        };
+        rules.push(Cmd::SketchOnFace, "Sketch on face", face_reason);
         rules.push(Cmd::SketchTop, "New sketch on TOP", "start a new profile");
+        if let Some(label) = app.feature_value_label() {
+            rules.push(
+                Cmd::EditFeatureValue,
+                label,
+                "the selected feature's main value",
+            );
+        }
+        if app.project.as_ref().map_or(0, ProjectFile::feature_count) > 1 {
+            rules.push(Cmd::FeatureUp, "Reorder feature", "Ctrl+Up / Ctrl+Down");
+        }
         rules.push(
             Cmd::SuppressFeature,
             "Suppress feature",
@@ -239,6 +257,11 @@ fn sketch_rules(rules: &mut Rules) {
         return;
     }
     if app.selected_dimension.is_some() {
+        rules.push(
+            Cmd::EditDimensionValue,
+            "Edit dimension value",
+            "type a new value",
+        );
         rules.push(
             Cmd::ToggleReference,
             "Make reference / driving",
@@ -304,7 +327,7 @@ fn sketch_rules(rules: &mut Rules) {
     if !analysis.conflicting.is_empty() {
         rules.push(
             Cmd::Undo,
-            "Fix conflict — see red rows",
+            "Fix conflict - see red rows",
             "undo or delete a red constraint",
         );
     }
@@ -312,7 +335,7 @@ fn sketch_rules(rules: &mut Rules) {
         rules.push(Cmd::FinishSketch, "Finish sketch", "closed profile ready");
         rules.push(Cmd::ExtrudeNew, "Extrude", "pull the profile into a solid");
         if analysis.dof > 0 {
-            let label = format!("Add dimension — {} DOF remaining", analysis.dof);
+            let label = format!("Add dimension - {} DOF remaining", analysis.dof);
             rules.push(Cmd::DimensionTool, &label, "fix sizes before extruding");
         } else {
             rules.push(
@@ -330,7 +353,7 @@ fn sketch_rules(rules: &mut Rules) {
     if !closed {
         rules.push(
             Cmd::Line,
-            "Line — continue or close",
+            "Line - continue or close",
             "no closed profile yet",
         );
         rules.push(Cmd::DimensionTool, "Add dimension", "fix sizes");
@@ -359,7 +382,8 @@ impl App {
             selected: self.document.selected_ids(),
             dimension: self.selected_dimension.is_some(),
             hover_shape: self.hover.shape,
-            hovered_face: self.hovered_face.is_some(),
+            hovered_face: self.hovered_face.as_ref().map(|face| face.label.clone()),
+            topo_hover: self.topo_hover.filter(|_| self.solid_preview),
             topo: self
                 .topo_selection
                 .iter()
@@ -383,6 +407,7 @@ impl App {
         {
             return items.clone();
         }
+        self.quick_builds.set(self.quick_builds.get() + 1);
         let items = Rc::new(suggest(self));
         *self.quick_cache.borrow_mut() = Some((key, items.clone()));
         items
@@ -692,8 +717,54 @@ impl App {
             }
         }
         self.status_message =
-            "Sketch has no closed profile to extrude — draw a closed shape or press X to extrude"
+            "Sketch has no closed profile to extrude - draw a closed shape or press X to extrude"
                 .into();
+    }
+
+    /// NEXT label for the selected feature's main value: "Edit depth" for
+    /// an extrusion, "Edit value" for a revolve / edge finish.
+    pub(super) fn feature_value_label(&self) -> Option<&'static str> {
+        if !self.solid_preview {
+            return None;
+        }
+        if self.selected_extension().is_some() {
+            return Some("Edit value");
+        }
+        self.project
+            .as_ref()
+            .and_then(ProjectFile::extrusion_previews)
+            .is_some_and(|solids| !solids.is_empty())
+            .then_some("Edit depth")
+    }
+
+    /// Open the Properties prompt for the selected feature's main value
+    /// (the same field a click on its DEPTH / value row opens).
+    pub(super) fn edit_feature_value(&mut self) {
+        let field = match self.feature_value_label() {
+            Some("Edit value") => EditField::FeatureValue,
+            Some(_) => EditField::ExtrusionDepth,
+            None => {
+                self.status_message = "No feature value to edit".into();
+                return;
+            }
+        };
+        self.editing = Some(DimensionEdit {
+            field,
+            buffer: String::new(),
+        });
+        self.status_message = if matches!(field, EditField::FeatureValue) {
+            "Type the new angle (deg) or size (mm), then Enter  |  Esc to cancel"
+        } else {
+            "Type positive depth in mm, then Enter  |  Esc to cancel"
+        }
+        .into();
+    }
+
+    /// Open the value prompt of the selected sketch dimension.
+    pub(super) fn edit_selected_dimension(&mut self) {
+        if let Some(key) = self.selected_dimension {
+            self.begin_label_edit(key);
+        }
     }
 
     /// Draft commands (Enter / F / E / Esc) feed the open prompt.
@@ -708,11 +779,9 @@ impl App {
     }
 }
 
-/// The bitmap font has no em dash.
 fn truncate(text: &str, max: usize) -> String {
-    let text = text.replace('—', "-");
     if text.chars().count() <= max {
-        return text;
+        return text.to_string();
     }
     let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
     out.push('~');

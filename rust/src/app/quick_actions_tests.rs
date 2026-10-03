@@ -409,3 +409,103 @@ fn smoke_author_splines_sequence_places_both_splines() {
     assert_eq!(splines, 2, "{}", app.status_message);
     let _ = std::fs::remove_file(path);
 }
+
+fn face_hover(label: &str) -> Option<FaceHover> {
+    Some(FaceHover {
+        face: None,
+        label: label.into(),
+        outline: Vec::new(),
+    })
+}
+
+#[test]
+fn hovering_in_3d_updates_row_one_once_per_hover_change() {
+    let (mut app, path) = block_app("hover");
+    let first = app.quick_suggestions();
+    assert_eq!(first[0].cmd, Cmd::SketchOnFace);
+    assert_eq!(first[0].reason, "hover a face first");
+    let builds = app.quick_builds.get();
+    app.hovered_face = face_hover("Top face");
+    app.topo_hover = Some(TopoRef::Face(0));
+    let items = app.quick_suggestions();
+    assert_eq!(items[0].reason, "Sketch on face - Top face");
+    assert_eq!(app.quick_builds.get(), builds + 1);
+    // More pointer moves over the same face: no rebuild.
+    for _ in 0..5 {
+        app.hovered_face = face_hover("Top face");
+        let _ = app.quick_suggestions();
+    }
+    assert_eq!(app.quick_builds.get(), builds + 1);
+    // Another face: exactly one more rebuild.
+    app.hovered_face = face_hover("Side face");
+    app.topo_hover = Some(TopoRef::Face(1));
+    assert_eq!(
+        app.quick_suggestions()[0].reason,
+        "Sketch on face - Side face"
+    );
+    let _ = app.quick_suggestions();
+    assert_eq!(app.quick_builds.get(), builds + 2);
+    // Hovered edge: rebuild once; Chamfer leads when it can run.
+    app.hovered_face = None;
+    app.topo_hover = Some(TopoRef::Edge(0));
+    let items = app.quick_suggestions();
+    assert_eq!(app.quick_builds.get(), builds + 3);
+    if app.command_available(command(Cmd::EdgeChamfer)) {
+        assert_eq!(items[0].cmd, Cmd::EdgeChamfer);
+        assert!(items[0].reason.starts_with("1 edge hovered"));
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn feature_and_dimension_states_offer_edit_and_reorder_rows() {
+    let (mut app, path) = block_app("rows");
+    app.settings.quick_actions = false;
+    let items = app.quick_suggestions();
+    let edit = items
+        .iter()
+        .find(|item| item.cmd == Cmd::EditFeatureValue)
+        .expect("Edit depth row");
+    assert_eq!(edit.label, "Edit depth");
+    assert!(!items.iter().any(|item| item.cmd == Cmd::FeatureUp));
+    assert_all_available(&app);
+    app.run_command(Cmd::EditFeatureValue);
+    assert!(matches!(
+        app.editing.as_ref().map(|edit| edit.field),
+        Some(EditField::ExtrusionDepth)
+    ));
+    app.editing = None;
+    // A second feature: the reorder row appears with its Ctrl+Up chip.
+    app.solid_preview = false;
+    app.run_command(Cmd::SketchFront);
+    draw_rectangle(&mut app);
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 5.0, 0)
+        .unwrap();
+    app.solid_preview = true;
+    let items = app.quick_suggestions();
+    let reorder = items
+        .iter()
+        .find(|item| item.cmd == Cmd::FeatureUp)
+        .expect("Reorder row");
+    assert_eq!(reorder.label, "Reorder feature");
+    assert_eq!(reorder.shortcut, "Ctrl+Up");
+    let _ = std::fs::remove_file(path);
+    // Sketch with a selected dimension: Edit dimension value first.
+    let path = temp_path("dim-edit");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(&mut app);
+    let id = app.document.shapes[0].id();
+    app.selected_dimension = Some(DimensionKey::Field(id, DimensionField::RectangleWidth));
+    let items = app.quick_suggestions();
+    assert_eq!(items[0].cmd, Cmd::EditDimensionValue);
+    assert_eq!(items[0].label, "Edit dimension value");
+    app.run_quick_action(0);
+    assert!(app.editing.is_some());
+    for item in items.iter() {
+        assert!(!item.label.contains('—') && !item.reason.contains('—'));
+    }
+    let _ = std::fs::remove_file(path);
+}
