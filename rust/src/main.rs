@@ -1,6 +1,7 @@
 mod model;
 mod project;
 mod renderer;
+mod solver;
 mod spline;
 mod stl;
 mod view3d;
