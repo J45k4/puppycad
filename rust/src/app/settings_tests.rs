@@ -40,6 +40,7 @@ fn save_and_load_round_trip() {
             x: 10,
             y: 20,
         }),
+        quick_actions: false,
     };
     settings.save_to(&path).unwrap();
     assert_eq!(Settings::load_from(&path), settings);
