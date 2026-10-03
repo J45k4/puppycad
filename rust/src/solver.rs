@@ -10,7 +10,10 @@
 //!
 //! * [`Problem::params`] is the parameter vector. The bridge in `model.rs`
 //!   (`Document::solve_constraints`) adds two parameters per anchor point
-//!   (line endpoints, sketch points, circle/arc centers) and one per radius.
+//!   (line endpoints, sketch points, curve centers, spline handles), one per
+//!   radius or ellipse semi-axis, ellipse rotation (degrees), and arc start
+//!   and sweep angles (radians). Spline point relations add an auxiliary
+//!   curve parameter in segment units.
 //!   Dimension values may also be parameters ([`Value::Param`]) so a dimension
 //!   can be left free and measured by the solve; the document currently passes
 //!   driving values as [`Value::Const`].
@@ -18,14 +21,16 @@
 //!   kind (fixed anchor, coincident endpoint/point, horizontal, vertical, line
 //!   length, line rotation, equal length, parallel, perpendicular, collinear,
 //!   signed angle, midpoint and point-on-line, radius, equal radius, radius
-//!   difference, concentric, point-on-circle).
+//!   difference, concentric, point-on-circle) plus [`Curve`] relations:
+//!   finite point-on-curve (segment, sweep and spline span penalties), curve
+//!   midpoint, fixed curve points, Normal, smooth-join endpoint tangency, and
+//!   internal and external tangency (contacts kept inside arc sweeps).
 //! * [`Soft`] terms express user intent: stay close to the post-edit geometry,
 //!   keep each line's first endpoint more strongly than its second one, and
 //!   keep unconstrained line lengths. They are what made the hand-written
 //!   propagation "anchor the first endpoint"; here they are weights.
 //! * Locked parameters are constants. The document locks the anchors the user
-//!   just edited and every entity that participates in a relation the solver
-//!   does not model (those keep their hand-written propagation).
+//!   just edited, and curve sizes and angles that no relation may change.
 //!
 //! Solving is Levenberg–Marquardt with central-difference Jacobians, run as a
 //! short continuation: soft terms are first solved together with heavily

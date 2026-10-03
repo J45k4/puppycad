@@ -33,7 +33,9 @@ constraints, and conflicts are diagnosed.
    relation diagnostics, shown in the header and as per-entity colors.
 4. Dragging under constraints: a temporary target for the dragged anchor,
    solved every frame.
-5. Remove restrictions the solver makes unnecessary (90-degree-only rotation of
+5. (Done for relation propagation: every relation kind is solver-backed; rotating
+   direction targets, scaling Equal ellipses and transforming splines with
+   linked points are allowed) Remove restrictions the solver makes unnecessary (90-degree-only rotation of
    constrained lines, Equal blocking split/trim/scale, and similar).
 
 ## Phase 2 — Sketch tool parity
