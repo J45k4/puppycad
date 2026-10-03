@@ -31,6 +31,10 @@ pub struct Painter {
     width: f32,
     height: f32,
     vertices: Vec<Vertex>,
+    /// Physical pixels per logical unit (UI scale); text pixels snap to it.
+    scale: f32,
+    /// Theme substitution: a color equal to `.0` is drawn as `.1`.
+    remap: Vec<(Color, Color)>,
 }
 
 impl Painter {
@@ -39,10 +43,31 @@ impl Painter {
             width,
             height,
             vertices: Vec::new(),
+            scale: 1.0,
+            remap: Vec::new(),
         }
     }
 
+    /// UI scale factor: coordinates stay logical (the whole logical canvas
+    /// maps onto the surface), but text pixels snap to physical pixels.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale.max(0.1);
+    }
+
+    /// Theme palette: colors matching a `from` entry are drawn as `to`.
+    pub fn set_remap(&mut self, remap: Vec<(Color, Color)>) {
+        self.remap = remap;
+    }
+
+    pub fn map_color(&self, color: Color) -> Color {
+        self.remap
+            .iter()
+            .find(|(from, _)| *from == color)
+            .map_or(color, |(_, to)| *to)
+    }
+
     fn vertex(&self, x: f32, y: f32, color: Color) -> Vertex {
+        let color = self.map_color(color);
         Vertex {
             position: [x / self.width * 2.0 - 1.0, 1.0 - y / self.height * 2.0],
             color,
@@ -128,12 +153,19 @@ impl Painter {
                 for (row, bits) in rows.iter().enumerate() {
                     for col in 0..8 {
                         if (bits >> col) & 1 == 1 {
+                            // Snap each font pixel to whole physical pixels.
+                            let k = self.scale;
+                            let snap = |v: f32| (v * k).round() / k;
+                            let x0 = snap(cursor + col as f32 * scale);
+                            let x1 = snap(cursor + (col + 1) as f32 * scale);
+                            let y0 = snap(y + row as f32 * scale);
+                            let y1 = snap(y + (row + 1) as f32 * scale);
                             self.rect(
                                 Rect {
-                                    x: cursor + col as f32 * scale,
-                                    y: y + row as f32 * scale,
-                                    w: scale,
-                                    h: scale,
+                                    x: x0,
+                                    y: y0,
+                                    w: (x1 - x0).max(1.0 / k),
+                                    h: (y1 - y0).max(1.0 / k),
                                 },
                                 color,
                             );
