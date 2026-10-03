@@ -3595,7 +3595,7 @@ impl Document {
             || self.external_tangents.values().any(|source| *source == id)
     }
 
-    pub(crate) fn curve_midpoint(shape: &Shape) -> Option<Point> {
+    pub fn curve_midpoint(shape: &Shape) -> Option<Point> {
         match shape {
             Shape::Line { a, b, .. } => Some(Point {
                 x: (a.x + b.x) * 0.5,
@@ -3635,7 +3635,7 @@ impl Document {
         }
     }
 
-    pub(crate) fn closest_curve_point(shape: &Shape, point: Point) -> Option<Point> {
+    pub fn closest_curve_point(shape: &Shape, point: Point) -> Option<Point> {
         if !point.x.is_finite() || !point.y.is_finite() {
             return None;
         }
@@ -3745,11 +3745,7 @@ impl Document {
         }
     }
 
-    pub(crate) fn normal_line_target(
-        source: &Shape,
-        target: &Shape,
-        endpoint: u8,
-    ) -> Option<Shape> {
+    pub fn normal_line_target(source: &Shape, target: &Shape, endpoint: u8) -> Option<Shape> {
         let Shape::Line { id, a, b } = target else {
             return None;
         };
@@ -3857,7 +3853,7 @@ impl Document {
         })
     }
 
-    pub(crate) fn endpoint_tangent_target(
+    pub fn endpoint_tangent_target(
         line: &Shape,
         arc: &Shape,
         endpoint: u8,

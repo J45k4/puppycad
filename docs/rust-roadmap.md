@@ -11,7 +11,7 @@ everything after it.
 1. Commit `rust/` and its docs on the `rust` branch. **Done.**
 2. CI: build and test the Rust workspace on every push, plus the Docker UI
    smoke (`rust/ui-smoke.sh`).
-3. Cross-loader round-trip test: every `rust/fixtures/*.pcad` and every project
+3. Cross-loader round-trip test (**done**: `rust/tests/roundtrip.rs`, `test/rust-roundtrip.test.ts`): every `rust/fixtures/*.pcad` and every project
    the native app saves must load in the TypeScript `src/project-file.ts`
    loader, and web-saved projects that use only supported features must load
    natively. This is the only guard against format drift between the two apps.

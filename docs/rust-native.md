@@ -316,6 +316,28 @@ Press Ctrl+E in the solid preview to export each supported body as an ASCII STL
 beside the project file. Existing STL files are preserved; additional bodies
 and repeated exports use numbered filenames.
 
+## Cross-loader round-trip
+
+The project, model, spline and STL code is a library crate (`rust/src/lib.rs`);
+the windowed app in `main.rs` builds on it. For headless use,
+
+```sh
+cargo run --manifest-path rust/Cargo.toml -- --roundtrip IN.pcad OUT.pcad
+```
+
+loads a project and writes it back exactly as Ctrl+S would, without bumping the
+revision or touching `IN.pcad`. It exits non-zero on any load or save error.
+
+Two tests guard against format drift between the apps:
+
+- `rust/tests/roundtrip.rs` (`cargo test`) loads every `rust/fixtures/*.pcad`,
+  saves it, reloads the saved copy and saves again; both saves must be identical.
+- `test/rust-roundtrip.test.ts` (`bun run test`) loads every Rust fixture in the
+  TypeScript loader and checks its part and sketch counts. It also builds a
+  web-side project (rectangle and line on the XY plane), passes it through
+  `--roundtrip`, and checks the TypeScript loader reads the same entities back.
+  That part is skipped, with a warning, when `cargo` is not installed.
+
 ## Isolated UI check
 
 The UI smoke test uses a rootless Docker container, Xvfb, and software Vulkan.

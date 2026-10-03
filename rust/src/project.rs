@@ -607,7 +607,7 @@ fn loops_intersect(a: &[Point], b: &[Point]) -> bool {
     })
 }
 
-pub(crate) struct ProfileLoops {
+pub struct ProfileLoops {
     pub outer: Vec<Point>,
     pub holes: Vec<Vec<Point>>,
 }
@@ -618,7 +618,7 @@ fn profile_from_document(document: &Document) -> Option<ProfileLoops> {
     (profiles.len() == 1).then(|| profiles.remove(0))
 }
 
-pub(crate) fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> {
+pub fn profiles_from_document(document: &Document) -> Option<Vec<ProfileLoops>> {
     let mut curves = Vec::new();
     let mut loops = Vec::new();
     for shape in document
@@ -2668,6 +2668,15 @@ impl ProjectFile {
             || self
                 .staged(document)
                 .map_or(true, |(value, _, _)| value != self.clean_value)
+    }
+
+    /// Writes the project as it would be saved to `output`, without touching the
+    /// project path or bumping the revision.
+    pub fn export_to(&self, document: &Document, output: &Path) -> Result<(), String> {
+        let (next, _, _) = self.staged(document)?;
+        let bytes = serde_json::to_vec_pretty(&next)
+            .map_err(|error| format!("serialize project: {error}"))?;
+        atomic_write(output, &bytes)
     }
 
     fn staged(&self, document: &Document) -> Result<StagedProject, String> {
