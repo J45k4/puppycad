@@ -1,0 +1,35 @@
+{
+  "version": 4,
+  "revision": 0,
+  "items": [
+    {
+      "id": "native-part-1",
+      "type": "part",
+      "name": "Face sketches",
+      "data": {
+        "features": [],
+        "cad": {
+          "nodes": [
+            { "id": "plane-top", "type": "referencePlane", "name": "Top", "plane": "XY" },
+            { "id": "plane-front", "type": "referencePlane", "name": "Front", "plane": "XZ" },
+            { "id": "plane-right", "type": "referencePlane", "name": "Right", "plane": "YZ" },
+            { "id": "native-sketch-1", "type": "sketch", "name": "Block sketch", "targetId": "plane-top", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-1", "type": "sketchCornerRectangle", "sketchId": "native-sketch-1", "p0": { "x": -40, "y": -30 }, "p1": { "x": 40, "y": 30 } },
+            { "id": "extrude-1", "type": "extrude", "name": "Block", "sketchId": "native-sketch-1", "profileId": "native-sketch-1-profile-1", "operation": "newBody", "depth": 20 },
+            { "id": "face-extrude-1-extrude-1-solid-face-6", "type": "face", "sourceId": "extrude-1", "faceId": "extrude-1-solid-face-6" },
+            { "id": "native-sketch-2", "type": "sketch", "name": "Top face sketch", "targetId": "face-extrude-1-extrude-1-solid-face-6", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-2", "type": "sketchPrimitive", "sketchId": "native-sketch-2", "primitive": { "id": "native-entity-2", "type": "circle", "center": { "x": 0, "y": 0 }, "radius": 10, "segments": 32 } },
+            { "id": "extrude-2", "type": "extrude", "name": "Pocket", "sketchId": "native-sketch-2", "profileId": "native-sketch-2-profile-1", "operation": "cut", "depth": 8 },
+            { "id": "face-extrude-1-extrude-1-solid-face-2", "type": "face", "sourceId": "extrude-1", "faceId": "extrude-1-solid-face-2" },
+            { "id": "native-sketch-3", "type": "sketch", "name": "Side face sketch", "targetId": "face-extrude-1-extrude-1-solid-face-2", "relations": [], "variables": [], "dimensions": [] },
+            { "id": "native-entity-3", "type": "sketchCornerRectangle", "sketchId": "native-sketch-3", "p0": { "x": 20, "y": 5 }, "p1": { "x": 40, "y": 15 } },
+            { "id": "extrude-3", "type": "extrude", "name": "Boss", "sketchId": "native-sketch-3", "profileId": "native-sketch-3-profile-1", "operation": "join", "depth": 6 }
+          ],
+          "rootNodeIds": ["plane-top", "plane-front", "plane-right", "native-sketch-1", "extrude-1", "native-sketch-2", "extrude-2", "native-sketch-3", "extrude-3"]
+        },
+        "tree": { "orderedNodeIds": ["native-sketch-1", "extrude-1", "native-sketch-2", "extrude-2", "native-sketch-3", "extrude-3"], "dirtySketchIds": [] }
+      }
+    }
+  ],
+  "selectedPath": [0]
+}
