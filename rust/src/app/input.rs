@@ -33,6 +33,9 @@ impl App {
         } else if self.solid_preview {
             self.update_face_hover();
         }
+        if self.solid_drag.is_none() && !self.more_open {
+            self.update_topology_hover();
+        }
         let hover_changed = self.update_hover() | self.update_tooltip_hover();
         let layout = self.layout();
         let idle_select = self.document.tool == Tool::Select
@@ -387,6 +390,7 @@ impl App {
             }
         }
         if self.click_feature_tree(layout, point) {
+            self.clear_topology_selection();
             self.redraw();
             return;
         }
@@ -429,7 +433,12 @@ impl App {
             return;
         }
         if self.solid_preview {
-            // Left-click in the 3D view is for selection in the web app; it never orbits.
+            // Left-click in the 3D view selects vertices, edges and faces;
+            // it never orbits.
+            if self.topology_active() {
+                self.topology_click(layout, point);
+                self.redraw();
+            }
             return;
         }
         let raw_world = self.document.screen_to_world(point, self.viewport_origin());

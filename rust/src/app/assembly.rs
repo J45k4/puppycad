@@ -386,6 +386,7 @@ impl App {
     }
 
     /// The instance face under `point`, in that instance's local frame.
+    #[cfg(test)]
     pub(super) fn assembly_face_at(&self, layout: Layout, point: Point) -> Option<FacePick> {
         if !layout.viewport.contains(point.x, point.y) {
             return None;
@@ -409,6 +410,7 @@ impl App {
 
     /// The visible sharp edge near `point` as a local pick, with the world
     /// edge for highlighting.
+    #[cfg(test)]
     pub(super) fn assembly_edge_at(
         &self,
         layout: Layout,
@@ -441,24 +443,61 @@ impl App {
         ))
     }
 
-    /// A sharp edge under the cursor wins over the face behind it.
+    /// The element under the cursor (vertex > edge > face) as a mate side.
     pub(super) fn assembly_pick_at(&self, layout: Layout, point: Point) -> Option<FacePick> {
-        self.assembly_edge_at(layout, point)
-            .map(|(pick, _)| pick)
-            .or_else(|| self.assembly_face_at(layout, point))
+        let pick = self.topology_pick_at(layout, point)?;
+        let (scene, _, _, topology) = self.topology_context(layout)?;
+        self.topology_face_pick(&scene, &topology, &pick)
+    }
+
+    /// A topology pick in an instance's local frame: a vertex is a point
+    /// with an adjacent face's normal, a straight edge its midpoint and
+    /// direction, a curved edge its centre and axis, a face the hit point
+    /// and normal.
+    pub(super) fn topology_face_pick(
+        &self,
+        scene: &SolidScene,
+        topology: &Topology,
+        pick: &TopoPick,
+    ) -> Option<FacePick> {
+        let view = self.assembly.as_ref()?;
+        let instance = topology.body_of(pick.element);
+        let (point, direction, edge) = match pick.element {
+            TopoRef::Edge(index) => {
+                let (center, axis) = topology.edge_axis(index);
+                let point = match &topology.edges[index].solid {
+                    Some(solid) => std::array::from_fn(|i| (solid.a[i] + solid.b[i]) * 0.5),
+                    None => center,
+                };
+                (point, axis, true)
+            }
+            _ => (pick.point, Self::pick_normal(scene, topology, pick)?, false),
+        };
+        let transform = view.asm.instances.get(instance)?.transform();
+        let pose = transform.pose().inverse();
+        let local = pose.point(point.map(f64::from));
+        Some(FacePick {
+            instance,
+            point: std::array::from_fn(|i| local[i] / transform.scale[i]),
+            normal: asm::v_unit(pose.vector(direction.map(f64::from)))?,
+            edge,
+        })
     }
 
     /// Recompute the hovered instance; true when it changed.
     pub(super) fn update_assembly_hover(&mut self) -> bool {
         let layout = self.layout();
-        let edge = self.assembly_edge_at(layout, self.cursor);
-        let hovered = match &edge {
-            Some((pick, _)) => Some(pick.instance),
-            None => self
-                .assembly_face_at(layout, self.cursor)
-                .map(|pick| pick.instance),
+        let pick = self.topology_pick_at(layout, self.cursor);
+        let (hovered, edge) = match (pick, self.topology_context(layout)) {
+            (Some(pick), Some((_, _, _, topology))) => (
+                Some(topology.body_of(pick.element)),
+                match pick.element {
+                    TopoRef::Edge(index) => topology.edges[index].solid.clone(),
+                    _ => None,
+                },
+            ),
+            _ => (None, None),
         };
-        let edge = edge.map(|(_, edge)| edge);
         match &mut self.assembly {
             Some(view) if view.hovered != hovered || view.hovered_edge != edge => {
                 view.hovered = hovered;
@@ -507,7 +546,13 @@ impl App {
         if !layout.viewport.contains(point.x, point.y) {
             return;
         }
-        let pick = self.assembly_pick_at(layout, point);
+        let message = self
+            .topology_click(layout, point)
+            .map(|_| self.status_message.clone());
+        let pick = self.topo_selection.last().copied().and_then(|last| {
+            let (scene, _, _, topology) = self.topology_context(layout)?;
+            self.topology_face_pick(&scene, &topology, &last)
+        });
         if let Some(view) = &mut self.assembly {
             view.prompt = None;
             view.selected = pick.map(|pick| pick.instance);
@@ -515,6 +560,9 @@ impl App {
             view.selected_mate = None;
         }
         self.describe_selection();
+        if let (Some(message), Some(_)) = (message, pick) {
+            self.status_message = format!("{message}  |  hover another instance, J mates");
+        }
     }
 
     fn describe_selection(&mut self) {
@@ -936,6 +984,7 @@ impl App {
             Some(view) if view.selected.is_some() => {
                 view.selected = None;
                 view.pick_a = None;
+                self.topo_selection.clear();
                 self.status_message = "Selection cleared  |  Esc again returns to the part".into();
             }
             Some(_) => self.close_assembly(),
@@ -1062,10 +1111,7 @@ impl App {
                 painter.triangle(points[0], points[1], points[2], color);
             }
             paint_visible_edges(painter, &scene, &projector);
-            if let Some(edge) = &view.hovered_edge {
-                let (s, e) = (projector.screen(edge.a), projector.screen(edge.b));
-                painter.line(s[0], s[1], e[0], e[1], 3.0, FACE_HOVER);
-            }
+            self.paint_topology(painter, layout, &scene, &projector);
             if let Some(pick) = view.pick_a {
                 let transform = view.asm.instances[pick.instance].transform();
                 let p = transform.apply(pick.point).map(|c| c as f32);
@@ -1389,6 +1435,14 @@ impl App {
                     painter.text(value.x + 6.0, value.y + 7.0, &text, 1.0, TEXT);
                 }
             }
+            let below = assembly_mate_row(layout, mates.len());
+            paint_lines(
+                painter,
+                below.x,
+                below.y + 12.0,
+                &self.topology_panel_lines(),
+                layout.right.w,
+            );
         } else {
             let row = assembly_property_row(layout, 0);
             painter.text(row.x, row.y + 9.0, "CLICK AN INSTANCE", 1.0, MUTED);

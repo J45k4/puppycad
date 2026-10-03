@@ -845,7 +845,9 @@ impl App {
         );
         if self.extrude_draft.is_some() {
             self.paint_draft_panel(painter, layout);
-        } else if self.paint_feature_panel(painter, layout) {
+        } else if self.paint_topology_panel(painter, layout)
+            || self.paint_feature_panel(painter, layout)
+        {
         } else if let Some(solids) = self
             .project
             .as_ref()

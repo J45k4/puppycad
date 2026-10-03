@@ -48,3 +48,204 @@ fn cache_returns_the_same_topology_for_the_same_scene() {
     assert_eq!(a, b);
     assert!(std::rc::Rc::ptr_eq(&first, &second));
 }
+
+use super::input::KeyPress;
+use winit::dpi::PhysicalPosition;
+use winit::event::DeviceId;
+
+fn key(app: &mut App, code: KeyCode) {
+    app.handle_key(KeyPress {
+        physical_key: PhysicalKey::Code(code),
+        text: None,
+    });
+}
+
+fn click(app: &mut App, point: Point, shift: bool) {
+    app.handle_window_event(WindowEvent::CursorMoved {
+        device_id: DeviceId::dummy(),
+        position: PhysicalPosition::new(point.x as f64, point.y as f64),
+    });
+    app.modifiers = if shift {
+        ModifiersState::SHIFT
+    } else {
+        ModifiersState::empty()
+    };
+    for state in [ElementState::Pressed, ElementState::Released] {
+        app.handle_window_event(WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state,
+            button: MouseButton::Left,
+        });
+    }
+    app.modifiers = ModifiersState::empty();
+}
+
+fn temp_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "puppycad-topo-{name}-{}-{}.pcad",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
+/// A 40 x 20 x 10 block in the part 3D view.
+fn block_app(name: &str) -> (App, PathBuf) {
+    let path = temp_path(name);
+    let mut app = App::with_project(&path).unwrap();
+    app.document.tool = Tool::Rectangle;
+    app.document.draft_start = Some(Point { x: 0.0, y: 0.0 });
+    assert!(app.document.finish_draft(Point { x: 40.0, y: 20.0 }));
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 10.0, 0)
+        .unwrap();
+    app.solid_preview = true;
+    (app, path)
+}
+
+fn screen_point(projector: &SolidProjector, world: [f32; 3]) -> Point {
+    let [x, y] = projector.screen(world);
+    Point { x, y }
+}
+
+/// A visible corner, a point 10 px along one of its visible edges and the
+/// edge index.
+fn corner_and_edge(app: &App) -> (usize, Point, usize, Point) {
+    let (scene, projector, _, topology) = app.topology_context(app.layout()).unwrap();
+    for (v, vertex) in topology.vertices.iter().enumerate() {
+        if !projector.visible(&scene, vertex.point) {
+            continue;
+        }
+        for (e, edge) in topology.edges.iter().enumerate() {
+            let (a, b) = (edge.points[0], edge.points[1]);
+            let far = if a == vertex.point {
+                b
+            } else if b == vertex.point {
+                a
+            } else {
+                continue;
+            };
+            let (sa, sb) = (projector.screen(vertex.point), projector.screen(far));
+            let length = ((sb[0] - sa[0]).powi(2) + (sb[1] - sa[1]).powi(2)).sqrt();
+            if length < 60.0 {
+                continue;
+            }
+            let t = 10.0 / length;
+            let along: [f32; 3] =
+                std::array::from_fn(|i| vertex.point[i] + (far[i] - vertex.point[i]) * t);
+            if projector.visible(&scene, along) {
+                return (
+                    v,
+                    screen_point(&projector, vertex.point),
+                    e,
+                    screen_point(&projector, along),
+                );
+            }
+        }
+    }
+    panic!("no visible corner");
+}
+
+#[test]
+fn pick_priority_is_vertex_then_edge_then_face() {
+    let (app, path) = block_app("priority");
+    let layout = app.layout();
+    let (v, corner, e, on_edge) = corner_and_edge(&app);
+    assert_eq!(
+        app.topology_pick_at(layout, corner).unwrap().element,
+        TopoRef::Vertex(v)
+    );
+    // 3 px off the corner is still the vertex (6 px tolerance).
+    let near = Point {
+        x: corner.x + 3.0,
+        y: corner.y,
+    };
+    assert!(matches!(
+        app.topology_pick_at(layout, near).unwrap().element,
+        TopoRef::Vertex(_)
+    ));
+    assert_eq!(
+        app.topology_pick_at(layout, on_edge).unwrap().element,
+        TopoRef::Edge(e)
+    );
+    let (scene, projector, _, topology) = app.topology_context(layout).unwrap();
+    let top = topology
+        .faces
+        .iter()
+        .position(|face| face.normal[2] > 0.99)
+        .unwrap();
+    let triangle = topology.faces[top].triangles[0];
+    let center: [f32; 3] =
+        std::array::from_fn(|i| scene.triangles[triangle].iter().map(|p| p[i]).sum::<f32>() / 3.0);
+    let pick = app
+        .topology_pick_at(layout, screen_point(&projector, center))
+        .unwrap();
+    assert_eq!(pick.element, TopoRef::Face(top));
+    let text = app.describe_pick(&scene, &topology, &pick);
+    assert!(text.starts_with("Face top A=800.00"), "{text}");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn hidden_back_vertex_is_not_picked() {
+    let (app, path) = block_app("occlusion");
+    let layout = app.layout();
+    let (scene, projector, _, topology) = app.topology_context(layout).unwrap();
+    let hidden: Vec<usize> = (0..topology.vertices.len())
+        .filter(|&v| !projector.visible(&scene, topology.vertices[v].point))
+        .collect();
+    assert!(!hidden.is_empty(), "the default view hides a back corner");
+    for v in hidden {
+        let point = screen_point(&projector, topology.vertices[v].point);
+        let pick = app.topology_pick_at(layout, point);
+        assert_ne!(pick.map(|p| p.element), Some(TopoRef::Vertex(v)));
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+fn selected(app: &App) -> Vec<TopoRef> {
+    app.topo_selection.iter().map(|p| p.element).collect()
+}
+
+#[test]
+fn shift_click_multi_selects_and_escape_clears() {
+    let (mut app, path) = block_app("multi");
+    let (v, corner, e, on_edge) = corner_and_edge(&app);
+    click(&mut app, corner, false);
+    assert_eq!(selected(&app), vec![TopoRef::Vertex(v)]);
+    assert!(
+        app.status_message.starts_with("Selected Vertex ("),
+        "{}",
+        app.status_message
+    );
+    click(&mut app, on_edge, true);
+    assert_eq!(selected(&app), vec![TopoRef::Vertex(v), TopoRef::Edge(e)]);
+    let lines = app.topology_panel_lines();
+    assert_eq!(lines[0], "2 SELECTED");
+    let _ = app.paint();
+    // Orbiting keeps the selection (ids belong to the scene, not the view).
+    let view = app.solid_view;
+    app.solid_view.rotate_drag(30.0, 10.0);
+    assert_eq!(app.current_topology_selection().unwrap().2.len(), 2);
+    app.solid_view = view;
+    click(&mut app, on_edge, true);
+    assert_eq!(selected(&app), vec![TopoRef::Vertex(v)]);
+    click(&mut app, on_edge, false);
+    assert_eq!(selected(&app), vec![TopoRef::Edge(e)]);
+    key(&mut app, KeyCode::Escape);
+    assert!(app.topo_selection.is_empty());
+    assert!(app.solid_preview, "Esc only clears the selection");
+    click(&mut app, corner, false);
+    let viewport = app.layout().viewport;
+    let empty = Point {
+        x: viewport.x + 5.0,
+        y: viewport.y + viewport.h - 5.0,
+    };
+    click(&mut app, empty, false);
+    assert!(app.topo_selection.is_empty());
+    let _ = std::fs::remove_file(path);
+}

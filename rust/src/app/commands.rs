@@ -1845,6 +1845,10 @@ impl App {
             self.status_message = "Cancelled".into();
             return;
         }
+        if self.solid_preview && self.clear_topology_selection() {
+            self.status_message = "Selection cleared".into();
+            return;
+        }
         self.box_start = None;
         self.split_circle_start = None;
         self.corner_pick = None;

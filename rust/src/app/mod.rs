@@ -16,6 +16,7 @@ mod solid;
 mod status;
 mod tangent;
 mod topology;
+mod topology_view;
 mod view_sketch;
 
 #[cfg(test)]
@@ -48,6 +49,7 @@ use shortcut_overlay::*;
 use solid::*;
 use status::*;
 use topology::*;
+use topology_view::paint_lines;
 
 use puppycad::{model, project, sketch_value, spline, stl, threemf};
 
@@ -292,6 +294,12 @@ pub(crate) struct App {
     /// Face under the cursor at the last pointer move in the 3D preview
     /// (kept while the MORE menu is open, for MORE → SKETCH ON FACE).
     hovered_face: Option<FaceHover>,
+    /// Selected vertices, edges and faces in the 3D views, valid for the
+    /// scene whose hash is `topo_key`.
+    topo_selection: Vec<TopoPick>,
+    topo_key: u64,
+    /// Element under the cursor in the 3D views (status line tracking).
+    topo_hover: Option<TopoRef>,
     /// Show (and snap to) a face sketch's supporting body; key 5 toggles.
     face_context: bool,
     selected_solid: usize,
@@ -471,6 +479,9 @@ impl Default for App {
             rollback_drag: false,
             solid_view: OrbitView::default(),
             hovered_face: None,
+            topo_selection: Vec::new(),
+            topo_key: 0,
+            topo_hover: None,
             face_context: true,
             selected_solid: 0,
             selected_profile: 0,
@@ -1072,7 +1083,7 @@ impl App {
                 if self.edge_pick.is_some() {
                     self.paint_edge_pick(&mut painter, layout, &scene, &projector);
                 } else {
-                    self.paint_face_hover(&mut painter, layout, &projector);
+                    self.paint_topology(&mut painter, layout, &scene, &projector);
                 }
             }
         } else {
