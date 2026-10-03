@@ -3355,3 +3355,47 @@ cp /tmp/native-face-sketch.pcad /out/rust-native-face-sketch.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Command palette and shortcut cheat sheet: Ctrl+K, type "mirr" (Mirror is
+# listed first, dimmed without a selection), Esc; then F1 shows every
+# registry shortcut grouped by category.
+./target/debug/puppycad /tmp/native-palette.pcad >/tmp/puppycad-palette.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-palette.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-palette.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" l
+xdotool mousemove 500 400 click 1
+xdotool mousemove 700 400 click 1
+xdotool key --window "$window_id" ctrl+k
+sleep 0.2
+xdotool type --window "$window_id" --clearmodifiers 'mirr'
+sleep 0.3
+import -window root /out/rust-native-palette.png
+xdotool key --window "$window_id" Escape
+xdotool key --window "$window_id" F1
+sleep 0.3
+import -window root /out/rust-native-shortcuts.png
+xdotool key --window "$window_id" Escape
+# Enter in the palette runs the selected command: "circ" picks Circle.
+xdotool key --window "$window_id" ctrl+k
+xdotool type --window "$window_id" --clearmodifiers 'circ'
+xdotool key --window "$window_id" Return
+xdotool mousemove 600 550 click 1
+xdotool mousemove 640 550 click 1
+xdotool key --window "$window_id" ctrl+s
+sleep 0.3
+test -s /tmp/native-palette.pcad
+grep -q '"type": *"circle"' /tmp/native-palette.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
