@@ -1566,3 +1566,115 @@ fn ghost_sharp_edges_are_the_twelve_box_edges() {
         .collect();
     assert_eq!(solid::mesh_sharp_edges(&triangles).len(), 12);
 }
+
+/// Rectangle sketch with an extrude draft open.
+fn draft_app(name: &str) -> (App, PathBuf) {
+    let path = temp_project(name);
+    let mut app = App::with_project(&path).unwrap();
+    app.document.tool = Tool::Rectangle;
+    app.document.draft_start = Some(Point { x: 0.0, y: 0.0 });
+    assert!(app.document.finish_draft(Point { x: 40.0, y: 20.0 }));
+    app.begin_extrude("newBody");
+    assert!(app.extrude_draft.is_some());
+    (app, path)
+}
+
+fn click_control(app: &mut App, control: DraftControl) {
+    let layout = app.layout();
+    let (_, rect, _) = app
+        .draft_controls(layout)
+        .into_iter()
+        .find(|(c, _, _)| *c == control)
+        .unwrap_or_else(|| panic!("{control:?} row"));
+    let point = Point {
+        x: rect.x + rect.w / 2.0,
+        y: rect.y + rect.h / 2.0,
+    };
+    assert!(app.draft_control_click(layout, point));
+}
+
+#[test]
+fn draft_rows_click_like_the_keys() {
+    let (mut app, path) = draft_app("draft-rows");
+    click_control(&mut app, DraftControl::End);
+    let draft = app.extrude_draft.as_ref().unwrap();
+    assert_eq!(draft.options.end, project::EndCondition::Symmetric);
+    assert_eq!(draft.ghost.as_ref().unwrap().start, -25.0);
+    click_control(&mut app, DraftControl::End);
+    click_control(&mut app, DraftControl::Flip);
+    let draft = app.extrude_draft.as_ref().unwrap();
+    assert!(draft.options.flip);
+    assert_eq!(draft.ghost.as_ref().unwrap().start, -50.0);
+    click_control(&mut app, DraftControl::Value);
+    assert!(app.draft_focus);
+    let layout = app.layout();
+    let prompt = app.draft_prompt_rect(layout);
+    assert!(app.draft_control_click(
+        layout,
+        Point {
+            x: prompt.x + 5.0,
+            y: prompt.y + 5.0
+        }
+    ));
+    // Cut / join need an existing body.
+    click_control(&mut app, DraftControl::Op);
+    assert_eq!(app.extrude_draft.as_ref().unwrap().operation, "newBody");
+    assert!(app.status_message.contains("needs an existing body"));
+    let _ = app.paint();
+    click_control(&mut app, DraftControl::Cancel);
+    assert!(app.extrude_draft.is_none() && !app.solid_preview);
+    assert!(app.project.as_ref().unwrap().extrusion_previews().is_none());
+
+    app.begin_extrude("newBody");
+    click_control(&mut app, DraftControl::Commit);
+    assert!(app.extrude_draft.is_none(), "{}", app.status_message);
+    assert_eq!(
+        app.project
+            .as_ref()
+            .unwrap()
+            .extrusion_previews()
+            .unwrap()
+            .len(),
+        1
+    );
+    // With a body, OP cycles newBody -> cut -> join -> newBody.
+    app.solid_preview = false;
+    app.document.draft_start = Some(Point { x: 60.0, y: 0.0 });
+    assert!(app.document.finish_draft(Point { x: 80.0, y: 20.0 }));
+    app.selected_profile = 1;
+    app.begin_extrude("newBody");
+    let op = |app: &App| app.extrude_draft.as_ref().unwrap().operation;
+    click_control(&mut app, DraftControl::Op);
+    assert_eq!(op(&app), "cut");
+    app.handle_draft_key(KeyCode::KeyO, None);
+    assert_eq!(op(&app), "join");
+    click_control(&mut app, DraftControl::Op);
+    assert_eq!(op(&app), "newBody");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn dragging_the_end_cap_changes_the_depth() {
+    let (mut app, path) = draft_app("draft-drag");
+    let layout = app.layout();
+    let handle = app.draft_cap_handle(layout).expect("blind draft has a cap");
+    let start = Point {
+        x: handle.centre[0],
+        y: handle.centre[1],
+    };
+    app.cursor = start;
+    assert!(app.begin_depth_drag(layout, start));
+    // Ten millimeters along the screen-space normal.
+    app.pointer_moved(Point {
+        x: start.x + handle.axis[0] * 10.2,
+        y: start.y + handle.axis[1] * 10.2,
+    });
+    app.finish_depth_drag();
+    let draft = app.extrude_draft.as_ref().unwrap();
+    assert_eq!(draft.buffer, "60");
+    assert_eq!(draft.ghost.as_ref().unwrap().depth, 60.0);
+    app.handle_draft_key(KeyCode::Enter, None);
+    let solids = app.project.as_ref().unwrap().extrusion_previews().unwrap();
+    assert_eq!(solids[0].depth, 60.0);
+    let _ = std::fs::remove_file(path);
+}

@@ -3,7 +3,7 @@ use super::*;
 impl App {
     pub(super) fn editable_field_at(&self, point: Point) -> Option<EditField> {
         let layout = self.layout();
-        if !layout.right.contains(point.x, point.y) || self.extrude_draft.is_some() {
+        if !layout.right.contains(point.x, point.y) || self.draft_panel_open() {
             return None;
         }
         if self.solid_preview && self.selected_extension().is_some() {
@@ -843,7 +843,7 @@ impl App {
             1.5,
             TEXT,
         );
-        if self.extrude_draft.is_some() {
+        if self.draft_panel_open() {
             self.paint_draft_panel(painter, layout);
         } else if self.paint_topology_panel(painter, layout)
             || self.paint_feature_panel(painter, layout)

@@ -408,8 +408,9 @@ boundaries are rejected. With several regions, **[ / ]** choose one
 
 **Extrude.** **X** new body, **Shift+X** cut, **Shift+J** join (cuts/joins
 apply to the nearest earlier new body). The 3D view opens with a translucent
-ghost and a DEPTH prompt: **E** cycles the end condition, **F** flips, Enter
-commits (empty = 50 mm blind), Esc cancels. End conditions: Blind; Symmetric
+ghost and a DEPTH prompt: **E** cycles the end condition, **F** flips, **O**
+cycles the operation (new body / cut / join; cut and join need an earlier
+body), Enter commits (empty = 50 mm blind), Esc cancels. End conditions: Blind; Symmetric
 (total depth centred, no flip); Through all and Up to body (cut/join only,
 target an earlier new body, **U** then click). A selected extrusion shows
 DEPTH, END, FLIP and TARGET in Properties, each edit one undo step; edits
@@ -427,7 +428,17 @@ breadcrumb is "New extrusion (preview)", a "PREVIEW" tag in the ghost color
 sits right of the DEPTH / ANGLE prompt, the ghost's sharp edges (same 20°
 rule as bodies) are outlined in the ghost color, and the Project panel shows
 a dimmed, inert "NEW EXTRUSION (preview)" row after the feature tree.
-Feature tree keys and row clicks do nothing until the draft ends. Enter
+Feature tree keys and row clicks do nothing until the draft ends.
+The draft's Properties block (NEW EXTRUSION / REVOLVE / CHAMFER / FILLET)
+is mouse-editable: clicking DEPTH (ANGLE, DISTANCE, RADIUS) or the prompt
+box focuses the prompt (caret shown), END cycles the end condition, FLIP
+toggles, OP cycles new body / cut / join like **O**, the TARGET row (Up to
+body) arms a body click, and **[ COMMIT ENTER ]** / **[ CANCEL ESC ]** end
+the draft; each change rebuilds the ghost. The prompt reads e.g.
+"DEPTH 50_ mm  BLIND  NEWBODY". For blind and symmetric extrusions,
+left-dragging the ghost's end cap along the extrusion normal sets the depth
+live (1 mm steps, Shift 0.1 mm); the draft stays open for Enter, and right
+drag still orbits. Enter
 creates the feature as one undo step ("Created … | Ctrl+Z to undo"); Esc
 reports "Extrusion cancelled" and returns to the sketch.
 

@@ -66,7 +66,7 @@ fn ghost_edge_color(cut: bool) -> Color {
     }
 }
 
-fn next_operation(operation: &'static str) -> &'static str {
+pub(super) fn next_operation(operation: &'static str) -> &'static str {
     match operation {
         "newBody" => "cut",
         "cut" => "join",
@@ -93,6 +93,7 @@ impl App {
             return;
         };
         self.selected_profile = self.selected_profile.min(profiles.len().saturating_sub(1));
+        self.draft_focus = false;
         self.revolve_draft = Some(RevolveDraft {
             axis: None,
             buffer: String::new(),
@@ -323,6 +324,7 @@ impl App {
                 if selected.len() == 1 { "" } else { "s" }
             )
         };
+        self.draft_focus = false;
         self.edge_pick = Some(EdgePick {
             kind,
             edges: selected,
@@ -544,10 +546,8 @@ impl App {
             .and_then(ProjectFile::evaluated_solids)
             .unwrap_or_default();
         let scene = SolidScene::from_manifolds(&solids);
-        let mut vertices = scene.vertices.clone();
-        vertices.extend(ghost.iter().flatten().copied());
         painter.rect(layout.viewport, [0.065, 0.085, 0.115, 1.0]);
-        if let Some(projector) = SolidProjector::new(self.solid_view, &vertices, layout.viewport) {
+        if let Some(projector) = self.ghost_projector(layout, ghost) {
             self.paint_boolean_preview(painter, layout, &scene, &projector, scene.bodies);
             let color: Color = if cut {
                 [0.95, 0.42, 0.32, 0.38]
@@ -571,14 +571,10 @@ impl App {
                 painter.line(a[0], a[1], b[0], b[1], 1.8, ghost_edge_color(cut));
             }
         }
-        let rect = Rect {
-            x: layout.viewport.x + 18.0,
-            y: layout.viewport.y + layout.viewport.h - 58.0,
-            w: 460.0,
-            h: 40.0,
-        };
+        let rect = self.draft_prompt_rect(layout);
+        let hot = self.draft_focus || rect.contains(self.cursor.x, self.cursor.y);
         painter.rect(rect, PANEL_LIGHT);
-        painter.outline(rect, 1.0, ACCENT);
+        painter.outline(rect, if hot { 2.0 } else { 1.0 }, ACCENT);
         painter.text(rect.x + 12.0, rect.y + 13.0, prompt, 1.2, ACCENT);
         // "PREVIEW" tag right of the prompt, in the ghost color.
         let color = ghost_edge_color(cut);
@@ -664,14 +660,10 @@ impl App {
             let color = if edge.straight { FACE_HOVER } else { MUTED };
             painter.line(a[0], a[1], b[0], b[1], 3.0, color);
         }
-        let rect = Rect {
-            x: layout.viewport.x + 18.0,
-            y: layout.viewport.y + layout.viewport.h - 58.0,
-            w: 520.0,
-            h: 40.0,
-        };
+        let rect = self.draft_prompt_rect(layout);
+        let hot = self.draft_focus || rect.contains(self.cursor.x, self.cursor.y);
         painter.rect(rect, PANEL_LIGHT);
-        painter.outline(rect, 1.0, ACCENT);
+        painter.outline(rect, if hot { 2.0 } else { 1.0 }, ACCENT);
         painter.text(
             rect.x + 12.0,
             rect.y + 13.0,
