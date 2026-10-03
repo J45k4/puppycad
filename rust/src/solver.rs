@@ -36,6 +36,7 @@
 //! conflicting constraints simply fail to converge.
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(dead_code)] // `Param` is exercised by tests; the document passes constants.
 pub enum Value {
     Const(f64),
     Param(usize),
@@ -61,27 +62,56 @@ pub struct CircleVar {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Constraint {
-    Fixed { point: PointVar, at: (f64, f64) },
+    Fixed {
+        point: PointVar,
+        at: (f64, f64),
+    },
     Coincident(PointVar, PointVar),
     Horizontal(LineVar),
     Vertical(LineVar),
-    Length { line: LineVar, value: Value },
+    Length {
+        line: LineVar,
+        value: Value,
+    },
     /// Absolute line direction in degrees (atan2 of b - a).
-    Rotation { line: LineVar, degrees: Value },
+    Rotation {
+        line: LineVar,
+        degrees: Value,
+    },
     EqualLength(LineVar, LineVar),
     Parallel(LineVar, LineVar),
     Perpendicular(LineVar, LineVar),
     Collinear(LineVar, LineVar),
     /// Signed angle from the first line to the second, in degrees.
-    Angle { from: LineVar, to: LineVar, degrees: Value },
-    Midpoint { point: PointVar, line: LineVar },
-    PointOnLine { point: PointVar, line: LineVar },
-    Radius { circle: CircleVar, value: Value },
+    Angle {
+        from: LineVar,
+        to: LineVar,
+        degrees: Value,
+    },
+    Midpoint {
+        point: PointVar,
+        line: LineVar,
+    },
+    PointOnLine {
+        point: PointVar,
+        line: LineVar,
+    },
+    Radius {
+        circle: CircleVar,
+        value: Value,
+    },
     EqualRadius(CircleVar, CircleVar),
     /// `source.radius - target.radius == value`.
-    RadiusDifference { source: CircleVar, target: CircleVar, value: Value },
+    RadiusDifference {
+        source: CircleVar,
+        target: CircleVar,
+        value: Value,
+    },
     Concentric(CircleVar, CircleVar),
-    PointOnCircle { point: PointVar, circle: CircleVar },
+    PointOnCircle {
+        point: PointVar,
+        circle: CircleVar,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,7 +119,11 @@ pub enum Soft {
     /// Keep parameter `var` near `value` with the given weight.
     Target { var: usize, value: f64, weight: f64 },
     /// Keep a line's length near `length`.
-    KeepLength { line: LineVar, length: f64, weight: f64 },
+    KeepLength {
+        line: LineVar,
+        length: f64,
+        weight: f64,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -116,6 +150,7 @@ impl Default for Options {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Diagnostics are reported to callers that want them.
 pub struct SolveResult {
     pub params: Vec<f64>,
     /// Euclidean norm of the hard residual vector at `params`.
@@ -162,8 +197,34 @@ impl Problem {
                     options,
                 );
             }
-            iterations +=
-                self.levenberg_marquardt(&mut params, &free, None, &damping, options);
+            iterations += self.levenberg_marquardt(&mut params, &free, None, &damping, options);
+            // Round-off cleanup: parameters the soft phases only nudged go back
+            // to their exact input values, and the rest are re-solved around
+            // them, so untouched geometry stays bit-identical.
+            let snapped: Vec<usize> = free
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    params[i] != self.params[i]
+                        && (params[i] - self.params[i]).abs()
+                            <= 1e-4 * self.params[i].abs().max(1.0)
+                })
+                .collect();
+            if !snapped.is_empty() {
+                let mut retry = params.clone();
+                for &i in &snapped {
+                    retry[i] = self.params[i];
+                }
+                let rest: Vec<usize> = free
+                    .iter()
+                    .copied()
+                    .filter(|i| !snapped.contains(i))
+                    .collect();
+                iterations += self.levenberg_marquardt(&mut retry, &rest, None, &damping, options);
+                if self.max_residual(&retry) <= options.tolerance {
+                    params = retry;
+                }
+            }
         }
         let residuals = self.residuals(&params);
         let residual_norm = residuals.iter().map(|r| r * r).sum::<f64>().sqrt();
@@ -175,6 +236,12 @@ impl Problem {
             max_residual,
             iterations,
         }
+    }
+
+    fn max_residual(&self, params: &[f64]) -> f64 {
+        self.residuals(params)
+            .iter()
+            .fold(0.0f64, |m, r| m.max(r.abs()))
     }
 
     fn damping_weights(&self) -> Vec<f64> {
@@ -217,7 +284,12 @@ impl Problem {
         damping: &[f64],
         options: Options,
     ) -> usize {
-        let cost = |p: &[f64]| self.objective(p, hard_weight).iter().map(|r| r * r).sum::<f64>();
+        let cost = |p: &[f64]| {
+            self.objective(p, hard_weight)
+                .iter()
+                .map(|r| r * r)
+                .sum::<f64>()
+        };
         let mut current = cost(params);
         let mut lambda = 1e-3;
         let n = free.len();
@@ -303,11 +375,8 @@ impl Problem {
 
 fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> Option<Vec<f64>> {
     for column in 0..n {
-        let pivot = (column..n).max_by(|&i, &j| {
-            a[i * n + column]
-                .abs()
-                .total_cmp(&a[j * n + column].abs())
-        })?;
+        let pivot = (column..n)
+            .max_by(|&i, &j| a[i * n + column].abs().total_cmp(&a[j * n + column].abs()))?;
         if a[pivot * n + column].abs() < 1e-300 {
             return None;
         }
@@ -371,6 +440,17 @@ fn wrap(angle: f64) -> f64 {
     angle.sin().atan2(angle.cos())
 }
 
+/// Undirected angle between two lines minus `offset`, wrapped to
+/// [-pi/2, pi/2). Unlike the web solver's cross/dot residuals this has a
+/// nonzero gradient even when the lines start exactly 90 degrees from the
+/// target orientation, so a quarter-turn edit cannot stall at a saddle.
+fn line_angle(p: &[f64], first: LineVar, second: LineVar, offset: f64) -> f64 {
+    let a = unit(p, first);
+    let b = unit(p, second);
+    let half = std::f64::consts::FRAC_PI_2;
+    (cross(a, b).atan2(dot(a, b)) - offset + half).rem_euclid(std::f64::consts::PI) - half
+}
+
 fn cross(a: (f64, f64), b: (f64, f64)) -> f64 {
     a.0 * b.1 - a.1 * b.0
 }
@@ -400,21 +480,25 @@ fn residual(constraint: &Constraint, p: &[f64], out: &mut Vec<f64>) {
         Constraint::EqualLength(first, second) => {
             out.push(line_length(p, first) - line_length(p, second))
         }
-        Constraint::Parallel(first, second) => out.push(cross(unit(p, first), unit(p, second))),
-        Constraint::Perpendicular(first, second) => out.push(dot(unit(p, first), unit(p, second))),
+        Constraint::Parallel(first, second) => out.push(line_angle(p, first, second, 0.0)),
+        Constraint::Perpendicular(first, second) => {
+            out.push(line_angle(p, first, second, std::f64::consts::FRAC_PI_2))
+        }
         Constraint::Collinear(first, second) => {
             let direction = unit(p, first);
             let (ax, ay) = pt(p, first.a);
             let (bx, by) = pt(p, second.a);
             out.extend([
-                cross(direction, unit(p, second)),
+                line_angle(p, first, second, 0.0),
                 cross((bx - ax, by - ay), direction),
             ]);
         }
         Constraint::Angle { from, to, degrees } => {
             let a = unit(p, from);
             let b = unit(p, to);
-            out.push(wrap(cross(a, b).atan2(dot(a, b)) - value(p, degrees).to_radians()));
+            out.push(wrap(
+                cross(a, b).atan2(dot(a, b)) - value(p, degrees).to_radians(),
+            ));
         }
         Constraint::Midpoint { point, line } => {
             let (x, y) = pt(p, point);
@@ -532,7 +616,10 @@ mod tests {
         let a = problem.point(1.0, 1.0, false);
         let b = problem.point(4.0, 4.0, false);
         problem.constraints = vec![
-            Constraint::Fixed { point: a, at: (2.0, 3.0) },
+            Constraint::Fixed {
+                point: a,
+                at: (2.0, 3.0),
+            },
             Constraint::Coincident(a, b),
         ];
         let p = solved(&problem).params;
@@ -547,9 +634,15 @@ mod tests {
         let v = line(&mut problem, (0.0, 0.0), (3.0, 4.0), true);
         problem.constraints = vec![
             Constraint::Horizontal(h),
-            Constraint::Length { line: h, value: Value::Const(5.0) },
+            Constraint::Length {
+                line: h,
+                value: Value::Const(5.0),
+            },
             Constraint::Vertical(v),
-            Constraint::Length { line: v, value: Value::Const(8.0) },
+            Constraint::Length {
+                line: v,
+                value: Value::Const(8.0),
+            },
         ];
         let p = solved(&problem).params;
         close(p[h.b.x], 5.0);
@@ -565,7 +658,10 @@ mod tests {
         problem.locked[l.b.x] = true;
         problem.locked[l.b.y] = true;
         let length = problem.param(1.0, false);
-        problem.constraints = vec![Constraint::Length { line: l, value: Value::Param(length) }];
+        problem.constraints = vec![Constraint::Length {
+            line: l,
+            value: Value::Param(length),
+        }];
         close(solved(&problem).params[length], 10.0);
     }
 
@@ -580,8 +676,15 @@ mod tests {
         let rotated = line(&mut problem, (0.0, 0.0), (5.0, 1.0), true);
         problem.constraints = vec![
             Constraint::Perpendicular(base, perpendicular),
-            Constraint::Angle { from: base, to: angled, degrees: Value::Const(30.0) },
-            Constraint::Rotation { line: rotated, degrees: Value::Const(-45.0) },
+            Constraint::Angle {
+                from: base,
+                to: angled,
+                degrees: Value::Const(30.0),
+            },
+            Constraint::Rotation {
+                line: rotated,
+                degrees: Value::Const(-45.0),
+            },
         ];
         soft_keep_all(&mut problem);
         let p = solved(&problem).params;
@@ -615,7 +718,10 @@ mod tests {
         let mid = problem.point(1.0, 1.0, false);
         let on = problem.point(3.0, 7.0, false);
         problem.constraints = vec![
-            Constraint::Midpoint { point: mid, line: l },
+            Constraint::Midpoint {
+                point: mid,
+                line: l,
+            },
             Constraint::PointOnLine { point: on, line: l },
         ];
         soft_keep_all(&mut problem);
@@ -635,10 +741,20 @@ mod tests {
         let on = problem.point(0.0, 9.0, false);
         problem.constraints = vec![
             Constraint::EqualRadius(source, equal),
-            Constraint::RadiusDifference { source, target: smaller, value: Value::Const(2.0) },
+            Constraint::RadiusDifference {
+                source,
+                target: smaller,
+                value: Value::Const(2.0),
+            },
             Constraint::Concentric(source, smaller),
-            Constraint::Radius { circle: sized, value: Value::Const(4.0) },
-            Constraint::PointOnCircle { point: on, circle: source },
+            Constraint::Radius {
+                circle: sized,
+                value: Value::Const(4.0),
+            },
+            Constraint::PointOnCircle {
+                point: on,
+                circle: source,
+            },
         ];
         soft_keep_all(&mut problem);
         let p = solved(&problem).params;
@@ -663,7 +779,10 @@ mod tests {
     fn locked_conflict_does_not_converge() {
         let mut problem = Problem::default();
         let a = problem.point(1.0, 2.0, true);
-        problem.constraints = vec![Constraint::Fixed { point: a, at: (0.0, 0.0) }];
+        problem.constraints = vec![Constraint::Fixed {
+            point: a,
+            at: (0.0, 0.0),
+        }];
         assert!(!problem.solve(Options::default()).converged);
     }
 }
