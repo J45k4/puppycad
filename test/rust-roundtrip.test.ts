@@ -63,9 +63,18 @@ it("solves the native assembly fixture like the native solver", () => {
 	expect(data.actuators?.[0]?.mateId).toBe("mate-elbow")
 	// Same numbers as WEB_FIXTURE_TRANSFORMS in rust/src/assembly/tests.rs.
 	const expected: Record<string, [number[], number[]]> = {
-		"base-1": [[0, 0, 0], [0, 0, 0]],
-		"arm-1": [[0, 0, 10], [0, 0, 0]],
-		"arm-2": [[-7.5, 27.990381056766577, 15], [0, 0, 30]]
+		"base-1": [
+			[0, 0, 0],
+			[0, 0, 0]
+		],
+		"arm-1": [
+			[0, 0, 10],
+			[0, 0, 0]
+		],
+		"arm-2": [
+			[-7.5, 27.990381056766577, 15],
+			[0, 0, 30]
+		]
 	}
 	for (const instance of data.instances) {
 		const [translation, rotation] = requireValue(expected[instance.id])

@@ -3693,3 +3693,45 @@ cp /tmp/native-edge-chamfer.pcad /out/rust-native-edge-chamfer.pcad
 kill "$app_pid"
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+# Assembly: open fixtures/assembly.pcad, Ctrl+B opens its assembly, click
+# the instance in the viewport center, export STL per instance and a 3MF,
+# then Delete the selected instance and save.
+mkdir -p /tmp/native-asm
+cp fixtures/assembly.pcad /tmp/native-asm/robot.pcad
+./target/debug/puppycad /tmp/native-asm/robot.pcad >/tmp/puppycad-asm.log 2>&1 &
+app_pid=$!
+tries=0
+until xdotool search --name '^PuppyCAD$' >/dev/null 2>&1; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/puppycad-asm.log; exit 1; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then cat /tmp/puppycad-asm.log; exit 1; fi
+    sleep 0.1
+done
+window_id=$(xdotool search --name '^PuppyCAD$' | head -n 1)
+xdotool windowmove "$window_id" 0 0
+xdotool windowsize "$window_id" 1280 800
+xdotool windowfocus --sync "$window_id"
+sleep 1
+xdotool key --window "$window_id" ctrl+b
+sleep 0.5
+import -window root /out/rust-native-assembly.png
+xdotool mousemove 623 431 click 1
+sleep 0.5
+import -window root /out/rust-native-assembly-selected.png
+xdotool key --window "$window_id" ctrl+e
+sleep 0.5
+xdotool key --window "$window_id" ctrl+alt+e
+sleep 0.5
+test "$(ls /tmp/native-asm/robot-*.stl | wc -l)" -eq 3
+unzip -p /tmp/native-asm/robot.3mf 3D/3dmodel.model | grep -c '<object ' | grep -qx 3
+xdotool key --window "$window_id" Delete
+sleep 0.3
+xdotool key --window "$window_id" ctrl+s
+sleep 0.5
+import -window root /out/rust-native-assembly-deleted.png
+test "$(grep -c '"partId"' /tmp/native-asm/robot.pcad)" -eq 2
+cp /tmp/native-asm/robot.pcad /out/rust-native-assembly.pcad
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""

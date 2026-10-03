@@ -1083,7 +1083,9 @@ impl App {
                     Some(buffer) => format!("{buffer}_"),
                     None => format!(
                         "{:.2}{}",
-                        field.get(&transform),
+                        Some(field.get(&transform))
+                            .map(|v| if v.abs() < 0.005 { 0.0 } else { v })
+                            .unwrap_or_default(),
                         if matches!(field, AsmField::X | AsmField::Y | AsmField::Z) {
                             " mm"
                         } else {
