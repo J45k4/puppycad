@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 /// Pixels a long status message takes from the status fields block.
 const STATUS_INFO_SHRINK: f32 = 110.0;
+/// Width of the AUTO / GLY toggles left of the status fields (sketch view).
+pub(crate) const STATUS_TOGGLES: f32 = 100.0;
 
 /// Delay before a hovered toolbar button shows its tooltip.
 pub(crate) const TOOLTIP_DELAY: Duration = Duration::from_millis(400);
@@ -319,13 +321,22 @@ impl Layout {
         }
     }
 
-    /// Status fields for a status message of `chars` characters: the full
-    /// block when the message fits left of it, else a block narrowed by
-    /// `STATUS_INFO_SHRINK` from the left (its text is scaled to fit).
-    pub(crate) fn status_info_for(self, chars: usize) -> Rect {
+    /// Status fields for a status message of `chars` characters. In the
+    /// sketch view the AUTO/GLY toggles sit in `STATUS_TOGGLES` px left of
+    /// the block; a message that does not fit narrows the block by
+    /// `STATUS_INFO_SHRINK` from the left (its text is scaled to fit). The
+    /// 3D view has no filter toggles, so the block moves right instead.
+    pub(crate) fn status_info_for(self, chars: usize, solid: bool) -> Rect {
         let full = self.status_info();
-        if 15.0 + chars as f32 * 9.6 + 10.0 <= full.x {
+        let toggles = if solid { 0.0 } else { STATUS_TOGGLES };
+        if 15.0 + chars as f32 * 9.6 + 10.0 <= full.x - toggles {
             return full;
+        }
+        if solid {
+            return Rect {
+                x: self.top.w - 120.0 - full.w,
+                ..full
+            };
         }
         Rect {
             x: full.x + STATUS_INFO_SHRINK,

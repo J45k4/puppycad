@@ -1801,8 +1801,13 @@ impl App {
         };
         // Keep the message left of the status fields (cursor, tool, snap);
         // a long message narrows the fields to get more room.
-        let info = layout.status_info_for(status.chars().count());
-        let room = ((info.x - 25.0) / 9.6).max(0.0) as usize;
+        let info = layout.status_info_for(status.chars().count(), self.solid_preview);
+        let toggles = if self.solid_preview {
+            0.0
+        } else {
+            STATUS_TOGGLES
+        };
+        let room = ((info.x - toggles - 25.0) / 9.6).max(0.0) as usize;
         let status: String = if status.chars().count() > room {
             status
                 .chars()
@@ -1838,7 +1843,7 @@ impl App {
         }
         if !self.solid_preview {
             painter.text(
-                layout.top.w - 520.0,
+                info.x - 96.0,
                 layout.bottom.y + 10.0,
                 if self.auto_constraints {
                     "AUTO"
@@ -1849,7 +1854,7 @@ impl App {
                 if self.auto_constraints { ACCENT } else { MUTED },
             );
             painter.text(
-                layout.top.w - 474.0,
+                info.x - 50.0,
                 layout.bottom.y + 10.0,
                 if self.show_glyphs { "GLY" } else { "gly" },
                 1.1,

@@ -108,8 +108,11 @@ fn glyphs_are_sixteen_by_sixteen_and_fit_buttons() {
 fn long_status_messages_narrow_the_info_block() {
     let layout = Layout::new(1280.0, 800.0);
     let full = layout.status_info();
-    assert_eq!(layout.status_info_for(10).x, full.x);
-    let narrow = layout.status_info_for(80);
+    assert_eq!(layout.status_info_for(10, false).x, full.x);
+    let narrow = layout.status_info_for(80, false);
     assert!(narrow.x > full.x);
     assert_eq!(narrow.x + narrow.w, full.x + full.w);
+    let moved = layout.status_info_for(80, true);
+    assert!(moved.x > narrow.x && moved.w == full.w);
+    assert!(moved.x + moved.w <= layout.top.w - 110.0);
 }
