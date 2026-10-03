@@ -838,8 +838,8 @@ removes it unless a later feature depends on it (also one undo step).
   facets of tessellated curves are shown grey and rejected. Convex edges are
   cut with a prism along the edge whose cross-section is the material outside
   the chamfer line or the fillet arc (16 segments per 90°); concave edges get
-  the same prism added. Hover ignores occlusion (the nearest projected edge
-  wins).
+  the same prism added. Hover skips edges hidden behind the bodies (the
+  point of the edge nearest the cursor is ray-cast against the mesh).
 
 File format: none of these exist as web graph nodes (the web `chamfer` node
 references web topology `edge` nodes the native app cannot resolve), so they

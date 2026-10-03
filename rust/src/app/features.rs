@@ -65,7 +65,9 @@ fn next_operation(operation: &'static str) -> &'static str {
     }
 }
 
-fn segment_distance(p: Point, a: [f32; 2], b: [f32; 2]) -> f32 {
+/// Screen distance from `p` to segment `a`-`b` and the segment parameter
+/// of the closest point.
+fn segment_distance(p: Point, a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let length = dx * dx + dy * dy;
     let t = if length < 1e-9 {
@@ -73,7 +75,10 @@ fn segment_distance(p: Point, a: [f32; 2], b: [f32; 2]) -> f32 {
     } else {
         (((p.x - a[0]) * dx + (p.y - a[1]) * dy) / length).clamp(0.0, 1.0)
     };
-    ((p.x - a[0] - t * dx).powi(2) + (p.y - a[1] - t * dy).powi(2)).sqrt()
+    (
+        ((p.x - a[0] - t * dx).powi(2) + (p.y - a[1] - t * dy).powi(2)).sqrt(),
+        t,
+    )
 }
 
 impl App {
@@ -301,36 +306,42 @@ impl App {
         );
     }
 
-    /// The sharp edge nearest the screen point, within a few pixels.
+    /// The sharp edge nearest the screen point, within a few pixels, that
+    /// is not hidden behind the bodies at the closest point.
     pub(super) fn edge_near(
         &self,
         projector: &SolidProjector,
-        edges: &[(usize, SolidEdge)],
+        scene: &SolidScene,
         point: Point,
     ) -> Option<SolidEdge> {
-        edges
+        let mut candidates: Vec<(f32, f32, &SolidEdge)> = scene
+            .edges
             .iter()
             .map(|(_, edge)| {
-                let distance =
+                let (distance, t) =
                     segment_distance(point, projector.screen(edge.a), projector.screen(edge.b));
-                (distance, edge)
+                (distance, t, edge)
             })
-            .filter(|(distance, _)| *distance <= EDGE_PICK_PIXELS)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, edge)| edge.clone())
+            .filter(|(distance, _, _)| *distance <= EDGE_PICK_PIXELS)
+            .collect();
+        candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+        candidates
+            .into_iter()
+            .find(|(_, t, edge)| {
+                projector.visible(
+                    scene,
+                    std::array::from_fn(|i| edge.a[i] + (edge.b[i] - edge.a[i]) * t),
+                )
+            })
+            .map(|(_, _, edge)| edge.clone())
     }
 
     /// Viewport click while edge picking: toggles the edge under the cursor.
     pub(super) fn toggle_edge_at(&mut self, layout: Layout, point: Point) {
-        let Some((_, projector)) = self.solid_projector(layout) else {
+        let Some((scene, projector)) = self.solid_projector(layout) else {
             return;
         };
-        let edges = self
-            .project
-            .as_ref()
-            .map(ProjectFile::solid_edges)
-            .unwrap_or_default();
-        let Some(edge) = self.edge_near(&projector, &edges, point) else {
+        let Some(edge) = self.edge_near(&projector, &scene, point) else {
             self.status_message = "No sharp edge under the cursor".into();
             return;
         };
@@ -568,24 +579,20 @@ impl App {
         &self,
         painter: &mut Painter,
         layout: Layout,
+        scene: &SolidScene,
         projector: &SolidProjector,
     ) {
         let Some(pick) = &self.edge_pick else {
             return;
         };
-        let edges = self
-            .project
-            .as_ref()
-            .map(ProjectFile::solid_edges)
-            .unwrap_or_default();
-        for (_, edge) in &edges {
+        for (_, edge) in &scene.edges {
             let (a, b) = (projector.screen(edge.a), projector.screen(edge.b));
             if pick.edges.contains(&edge.reference()) {
                 painter.line(a[0], a[1], b[0], b[1], 4.0, ACCENT);
             }
         }
         if layout.viewport.contains(self.cursor.x, self.cursor.y)
-            && let Some(edge) = self.edge_near(projector, &edges, self.cursor)
+            && let Some(edge) = self.edge_near(projector, scene, self.cursor)
         {
             let (a, b) = (projector.screen(edge.a), projector.screen(edge.b));
             let color = if edge.straight { FACE_HOVER } else { MUTED };

@@ -1017,7 +1017,7 @@ impl App {
             {
                 self.paint_boolean_preview(&mut painter, layout, &scene, &projector, scene.bodies);
                 if self.edge_pick.is_some() {
-                    self.paint_edge_pick(&mut painter, layout, &projector);
+                    self.paint_edge_pick(&mut painter, layout, &scene, &projector);
                 } else {
                     self.paint_face_hover(&mut painter, layout, &projector);
                 }

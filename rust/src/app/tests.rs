@@ -1320,15 +1320,24 @@ fn edge_pick_chamfers_the_clicked_edge() {
     app.begin_edge_finish(project::FinishKind::Chamfer);
     assert!(app.edge_pick.is_some());
     let layout = Layout::new(1280.0, 800.0);
-    let (_, projector) = app.solid_projector(layout).unwrap();
-    let edges = app.project.as_ref().unwrap().solid_edges();
-    let edge = &edges[0].1;
+    let (scene, projector) = app.solid_projector(layout).unwrap();
+    let edge = scene
+        .edges
+        .iter()
+        .map(|(_, edge)| edge)
+        .find(|edge| {
+            projector.visible(
+                &scene,
+                std::array::from_fn(|i| (edge.a[i] + edge.b[i]) / 2.0),
+            )
+        })
+        .unwrap();
     let mid = projector.screen(std::array::from_fn(|i| (edge.a[i] + edge.b[i]) / 2.0));
     let point = Point {
         x: mid[0],
         y: mid[1],
     };
-    let target = app.edge_near(&projector, &edges, point).unwrap();
+    let target = app.edge_near(&projector, &scene, point).unwrap();
     app.toggle_edge_at(layout, point);
     assert_eq!(
         app.edge_pick.as_ref().unwrap().edges,
@@ -1365,6 +1374,39 @@ fn edge_pick_chamfers_the_clicked_edge() {
             .extension_features()
             .is_empty()
     );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn edges_behind_the_body_are_not_picked() {
+    let path = temp_project("edge-hidden");
+    let mut app = App::with_project(&path).unwrap();
+    draw_rectangle(
+        &mut app,
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 20.0, y: 20.0 },
+    );
+    app.project
+        .as_mut()
+        .unwrap()
+        .create_extrusion_for_profile(&app.document, 20.0, 0)
+        .unwrap();
+    app.solid_preview = true;
+    let layout = Layout::new(1280.0, 800.0);
+    let (scene, projector) = app.solid_projector(layout).unwrap();
+    let mid = |edge: &project::SolidEdge| std::array::from_fn(|i| (edge.a[i] + edge.b[i]) / 2.0);
+    let hidden: Vec<_> = scene
+        .edges
+        .iter()
+        .map(|(_, edge)| edge)
+        .filter(|edge| !projector.visible(&scene, mid(edge)))
+        .collect();
+    assert!(!hidden.is_empty(), "a box hides some of its edges");
+    for edge in hidden {
+        let [x, y] = projector.screen(mid(edge));
+        let picked = app.edge_near(&projector, &scene, Point { x, y });
+        assert!(picked.is_none_or(|picked| picked.reference() != edge.reference()));
+    }
     let _ = std::fs::remove_file(path);
 }
 
