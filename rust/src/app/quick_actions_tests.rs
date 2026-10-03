@@ -267,3 +267,61 @@ fn assembly_and_dimension_states_offer_their_commands() {
     }
     let _ = std::fs::remove_file(path);
 }
+
+fn click_at(app: &mut App, x: f32, y: f32) {
+    app.pointer_moved(Point { x, y });
+    app.handle_left_press();
+    app.document.finish_drag();
+    let _ = app.paint();
+}
+
+/// The UI smoke "author splines" steps, headless, with NEXT shown.
+#[test]
+fn smoke_author_splines_sequence_places_both_splines() {
+    let path = temp_path("splines");
+    let mut app = App::with_project(&path).unwrap();
+    assert!(app.settings.quick_actions);
+    key_with(&mut app, ModifiersState::SHIFT, KeyCode::KeyG);
+    click_at(&mut app, 1150.0, 63.0);
+    click_at(&mut app, 1150.0, 508.0);
+    assert_eq!(app.document.tool, Tool::FitSpline);
+    for (x, y) in [
+        (420.0, 330.0),
+        (520.0, 330.0),
+        (520.0, 430.0),
+        (420.0, 430.0),
+    ] {
+        click_at(&mut app, x, y);
+    }
+    key_with(&mut app, ModifiersState::SHIFT, KeyCode::Enter);
+    click_at(&mut app, 1150.0, 63.0);
+    click_at(&mut app, 1150.0, 544.0);
+    assert_eq!(app.document.tool, Tool::ControlSpline);
+    for (x, y) in [
+        (690.0, 380.0),
+        (730.0, 300.0),
+        (790.0, 460.0),
+        (840.0, 380.0),
+    ] {
+        click_at(&mut app, x, y);
+    }
+    assert!(
+        app.status_message.contains("4 points"),
+        "{}",
+        app.status_message
+    );
+    // Profile detection is cached per revision (paint and NEXT share it).
+    assert!(std::rc::Rc::ptr_eq(
+        &app.sketch_profiles(),
+        &app.sketch_profiles()
+    ));
+    key_with(&mut app, ModifiersState::empty(), KeyCode::Enter);
+    let splines = app
+        .document
+        .shapes
+        .iter()
+        .filter(|s| matches!(s, Shape::Spline { .. }))
+        .count();
+    assert_eq!(splines, 2, "{}", app.status_message);
+    let _ = std::fs::remove_file(path);
+}

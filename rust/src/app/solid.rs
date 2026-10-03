@@ -571,7 +571,8 @@ impl App {
         if self.read_only() {
             return;
         }
-        let Some(profiles) = profiles_from_document(&self.document) else {
+        let cached = self.sketch_profiles();
+        let Some(profiles) = cached.as_ref() else {
             return;
         };
         if profiles.len() < 2 {

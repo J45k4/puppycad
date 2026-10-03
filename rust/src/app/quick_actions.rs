@@ -182,10 +182,7 @@ fn solid_rules(rules: &mut Rules) {
         .project
         .as_ref()
         .is_some_and(|project| project.sketch_face(project.active_sketch()).is_some());
-    if face_sketch
-        && !app.read_only()
-        && profiles_from_document(&app.document).is_some_and(|p| !p.is_empty())
-    {
+    if face_sketch && !app.read_only() && app.sketch_closed() {
         rules.push(
             Cmd::ExtrudeNew,
             "Extrude face sketch",
@@ -303,7 +300,7 @@ fn sketch_rules(rules: &mut Rules) {
         return;
     }
     let analysis = app.sketch_analysis().clone();
-    let closed = profiles_from_document(document).is_some_and(|p| !p.is_empty());
+    let closed = app.sketch_closed();
     if !analysis.conflicting.is_empty() {
         rules.push(
             Cmd::Undo,
@@ -568,7 +565,7 @@ impl App {
             self.toggle_solid_view();
             return;
         }
-        let closed = profiles_from_document(&self.document).is_some_and(|p| !p.is_empty());
+        let closed = self.sketch_closed();
         if closed && self.project.is_some() && !self.read_only() {
             self.begin_extrude("newBody");
             if self.extrude_draft.is_some() {

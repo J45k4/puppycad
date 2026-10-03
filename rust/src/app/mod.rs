@@ -76,7 +76,7 @@ use model::{
     SelectionFilter, Shape, SketchAnalysis, SnapKind, Tool,
 };
 use project::{
-    EntryKind, ProjectFile, ProjectSummary, SketchPlane, SolidPreview, list_projects,
+    EntryKind, ProfileLoops, ProjectFile, ProjectSummary, SketchPlane, SolidPreview, list_projects,
     profiles_from_document,
 };
 use winit::{
@@ -127,6 +127,9 @@ struct Layout {
     /// Pixels the Project panel rows are scrolled up by.
     panel_scroll: f32,
 }
+
+/// Cached `profiles_from_document` result.
+type SketchProfiles = std::rc::Rc<Option<Vec<ProfileLoops>>>;
 
 const MORE_COLUMN_ROWS: usize = 18;
 
@@ -341,6 +344,9 @@ pub(crate) struct App {
     /// Constraint analysis keyed by `Document::revision`; refreshed once per
     /// committed edit, never during a drag.
     analysis: std::cell::RefCell<Option<(u64, SketchAnalysis)>>,
+    /// Closed profiles of the sketch keyed by document revision (profile
+    /// detection is slow with splines; paint and NEXT read it every frame).
+    profiles: std::cell::RefCell<Option<(u64, SketchProfiles)>>,
     /// Dimension picked by clicking its label.
     selected_dimension: Option<DimensionKey>,
     /// Label press in progress: a click edits it, a drag moves it.
@@ -522,6 +528,7 @@ impl Default for App {
             pattern_prompt: None,
             pattern_values: PatternValues::default(),
             analysis: Default::default(),
+            profiles: Default::default(),
             selected_dimension: None,
             label_drag: None,
             dimension_start: None,
