@@ -146,6 +146,29 @@ lengths) are removed; relations at the far ends and line-wide relations stay.
 Split and Trim move fillet/chamfer joins to the retained piece. Native
 rectangle corners and curved edges are not supported (the web app does not
 support them either).
+**Offset**: select a line, circle or arc and press **Shift+U** (or pick
+**MORE → OFFSET**). Type a signed distance in the Properties prompt and press
+Enter; an empty prompt keeps the last distance (5 mm by default). As in the
+web app, positive distances move a line to the left of its direction and grow
+circles and arcs; negative distances go the other way. The copy is linked to
+its source by the web `offset` relation (`a` source, `b` copy, signed
+`value`). When the selected line joins other lines end to end (shared
+endpoints, with or without coincident links, through vertices where exactly
+two lines meet), the whole chain is offset with mitered joins at the
+intersections of neighboring offset lines and stored as one web
+`offsetChain` relation (ordered `sources` with `reversed` flags, `targets`,
+`closed`, `side`, `value`), exactly as the web Offset button stores it. A
+closed chain offsets outward for positive distances. The distance is a
+driving value: select an offset copy and click **OFFSET … MM** in Properties
+to edit it. The solver keeps the copy at that distance when the source moves
+or changes size (the source wins, the copy follows); a chain also keeps its
+sources joined. Rows show `[OFS]`. Creating or editing an offset is one undo
+step. Zero distances, radii that would collapse, reversing corners, edges
+that would collapse or reverse, and self-intersecting chain offsets are
+rejected. Like the web app, ellipses, elliptic arcs and splines have no
+offset yet; mixed line/arc chains and rounded joins are out of scope. Split,
+trim, extend, fillet and chamfer refuse offset members; deleting a source or
+copy removes the relation.
 Set **CX** and **CY** to the transform center in millimeters. The default is the sketch origin. Set a positive scale factor in Properties and click **Scale selected** or **Scale copy** to resize about that center. Existing driving dimension values scale with the selected shape.
 The **Rotate** tab uses a signed angle in degrees and offers **Rotate selected** and **Rotate copy** about the same editable center. Rotating an axis-aligned rectangle converts it to a rotated rectangle primitive that the web app can open.
 Move, scale, and rotate copies retain their editable driving dimensions.
@@ -208,7 +231,10 @@ sweep. Point symmetry (the axis line is the perpendicular bisector of
 the two anchors) and whole-shape mirror relations of lines, points, circles,
 arcs, ellipses, elliptic arcs and splines (anchor pairs, equal radii or axes,
 mirrored arc start and ellipse rotation, negated sweeps) are solver residuals
-too. The only hand-propagated relation is a mirror copy of a rectangle,
+too, as are offsets (a line copy at a signed distance to the left of its
+source, concentric circles and arcs with a radius difference and equal
+angles, and a mitered line chain offset that also keeps its sources joined).
+The only hand-propagated relation is a mirror copy of a rectangle,
 polygon or slot, which is regenerated from its source and axis after every
 solve.
 
@@ -464,6 +490,7 @@ Library crate (`rust/src/lib.rs`):
   selection, drafting, undo), `shapes.rs` (`Point`, `Shape` and per-shape
   geometry), `relations.rs` (fixed anchors and relation toggles),
   `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
+  `offset.rs` (single-shape and mitered chain offsets, the Offset tool),
   `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
   shared with split/trim),
   `dimensions.rs` (`set_dimension`), `edit.rs` (delete, split, trim, extend,
@@ -578,6 +605,9 @@ A fillet scenario draws two lines meeting at a corner, fillets it with Shift+W
 (`rust-native-fillet.png`), chamfers a second corner with Shift+H in
 distance-angle mode (`rust-native-chamfer.png`), and checks the saved
 `endpointTangent` and `chamfer` relations.
+An offset scenario draws an L of two lines, offsets the chain by 20 mm with
+Shift+U (`rust-native-offset.png`), and checks the saved `offsetChain`
+relation.
 It does not open a host desktop
 window.
 
