@@ -398,3 +398,13 @@ docker --context rootless run --rm -v "$PWD/workdir:/out" \
   -v "$PWD/rust/ui-projection-smoke.sh:/app/ui-projection-smoke.sh:ro" \
   puppycad-ui-test sh /app/ui-projection-smoke.sh
 ```
+
+## Continuous integration
+
+`.github/workflows/rust.yml` runs on pushes and pull requests to `master` and
+`rust`. The `build-test` job runs `cargo fmt --check`, `cargo build --workspace`,
+and `cargo test --workspace` in `rust/`; `cargo clippy --workspace -- -D warnings`
+also runs but is non-blocking until existing lints are fixed. The `ui-smoke`
+job builds `rust/Dockerfile.ui-test` with plain Docker, runs the smoke test
+with `workdir/` mounted at `/out`, and uploads the screenshots as the
+`rust-ui-smoke` artifact.

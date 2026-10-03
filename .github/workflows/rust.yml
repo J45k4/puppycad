@@ -1,0 +1,68 @@
+name: Rust
+
+on:
+  push:
+    branches: [master, rust]
+  pull_request:
+    branches: [master, rust]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Format
+        run: cargo fmt --check
+      - name: Build
+        run: cargo build --workspace
+      - name: Test
+        run: cargo test --workspace
+      - name: Clippy
+        # Existing code has outstanding clippy warnings; non-blocking until fixed.
+        continue-on-error: true
+        run: cargo clippy --workspace -- -D warnings
+
+  ui-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build UI test image
+        uses: docker/build-push-action@v6
+        with:
+          context: rust
+          file: rust/Dockerfile.ui-test
+          tags: puppycad-ui-test
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run UI smoke test
+        run: |
+          mkdir -p workdir
+          chmod 777 workdir
+          docker run --rm -v "$PWD/workdir:/out" puppycad-ui-test
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-ui-smoke
+          path: workdir/
+          if-no-files-found: warn
