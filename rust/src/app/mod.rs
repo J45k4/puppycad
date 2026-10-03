@@ -1,6 +1,7 @@
 mod commands;
 mod corner;
 mod extrude;
+mod history;
 mod input;
 mod palette;
 mod panels;
@@ -11,6 +12,8 @@ mod solid;
 mod tangent;
 mod view_sketch;
 
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod input_tests;
 #[cfg(test)]
@@ -282,6 +285,8 @@ pub(crate) struct App {
     palette: Option<Palette>,
     /// Shortcut cheat sheet (? / F1) is shown.
     shortcut_overlay: bool,
+    /// HISTORY panel over the Project panel (Ctrl+Shift+H).
+    history_open: bool,
 }
 
 /// What the pointer is over in Select mode.
@@ -414,6 +419,7 @@ impl Default for App {
             redraw_requests: Default::default(),
             palette: None,
             shortcut_overlay: false,
+            history_open: false,
         }
     }
 }
@@ -957,6 +963,7 @@ impl App {
             self.paint_profile_choice(&mut painter, layout);
         }
         self.paint_panels(&mut painter, layout);
+        self.paint_history_panel(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
         self.paint_palette(&mut painter, layout);
         self.paint_shortcut_overlay(&mut painter, layout);

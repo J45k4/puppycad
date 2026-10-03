@@ -163,6 +163,7 @@ pub(super) enum Cmd {
     MoreMenu,
     CommandPalette,
     ShortcutOverlay,
+    HistoryPanel,
     NewPart,
     SketchTop,
     SketchFront,
@@ -474,33 +475,20 @@ pub(super) static COMMANDS: &[Command] = &[
             App::toggle_construction_key,
         )
     },
-    Command {
-        edits: true,
-        ..cmd(Cmd::Undo, "Undo", "Ctrl+Z", C::Edit, S::Any, |app| {
-            if app.solid_preview {
-                app.solid_undo_step(false);
-            } else if !app.read_only() {
-                app.document.undo();
-            }
-        })
-    },
-    Command {
-        edits: true,
-        ..cmd(
-            Cmd::Redo,
-            "Redo",
-            "Ctrl+Y / Ctrl+Shift+Z",
-            C::Edit,
-            S::Any,
-            |app| {
-                if app.solid_preview {
-                    app.solid_undo_step(true);
-                } else if !app.read_only() {
-                    app.document.redo();
-                }
-            },
-        )
-    },
+    // Undo / redo walk one history across both views (`history.rs`).
+    cmd(Cmd::Undo, "Undo", "Ctrl+Z", C::Edit, S::Any, |app| {
+        app.undo_any();
+    }),
+    cmd(
+        Cmd::Redo,
+        "Redo",
+        "Ctrl+Y / Ctrl+Shift+Z",
+        C::Edit,
+        S::Any,
+        |app| {
+            app.redo_any();
+        },
+    ),
     cmd(
         Cmd::Cancel,
         "Cancel / clear selection",
@@ -836,6 +824,14 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Any,
         App::toggle_shortcut_overlay,
     ),
+    cmd(
+        Cmd::HistoryPanel,
+        "Undo history panel",
+        "Ctrl+Shift+H",
+        C::View,
+        S::Any,
+        App::toggle_history_panel,
+    ),
     // Project
     cmd(Cmd::NewPart, "New part", "B", C::Project, S::Any, |app| {
         app.create_part()
@@ -1064,6 +1060,7 @@ impl App {
             KeyCode::KeyP if ctrl && shift => Cmd::CommandPalette,
             KeyCode::Slash if plain_shift => Cmd::ShortcutOverlay,
             KeyCode::F1 => Cmd::ShortcutOverlay,
+            KeyCode::KeyH if ctrl && shift => Cmd::HistoryPanel,
             KeyCode::Escape if self.body_pick => Cmd::CancelBodyPick,
             KeyCode::KeyE if self.solid_preview && !ctrl && !shift => Cmd::SolidEndCondition,
             KeyCode::KeyF if self.solid_preview && !ctrl && !shift => Cmd::SolidFlip,
@@ -1174,7 +1171,7 @@ impl App {
             KeyCode::KeyE if ctrl => Cmd::ExportStl,
             KeyCode::KeyZ if ctrl && shift => Cmd::Redo,
             KeyCode::KeyZ if ctrl => Cmd::Undo,
-            KeyCode::KeyY if ctrl && !read_only => Cmd::Redo,
+            KeyCode::KeyY if ctrl => Cmd::Redo,
             _ => return None,
         })
     }
