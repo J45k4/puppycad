@@ -597,7 +597,9 @@ Press **Shift+J** or **MORE → JOIN** to fuse a later overlapping extrusion wit
 that body. The shaded preview and STL export use the evaluated Boolean mesh.
 The Project panel lists each extrusion feature; select the cut or join
 feature to edit its depth or delete it. Earlier features with dependent cuts or
-joins cannot be deleted in isolation. Chamfers still need native support.
+joins cannot be deleted in isolation. Revolve, loft and edge chamfer/fillet
+features are described below; web `chamfer` graph nodes still need native
+support.
 
 ### Sketches on faces
 
@@ -709,6 +711,70 @@ sketch runs into the body by default and new bodies/joins grow outward; flip
 inverts that default. Through all and up to body measure the target's extent
 from the face plane. Fixture: `rust/fixtures/extrude-options.pcad`.
 
+### Revolve, loft and edge finishes
+
+These features are evaluated in graph order together with extrusions, all
+through `manifold-rust` (`rust/src/project/features.rs`). They appear in the
+Project panel after the extrusions; selecting one shows its value (ANGLE,
+DISTANCE or RADIUS) in Properties, where clicking the value edits it (one
+undo step, **Ctrl+Z** / **Ctrl+Shift+Z** in the solid view), and **Delete**
+removes it unless a later feature depends on it.
+
+- **Revolve** — key **6** or **MORE → REVOLVE** in a sketch with a closed
+  profile selected (**[ ]** cycle profiles as for extrude). Click a sketch
+  line as the axis, or press **X** / **Y** for the sketch axes. The view
+  switches to a translucent ghost with an ANGLE prompt (empty = 360°); **O**
+  cycles new body / cut / join, **Enter** commits, **Esc** cancels. The
+  profile (with holes) is swept in 32 segments per full turn (fewer for
+  partial angles, capped at both ends); it may touch the axis but not cross
+  it.
+- **Loft** — key **7** (or **MORE → LOFT**) remembers the selected profile of
+  the current sketch; open another sketch, select its profile and press **7**
+  again for a new body or **Shift+7** to join the last body (**Esc** clears the
+  first pick). Both outer loops are resampled at the union of their
+  arc-length parameters (every original vertex is kept) after aligning the
+  second loop's start to the point nearest the first loop's start and
+  matching winding; the side quads and both caps form the mesh. Profiles with
+  holes, edge-on profiles and self-intersecting results are rejected.
+- **Edge chamfer / fillet** — key **8** (chamfer) or **9** (fillet), or
+  **MORE → EDGE CHAMFER / EDGE FILLET**, in the solid view. Hovering
+  highlights the nearest sharp edge (adjacent face normals more than 20°
+  apart, collinear mesh segments between the same two planes merged); click
+  edges to add or remove them, type the DISTANCE / RADIUS (empty = 2 mm),
+  **Enter** commits. Only straight edges between planar faces are accepted;
+  facets of tessellated curves are shown grey and rejected. Convex edges are
+  cut with a prism along the edge whose cross-section is the material outside
+  the chamfer line or the fillet arc (16 segments per 90°); concave edges get
+  the same prism added. Hover ignores occlusion (the nearest projected edge
+  wins).
+
+File format: none of these exist as web graph nodes (the web `chamfer` node
+references web topology `edge` nodes the native app cannot resolve), so they
+are native extension nodes that the web loader drops when it normalizes the
+graph:
+
+```json
+{"type":"revolve","id":"native-revolve-1","name":"Revolve 1","sketchId":"…","profileId":"<sketchId>-profile-1",
+ "axis":{"a":{"x":0,"y":0},"b":{"x":0,"y":1}},"angle":360,"operation":"newBody"}
+{"type":"loft","id":"native-loft-1","name":"Loft 1","operation":"newBody",
+ "profiles":[{"sketchId":"…","profileId":"…"},{"sketchId":"…","profileId":"…"}]}
+{"type":"edgeFinish","id":"native-edge-finish-1","name":"Chamfer 1","kind":"chamfer","distance":2,
+ "edges":[{"a":[x,y,z],"b":[x,y,z],"normals":[[nx,ny,nz],[nx,ny,nz]]}]}
+```
+
+The axis is in sketch coordinates and the angle in degrees (0, 360]; loft
+operations are `newBody` or `join`; a fillet stores `radius` instead of
+`distance`. Edges are stored by their world endpoints and the outward normals
+of the two faces and are re-identified on every evaluation: first by
+endpoints, then by an edge between the same two planes on the same line, so a
+finish survives upstream changes that keep its edge (for example a deeper
+extrusion under a bottom edge). A finish whose edge no longer exists, an
+invalid angle, axis or operation, and web `chamfer` nodes open the part
+read-only with the evaluation error as the reason. Sketches used by a revolve
+or loft lock like extruded sketches. STL/3MF export uses the evaluated bodies.
+Fixture: `rust/fixtures/revolve-loft-finish.pcad`; tests in
+`rust/src/project/feature_tests.rs` and `rust/src/app/tests.rs`.
+
 ## Code layout
 
 Library crate (`rust/src/lib.rs`):
@@ -735,7 +801,9 @@ Library crate (`rust/src/lib.rs`):
   conditions; dimension round-trip tests in `project/dimension_tests.rs`,
   extrude option tests in `project/extrude_option_tests.rs`), `project/face.rs`
   (plane frames, web face descriptors, face lookup, face sketches and their
-  support edges; tests in `project/face_tests.rs`), `solver.rs`,
+  support edges; tests in `project/face_tests.rs`), `project/features.rs`
+  (revolve, loft and edge finish meshes, sharp-edge detection and the native
+  extension nodes; tests in `project/feature_tests.rs`), `solver.rs`,
   `sketch_value.rs` (dimension expressions and sketch variables),
   `spline.rs`, `stl.rs` (body triangles, ASCII/binary STL, numbered
   writes), `threemf.rs` (3MF package). `lib.rs` also hosts `roundtrip` and
@@ -753,7 +821,9 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
   preview projection, dragging, face and body picking and painting), `extrude.rs`
   (extrude prompt with ghost preview, end condition/flip/target edits and
-  their undo), `view_sketch.rs` (sketch grid
+  their undo), `features.rs` (revolve axis pick and ANGLE prompt, loft
+  picks, edge hover/pick and size prompt, extension feature Properties),
+  `view_sketch.rs` (sketch grid
   and shape painting, dimension labels), `tests.rs`.
 - `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
 
@@ -887,6 +957,13 @@ A face sketch scenario extrudes a rectangle, hovers its top face
 (`rust-native-face-hover.png`), presses 4, draws a circle over the projected
 block outline (`rust-native-face-sketch.png`), cuts it with Shift+X
 (`rust-native-face-cut.png`) and checks the saved `face` node and cut.
+A revolve scenario draws a rectangle and a vertical line beside it, presses
+6 (`rust-native-revolve-axis.png`), clicks the line as the axis
+(`rust-native-revolve-preview.png`) and commits a 360° ring
+(`rust-native-revolve.png`). An edge chamfer scenario extrudes a block,
+presses 8, hovers a top edge (`rust-native-edge-chamfer-hover.png`), clicks
+it, types 10 and commits (`rust-native-edge-chamfer.png`); both check the
+saved `revolve` / `edgeFinish` nodes.
 It does not open a host desktop
 window.
 

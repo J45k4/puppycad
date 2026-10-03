@@ -71,7 +71,9 @@ Each item is ported from the matching `src/sketch-*.ts` together with its tests.
    MORE → SKETCH ON FACE, **5** toggles the supporting-body context, X /
    Shift+X / Shift+J extrude along the face normal.)
 3. Revolve, loft (`loft.ts`), edge fillet and chamfer (`edge-finish.ts`), all
-   through `manifold-rust`.
+   through `manifold-rust`. (**done**: `rust/src/project/features.rs`; keys
+   6 revolve, 7 / Shift+7 loft, 8 / 9 edge chamfer / fillet, stored as native
+   extension nodes `revolve`, `loft`, `edgeFinish`; see `rust-native.md`.)
 4. Feature tree with reorder, suppress and rollback; re-evaluation when an
    upstream sketch changes.
 5. Export: binary STL, then 3MF or STEP (**done** for binary/ASCII STL and 3MF:
