@@ -1,9 +1,12 @@
+mod commands;
 mod corner;
 mod extrude;
 mod input;
+mod palette;
 mod panels;
 mod pattern;
 mod project_panel;
+mod shortcut_overlay;
 mod solid;
 mod tangent;
 mod view_sketch;
@@ -13,10 +16,15 @@ mod input_tests;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use commands::shortcuts_markdown;
+use commands::*;
 use corner::*;
 use extrude::*;
+use palette::*;
 use pattern::*;
 use project_panel::*;
+#[cfg(test)]
+use shortcut_overlay::*;
 use solid::*;
 
 use puppycad::{model, project, sketch_value, spline, stl, threemf};
@@ -270,6 +278,10 @@ pub(crate) struct App {
     auto_constraints: bool,
     /// Redraw requests, counted for tests.
     redraw_requests: std::cell::Cell<u64>,
+    /// Command palette (Ctrl+K) while open.
+    palette: Option<Palette>,
+    /// Shortcut cheat sheet (? / F1) is shown.
+    shortcut_overlay: bool,
 }
 
 /// What the pointer is over in Select mode.
@@ -400,6 +412,8 @@ impl Default for App {
             show_glyphs: true,
             auto_constraints: true,
             redraw_requests: Default::default(),
+            palette: None,
+            shortcut_overlay: false,
         }
     }
 }
@@ -944,6 +958,8 @@ impl App {
         }
         self.paint_panels(&mut painter, layout);
         self.paint_more_menu(&mut painter, layout);
+        self.paint_palette(&mut painter, layout);
+        self.paint_shortcut_overlay(&mut painter, layout);
         painter
     }
 
@@ -951,32 +967,7 @@ impl App {
         if !self.more_open {
             return;
         }
-        for (index, label) in [
-            "POINT [P]",
-            "POLYGON [G]",
-            "SLOT [S]",
-            "EXTRUDE [X]",
-            "NEW PART [B]",
-            "3PT CIRCLE",
-            "CENTER ARC",
-            "CENTER RECT",
-            "3PT RECT",
-            "3PT CTR RECT",
-            "JOIN [SHIFT J]",
-            "FIT SPLINE",
-            "CTRL SPLINE",
-            "MIRROR [SHIFT I]",
-            "FILLET [SHIFT W]",
-            "CHAMFER [SHIFT H]",
-            "OFFSET [SHIFT U]",
-            "TANGENT ARC [,]",
-            "LIN PATTERN [SHIFT Z]",
-            "CIRC PATTERN [;]",
-            "SKETCH ON FACE [4]",
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (index, (_, label)) in MORE_MENU.iter().enumerate() {
             let row = layout.more_item(index);
             painter.rect(row, PANEL_LIGHT);
             painter.outline(row, 1.0, ACCENT);

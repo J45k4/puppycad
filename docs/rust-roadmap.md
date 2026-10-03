@@ -85,7 +85,9 @@ per-instance selection and export.
 
 ## Phase 5 — Editor UX
 
-1. Searchable command palette and a shortcut overlay.
+1. (Done) Searchable command palette and a shortcut overlay: command
+   registry in `rust/src/app/commands.rs`, Ctrl+K / Ctrl+Shift+P palette,
+   ? / F1 cheat sheet, `puppycad --print-shortcuts`.
 2. (Done) Hover pre-highlight, relation glyphs beside entities, inference
    hints while placing.
 3. Undo history panel.

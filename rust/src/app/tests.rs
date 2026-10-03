@@ -874,3 +874,299 @@ fn line_commit_adds_horizontal_only_with_automatic_constraints() {
     assert_eq!(app.document.shapes.len(), 2);
     assert_eq!(app.document.axis_constraints.len(), 1);
 }
+
+#[test]
+fn registry_has_unique_ids_and_no_duplicate_shortcuts() {
+    let mut seen: Vec<(String, Scope, &str)> = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut duplicates = Vec::new();
+    for command in COMMANDS {
+        assert!(ids.insert(command.id), "{:?} registered twice", command.id);
+        assert!(!command.label.is_empty());
+        for chord in shortcut_chords(command.shortcut) {
+            if let Some((_, _, other)) = seen.iter().find(|(seen_chord, scope, _)| {
+                *seen_chord == chord && scope.overlaps(command.scope)
+            }) {
+                duplicates.push(format!("{chord}: {other} / {}", command.label));
+            }
+            seen.push((chord, command.scope, command.label));
+        }
+    }
+    assert!(duplicates.is_empty(), "duplicate shortcuts: {duplicates:?}");
+    assert_eq!(
+        shortcut_chords("Ctrl+Shift+E"),
+        shortcut_chords("Shift+Ctrl+E")
+    );
+    assert_eq!(shortcut_chords("Ctrl+Y / Ctrl+Shift+Z").len(), 2);
+}
+
+#[test]
+fn every_more_item_maps_to_a_registered_command() {
+    let layout = Layout::new(1280.0, 800.0);
+    for (index, (id, label)) in MORE_MENU.iter().enumerate() {
+        assert_eq!(command(*id).id, *id, "{label}");
+        let row = layout.more_item(index);
+        assert!(row.y + row.h <= 800.0 && row.x >= 0.0, "{label}: {row:?}");
+    }
+    let mut app = App {
+        more_open: true,
+        ..App::default()
+    };
+    let row = layout.more_item(0);
+    app.cursor = Point {
+        x: row.x + 5.0,
+        y: row.y + 5.0,
+    };
+    app.handle_left_press();
+    assert_eq!(app.document.tool, Tool::Point);
+    assert!(!app.more_open);
+}
+
+#[test]
+fn key_resolution_respects_modifiers_and_context() {
+    let mut app = App::default();
+    assert_eq!(app.command_for_key(KeyCode::KeyR), Some(Cmd::Rectangle));
+    assert_eq!(app.command_for_key(KeyCode::KeyW), None);
+    app.modifiers = ModifiersState::SHIFT;
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyR),
+        Some(Cmd::CenterRectangle)
+    );
+    assert_eq!(app.command_for_key(KeyCode::KeyW), Some(Cmd::FilletCorner));
+    assert_eq!(app.command_for_key(KeyCode::KeyL), Some(Cmd::Collinear));
+    app.modifiers = ModifiersState::CONTROL;
+    assert_eq!(app.command_for_key(KeyCode::KeyS), Some(Cmd::Save));
+    assert_eq!(app.command_for_key(KeyCode::KeyZ), Some(Cmd::Undo));
+    app.modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    assert_eq!(app.command_for_key(KeyCode::KeyZ), Some(Cmd::Redo));
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyE),
+        Some(Cmd::ExportAsciiStl)
+    );
+    app.modifiers = ModifiersState::empty();
+    app.select_tool(Tool::CenterArc);
+    assert_eq!(app.command_for_key(KeyCode::KeyW), Some(Cmd::ArcDirection));
+    app.run_command(Cmd::ArcDirection);
+    assert!(app.status_message.contains("sweep"));
+    app.run_command(Cmd::Circle);
+    assert_eq!(app.document.tool, Tool::Circle);
+}
+
+#[test]
+fn palette_filters_and_orders_matches() {
+    assert_eq!(palette_matches("").len(), COMMANDS.len());
+    let labels = |query| -> Vec<&str> {
+        palette_matches(query)
+            .into_iter()
+            .map(|command| command.label)
+            .collect()
+    };
+    assert_eq!(labels("mirr")[0], "Mirror");
+    assert_eq!(labels("MIRR")[0], "Mirror");
+    // Label prefix beats a word inside the label, ties keep registry order.
+    let circle = labels("circle");
+    assert_eq!(&circle[..2], ["Circle", "3-point circle"]);
+    let ext = labels("ext");
+    assert_eq!(&ext[..2], ["Extend curve to cursor", "Extrude new body"]);
+    // Category and shortcut text match too, after label matches.
+    assert_eq!(labels("ctrl+s")[0], "Save project");
+    assert!(labels("constrain").contains(&"Horizontal"));
+    // Subsequence fallback.
+    assert_eq!(labels("ctrspl")[0], "Control spline");
+    assert!(labels("zzzz").is_empty());
+}
+
+#[test]
+fn palette_skips_unavailable_rows_and_enter_runs_selection() {
+    let mut app = App {
+        modifiers: ModifiersState::CONTROL,
+        ..App::default()
+    };
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyK),
+        Some(Cmd::CommandPalette)
+    );
+    app.modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyP),
+        Some(Cmd::CommandPalette)
+    );
+    app.modifiers = ModifiersState::empty();
+    app.run_command(Cmd::CommandPalette);
+    assert!(app.palette.is_some());
+    // In the sketch view the solid cycling rows are dimmed and skipped.
+    app.palette_type("solid");
+    let entries = app.palette_entries();
+    assert_eq!(entries[0].0.id, Cmd::PreviousSolid);
+    assert!(!entries[0].1 && !entries[1].1);
+    let selected = app.palette.as_ref().unwrap().selected;
+    assert!(selected >= 2 && entries[selected].1);
+    app.palette_move(-1);
+    assert_eq!(app.palette.as_ref().unwrap().selected, selected);
+    app.palette_move(1);
+    assert!(app.palette.as_ref().unwrap().selected > selected);
+    // Esc closes without running anything.
+    assert!(app.palette_key(KeyCode::Escape, None));
+    assert!(app.palette.is_none());
+    assert!(!app.palette_key(KeyCode::Escape, None));
+
+    // Typed text filters; Enter runs the selected command.
+    app.open_palette();
+    app.palette_key(KeyCode::KeyC, Some("circ"));
+    app.palette_key(KeyCode::KeyX, Some("x"));
+    app.palette_key(KeyCode::Backspace, None);
+    assert_eq!(app.palette.as_ref().unwrap().query, "circ");
+    app.palette_key(KeyCode::ArrowDown, None);
+    app.palette_key(KeyCode::Enter, None);
+    assert!(app.palette.is_none());
+    assert_eq!(app.document.tool, Tool::ThreePointCircle);
+
+    // Mirror needs a selection: dimmed without one, runs with one.
+    let mut app = App {
+        document: Document::from_shapes(vec![Shape::Line {
+            id: 1,
+            a: Point { x: 0.0, y: 0.0 },
+            b: Point { x: 10.0, y: 0.0 },
+        }]),
+        ..App::default()
+    };
+    app.open_palette();
+    app.palette_type("mirr");
+    assert!(!app.palette_entries()[0].1);
+    app.palette = None;
+    app.document.selected = Some(1);
+    app.open_palette();
+    app.palette_type("mirr");
+    assert!(app.palette_entries()[0].1);
+    app.palette_run();
+    assert!(matches!(app.pick, Some(Pick::Mirror { .. })));
+}
+
+#[test]
+fn shortcut_overlay_toggles_and_swallows_keys() {
+    let mut app = App {
+        modifiers: ModifiersState::SHIFT,
+        ..App::default()
+    };
+    assert_eq!(
+        app.command_for_key(KeyCode::Slash),
+        Some(Cmd::ShortcutOverlay)
+    );
+    app.modifiers = ModifiersState::empty();
+    assert_eq!(app.command_for_key(KeyCode::F1), Some(Cmd::ShortcutOverlay));
+    app.run_command(Cmd::ShortcutOverlay);
+    assert!(app.shortcut_overlay);
+    // Other keys do nothing while it is shown.
+    assert!(app.shortcut_overlay_key(KeyCode::KeyC));
+    assert!(app.shortcut_overlay);
+    assert_ne!(app.document.tool, Tool::Circle);
+    assert!(app.shortcut_overlay_key(KeyCode::F1));
+    assert!(!app.shortcut_overlay);
+    assert!(!app.shortcut_overlay_key(KeyCode::F1));
+    app.run_command(Cmd::ShortcutOverlay);
+    app.modifiers = ModifiersState::SHIFT;
+    app.shortcut_overlay_key(KeyCode::Slash);
+    assert!(!app.shortcut_overlay);
+    app.run_command(Cmd::ShortcutOverlay);
+    app.shortcut_overlay_key(KeyCode::Escape);
+    assert!(!app.shortcut_overlay);
+    // The palette and the overlay replace each other.
+    app.run_command(Cmd::CommandPalette);
+    app.run_command(Cmd::ShortcutOverlay);
+    assert!(app.palette.is_none() && app.shortcut_overlay);
+    app.run_command(Cmd::CommandPalette);
+    assert!(app.palette.is_some() && !app.shortcut_overlay);
+}
+
+#[test]
+fn shortcut_overlay_lists_every_shortcut_and_fits_the_window() {
+    for (width, height) in [(1280.0, 800.0), (1600.0, 900.0), (1920.0, 1080.0)] {
+        let lines = shortcut_overlay_lines(width, height);
+        let column = overlay_column_width(width);
+        for line in &lines {
+            let chars = match &line.text {
+                OverlayText::Header(name) => name.len(),
+                OverlayText::Entry { keys, label } => 15 + label.chars().count().max(keys.len()),
+            };
+            assert!(
+                line.x >= 0.0 && line.x + chars as f32 * 8.0 <= width,
+                "{line:?} at {width}"
+            );
+            assert!(line.y + 8.0 <= height, "{line:?} at {height}");
+            assert!(chars as f32 * 8.0 <= column, "{line:?} wider than a column");
+        }
+        for category in Category::ALL {
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.text == OverlayText::Header(category.name())),
+                "{category:?}"
+            );
+        }
+        // Each shortcut command shows its label once.
+        for command in COMMANDS
+            .iter()
+            .filter(|command| !command.shortcut.is_empty())
+        {
+            let shown = lines.iter().any(|line| match &line.text {
+                OverlayText::Entry { label, .. } => {
+                    command.label.starts_with(label.trim_end_matches("...")) && !label.is_empty()
+                }
+                OverlayText::Header(_) => false,
+            });
+            assert!(shown, "{} missing", command.label);
+        }
+        // A header is never the last line of a column.
+        for pair in lines.windows(2) {
+            if matches!(pair[0].text, OverlayText::Header(_)) {
+                assert_eq!(pair[0].x, pair[1].x);
+            }
+        }
+    }
+    // At 1280 px the sheet wraps into several columns.
+    let columns = |width: f32| {
+        let mut xs: Vec<i32> = shortcut_overlay_lines(width, 800.0)
+            .iter()
+            .map(|line| line.x as i32)
+            .collect();
+        xs.dedup();
+        xs.len()
+    };
+    assert!(columns(1280.0) >= 2);
+    assert!(columns(1280.0) <= 4);
+}
+
+#[test]
+fn solid_and_view_keys_resolve_through_the_registry() {
+    let mut app = App::default();
+    assert_eq!(app.command_for_key(KeyCode::KeyE), Some(Cmd::Ellipse));
+    assert_eq!(app.command_for_key(KeyCode::KeyF), Some(Cmd::FitView));
+    assert_eq!(
+        app.command_for_key(KeyCode::Digit6),
+        Some(Cmd::ToggleGlyphs)
+    );
+    assert_eq!(
+        app.command_for_key(KeyCode::Digit7),
+        Some(Cmd::ToggleAutoConstraints)
+    );
+    app.solid_preview = true;
+    assert_eq!(
+        app.command_for_key(KeyCode::KeyE),
+        Some(Cmd::SolidEndCondition)
+    );
+    assert_eq!(app.command_for_key(KeyCode::KeyF), Some(Cmd::SolidFlip));
+    assert_eq!(app.command_for_key(KeyCode::KeyU), Some(Cmd::BodyPick));
+    app.modifiers = ModifiersState::CONTROL;
+    assert_eq!(app.command_for_key(KeyCode::KeyY), Some(Cmd::Redo));
+    app.modifiers = ModifiersState::empty();
+    app.body_pick = true;
+    assert_eq!(
+        app.command_for_key(KeyCode::Escape),
+        Some(Cmd::CancelBodyPick)
+    );
+    app.run_command(Cmd::CancelBodyPick);
+    assert!(!app.body_pick);
+    let glyphs = app.show_glyphs;
+    app.run_command(Cmd::ToggleGlyphs);
+    assert_ne!(app.show_glyphs, glyphs);
+}

@@ -740,6 +740,166 @@ sketch runs into the body by default and new bodies/joins grow outward; flip
 inverts that default. Through all and up to body measure the target's extent
 from the face plane. Fixture: `rust/fixtures/extrude-options.pcad`.
 
+## Shortcuts
+
+Every command lives in one registry (`rust/src/app/commands.rs`): label,
+shortcut, category, availability (view, editable sketch, selection) and the
+action it runs. Keyboard bindings, the MORE menu, the command palette and the
+cheat sheet all dispatch through it.
+
+- **Ctrl+K** (or **Ctrl+Shift+P**) opens the command palette over the
+  viewport. Typing filters by label, category and shortcut text (label
+  prefix first, then word starts, substrings and finally subsequences, so
+  `mirr` or `ctrl+s` find their command). Up/Down move, Enter runs the
+  highlighted command, Esc or a click outside closes it; clicking a row runs
+  it. Commands that cannot run right now (wrong view, read-only sketch, no
+  selection) are dimmed and skipped by the selection.
+- **?** (Shift+/) or **F1** toggles a full-window cheat sheet grouped by
+  category, generated from the registry and balanced over as many columns as
+  the window fits (three at 1280×800). Esc, ?, F1 or a click close it.
+
+Some keys mean different things in a modal context: **R** toggles a selected
+dimension between driving and reference instead of drawing a rectangle,
+**W** flips the sweep while the center-arc tool is active, **Enter** finishes
+a spline, **Esc** cancels an armed up-to-body pick, **E**/**F**/**U** edit the
+selected extrusion in the 3D preview (end condition, flip, up-to body) but
+are Ellipse/Fit/Extend in the sketch, and **[** / **]** cycle profiles in the sketch but solids in the 3D
+preview. A unit test checks that no chord is bound twice within the same
+context. The table below is the output of
+`cargo run --manifest-path rust/Cargo.toml -- --print-shortcuts`
+("editable": not in read-only sketches; "selection": needs a selected shape
+or dimension):
+
+#### Draw
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `V` | Select | sketch |
+| `L` | Line | sketch |
+| `R` | Rectangle | sketch |
+| `Shift+R` | Center rectangle | sketch |
+| `T` | 3-point rectangle | sketch |
+| `Shift+T` | 3-point center rectangle | sketch |
+| `C` | Circle | sketch |
+| `Shift+C` | 3-point circle | sketch |
+| `E` | Ellipse | sketch |
+| `A` | Arc (3-point) | sketch |
+| `Shift+A` | Center arc | sketch |
+| `W` | Flip center arc direction | center-arc tool |
+| `,` | Tangent arc | sketch |
+| `P` | Point | sketch |
+| `G` | Polygon | sketch |
+| `S` | Slot | sketch |
+| palette / MORE | Fit spline | sketch |
+| palette / MORE | Control spline | sketch |
+| `Enter` | Finish spline | placing a spline |
+| `Shift+Enter` | Finish closed spline | placing a spline |
+
+#### Edit
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `I` | Split curve at cursor | sketch, editable, selection |
+| `Q` | Trim curve at cursor | sketch, editable, selection |
+| `U` | Extend curve to cursor | sketch, editable, selection |
+| `Shift+I` | Mirror | sketch, editable, selection |
+| `Shift+U` | Offset | sketch, editable, selection |
+| `Shift+W` | Fillet selected + hovered line | sketch, editable, selection |
+| `Shift+H` | Chamfer selected + hovered line | sketch, editable, selection |
+| palette / MORE | Fillet (pick two lines) | sketch, editable |
+| palette / MORE | Chamfer (pick two lines) | sketch, editable |
+| `Shift+Z` | Linear pattern | sketch, selection |
+| `;` | Circular pattern | sketch, selection |
+| `Ctrl+D` | Copy selected | any view, editable, selection |
+| `Delete` / `Backspace` | Delete selection / extrusion | any view |
+| `K` | Toggle construction | any view, editable, selection |
+| `Ctrl+Z` | Undo | any view, editable |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo | any view, editable |
+| `Esc` | Cancel / clear selection | any view |
+
+#### Constrain
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `H` | Horizontal | sketch, editable, selection |
+| `J` | Vertical | sketch, editable, selection |
+| `Shift+S` | Symmetric about selected line | sketch, editable, selection |
+| `Shift+V` | Point on hovered curve | sketch, editable, selection |
+| `Shift+Q` | Tangent to hovered curve | sketch, editable, selection |
+| `Shift+Y` | Internal tangent | sketch, editable, selection |
+| `Shift+O` | Concentric | sketch, editable, selection |
+| `Shift+E` | Equal | sketch, editable, selection |
+| `Shift+P` | Parallel | sketch, editable, selection |
+| `Shift+N` | Perpendicular | sketch, editable, selection |
+| `Shift+L` | Collinear | sketch, editable, selection |
+| `Shift+M` | Midpoint of hovered line/arc | sketch, editable, selection |
+| `Shift+F` | Normal to hovered curve | sketch, editable, selection |
+| `Shift+K` | Fix anchor at cursor | any view, editable, selection |
+| `.` | Smooth join (G1) | sketch, editable, selection |
+
+#### Dimension
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `D` | Dimension tool | sketch |
+| `R` | Toggle driving / reference | dimension selected, selection |
+| `Shift+B` | Angle to hovered line | sketch, editable, selection |
+| `Shift+D` | Radial distance to hovered circle | sketch, editable, selection |
+
+#### Solid
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `X` | Extrude new body | any view |
+| `Shift+J` | Extrude join | any view |
+| `Shift+X` | Extrude cut | any view |
+| `4` | Sketch on hovered face | any view |
+| `5` | Toggle face body context | any view |
+| `E` | Cycle extrusion end condition | 3D preview |
+| `F` | Flip extrusion direction | 3D preview |
+| `U` | Pick up-to body | 3D preview |
+| `Esc` | Cancel body pick | picking an up-to body |
+| `Tab` | Toggle 3D preview | any view |
+| `[` | Previous profile | sketch |
+| `]` | Next profile | sketch |
+| `[` | Previous solid | 3D preview |
+| `]` | Next solid | 3D preview |
+
+#### View
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `6` | Toggle relation glyphs | any view |
+| `7` | Toggle automatic constraints | any view |
+| `F` | Fit sketch to view | sketch |
+| `Shift+G` | Toggle grid snapping | any view |
+| `N` | Toggle geometry snapping | any view |
+| `M` | MORE menu | any view |
+| `Ctrl+K` / `Ctrl+Shift+P` | Command palette | any view |
+| `?` / `F1` | Keyboard shortcuts | any view |
+
+#### Project
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `B` | New part | any view |
+| `1` | New sketch on TOP | any view |
+| `2` | New sketch on FRONT | any view |
+| `3` | New sketch on RIGHT | any view |
+| `Ctrl+PageDown` | Next part | any view |
+| `Ctrl+PageUp` | Previous part | any view |
+| `F2` | Rename part | any view |
+| `Shift+F2` | Rename sketch | any view |
+
+#### File
+
+| Shortcut | Command | When |
+| --- | --- | --- |
+| `Ctrl+S` | Save project | any view |
+| `Ctrl+E` | Export binary STL | any view |
+| `Ctrl+Shift+E` | Export ASCII STL | any view |
+| `Ctrl+Alt+E` | Export 3MF | any view |
+
 ## Code layout
 
 Library crate (`rust/src/lib.rs`):
@@ -776,6 +936,9 @@ Library crate (`rust/src/lib.rs`):
 Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
+  `commands.rs` (command registry, key resolution and the actions behind
+  keyboard/MORE/palette), `palette.rs` (Ctrl+K command palette),
+  `shortcut_overlay.rs` (? / F1 cheat sheet),
   `input.rs` (mouse/keyboard handling; the `winit` handler forwards to
   `App::handle_window_event` and `App::handle_key`, which tests drive
   headlessly),
@@ -851,6 +1014,10 @@ star around the point, every row `[PAT]`), and checks the saved
 `rust/fixtures/patterns.pcad` fixture (a 3x2 circle grid and a four-way line
 pattern about a referenced point) is opened by both the Rust round-trip test
 and `test/rust-roundtrip.test.ts`.
+A palette scenario draws a line, presses Ctrl+K and types `mirr`
+(`rust-native-palette.png`: Mirror highlighted first), presses F1
+(`rust-native-shortcuts.png`: the three-column cheat sheet), then runs
+Circle from the palette with `circ` + Enter and checks the saved circle.
 It also creates and renames a second part, switches between parts, renames a
 sketch, and saves geometry in both parts. A two-body scenario creates extrusions
 on Top and Front sketches, saves their graph, and exports both STLs.

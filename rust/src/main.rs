@@ -10,8 +10,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let argument = std::env::args().nth(1);
     if argument.as_deref() == Some("--help") {
         println!(
-            "Usage: puppycad [PROJECT.pcad]\n       puppycad --roundtrip IN.pcad OUT.pcad\n       puppycad --export IN.pcad OUT.stl|OUT.3mf"
+            "Usage: puppycad [PROJECT.pcad]\n       puppycad --roundtrip IN.pcad OUT.pcad\n       puppycad --export IN.pcad OUT.stl|OUT.3mf\n       puppycad --print-shortcuts"
         );
+        return Ok(());
+    }
+    if argument.as_deref() == Some("--print-shortcuts") {
+        print!("{}", app::shortcuts_markdown());
         return Ok(());
     }
     if argument.as_deref() == Some("--roundtrip") {
