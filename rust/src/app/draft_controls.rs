@@ -208,17 +208,6 @@ impl App {
         self.status_message = format!("Type the {what}, Enter commits  |  Esc cancel");
     }
 
-    /// Feed a key to whichever draft is open.
-    fn draft_key(&mut self, code: KeyCode) {
-        if self.extrude_draft.is_some() {
-            self.handle_draft_key(code, None);
-        } else if self.revolve_draft.is_some() {
-            self.handle_revolve_key(code, None);
-        } else if self.edge_pick.is_some() {
-            self.handle_edge_key(code, None);
-        }
-    }
-
     /// Left click on a draft control or on the prompt box.
     pub(super) fn draft_control_click(&mut self, layout: Layout, point: Point) -> bool {
         if !self.draft_panel_open() {
