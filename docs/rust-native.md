@@ -146,6 +146,30 @@ lengths) are removed; relations at the far ends and line-wide relations stay.
 Split and Trim move fillet/chamfer joins to the retained piece. Native
 rectangle corners and curved edges are not supported (the web app does not
 support them either).
+**Tangent arc**: press **,** (or pick **MORE → TANGENT ARC**), click an
+endpoint of a line, arc or open fit/control spline (only curve endpoints
+within 8 px are picked), then click the arc's far end. The arc starts at that
+endpoint continuing the source's direction and is previewed while the pointer
+moves. It is saved with a web `smoothJoin` relation from the source endpoint
+to the arc's `p0`, which the solver keeps (the endpoints coincide and their
+tangents line up). A spline endpoint with a zero tangent (a control spline
+whose first handle sits on its endpoint) is rejected with a status message,
+as is an arc end on the tangent line; neither adds an undo step.
+**Smooth join**: select a line, arc or open spline, hover another one and
+press **.**: the nearest endpoint pair of the two gets a `smoothJoin`, and the
+solver moves the hovered curve so its endpoint meets the selected curve's
+endpoint and continues its tangent. Press **.** again over the same pair to
+remove it. Each endpoint takes at most one smooth join. Joined curves show
+`[TJ]` in the project rows. Web `smoothJoin` relations between line, arc and
+open spline endpoints (`p0`/`p1`, `point0`/`pointN`) load and save; Split
+and Trim move them (and the fillet's joins, fixes and point links) from a
+curve's end to the retained piece and drop them from a cut-away end.
+Spline relations hold on both fit and control splines through the solver:
+fixed handles, point-on-curve, Normal, endpoint coincidence with sketch
+points, symmetry/mirror, smooth joins and tangent-arc attachment. Midpoint
+on a spline is rejected, as in the web app; closed control splines,
+curvature constraints and handle continuity are not supported (they are open
+on the web as well).
 Set **CX** and **CY** to the transform center in millimeters. The default is the sketch origin. Set a positive scale factor in Properties and click **Scale selected** or **Scale copy** to resize about that center. Existing driving dimension values scale with the selected shape.
 The **Rotate** tab uses a signed angle in degrees and offers **Rotate selected** and **Rotate copy** about the same editable center. Rotating an axis-aligned rectangle converts it to a rotated rectangle primitive that the web app can open.
 Move, scale, and rotate copies retain their editable driving dimensions.
@@ -170,7 +194,9 @@ Perpendicular targets.
 `src/sketch-solver.ts`. Every anchor coordinate (line endpoints, sketch points,
 curve centers, spline handles), every circle or arc radius, ellipse semi-axes
 and rotation, and arc start and sweep angles are parameters; each relation
-contributes a residual. Point-on-curve and Normal relations on a spline add an
+contributes a residual. A smooth join (web `smoothJoin`) is four residuals:
+the two endpoints coincide and their outward unit tangents sum to zero; it
+works between any line, arc and open spline endpoints. Point-on-curve and Normal relations on a spline add an
 auxiliary curve parameter. A curve keeps its size and its angles unless a
 relation or driving value may change them (Equal, radial distance, shared
 ellipses, radius, axis, sweep or rotation dimensions, smooth joins, fixed arc
@@ -465,7 +491,8 @@ Library crate (`rust/src/lib.rs`):
   geometry), `relations.rs` (fixed anchors and relation toggles),
   `symmetry.rs` (mirror geometry, symmetry relations, the Mirror tool),
   `corner.rs` (line-line fillet and chamfer, endpoint relation bookkeeping
-  shared with split/trim),
+  shared with split/trim), `tangent.rs` (tangent arc, smooth join gesture,
+  endpoint tangents),
   `dimensions.rs` (`set_dimension`), `edit.rs` (delete, split, trim, extend,
   copy, move, scale, rotate), `drag.rs` (whole-shape and single-anchor
   dragging), `solve.rs` (`build_problem`, `solve_once`, `analyze_constraints`),
@@ -478,7 +505,8 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
   `input.rs` (mouse/keyboard handling and the `winit` handler),
   `panels.rs` (toolbar and properties panels, dimension editing),
-  `corner.rs` (fillet/chamfer gestures and prompts),
+  `corner.rs` (fillet/chamfer gestures and prompts), `tangent.rs` (tangent
+  arc tool and smooth join key),
   `project_panel.rs` (breadcrumbs and the projects page), `solid.rs` (3D
   preview projection, dragging and painting), `view_sketch.rs` (sketch grid
   and shape painting), `tests.rs`.
@@ -578,6 +606,11 @@ A fillet scenario draws two lines meeting at a corner, fillets it with Shift+W
 (`rust-native-fillet.png`), chamfers a second corner with Shift+H in
 distance-angle mode (`rust-native-chamfer.png`), and checks the saved
 `endpointTangent` and `chamfer` relations.
+A tangent arc scenario draws a line, presses `,`, clicks the line's end and
+captures the live preview (`rust-native-tangent-arc-preview.png`), places the
+arc, then smooth-joins a second line to the first line's start with `.`
+(`rust-native-tangent-arc.png`) and checks the two saved `smoothJoin`
+relations.
 It does not open a host desktop
 window.
 
