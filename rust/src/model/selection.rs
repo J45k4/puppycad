@@ -114,6 +114,22 @@ impl Document {
             .map(Shape::id)
     }
 
+    /// Whether `point` is on a drag handle of the primary selection: an
+    /// anchor or a spline control/fit point. A press there edits the shape
+    /// instead of starting a box selection.
+    pub fn handle_at(&self, point: Point) -> bool {
+        if self.anchor_at(point).is_some() {
+            return true;
+        }
+        let tolerance = 7.0 / self.zoom.max(0.2);
+        matches!(
+            self.selected
+                .and_then(|id| self.shapes.iter().find(|shape| shape.id() == id)),
+            Some(Shape::Spline { points, .. })
+                if points.iter().any(|handle| handle.distance(point) <= tolerance)
+        )
+    }
+
     /// Shift+click at `point`: toggle the shape under it. Returns whether a
     /// shape was hit.
     pub fn toggle_at(&mut self, point: Point) -> bool {

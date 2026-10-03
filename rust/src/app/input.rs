@@ -296,6 +296,24 @@ impl App {
                 return;
             }
         }
+        if !self.solid_preview {
+            for index in 0..3 {
+                if layout.filter_button(index).contains(point.x, point.y) {
+                    let filter = &mut self.selection_filter;
+                    let (flag, label) = match index {
+                        0 => (&mut filter.geometry, "Geometry"),
+                        1 => (&mut filter.construction, "Construction"),
+                        _ => (&mut filter.points, "Point"),
+                    };
+                    *flag = !*flag;
+                    self.status_message =
+                        format!("{label} selection {}", if *flag { "on" } else { "off" });
+                    self.document.selection_filter = self.selection_filter;
+                    self.redraw();
+                    return;
+                }
+            }
+        }
         if !layout.viewport.contains(point.x, point.y) {
             return;
         }
@@ -319,9 +337,28 @@ impl App {
         match self.document.tool {
             Tool::Select => {
                 self.split_circle_start = None;
-                self.document.select_at(world);
-                if !self.read_only() {
-                    self.document.begin_drag(world);
+                self.document.selection_filter = self.selection_filter;
+                let hit = self.document.pick_at(world);
+                let on_anchor = self.document.handle_at(world);
+                if hit.is_none() && !on_anchor {
+                    // Empty canvas: start a rubber band; release selects.
+                    self.box_start = Some(point);
+                } else if self.modifiers.shift_key() {
+                    if let Some(id) = hit {
+                        self.document.toggle_selected(id);
+                    }
+                } else {
+                    // Pressing on a member of a multi-selection keeps it so
+                    // the whole group can be dragged.
+                    let keep_group = !on_anchor
+                        && hit.is_some_and(|id| self.document.is_selected(id))
+                        && self.document.selection_count() > 1;
+                    if !keep_group {
+                        self.document.select_at(world);
+                    }
+                    if !self.read_only() {
+                        self.document.begin_drag(world);
+                    }
                 }
             }
             Tool::Point => {
@@ -471,6 +508,9 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state, button, .. } => match (state, button) {
                 (ElementState::Pressed, MouseButton::Left) => self.handle_left_press(),
                 (ElementState::Released, MouseButton::Left) => {
+                    if let Some(start) = self.box_start.take() {
+                        self.finish_box_select(start, self.cursor);
+                    }
                     if self.document.finish_drag() {
                         self.status_message = "Moved geometry  |  Ctrl+S to save".into();
                     }
@@ -1372,6 +1412,7 @@ impl ApplicationHandler for App {
                             };
                         }
                         KeyCode::Escape => {
+                            self.box_start = None;
                             self.split_circle_start = None;
                             self.spline_points.clear();
                             if self.document.cancel_drag() {
@@ -1465,5 +1506,34 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
+    }
+}
+
+impl App {
+    /// Finish a Select-mode rubber band from screen `start` to `end`. A
+    /// near-zero box is a click on empty canvas: it clears the selection
+    /// unless Shift is held.
+    pub(super) fn finish_box_select(&mut self, start: Point, end: Point) {
+        let shift = self.modifiers.shift_key();
+        if start.distance(end) < 3.0 {
+            if !shift {
+                self.document.clear_selection();
+            }
+            return;
+        }
+        let origin = self.viewport_origin();
+        let from = self.document.screen_to_world(start, origin);
+        let to = self.document.screen_to_world(end, origin);
+        self.document.selection_filter = self.selection_filter;
+        self.document.box_select(from, to, shift);
+        let count = self.document.selection_count();
+        self.status_message = format!(
+            "{count} selected  |  {}",
+            if end.x >= start.x {
+                "window: fully enclosed"
+            } else {
+                "crossing: touched"
+            }
+        );
     }
 }
