@@ -20,6 +20,7 @@ const EXPECTED: Record<string, number[]> = {
 	"extrude-options.pcad": [3],
 	"extruded-rectangle.pcad": [1],
 	"face-sketch.pcad": [3],
+	"feature-tree.pcad": [3],
 	"graph-constrained-line.pcad": [1],
 	"mirror-symmetry.pcad": [1],
 	"offset.pcad": [1],

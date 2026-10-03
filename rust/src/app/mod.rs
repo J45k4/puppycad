@@ -845,7 +845,7 @@ impl App {
             if let Some(solids) = self
                 .project
                 .as_ref()
-                .and_then(ProjectFile::extrusion_previews)
+                .and_then(ProjectFile::active_extrusion_previews)
                 && let Some((scene, projector)) = self.solid_projector(layout)
             {
                 if scene.bodies < solids.len() {
