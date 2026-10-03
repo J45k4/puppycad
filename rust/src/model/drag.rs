@@ -5,6 +5,10 @@ impl Document {
         let Some(id) = self.selected else {
             return false;
         };
+        // Projected entities follow the body only.
+        if self.projections.contains_key(&id) {
+            return false;
+        }
         // A multi-selection always drags as a whole group.
         if self.selection_count() <= 1
             && let Some((anchor_id, index)) = self.anchor_at(start)
@@ -329,6 +333,9 @@ impl Document {
     /// Start dragging one anchor. Refused for fixed anchors; every relation
     /// the shape takes part in follows through the solver.
     pub fn begin_anchor_drag(&mut self, id: u32, index: usize, start: Point) -> bool {
+        if self.projections.contains_key(&id) {
+            return false;
+        }
         let Some(original) = self.shapes.iter().find(|shape| shape.id() == id).cloned() else {
             return false;
         };

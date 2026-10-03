@@ -487,6 +487,7 @@ impl App {
             format!("Set angle {number}°")
         };
         self.push_tree_step(snapshot, label);
+        self.reproject_all();
         Ok(())
     }
 

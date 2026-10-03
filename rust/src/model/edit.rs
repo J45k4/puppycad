@@ -1644,6 +1644,7 @@ impl Document {
     /// anchor on it or its shared-ellipse / concentric partners).
     pub(super) fn movable(&self, id: u32) -> bool {
         !self.midpoint_links.contains_key(&id)
+            && !self.projections.contains_key(&id)
             && !self.has_fixed_anchor(id)
             && !self
                 .shared_ellipse_partners(id)

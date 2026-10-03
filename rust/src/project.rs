@@ -2722,6 +2722,16 @@ impl ProjectFile {
                             }
                             continue;
                         }
+                        if relation.get("type").and_then(Value::as_str) == Some("projected") {
+                            // Native: a projection that does not resolve
+                            // leaves a plain entity (never read-only).
+                            if let Some((id, source)) = read_projected(relation, &entity_ids)
+                                && document.shapes.iter().any(|shape| shape.id() == id)
+                            {
+                                document.projections.insert(id, source);
+                            }
+                            continue;
+                        }
                         if matches!(
                             relation.get("type").and_then(Value::as_str),
                             Some("offset" | "offsetChain")
@@ -3730,8 +3740,13 @@ fn serialize_sketches(
             let Some(kind) = relation.get("type").and_then(Value::as_str) else {
                 return true;
             };
-            if kind == "distance" || kind == "linearPattern" || kind == "circularPattern" {
-                // Point dimensions and patterns are rewritten from the document below.
+            if kind == "distance"
+                || kind == "linearPattern"
+                || kind == "circularPattern"
+                || kind == "projected"
+            {
+                // Point dimensions, patterns and projections are rewritten
+                // from the document below.
                 return false;
             }
             if kind == "fixed" {
@@ -4929,6 +4944,37 @@ fn serialize_sketches(
                 "value": distance
             }));
         }
+        let mut projected: Vec<_> = document.projections.iter().collect();
+        projected.sort_by_key(|(id, _)| **id);
+        for (id, source) in projected {
+            let Some(entity_id) = next_ids.get(id) else {
+                continue;
+            };
+            let base = format!("native-projected-{entity_id}");
+            let mut relation_id = base.clone();
+            let mut suffix = 2;
+            while !relation_ids.insert(relation_id.clone()) {
+                relation_id = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            let mut relation = json!({
+                "id": relation_id,
+                "type": "projected",
+                "entityId": entity_id,
+                "sketchId": workspace.id,
+            });
+            match source {
+                crate::model::ProjectionSource::Face(face_id) => {
+                    relation["sourceFaceId"] = json!(face_id);
+                }
+                crate::model::ProjectionSource::Edge(key) => {
+                    relation["sourceEdge"] = json!({
+                        "a": key.a, "b": key.b, "via": key.via, "normals": key.normals
+                    });
+                }
+            }
+            relations.push(relation);
+        }
         for chain in &document.offset_chains {
             let targets: Vec<Value> = chain
                 .targets
@@ -5543,6 +5589,45 @@ fn offset_chain_json(
         "targets": targets,
         "value": chain.distance
     }))
+}
+
+/// A native `projected` relation: the shape and its source.
+fn read_projected(
+    relation: &Value,
+    entity_ids: &HashMap<u32, String>,
+) -> Option<(u32, crate::model::ProjectionSource)> {
+    let graph_id = relation.get("entityId")?.as_str()?;
+    let id = entity_ids
+        .iter()
+        .find_map(|(shape_id, id)| (id == graph_id).then_some(*shape_id))?;
+    if let Some(face) = relation.get("sourceFaceId").and_then(Value::as_str) {
+        return Some((id, crate::model::ProjectionSource::Face(face.to_string())));
+    }
+    let edge = relation.get("sourceEdge")?;
+    let vector = |value: &Value| -> Option<[f32; 3]> {
+        let array = value.as_array().filter(|a| a.len() == 3)?;
+        let v: Vec<f32> = array
+            .iter()
+            .map(|c| c.as_f64().map(|c| c as f32).filter(|c| c.is_finite()))
+            .collect::<Option<_>>()?;
+        Some([v[0], v[1], v[2]])
+    };
+    let normals = edge.get("normals")?.as_array().filter(|n| n.len() == 2)?;
+    let a = vector(edge.get("a")?)?;
+    let b = vector(edge.get("b")?)?;
+    let via = edge
+        .get("via")
+        .and_then(vector)
+        .unwrap_or_else(|| std::array::from_fn(|i| (a[i] + b[i]) * 0.5));
+    Some((
+        id,
+        crate::model::ProjectionSource::Edge(crate::model::EdgeKey {
+            a,
+            b,
+            via,
+            normals: [vector(&normals[0])?, vector(&normals[1])?],
+        }),
+    ))
 }
 
 /// Load a web `offset` or `offsetChain` relation into `document`. Returns

@@ -340,6 +340,27 @@ impl ProjectFile {
             .all(|sketch| self.sketch_frame(&sketch.id).is_some())
     }
 
+    /// Frame of a web face id `<extrudeId>-solid-face-<n>`.
+    pub fn face_frame(&self, face_id: &str) -> Option<Frame> {
+        let (extrude_id, _) = face_id.rsplit_once("-solid-face-")?;
+        self.face_descriptors(extrude_id)?
+            .into_iter()
+            .find(|face| face.face_id == face_id)
+            .map(|face| face.frame)
+    }
+
+    /// Stored document of sketch `index` (the open one may be newer).
+    pub fn sketch_document(&self, index: usize) -> Option<&Document> {
+        self.sketches.get(index).map(|sketch| &sketch.document)
+    }
+
+    /// Replaces the stored document of sketch `index` (re-projection).
+    pub fn set_sketch_document(&mut self, index: usize, document: Document) {
+        if let Some(sketch) = self.sketches.get_mut(index) {
+            sketch.document = document;
+        }
+    }
+
     pub fn sketch_face(&self, index: usize) -> Option<&FaceRef> {
         self.sketches.get(index)?.face.as_ref()
     }

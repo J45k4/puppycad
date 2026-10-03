@@ -11,6 +11,7 @@ mod palette;
 mod panels;
 mod pattern;
 mod project_panel;
+mod projection;
 mod settings;
 mod shortcut_overlay;
 mod solid;
@@ -47,6 +48,7 @@ use features::*;
 use palette::*;
 use pattern::*;
 use project_panel::*;
+use projection::*;
 use settings::*;
 #[cfg(test)]
 use shortcut_overlay::*;
@@ -310,6 +312,11 @@ pub(crate) struct App {
     right_press: Option<Point>,
     /// Show (and snap to) a face sketch's supporting body; key 5 toggles.
     face_context: bool,
+    /// Use edges is armed: a click on a dashed reference edge projects it.
+    use_mode: bool,
+    /// 3D edges and faces selected before the open face sketch was made;
+    /// Use edges projects them.
+    pending_projection: Vec<PendingProjection>,
     selected_solid: usize,
     selected_profile: usize,
     snap_grid: bool,
@@ -493,6 +500,8 @@ impl Default for App {
             context_menu: None,
             right_press: None,
             face_context: true,
+            use_mode: false,
+            pending_projection: Vec::new(),
             selected_solid: 0,
             selected_profile: 0,
             snap_grid: true,
@@ -913,6 +922,7 @@ impl App {
     /// Loads the active face sketch's supporting-body edges into the document
     /// (drawn behind the sketch and used as snap targets) unless key 5 hid them.
     fn refresh_reference_edges(&mut self) {
+        self.reproject_all();
         let context = match &self.project {
             Some(project) if self.face_context => project.sketch_context(project.active_sketch()),
             _ => Default::default(),

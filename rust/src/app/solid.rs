@@ -480,6 +480,7 @@ impl App {
             return;
         };
         self.document.finish_drag();
+        let pending = self.selection_projections(Some(&face));
         let Some(project) = &mut self.project else {
             return;
         };
@@ -491,6 +492,8 @@ impl App {
                 self.editing = None;
                 self.hovered_face = None;
                 self.face_context = true;
+                self.use_mode = false;
+                self.pending_projection = pending;
                 self.status_message = format!(
                     "Created {} on {}  |  5 toggles body context  |  Ctrl+S to save",
                     project

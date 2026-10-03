@@ -155,6 +155,8 @@ pub(super) enum Cmd {
     ExtrudeCut,
     SketchOnFace,
     FaceContext,
+    UseEdges,
+    ProjectIntoSketch,
     TogglePreview,
     SolidEndCondition,
     SolidFlip,
@@ -722,6 +724,22 @@ pub(super) static COMMANDS: &[Command] = &[
         S::Any,
         App::toggle_face_context,
     ),
+    edit(
+        Cmd::UseEdges,
+        "Use edges: project the face loops / selection (again: construction)",
+        "O",
+        C::Draw,
+        false,
+        App::use_edges,
+    ),
+    cmd(
+        Cmd::ProjectIntoSketch,
+        "Project selected edges / faces into a face sketch",
+        "",
+        C::Solid,
+        S::Solid,
+        App::project_into_sketch,
+    ),
     cmd(
         Cmd::SolidEndCondition,
         "Cycle extrusion end condition",
@@ -1157,7 +1175,7 @@ pub(super) static COMMANDS: &[Command] = &[
 ];
 
 /// MORE menu rows (index = `Layout::more_item` slot) and their labels.
-pub(super) const MORE_MENU: [(Cmd, &str); 28] = [
+pub(super) const MORE_MENU: [(Cmd, &str); 29] = [
     (Cmd::Point, "POINT [P]"),
     (Cmd::Polygon, "POLYGON [G]"),
     (Cmd::Slot, "SLOT [S]"),
@@ -1186,6 +1204,7 @@ pub(super) const MORE_MENU: [(Cmd, &str); 28] = [
     (Cmd::EdgeFillet, "EDGE FILLET [SHIFT 0]"),
     (Cmd::LoftJoin, "LOFT JOIN [SHIFT 9]"),
     (Cmd::AssemblyView, "ASSEMBLY [CTRL B]"),
+    (Cmd::UseEdges, "USE EDGES [O]"),
 ];
 
 /// Toolbar buttons 0..=9 (`Layout::tool_button` slot) and their commands.
@@ -1432,6 +1451,7 @@ impl App {
             KeyCode::KeyY if plain_shift && sketch_edit => Cmd::InternalTangent,
             KeyCode::KeyD if plain_shift && sketch_edit => Cmd::RadialDistance,
             KeyCode::KeyO if plain_shift && sketch_edit => Cmd::Concentric,
+            KeyCode::KeyO if !ctrl && !shift && !self.solid_preview => Cmd::UseEdges,
             KeyCode::KeyE if plain_shift && sketch_edit => Cmd::Equal,
             KeyCode::KeyE if !ctrl => Cmd::Ellipse,
             KeyCode::KeyA if shift => Cmd::CenterArc,
@@ -1893,6 +1913,10 @@ impl App {
     }
 
     fn cancel_key(&mut self) {
+        if std::mem::take(&mut self.use_mode) {
+            self.status_message = "Use edges done".into();
+            return;
+        }
         if self.loft_start.take().is_some() {
             self.status_message = "Loft cancelled".into();
             return;

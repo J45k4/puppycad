@@ -238,6 +238,7 @@ impl App {
             Ok(()) => {
                 self.solid_undo.push(SolidUndo::new(index, node, label));
                 self.solid_redo.clear();
+                self.reproject_all();
                 format!(
                     "{}{}  |  Ctrl+Z to undo  |  Ctrl+S to save",
                     options.end.label(),
@@ -259,6 +260,7 @@ impl App {
         let label = format!("Extrude {} mm", model::history_number_label(depth));
         self.solid_undo.push(SolidUndo::new(index, node, label));
         self.solid_redo.clear();
+        self.reproject_all();
         Ok(())
     }
 

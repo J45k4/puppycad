@@ -77,12 +77,18 @@ impl App {
             }
             (false, Some(TopoRef::Face(_))) => {
                 items.push((Cmd::SketchOnFace, "Sketch on face"));
+                if self.project_into_sketch_available() {
+                    items.push((Cmd::ProjectIntoSketch, "Project into sketch"));
+                }
                 items.push((Cmd::SuppressFeature, "Suppress / unsuppress"));
                 items.push((Cmd::DeleteFeature, "Delete feature"));
             }
             (false, Some(TopoRef::Edge(_))) => {
                 items.push((Cmd::EdgeChamfer, "Chamfer..."));
                 items.push((Cmd::EdgeFillet, "Fillet..."));
+                if self.project_into_sketch_available() {
+                    items.push((Cmd::ProjectIntoSketch, "Project into sketch"));
+                }
             }
             (_, Some(TopoRef::Vertex(_))) | (true, None) | (false, None) => {}
         }
@@ -112,6 +118,7 @@ impl App {
                 .current_topology_selection()
                 .is_some_and(|(_, _, selection)| selection.len() == 2),
             Cmd::SuppressFeature | Cmd::DeleteFeature => self.selected_feature_row().is_some(),
+            Cmd::ProjectIntoSketch => self.project_into_sketch_available(),
             _ => self.command_available(command(id)),
         }
     }

@@ -157,6 +157,13 @@ impl App {
             self.redraw();
             return;
         }
+        if self.use_mode && !self.solid_preview && layout.viewport.contains(point.x, point.y) {
+            if self.use_click(point) {
+                self.redraw();
+                return;
+            }
+            self.use_mode = false;
+        }
         if !self.solid_preview
             && self.document.selected.is_none()
             && !self
