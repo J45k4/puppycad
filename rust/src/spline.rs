@@ -438,6 +438,94 @@ fn solve_tridiagonal(mut diagonal: Vec<f64>, mut rhs: Vec<f64>) -> Vec<f64> {
     rhs
 }
 
+/// Double-precision Bezier segments for the constraint solver (same
+/// construction as [`beziers`]); `None` for invalid input.
+pub fn beziers_f64(
+    control: bool,
+    points: &[(f64, f64)],
+    closed: bool,
+) -> Option<Vec<[(f64, f64); 4]>> {
+    let count = points.len();
+    if count < 2 || points.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+        return None;
+    }
+    if control {
+        if closed || count < 4 || (count - 1) % 3 != 0 {
+            return None;
+        }
+        return Some(
+            points
+                .windows(4)
+                .step_by(3)
+                .map(|part| [part[0], part[1], part[2], part[3]])
+                .collect(),
+        );
+    }
+    if closed && count < 3 {
+        return None;
+    }
+    let coordinate = |i: usize, axis: usize| if axis == 0 { points[i].0 } else { points[i].1 };
+    let mut second = vec![[0.0_f64; 2]; count];
+    for axis in 0..2 {
+        if closed {
+            let values = (0..count)
+                .map(|i| {
+                    6.0 * (coordinate((i + 1) % count, axis) - 2.0 * coordinate(i, axis)
+                        + coordinate((i + count - 1) % count, axis))
+                })
+                .collect::<Vec<_>>();
+            let mut diagonal = vec![4.0; count];
+            diagonal[0] = 8.0;
+            diagonal[count - 1] = 4.25;
+            let solved = solve_tridiagonal(diagonal.clone(), values);
+            let mut correction_rhs = vec![0.0; count];
+            correction_rhs[0] = -4.0;
+            correction_rhs[count - 1] = 1.0;
+            let correction = solve_tridiagonal(diagonal, correction_rhs);
+            let factor = (solved[0] - solved[count - 1] / 4.0)
+                / (1.0 + correction[0] - correction[count - 1] / 4.0);
+            for i in 0..count {
+                second[i][axis] = solved[i] - factor * correction[i];
+            }
+        } else if count > 2 {
+            let rhs = (1..count - 1)
+                .map(|i| {
+                    6.0 * (coordinate(i + 1, axis) - 2.0 * coordinate(i, axis)
+                        + coordinate(i - 1, axis))
+                })
+                .collect::<Vec<_>>();
+            let solved = solve_tridiagonal(vec![4.0; count - 2], rhs);
+            for (i, value) in solved.into_iter().enumerate() {
+                second[i + 1][axis] = value;
+            }
+        }
+    }
+    let segments = if closed { count } else { count - 1 };
+    Some(
+        (0..segments)
+            .map(|i| {
+                let j = (i + 1) % count;
+                let handle = |axis: usize, end: bool| {
+                    let delta = coordinate(j, axis) - coordinate(i, axis);
+                    if end {
+                        coordinate(j, axis)
+                            - (delta + (second[i][axis] + 2.0 * second[j][axis]) / 6.0) / 3.0
+                    } else {
+                        coordinate(i, axis)
+                            + (delta - (2.0 * second[i][axis] + second[j][axis]) / 6.0) / 3.0
+                    }
+                };
+                [
+                    points[i],
+                    (handle(0, false), handle(1, false)),
+                    (handle(0, true), handle(1, true)),
+                    points[j],
+                ]
+            })
+            .collect(),
+    )
+}
+
 pub fn beziers(mode: SplineMode, points: &[Point], closed: bool) -> Result<Vec<Cubic>, String> {
     if points.len() < 2
         || points.len() > 4096
