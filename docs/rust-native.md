@@ -744,7 +744,9 @@ Library crate (`rust/src/lib.rs`):
 Binary (`rust/src/main.rs` parses arguments and starts the event loop):
 
 - `app/` — `mod.rs` (`App` state, layout, colors, painting entry point),
-  `input.rs` (mouse/keyboard handling and the `winit` handler),
+  `input.rs` (mouse/keyboard handling; the `winit` handler forwards to
+  `App::handle_window_event` and `App::handle_key`, which tests drive
+  headlessly),
   `panels.rs` (toolbar and properties panels, dimension and variable
   editing),
   `corner.rs` (fillet/chamfer gestures and prompts), `tangent.rs` (tangent
@@ -754,8 +756,11 @@ Binary (`rust/src/main.rs` parses arguments and starts the event loop):
   preview projection, dragging, face and body picking and painting), `extrude.rs`
   (extrude prompt with ghost preview, end condition/flip/target edits and
   their undo), `view_sketch.rs` (sketch grid
-  and shape painting, dimension labels), `tests.rs`.
-- `renderer.rs` (`wgpu` painter), `view3d.rs` (orbit camera).
+  and shape painting, dimension labels), `tests.rs`, `input_tests.rs`
+  (headless keyboard/mouse tests).
+- `renderer.rs` (CPU `Painter` that builds the triangle list, and the
+  `wgpu` `Renderer` that uploads it; `Painter` tests in
+  `renderer_tests.rs`), `view3d.rs` (orbit camera).
 
 ## Cross-loader round-trip
 

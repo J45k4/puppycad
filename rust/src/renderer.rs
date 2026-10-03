@@ -275,3 +275,7 @@ impl Renderer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "renderer_tests.rs"]
+mod tests;

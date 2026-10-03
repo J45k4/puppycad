@@ -9,6 +9,8 @@ mod tangent;
 mod view_sketch;
 
 #[cfg(test)]
+mod input_tests;
+#[cfg(test)]
 mod tests;
 
 use corner::*;
