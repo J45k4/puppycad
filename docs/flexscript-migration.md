@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`aabb970fefdc879cf8fe221ee1c0af371a3611dc` includes the shared library and
+`93d6238fbe98ca8ec6fc0ec4c5b5aacd5a911c1e` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -614,6 +614,16 @@ the edits in Biscuit produces the same CAD graph. Two frozen builds verify
 STL byte identity, volume and the 128 oriented outer rim vertices. Changing
 the saved width to 61 mm without updating its driver makes the worker reject
 the export. See `workdir/flexscript/ellipse-rotation-dimension.png`.
+
+The native split tool preserves the original entity ID and links each new
+elliptic arc to the original with a `sameEllipse` relation. The headless
+window test splits a 40 × 20 mm ellipse into three pieces, undoes and redoes
+the second cut, then reopens the file and drives all three widths to 50 mm.
+Its 10 mm extrusion matches the Rust 3MF. Biscuit’s checked program produces
+the same CAD graph. Two frozen Biscuit builds export byte-identical STLs
+with the expected volume. Moving only one saved arc’s center makes the
+worker reject the export. The library tests also cover clockwise arcs and
+the explicit coincident endpoint relations saved by the TypeScript editor.
 
 The headless library reads faceted STEP bodies from Part 21 files and
 validates their closed shells. All five definitions in the native sensor

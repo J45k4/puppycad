@@ -179,6 +179,68 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        path=Path(tmp)/"Split ellipse.pcad"
+        app,window=open_app(path,"Click two rectangle corners")
+        key("Shift_L+e")
+        click(window,480,358)
+        click(window,560,358)
+        click(window,480,318)
+        verify(window,"Curve added")
+        click(window,474,55)  # Split ellipse
+        verify(window,"Pick a cut on an ellipse or elliptic arc")
+        click(window,560,358)
+        verify(window,"Pick the second cut")
+        click(window,560,358)
+        verify(window,"distinct interior split points")
+        xlib.XWarpPointer(connection,0,window,0,0,0,0,480,318)
+        xlib.XSync(connection,0)
+        time.sleep(.15)
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"ellipse-split-picks.png"],check=True)
+        click(window,480,318)
+        verify(window,"Ellipse split")
+        click(window,400,358)
+        verify(window,"Ellipse split")
+        def split_nodes():
+            key("Control_L+s")
+            verify(window,"Saved")
+            return json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        nodes=split_nodes()
+        joins=lambda nodes: [r for n in nodes if n["type"]=="sketch" for r in n["relations"] if r["type"]=="sameEllipse"]
+        assert [(r["a"],r["b"]) for r in joins(nodes)]==[("native-entity-1","native-entity-2"),("native-entity-1","native-entity-3")]
+        key("Control_L+z")
+        assert len(joins(split_nodes()))==1
+        key("Control_L+y")
+        assert len(joins(split_nodes()))==2
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"Sweep 90 deg")
+        key("Tab")
+        verify(window,"Width 40 mm")
+        key("F2")
+        type_value("50")
+        key("Return")
+        verify(window,"Edited")
+        nodes=split_nodes()
+        pieces=[n["primitive"] for n in nodes if n.get("primitive",{}).get("type")=="ellipticArc"]
+        assert len(pieces)==3 and all(n["width"]==50 and n["height"]==20 for n in pieces)
+        assert all(math.isclose(p["sweep"],a,abs_tol=1e-10) for p,a in zip(pieces,(math.pi/2,math.pi/2,math.pi),strict=True))
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        split_nodes()
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        ref=Path(tmp)/"split-ellipse-rust.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,ref],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),ref)
+        key("Escape")
+        app.wait(3)
+
         path=Path(tmp)/"Elliptical washer.pcad"
         app,window=open_app(path,"Click two rectangle corners")
         click(window,576,20)  # More tools

@@ -267,6 +267,12 @@ For a **3-point circle** (Shift+C), click three points on the rim. The third
 click commits the shape. Backspace retracts the last pending point. A
 collinear third point leaves the first two picks available for correction.
 
+Choose **More tools → Conics → Split ellipse** (Shift+X). Click two
+distinct points on an ellipse’s rim. To split an existing elliptic arc,
+click once inside its sweep. Each split is one undo step. After saving
+and reopening, editing the width, height or rotation of any piece in
+**Dimensions** (F8) still updates the whole ellipse.
+
 In **More tools**, choose **Tangent** (Shift+J), click a free line, circular
 arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**
 (J) joins the nearest endpoints of two curves. Select the curve to keep in

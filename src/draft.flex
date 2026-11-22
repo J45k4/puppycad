@@ -1,4 +1,5 @@
 import "smooth.flex";
+import "cad/project-ellipse-split.flex";
 
 // Draft coordinates use 4 logical pixels per millimetre at the default zoom.
 global puppy_draft=0;
@@ -105,6 +106,7 @@ fn puppy_tool_name() {
     return "rectangle";
 }
 fn puppy_draft_hint() {
+    if puppy_tool==-6 {if puppy_anchor {return "Pick the second cut on this ellipse";}return "Pick a cut on an ellipse or elliptic arc";}
     if puppy_tool==-4 {if puppy_anchor {return "Click the new tangent arc endpoint";}return "Pick a curve endpoint to start a tangent arc";}
     if puppy_tool==-5 {if puppy_anchor {return "Pick the curve that should follow or drag a source point";}return "Pick the source curve for Smooth";}
     if puppy_tool==-3 && !puppy_revolve_axis {return "Pick a source to offset or a copy to resize";}
@@ -172,6 +174,19 @@ fn puppy_offset_pick(project,point) {
     }
     puppy_offset_pick_id=puppy_snapshot(id);return puppy_number_open(project,puppy_active_field(project));
 }
+fn puppy_split_click(project,p) {
+    let sk=j_string(puppy_draft_sketch(project),"id");let nodes=pc_nodes(cad_project_part(project));let a=p;let b=0;
+    if puppy_anchor {a=cg_v(puppy_ax,puppy_ay,0);b=p;}
+    let node=puppy_sketch_hit(nodes,sk,a);if !pc_ellipse_entity(node) {return puppy_title(project,"Pick a cut on an ellipse or elliptic arc");}
+    let tolerance=8000000000/puppy_draft_scale;
+    if !puppy_anchor && !pc_finite_arc(node) {
+        pe_parameter(pc_curve_geometry(node),p,tolerance);if cg_error {return puppy_title(project,cg_error);}
+        puppy_ax=load64(p);puppy_ay=load64(p+8);puppy_anchor=1;return puppy_title(project,puppy_draft_hint());
+    }
+    let updated=cad_project_split_ellipse(project,sk,j_string(node,"id"),a,b,tolerance);
+    if !updated {return puppy_title(project,cg_error);}
+    puppy_anchor=0;puppy_push(updated);return puppy_title(updated,"Ellipse split");
+}
 fn puppy_draft_click(x,y) {
     let project=cad_project_open(puppy_history+24);let p=puppy_draft_point(x,y);
     puppy_mx=load64(p);puppy_my=load64(p+8);
@@ -180,6 +195,7 @@ fn puppy_draft_click(x,y) {
         puppy_anchor=1;puppy_ax=puppy_mx;puppy_ay=puppy_my;
         return puppy_title(project,puppy_draft_hint());
     }
+    if puppy_tool==-6 {return puppy_split_click(project,p);}
     if puppy_tool==-4 || puppy_tool==-5 {return puppy_join_click(project,p);}
     if puppy_tool==-3 {return puppy_offset_pick(project,p);}
     if puppy_tool<0 {
@@ -281,6 +297,7 @@ fn puppy_draft_key(project,key,mods) {
         if key==28 {return puppy_draft_revolve(project,cg_v(0,0,0),cg_v(0,1000000,0));}
         return 1;
     }
+    if key==27 && mods&3 {puppy_curves_page=2;puppy_tool=-6;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());}
     if key==13 {
         puppy_join_select(0);puppy_anchor=0;puppy_curves_page=1;puppy_tool=-5;if mods&3 {puppy_tool=-4;}
         return puppy_title(project,puppy_draft_hint());
@@ -387,6 +404,18 @@ fn puppy_draw_draft() {
         let preview=puppy_join_preview(project,id);if preview {if !puppy_draft_path(preview,3,w,h) {return 0;}}cg_begin();
     }
     let selected=0;if puppy_tool==-5 && puppy_anchor && puppy_join_source {selected=j_string(j_parse(puppy_join_source+24),"entityId");}
+    let split_cuts=0;if puppy_tool==-6 && puppy_anchor && !puppy_revolve_axis {
+        let first=cg_v(puppy_ax,puppy_ay,0);let node=puppy_sketch_hit(pc_nodes(cad_project_part(project)),id,first);
+        selected=j_string(node,"id");let geom=pc_curve_geometry(node);split_cuts=cg_array();let i=0;
+        while i<2 && geom {
+            let p=first;if i {p=cg_v(puppy_mx,puppy_my,0);}
+            let angle=pe_parameter(geom,p,8000000000/puppy_draft_scale);
+            if !cg_error {
+                let pts=pc_ellipse_samples(pc_uv(j_get(geom,"center")),pc_pose_number(j_get(geom,"width"))/2,pc_pose_number(j_get(geom,"height"))/2,pc_ellipse_rotation(geom),angle,0,1,0);
+                cg_push(split_cuts,cg_at(pts,0));
+            }if cg_error {cg_begin();}i=i+1;
+        }
+    }
     let offset=0;if puppy_line_report && !puppy_distance_row() {
         let row=puppy_line_row();selected=j_string(row,"id");if po_kind(row) && !puppy_symmetry_mode {offset=row;}
     }
@@ -436,13 +465,18 @@ fn puppy_draw_draft() {
             while k<cg_count(rows) {cg_push(handles,load64(cg_at(rows,k)));k=k+1;}
             render_gl(puppy_device,"glUniform1i",color,5,0,0,0,0);render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);
             if !puppy_draft_path(handles,0,w,h) {return 0;}render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
-        }else if highlight && !pattern {
+        }else if highlight && !pattern && !split_cuts {
             render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);
             if !puppy_draft_path(points,0,w,h) {return 0;}
             render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
         }
         i=i+1;
     }
+    if cg_count(split_cuts) {
+        render_gl(puppy_device,"glUniform1i",color,5,0,0,0,0);render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);
+        if !puppy_draft_path(split_cuts,0,w,h) {return 0;}render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
+    }
+
     if pattern && !puppy_pattern_guides(project,pattern,color,w,h) {return 0;}
     let distance=puppy_distance_row();
     let first=puppy_distance_first;if puppy_symmetry_mode {first=puppy_symmetry_anchor;}
