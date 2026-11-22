@@ -296,14 +296,14 @@ fn puppy_toolbar_build(w) {
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_plane_chooser || puppy_assembly_choice_kind {
-        if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
+        if puppy_status {puppy_toolbar_workspace_status(rgb,w,project,puppy_status+24);}
         let actions=0;if puppy_assembly_choice_kind {actions=puppy_assembly_choice_actions();}else {actions=puppy_plane_actions();}
         puppy_action_bar(actions,rgb,w,-1);
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;
         return 1;
     }
     if puppy_support_stage {
-        if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
+        if puppy_status {puppy_toolbar_workspace_status(rgb,w,project,puppy_status+24);}
         puppy_action_bar(puppy_support_actions(),rgb,w,-1);
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
@@ -320,29 +320,28 @@ fn puppy_toolbar_build(w) {
         return 1;
     }
     if puppy_step_input || puppy_mating || puppy_construction_ids {
-        if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-12);}
+        if puppy_status {puppy_toolbar_workspace_status(rgb,w,project,puppy_status+24);}
         let rows=0;if puppy_construction_ids {rows=puppy_construction_actions();}else if puppy_mating {rows=puppy_mate_actions();}else {rows=puppy_step_actions(project);}
         puppy_action_bar(rows,rgb,w,-1);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_history_rows {
         let label="Feature history";if puppy_history_preview {label="Feature preview";}
-        puppy_bar_text(rgb,w,12,25,label,135);
-        if puppy_status {puppy_bar_text(rgb,w,142,25,puppy_status+24,w-12);}
+        if puppy_status {label=m_cat(label,m_cat("  /  ",puppy_status+24));}
+        puppy_toolbar_workspace_status(rgb,w,project,label);
         puppy_compact_bar(rgb,w,project,-1);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_edge_kind {
-        puppy_bar_text(rgb,w,12,25,puppy_edge_label(),112);
-        if puppy_status {puppy_bar_text(rgb,w,120,25,puppy_status+24,w-12);}
+        let label=puppy_edge_label();
+        if puppy_status && !m_eq(label,puppy_status+24) {label=m_cat(label,m_cat("  /  ",puppy_status+24));}
+        puppy_toolbar_workspace_status(rgb,w,project,label);
         if w<800 {puppy_compact_bar(rgb,w,project,-1);}else {puppy_action_bar(puppy_edge_actions(),rgb,w,-1);}
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_loft_open {
-        let sketch=puppy_draft_sketch(project);let name=j_string(sketch,"name");
-        let label=m_cat(name,m_cat(" / Profile ",m_int(puppy_profile_index)));
-        puppy_bar_text(rgb,w,12,25,label,w/2);
-        if puppy_status {puppy_bar_text(rgb,w,w/2,25,puppy_status+24,w-10);}
+        let label="";if puppy_status {label=puppy_status+24;}
+        puppy_toolbar_workspace_status(rgb,w,project,label);
         if w<800 {puppy_compact_bar(rgb,w,project,-1);}else {puppy_action_bar(puppy_loft_actions(),rgb,w,-1);}
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
@@ -521,6 +520,12 @@ fn puppy_breadcrumb_navigate(project,target) {
     if puppy_patterns {puppy_pattern_end();}
     if puppy_extrusion_open {puppy_extrusion_close();}
     if puppy_revolve_open {puppy_revolve_close();}
+    if puppy_support_sketch {puppy_support_end();}
+    if puppy_history_rows {puppy_history_close();}
+    if puppy_edge_kind {puppy_edge_close();}
+    if puppy_loft_open {puppy_loft_close();}
+    if puppy_construction_ids {puppy_construction_key(project,GUI_KEY_ESCAPE);}
+    puppy_plane_chooser=0;puppy_picking_face=0;
     if target==1 {return puppy_workspace_return_to_assembly(project);}
     return puppy_workspace_return_to_part(project);
 }

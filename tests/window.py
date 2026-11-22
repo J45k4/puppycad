@@ -514,6 +514,58 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        tools_path=Path(tmp)/"Workspace tools.pcad"
+        tools_path.write_text(json.dumps(preview_doc))
+        app,window=open_app(tools_path,"Assembly opened",design_tree=True)
+
+        def return_to_assembly(frame):
+            assembly_link,=breadcrumb_links(window,frame)
+            click(window,assembly_link,20)
+            verify(window,"Opened Arm assembly")
+            click(window,55,160)
+            verify(window,"Opened Base")
+
+        click(window,55,160)
+        verify(window,"Opened Base")
+        key("F7")
+        verify(window,"Base block   active")
+        return_to_assembly("workspace-history-breadcrumb.png")
+        key("h")
+        verify(window,"Pick straight edges")
+        return_to_assembly("workspace-edge-breadcrumb.png")
+        key("Shift_L+s")
+        verify(window,"Choose a plane for the new sketch")
+        return_to_assembly("workspace-plane-breadcrumb.png")
+
+        click(window,85,238,button=3)
+        key("Up")
+        key("Return")
+        verify(window,"Choose a sketch support")
+        click(window,410,55)
+        verify(window,"Click an earlier extrusion face")
+        return_to_assembly("workspace-support-breadcrumb.png")
+
+        key("9")
+        verify(window,"First loft profile")
+        key("Return")
+        verify(window,"Second loft profile")
+        _,part_link=breadcrumb_links(window,"workspace-loft-breadcrumb.png")
+        click(window,part_link,20)
+        verify(window,"Part workspace")
+        assert "  |  Base  |  Solid" in title(window)
+        click(window,85,238)
+        verify(window,"Editing Preview sketch")
+        key("w")
+        verify(window,"Pick sketch geometry, then Apply")
+        _,part_link=breadcrumb_links(window,"workspace-construction-breadcrumb.png")
+        click(window,part_link,20)
+        verify(window,"Part workspace")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(tools_path.read_bytes())["items"]==preview_doc["items"]
+        key("Escape")
+        app.wait(3)
+
         pattern_path=Path(tmp)/"Workspace pattern.pcad"
         pattern_path.write_bytes((root/"rust/fixtures/patterns.pcad").read_bytes())
         pattern_original=pattern_path.read_bytes()

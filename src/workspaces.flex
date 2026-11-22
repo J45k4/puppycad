@@ -130,7 +130,9 @@ fn puppy_workspace_switch(project) {
 }
 
 fn puppy_workspace_return_to_part(project) {
-    let result=puppy_workspace_switch(project);
+    let result=0;
+    if puppy_sketch {result=puppy_workspace_switch(project);}
+    else {result=puppy_title(project,"Part workspace");}
     if !puppy_sketch {puppy_design_select_item(cad_project_part(project));}
     return result;
 }

@@ -29,11 +29,11 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
 When you open a referenced part from an assembly, click the underlined
 **Assembly** breadcrumb to return to that assembly from Part or Sketch.
 The Assembly link stays available when you switch to another part used by
-that assembly. Breadcrumb links highlight on hover and work from
-**Dimensions**, **Relations**, **Patterns**, and extrusion and revolve
-previews, including with the Design sidebar collapsed. Clicking a
-breadcrumb opens the chosen workspace and cancels any unapplied preview
-or unsubmitted value. It also dismisses an open Design context menu.
+that assembly. Click any underlined ancestor to open that workspace, even
+with the Design sidebar collapsed. The links stay available during feature
+previews, sketch plane and face selection, and sketch tools. Navigating
+cancels any unapplied preview or unsubmitted value and dismisses an open
+Design context menu.
 Undo and Redo restore the Assembly link from the original visit to a part.
 In a narrow window the path can use the workspace names **Assembly**, **Part**, and
 **Sketch** to fit. The toolbar uses paged controls when it needs more space
