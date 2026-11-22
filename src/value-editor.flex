@@ -224,9 +224,14 @@ fn puppy_number_apply(project) {
     let limit=500;
     let history_field=puppy_history_legacy_field(project);
     if history_field && m_eq(j_string(load64(history_field),"id"),"segments") {limit=1024;}
+    if history_field && j_get(load64(history_field),"regionIndex") {
+        let key=j_string(load64(history_field),"regionKey");
+        if m_eq(key,"segments") || m_eq(key,"arcSegments") {limit=4096;}
+    }
     cg_begin();let value=cg_number_bounded(j_new(6,text),limit);
     if cg_error {
         if limit==1024 {return puppy_title(project,"Enter a whole number of segments from 8 to 1024");}
+        if limit==4096 {return puppy_title(project,"Enter a whole number of segments up to 4096");}
         return puppy_title(project,"Enter a decimal from -500 to 500 with up to six places");
     }
     if puppy_shell_open {return puppy_shell_set_thickness(project,value);}

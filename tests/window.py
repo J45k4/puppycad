@@ -2024,6 +2024,108 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Saved topology finishes keep their original edge ID and record family.
+        edge_cases=(
+            ("feature-chamfer","Saved chamfer 1 d1  mm","Saved chamfer 1 d2  mm",2,3,3.25,1.75,3943.125),
+            ("topology-fillet","Edge fillet 1 radius  mm","Edge fillet 1 segments",2,32,3,16,3961.485339),
+        )
+        for kind,first_label,second_label,initial_first,initial_second,first,second,expected_volume in edge_cases:
+            artifact=f"legacy-{kind}"
+            path=Path(tmp)/f"{artifact}.pcad"
+            initial=(libs/"cad/tests/fixtures"/f"legacy-typescript-{kind}.pcad").read_bytes()
+            path.write_bytes(initial)
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            app,window=open_app(path,design_tree=True)
+            key("F7")
+            verify(window,"Depth  mm  10")
+            for _ in range(5):
+                key("Tab")
+            verify(window,f"{first_label}  {initial_first}")
+            legacy_number(str(first))
+            verify(window,f"{first_label}  {first}")
+            key("Tab")
+            verify(window,f"{second_label}  {initial_second}")
+            if kind=="topology-fillet":
+                legacy_number("65")
+                verify(window,"Edge fillet segments must be between 2 and 64")
+                key("Escape")
+                assert path.read_bytes()==initial
+            legacy_number(str(second))
+            verify(window,f"{second_label}  {second}")
+            key("Control_L+z")
+            verify(window,f"{second_label}  {initial_second}")
+            key("Control_L+y")
+            verify(window,f"{second_label}  {second}")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            expected=json.loads(initial)
+            expected["revision"]+=1
+            part=expected["items"][0]["data"]
+            if kind=="feature-chamfer":
+                chamfer=next(row for row in part["features"] if row["type"]=="chamfer")
+                chamfer.update(d1=first,d2=second)
+            else:
+                part["solidSteps"][0]["edgeFinishes"][0].update(radius=first,segments=second)
+            assert json.loads(path.read_bytes())==expected
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            verify(window,"Feature history closed")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl");bounds,volume=triangulation(stl)
+            assert bounds==[(-10,10),(-10,10),(0,10)] and math.isclose(volume,expected_volume,abs_tol=.002),(bounds,volume)
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
+        # The extra filled regions share the extrusion tool's extent and preserve its face IDs.
+        path=Path(tmp)/"Legacy regions.pcad"
+        fixture=json.loads((libs/"cad/tests/fixtures/legacy-typescript-filled-regions.pcad").read_bytes())
+        original=dict(fixture,items=[next(item for item in fixture["items"] if item["id"]=="regions-face-attachment")],selectedPath=[0])
+        path.write_text(json.dumps(original))
+        shutil.copyfile(path,output_dir/"legacy-filled-region-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        key("F7")
+        verify(window,"Depth  mm  8")
+        legacy_number("10")
+        verify(window,"Depth  mm  10")
+        key("Tab")
+        key("Tab")
+        verify(window,"Region 2 center X  mm  28")
+        legacy_number("32")
+        verify(window,"Region 2 center X  mm  32")
+        key("Control_L+z")
+        verify(window,"Region 2 center X  mm  28")
+        key("Control_L+y")
+        verify(window,"Region 2 center X  mm  32")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-filled-region.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        expected=json.loads(json.dumps(original))
+        expected["revision"]+=1
+        data=expected["items"][0]["data"]
+        data["features"][1]["depth"]=10
+        data["solidSteps"][0]["regions"][0]["center"]["x"]=32
+        assert data["features"][2]["target"]["face"]["faceId"]=="base-solid-face-6"
+        assert json.loads(path.read_bytes())==expected
+        shutil.copyfile(path,output_dir/"legacy-filled-region-edited.pcad")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert triangulation(stl)==([(-8,37),(-2,8),(4,17)],2384)
+        shutil.copyfile(stl,output_dir/"legacy-filled-region-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # Edit a TypeScript PartBuilder sketch and rebuild its original extrusion.
         path=Path(tmp)/"Legacy editable sketch.pcad"
         initial=(libs/"cad/tests/fixtures/legacy-typescript-editable-sketch.pcad").read_bytes()
@@ -3601,6 +3703,87 @@ with tempfile.TemporaryDirectory() as tmp:
         reference=path.with_name("Point on arc reference.3mf")
         subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
         compare_solid_packages(path.with_suffix(".3mf"),reference)
+        key("Escape")
+        app.wait(3)
+
+        # A TypeScript elliptic arc keeps its authored wrapper and the adaptive profile.
+        path=Path(tmp)/"Web elliptic arc.pcad"
+        path.write_bytes((libs/"cad/tests/fixtures/web-elliptic-arc.pcad").read_bytes())
+        shutil.copyfile(path,output_dir/"web-elliptic-arc-input.pcad")
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"closing-chord   40 mm   DOF 2")
+        for _ in range(3):
+            key("Tab")
+        verify(window,"web-profile-arc   Height 10 mm   DOF 2")
+        legacy_number("12 mm")
+        verify(window,"Edited")
+        key("Tab")
+        key("Tab")
+        verify(window,"web-guide-arc   Sweep -90 deg   DOF 2")
+        legacy_number("-60 deg")
+        verify(window,"Edited")
+        key("Tab")
+        verify(window,"web-guide-arc   Width 20 mm   DOF 2")
+        legacy_number("24 mm")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"web-guide-arc   Width 20 mm   DOF 2")
+        key("Control_L+y")
+        verify(window,"web-guide-arc   Width 24 mm   DOF 2")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        nodes={node["id"]:node for node in saved["items"][0]["data"]["cad"]["nodes"]}
+        for arc_id in ("web-profile-arc","web-guide-arc"):
+            node=nodes[arc_id]
+            assert node["type"]=="sketchArc" and "primitive" not in node
+            assert node["arc"]["id"]==arc_id and node["arc"]["type"]=="ellipticArc"
+        assert nodes["web-profile-arc"]["arc"]["height"]==12
+        guide=nodes["web-guide-arc"]["arc"]
+        assert guide["width"]==24 and guide["height"]==10 and guide["rotation"]==-20 and guide["construction"]
+        assert math.isclose(guide["sweep"],-math.pi/3,rel_tol=0,abs_tol=1e-12)
+        shutil.copyfile(path,output_dir/"web-elliptic-arc-edited.pcad")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"web-elliptic-arc.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"closing-chord   40 mm   DOF 2")
+        for _ in range(5):
+            key("Tab")
+        verify(window,"web-guide-arc   Sweep -60 deg   DOF 2")
+        key("Tab")
+        verify(window,"web-guide-arc   Width 24 mm   DOF 2")
+        key("Escape")
+        key("Control_L+e")
+        verify(window,"Exported")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl");package=path.with_suffix(".3mf")
+        _,bodies=package_geometry(package)
+        assert len(bodies)==1
+        expected_bounds=[(-17.575858203,17.320508076),(-10,11.266332321),(0,10)]
+        for bounds,volume in (triangulation(stl),bodies[0][1]):
+            assert all(math.isclose(value,expected,abs_tol=.000003)
+                       for pair,reference in zip(bounds,expected_bounds)
+                       for value,expected in zip(pair,reference)),bounds
+            assert math.isclose(volume,1883.715585879,abs_tol=.0001),volume
+        shutil.copyfile(stl,output_dir/"web-elliptic-arc-edited.stl")
+        shutil.copyfile(package,output_dir/"web-elliptic-arc-edited.3mf")
+        for arc_id in ("web-profile-arc","web-guide-arc"):
+            nodes[arc_id]["type"]="sketchPrimitive"
+            nodes[arc_id]["primitive"]=nodes[arc_id].pop("arc")
+        alias=Path(tmp)/"Rust elliptic arc wrapper.pcad"
+        alias.write_text(json.dumps(saved))
+        reference=alias.with_suffix(".3mf")
+        native_alias=alias.with_name("Native Rust elliptic arc wrapper.3mf")
+        subprocess.run([output_dir/"puppycad","--export",alias,native_alias],check=True)
+        subprocess.run([root/"rust/target/debug/puppycad","--export",alias,reference],check=True)
+        compare_solid_packages(native_alias,reference)
         key("Escape")
         app.wait(3)
 

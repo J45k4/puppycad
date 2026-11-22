@@ -323,6 +323,10 @@ Reversing a semicircle from 180° to −180° keeps its chord and puts the
 solid on the opposite side. An edit that opens an extruded profile reports
 the failure and retains the previous solid.
 
+Saved TypeScript v4 elliptic arcs keep their IDs and original sketch-arc
+records when edited. A chord or other connected edge can close the arc
+for extrusion. A construction arc stays out of the solid.
+
 To drive a line with a formula, choose **Variables** (F3) and enter
 `w = 1 in`. Apply it, select the line, and enter `#w + 6.725 mm` in
 **Set length**. The line measures 32.125 mm. F2 reopens the saved formula.
@@ -434,9 +438,12 @@ The operation and extent buttons change the Boolean or choose between
 blind and through-all extrusion. For a circular loft, edit the radii,
 height or segment count. For its shell, edit the wall thickness. For a saved
 profile finish, edit the chamfer distance, fillet radius or fillet segment
-count. Up and Down move a step one slot. Each
-accepted edit keeps the document's original sketch and solid-step records
-and can be undone.
+count. For a saved solid edge finish, edit the chamfer's two setbacks
+or the fillet's radius and segment count. For an extrusion with multiple
+filled regions, Tab also reaches the extra regions' dimensions and positions.
+Each region uses the same extrusion direction, depth and operation. Up and
+Down move a step one slot. Each accepted edit keeps the document's original
+sketch and solid-step records and can be undone.
 
 Click a PartBuilder sketch in Design to edit it. **Dimensions** (F8)
 opens the saved dimensions and relations for supported lines, circles and

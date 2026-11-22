@@ -77,13 +77,17 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`59f9a5543444bd9cc46e34f80c20e9c6d075a140` includes the shared library and
-the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
-VM verified all 45 historical CAD and runtime import paths against the
-archived catalog and VM. The v10 artifact lineage, the v11 worker and
-headless KiCad browser flows passed using identical checker and worker
-binaries in the staged build. Hosted CI verification requires publishing
-the SDK commit.
+`a492df1eed9c0ad16ffbdf2e88fdeced9e51345a` includes the shared library and
+the FlexDB blob APIs required by the backend. Its default local build
+bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
+produced byte-identical compilers. Biscuit's checked VM matched the
+archived VM across all 45 historical CAD and runtime import paths. Its
+headless browser tests passed desktop and mobile builds, protected ZIP
+downloads, and integrated PCAD fabrication with the pinned KiCad
+executable. The KiCad v3/v4 upgrade preserves the earlier fabrication
+ZIP and produces matching board data and rear silkscreen in new builds.
+The earlier SDK pin verified v10 artifact lineage. Hosted CI verification
+requires publishing the SDK commit.
 
 The native editor now authors external and internal tangency for circles
 and circular arcs. A construction arc and a follower circle retain their
@@ -165,6 +169,28 @@ same bevel corners as TypeScript. The SDK also checks the sampled fillet on
 a partial revolve and exposes fillet radius and segment fields. The checked
 VM and frozen worker match all five accepted exports. Sampled curves require
 a saved outline that agrees with the evaluated vertex order.
+
+Saved TypeScript topology chamfers and fillets preserve the original edge ID.
+The editor changes two chamfer setbacks and a fillet radius and segment count,
+undoes and redoes the edits, then saves and reopens. The watertight native
+exports measure 3,943.125 and 3,961.485 mm³. The SDK also preserves multiple
+filled regions of an extrusion as a single Boolean tool. In the joined
+fixture, the editor changes the primary depth from 8 to 10 mm and moves the
+second region from X = 28 to X = 32 mm. The downstream boss retains its
+original face ID. The reopened 2,384 mm³ solid matches the original
+TypeScript geometry. Biscuit's checked VM and pinned v11 worker reproduce
+the native saves and STL bytes. The same tests reject invalid finish values
+and a filled-region extrusion with an explicit topology finish.
+
+TypeScript's saved `sketchArc.arc` form uses its original 0.01 mm adaptive
+chord tolerance. The headless editor changes the profile height from 10 to
+12 mm and edits a construction arc's width and clockwise sweep. The saved
+file retains both wrappers, IDs and signed angles. The native STL and the
+original TypeScript export of that file are watertight. Their bounds agree
+within 0.000002 mm and their volumes within 0.00005 mm³. Existing Rust-style
+elliptic arcs keep their sampling. Biscuit's checked VM repeats the native
+edit and two frozen v11 builds match the native STL bytes. The combined
+pin passed all 70 headless SDK tests.
 
 Original PartBuilder sketches with supported lines, circles, rectangles and
 points open in the native sketch workspace. The headless test edits a driving
