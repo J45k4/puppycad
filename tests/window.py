@@ -2314,6 +2314,114 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Change a saved slot expression and drag the free cap center without moving the fixed cap.
+        capsule_path=Path(tmp)/"Slot with an attached boss.pcad"
+        capsule_fixture=json.loads((libs/"cad/tests/fixtures/legacy-typescript-capsule-edit.pcad").read_bytes())
+        capsule_source=dict(capsule_fixture,items=[capsule_fixture["items"][0]],selectedPath=[0])
+        capsule_path.write_text(json.dumps(capsule_source))
+        shutil.copyfile(capsule_path,output_dir/"legacy-driven-slot-input.pcad")
+        app,window=open_app(capsule_path,design_tree=True)
+        click(window,26,238)
+        click(window,94,264)
+        key("Return")
+        verify(window,"Set value")
+        key("End")  # The property input contains the existing expression, #stock.
+        type_value(" + 1.625 mm")
+        key("Return")
+        verify(window,"Profile updated")
+        key("F3")
+        key("Home")
+        click(window,480,358,button=4,count=12)
+        key("j")
+        click(window,569,452)
+        verify(window,"Drag a slot cap center")
+        from_handle,to_handle=(708,142),(252,574)
+        target=(764,210)
+        drag(window,1,from_handle,target,cancel=True,dragging="Dragging slot cap center")
+        verify(window,"Smooth drag cancelled")
+        drag(window,1,to_handle,(300,534))
+        verify(window,"Capsule endpoint is fixed")
+        drag(window,1,from_handle,target)
+        verify(window,"Slot cap center moved")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-driven-slot.png"],check=True)
+
+        def saved_slot():
+            key("Control_L+s")
+            verify(window,"Saved")
+            doc=json.loads(capsule_path.read_bytes())
+            return doc["items"][0]["data"]
+
+        key("Control_L+z")
+        assert saved_slot()["features"][0]["entities"][0]["from"]==dict(x=8.75,y=4.25)
+        key("Control_L+y")
+        after=saved_slot()
+        before=capsule_source["items"][0]["data"]
+        old_slot,slot=(doc["features"][0] for doc in (before,after))
+        assert "cad" not in after and before["solidSteps"]==after["solidSteps"]
+        assert before["features"][1:]==after["features"][1:]
+        assert slot["entities"]==[dict(old_slot["entities"][0],width=8.125,**{"from":dict(x=10.5,y=2.125)})]
+        assert slot["relations"]==[
+            dict(old_slot["relations"][0],value=8.125,expression="#stock + 1.625 mm"),
+            old_slot["relations"][1],dict(old_slot["relations"][2],value=19.631368),
+        ]
+        assert after["features"][2]["target"]["face"]["faceId"]=="slot-solid-face-18"
+        assert slot["variables"]==old_slot["variables"] and len(slot["vertices"])==16
+        shutil.copyfile(capsule_path,output_dir/"legacy-driven-slot-edited.pcad")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(capsule_path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=capsule_path.with_suffix(".stl")
+        assert math.isclose(triangulation(stl)[1],1685.042433,abs_tol=.002)
+        shutil.copyfile(stl,output_dir/"legacy-driven-slot-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Capsule width uses the same saved variable and reference controls as other dimensions.
+        path=Path(tmp)/"Slot width variable.pcad"
+        path.write_text(json.dumps(capsule_source))
+        shutil.copyfile(path,output_dir/"legacy-slot-variable-input.pcad")
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"slot/sketch/0   Width 6.5 mm   DOF 2")
+        key("F3")
+        verify(window,"Edit name = expression")
+        type_value("stock = 8.125 mm")
+        key("Return")
+        verify(window,"Variables updated")
+        key("Tab")
+        verify(window,"slot/sketch/0   Width 8.125 mm   DOF 2")
+        key("r")
+        verify(window,"Reference Width 8.125 mm")
+        key("F2")
+        verify(window,"Reference slot width is measured")
+        key("Control_L+z")
+        verify(window,"slot/sketch/0   Width 8.125 mm   DOF 2")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-slot-variable.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        after=json.loads(path.read_bytes())["items"][0]["data"]
+        slot=after["features"][0];before=capsule_source["items"][0]["data"]
+        assert slot["entities"]==[dict(before["features"][0]["entities"][0],width=8.125)]
+        assert slot["relations"][0]==dict(before["features"][0]["relations"][0],value=8.125)
+        assert slot["variables"]==[dict(name="stock",kind="length",expression="8.125 mm")]
+        assert after["features"][1:]==before["features"][1:] and after["solidSteps"]==before["solidSteps"]
+        shutil.copyfile(path,output_dir/"legacy-slot-variable-edited.pcad")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert math.isclose(triangulation(stl)[1],1684.913089,abs_tol=.002)
+        shutil.copyfile(stl,output_dir/"legacy-slot-variable-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # A PartBuilder sketch without any solid can open and save its own editing state.
         path=Path(tmp)/"Legacy sketch only.pcad"
         initial=(libs/"cad/tests/fixtures/legacy-typescript-sketch-only.pcad").read_bytes()
@@ -4593,6 +4701,124 @@ with tempfile.TemporaryDirectory() as tmp:
         stl=path.with_suffix(".stl")
         assert stl.read_bytes()==baseline.read_bytes()
         shutil.copyfile(stl,output_dir/"normal-line-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Normals follow both control and fit splines, including a closed active profile.
+        spline_normals=json.loads((libs/"cad/tests/fixtures/spline-normal.pcad").read_bytes())
+        for index,name in enumerate(("control","fit","periodic")):
+            artifact=f"normal-spline-{name}"
+            path=Path(tmp)/f"{artifact}.pcad"
+            spline_normals["selectedPath"]=[index]
+            path.write_text(json.dumps(spline_normals))
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            baseline=path.with_name(f"{artifact}-before.stl")
+            subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+            app,window=open_app(path)
+            key("F12")
+            verify(window,"Editing Spline normals")
+            original=spline_normals["items"][index]["data"]["cad"]["nodes"]
+            source=next(n for n in original if n["id"]=="spline-guide")["spline"]
+            if not index:
+                key("F8")
+                verify(window,"normal-line   5 mm   DOF 1")
+                click(window,890,20)
+                verify(window,"Choose a relation")
+                key("n")
+                verify(window,"Pick the source curve for Normal")
+                key("Escape")
+                legacy_number("8 mm")
+                verify(window,"Edited")
+                key("Control_L+z")
+                verify(window,"normal-line   5 mm")
+                key("Control_L+y")
+                verify(window,"normal-line   8 mm")
+                point0,point1=(5,7.5),(5,15.5)
+                expected_points=source["points"]
+            else:
+                key("Home")
+                click(window,480,358,button=4,count=12)  # Clamp at 32 pixels/mm.
+                key("j")
+                if index==1:
+                    click(window,112,294)
+                    start,target=(80,278),(80,270)
+                    changed_point,point0,point1=1,(5,10.25),(5,15.25)
+                else:
+                    click(window,480,358,button=5,count=7)  # 25 pixels/mm keeps the top handle below the toolbar.
+                    click(window,730,383)
+                    verify(window,"Drag a spline point")
+                    start,target=(480,133),(480,83)
+                    changed_point,point0,point1=3,(0,12),(0,7)
+                drag(window,1,start,target)
+                verify(window,"Smooth point moved")
+                expected_points=list(source["points"])
+                expected_points[changed_point]=dict(x=point0[0],y=point0[1])
+            key("Home")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            edited=json.loads(path.read_bytes())
+            before,after=({n["id"]:n for n in rows} for rows in (
+                original,edited["items"][index]["data"]["cad"]["nodes"]))
+            assert after["spline-guide"]["spline"]==dict(source,points=expected_points)
+            assert before["native-sketch-1"]["relations"][0]==after["native-sketch-1"]["relations"][0]
+            assert all(edited["items"][i]==item for i,item in enumerate(spline_normals["items"]) if i!=index)
+            for field,expected in (("p0",point0),("p1",point1)):
+                point=after["normal-line"][field]
+                assert math.dist((point["x"],point["y"]),expected)<.00008,point
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            if index==2:
+                bounds,volume=triangulation(stl)
+                assert bounds[1]==(-8,12) and volume>triangulation(baseline)[1]
+            else:
+                assert stl.read_bytes()==baseline.read_bytes()
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
+        # TypeScript saved the Normal on the retained half of a split control spline.
+        path=Path(tmp)/"Normal on a saved split spline.pcad"
+        initial=(libs/"cad/tests/fixtures/typescript-split-spline-normal.pcad").read_bytes()
+        path.write_bytes(initial)
+        shutil.copyfile(path,output_dir/"normal-spline-split-input.pcad")
+        baseline=path.with_name("Split spline before.stl")
+        subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"normal-line   5 mm")
+        legacy_number("8 mm")
+        verify(window,"Edited")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"normal-spline-split.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        before,after=({n["id"]:n for n in d["items"][0]["data"]["cad"]["nodes"]}
+                      for d in (json.loads(initial),json.loads(path.read_bytes())))
+        for entity in ("spline-guide","spline-guide-split-1"):
+            assert before[entity]==after[entity]
+        old,new=(d["native-sketch-1"]["relations"] for d in (before,after))
+        assert old[-1]==new[-1] and old[0]==new[0] and new[0]["b"]=="spline-guide-split-1"
+        assert new[1]==dict(old[1],value=8,expression="8 mm")
+        foot=after["normal-line"]["p0"];tip=after["normal-line"]["p1"]
+        assert math.dist((foot["x"],foot["y"]),(8.96,4.8))<.00004
+        assert math.isclose(math.dist((foot["x"],foot["y"]),(tip["x"],tip["y"])),8,abs_tol=.00004)
+        shutil.copyfile(path,output_dir/"normal-spline-split-edited.pcad")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert stl.read_bytes()==baseline.read_bytes()
+        shutil.copyfile(stl,output_dir/"normal-spline-split-edited.stl")
         key("Escape")
         app.wait(3)
 

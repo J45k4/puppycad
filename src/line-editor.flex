@@ -268,6 +268,7 @@ fn puppy_line_command(project,key) {
         if !distance && j_value(j_get(circle,"reference")) {
             let model=puppy_sketch_model(project,j_string(puppy_draft_sketch(project),"id"));
             let node=pc_find(pc_nodes(cad_project_part(model)),j_string(circle,"id"));
+            if pc_capsule_entity(node) {return puppy_title(project,"Reference slot width is measured");}
             if pc_axis_field(j_string(circle,"field")) {return puppy_title(project,"Reference ellipse dimension is measured");}
             if pc_finite_arc(node) {return puppy_title(project,"Reference arc dimension is measured");}
             return puppy_title(project,"Reference circle dimension is measured");

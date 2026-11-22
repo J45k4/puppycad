@@ -29,7 +29,7 @@ fn puppy_join_endpoint(nodes,sk,cursor) {
 fn puppy_join_click(project,cursor) {
     let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
     if !model {return puppy_title(project,cg_error);}
-    let nodes=pc_nodes(cad_project_part(model));let hit=0;let updated=0;let closed=0;
+    let nodes=pc_nodes(cad_project_part(model));let hit=0;let updated=0;let handle_hint=0;
     if puppy_tool==-4 {
         if puppy_anchor {
             updated=cad_project_add_tangent_arc(model,sk,j_parse(puppy_join_source+24),pc_json_point(cursor));
@@ -37,13 +37,14 @@ fn puppy_join_click(project,cursor) {
     }else {
         let node=puppy_sketch_hit(nodes,sk,cursor);
         let end=ps_end_name(node,0);
-        if !end && m_eq(j_string(node,"type"),"sketchSpline") {end="point0";closed=1;}
+        if !end && m_eq(j_string(node,"type"),"sketchSpline") {end="point0";handle_hint="Drag a spline point";}
+        if pc_capsule_entity(node) {end="from";handle_hint="Drag a slot cap center";}
         if end {
             let id=j_string(node,"id");
             hit=ps_anchor(id,end);
             if puppy_anchor {
                 let source=j_string(j_parse(puppy_join_source+24),"entityId");
-                if !closed && ps_end_name(pc_find(nodes,source),0) {
+                if !handle_hint && ps_end_name(pc_find(nodes,source),0) {
                     updated=cad_project_toggle_smooth_curves(model,sk,source,id);
                 }else {puppy_anchor=0;}
             }
@@ -57,7 +58,7 @@ fn puppy_join_click(project,cursor) {
     if cg_error {return puppy_title(project,cg_error);}
     if !puppy_anchor && hit {
         puppy_join_select(hit);puppy_anchor=1;puppy_ax=load64(cursor);puppy_ay=load64(cursor+8);
-        if closed {return puppy_title(project,"Drag a spline point");}
+        if handle_hint {return puppy_title(project,handle_hint);}
     }
     return puppy_title(project,puppy_draft_hint());
 }
@@ -73,6 +74,10 @@ fn puppy_join_handles(node) {
         let p=pc_first(j_get(j_get(node,"spline"),"points"));let i=0;while p {
             cg_push(rows,cg_v(pc_uv(p),ps_anchor(id,m_cat("point",m_int(i))),0));p=load64(p+24);i=i+1;
         }
+    }else if pc_capsule_entity(node) {
+        let shape=j_get(node,"primitive");
+        cg_push(rows,cg_v(pc_uv(j_get(shape,"from")),ps_anchor(id,"from"),0));
+        cg_push(rows,cg_v(pc_uv(j_get(shape,"to")),ps_anchor(id,"to"),0));
     }else {
         let i=0;while i<2 {
             let name=ps_end_name(node,i);if name {let f=ps_endpoint(node,name);if f {cg_push(rows,cg_v(load64(f),ps_anchor(id,name),0));}}
@@ -109,12 +114,20 @@ fn puppy_join_event(event) {
     if cg_abs(dx)<2 && cg_abs(dy)<2 {if release {puppy_join_end_drag();}return puppy_title(project,puppy_draft_hint());}
     let model=puppy_sketch_model(project,sk);
     let pt=cg_v(puppy_join_origin_x+dx*1000000000/puppy_draft_scale,puppy_join_origin_y+dy*1000000000/puppy_draft_scale,0);
-    let changed=0;
+    let anchor=j_parse(puppy_join_drag+24);let end=j_string(anchor,"point");
+    let slot=m_eq(end,"from") || m_eq(end,"to");let changed=0;
     if model {
-        changed=cad_project_move_smooth_point(model,sk,j_parse(puppy_join_drag+24),pc_json_point(pt));
+        if slot {changed=cad_project_move_capsule_endpoint(model,sk,j_string(anchor,"entityId"),end,pc_json_point(pt));}
+        else {changed=cad_project_move_smooth_point(model,sk,anchor,pc_json_point(pt));}
         changed=puppy_sketch_result(project,sk,changed);
     }
     if !changed {if release {puppy_join_end_drag();}return puppy_title(project,cg_error);}
-    if release {puppy_join_end_drag();puppy_push(changed);return puppy_title(changed,"Smooth point moved");}
-    puppy_join_preview_doc=puppy_snapshot(j_encode(changed));return puppy_title(changed,"Dragging joined curve");
+    if release {
+        puppy_join_end_drag();puppy_push(changed);
+        if slot {return puppy_title(changed,"Slot cap center moved");}
+        return puppy_title(changed,"Smooth point moved");
+    }
+    puppy_join_preview_doc=puppy_snapshot(j_encode(changed));
+    if slot {return puppy_title(changed,"Dragging slot cap center");}
+    return puppy_title(changed,"Dragging joined curve");
 }

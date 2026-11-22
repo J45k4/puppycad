@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`667b2cc6502cf7143bbaa46d9d6d0ce50416b271` includes the shared library and
+`657bb4755c5fc083d80c0e5203207d557f49f4a8` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
@@ -305,7 +305,32 @@ attached ellipse cap and reject a polygon side count that would redirect an
 attached face or selected corner. Biscuit's checked VM and two frozen v11
 jobs per case reproduced the saved native data and STL bytes across these
 three forms, the five Normal cases, and the sampled inner chamfer.
-The pinned `667b2cc` SDK passed all 80 CAD test programs.
+The previous `667b2cc` SDK passed all 80 CAD test programs.
+
+Saved spline Normals follow control, open fit and periodic fit splines.
+The native editor changes a driving line length, moves open and periodic
+spline points, and edits a Normal saved by TypeScript on the retained
+half of a split spline. The imported coincidence and Normal keep their
+IDs. The dependent periodic extrusion rebuilds. Analytic nearest-point
+pruning and reusing validated constraints put the periodic edit, reopen
+and export within Biscuit's existing checked VM instruction budget.
+
+Original PartBuilder capsules retain their width expression, named cap
+centers, measured span and attached face when edited. The native **Dimensions**
+report shows the driving or measured width. Editing a sketch variable
+rebuilds the capsule and its linked copies without moving either cap.
+The editor previews and commits a free cap drag while rejecting fixed cap
+dragging and edits that would redirect a saved face. At the `657bb47` pin,
+82 SDK test programs passed. Biscuit's checked VM and 12 frozen v11 jobs
+reproduced the six native slot and spline Normal edits and their STL bytes.
+
+Original v1 Biscuit builds preserve the 16-file split profile and the
+21-file standalone profile. The migration test creates archived releases
+with the original binaries and real KiCad, then verifies the same authorized
+ZIP, native artifacts and both fabrication sets after the portal upgrade.
+With the original worker and checker granted, rerunning a version with a
+completed receipt preserves its frozen source and deterministic artifacts.
+Current source and membership permissions still govern those reads and replays.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the

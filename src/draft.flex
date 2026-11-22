@@ -242,8 +242,20 @@ fn puppy_profile_property(node) {
 }
 fn puppy_profile_open(project,node) {
     let shape=puppy_profile_shape(node);let text=m_int(j_integer(shape,"sides"));
-    if m_eq(j_string(shape,"type"),"capsule") {text=puppy_display_number(pc_pose_number(j_get(shape,"width")));}
-    puppy_profile_value_id=puppy_snapshot(j_string(node,"id"));
+    let id=j_string(node,"id");
+    if m_eq(j_string(shape,"type"),"capsule") {
+        text=puppy_display_number(pc_pose_number(j_get(shape,"width")));
+        let expression="";let relation=pc_first(j_get(puppy_draft_sketch(project),"relations"));
+        while relation && !m_len(expression) {
+            if m_eq(j_string(relation,"type"),"width") && m_eq(j_string(relation,"entityId"),id)
+                && !j_value(j_get(relation,"reference")) {
+                expression=j_string(relation,"expression");
+            }
+            relation=load64(relation+24);
+        }
+        if m_len(expression) {text=expression;}
+    }
+    puppy_profile_value_id=puppy_snapshot(id);
     puppy_anchor=0;
     return puppy_text_open(project,text);
 }
@@ -629,6 +641,14 @@ fn puppy_draw_draft() {
             let circle=j_get(entity,"primitive");let c=pc_uv(j_get(circle,"center"));let r=pc_pose_number(j_get(circle,"radius"));
             let a=cg_v(load64(c),load64(c+8),0);if m_eq(j_string(puppy_line_row(),"field"),"diameter") {store64(a,load64(a)-r);}
             let guide=cg_array();cg_push(guide,a);cg_push(guide,cg_v(load64(c)+r,load64(c+8),0));
+            if !puppy_draft_path(guide,1,w,h) {return 0;}
+        }else if highlight && puppy_line_report && pc_capsule_width_field(entity,j_string(puppy_line_row(),"field")) {
+            let shape=j_get(entity,"primitive");let a=pc_uv(j_get(shape,"from"));let b=pc_uv(j_get(shape,"to"));
+            let span=pc_line_span(a,b);if !span {return 0;}
+            let x=(load64(a)+load64(b))/2;let y=(load64(a+8)+load64(b+8))/2;
+            let half=pc_circle_measure(entity,"width")/2;
+            let dx=(load64(a+8)-load64(b+8))*half/span;let dy=(load64(b)-load64(a))*half/span;
+            let guide=cg_array();cg_push(guide,cg_v(x-dx,y-dy,0));cg_push(guide,cg_v(x+dx,y+dy,0));
             if !puppy_draft_path(guide,1,w,h) {return 0;}
         }else if highlight && puppy_line_report && pc_curve_axes(entity) && pc_axis_field(j_string(puppy_line_row(),"field")) {
             let geom=pc_curve_geometry(entity);let center=pc_uv(j_get(geom,"center"));let angle=pc_ellipse_rotation(geom);

@@ -253,10 +253,11 @@ first and the inner curve second. A driving dimension rebuilds the contact
 while keeping the relation.
 
 Choose **Normal** (N) in **Dimensions → Relations**, then click a line,
-circle, ellipse, or circular or elliptic arc. Click the endpoint of a
+circle, ellipse, arc, or fit or control spline. Click the endpoint of a
 different line. That endpoint stays on the source and the line stays
-perpendicular as dimensions change. A line limits contact to its segment,
-and an arc limits it to its signed sweep.
+perpendicular when dimensions or spline points change. Contact stays
+within the source segment, sweep, or spline. At a spline join, the adjacent
+spans must share a nonzero tangent.
 
 Choose **Midpoint** in **Relations**, click the source line or arc, then click
 a point, line endpoint or supported shape center. Changing a source dimension
@@ -463,9 +464,12 @@ opens the saved dimensions and relations for supported lines, circles,
 full ellipses, circular arcs, elliptic arcs, regular polygons, and points.
 Expand the sketch and select a polygon or capsule to reach **Set sides**
 or **Set width**. You can also point at its outline in Sketch and press F2.
-Choose **Smooth** (J), select a
-control or fit spline and drag one of its points to reshape it. Closed fit
-splines also expose their points. The sketch toolbar adds lines, circles,
+An existing capsule width expression opens in the width editor. Use
+**Dimensions** (F8) to inspect the width, update sketch variables, or switch
+between a driving and measured width. Choose **Smooth** (J), click the slot
+outline, and drag a free cap center. Fixed or driven cap centers are protected.
+The same tool exposes the points of control and fit splines, including closed
+fit splines. The sketch toolbar adds lines, circles,
 rectangles and points, including in files without a solid. The editor saves
 the original records and sketch IDs. Editing an arc or spline rebuilds the
 outline in its original order. **Patterns** (F5) creates or edits grid and
