@@ -1026,8 +1026,8 @@ with tempfile.TemporaryDirectory() as tmp:
                 "sketchId":"native-sketch-1","p0":dict(zip(("x","y"),a)),"p1":dict(zip(("x","y"),b))})
         line_edit_path.write_text(json.dumps(line_edit_doc))
 
-        def saved_line_endpoints():
-            nodes=json.loads(line_edit_path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        def saved_line_endpoints(path=line_edit_path):
+            nodes=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
             return {n["id"]:tuple((n[p]["x"],n[p]["y"]) for p in ("p0","p1"))
                     for n in nodes if n["type"]=="sketchLine"}
 
@@ -1102,6 +1102,81 @@ with tempfile.TemporaryDirectory() as tmp:
         assert saved_curved_lines()==[("native-entity-1",-30,16),("native-entity-3",16,30)]
         key("Escape")
         key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        spline_line_path=Path(tmp)/"Spline sketch boundary.pcad"
+        spline_doc=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        spline_graph=spline_doc["items"][0]["data"]["cad"]
+        spline_graph["nodes"]=spline_graph["nodes"][:4]
+        spline_graph["nodes"][3]["name"]="Line and spline"
+        # x = 30t-15 and y = 48t(1-t), so y = 9 cuts exactly at x = ±7.5.
+        spline_id="native-entity-2"
+        spline_node={"id":spline_id,"type":"sketchSpline","sketchId":"native-sketch-1",
+                     "spline":{"id":spline_id,"type":"spline","mode":"control","closed":False,
+                               "points":[{"x":x,"y":y} for x,y in [(-15,0),(-5,16),(5,16),(15,0)]]}}
+        target={"id":"native-entity-1","type":"sketchLine","sketchId":"native-sketch-1",
+                "p0":{"x":-25,"y":9},"p1":{"x":25,"y":9}}
+        spline_graph["nodes"].extend([target,spline_node])
+        spline_line_path.write_text(json.dumps(spline_doc))
+        app,window=open_app(spline_line_path,"Click two rectangle corners")
+        key("q")
+        verify(window,"Click the line segment to trim")
+        click(window,480,322)
+        verify(window,"Line trimmed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        trimmed={"native-entity-1":((-25,9),(-7.5,9)),"native-entity-3":((7.5,9),(25,9))}
+        assert saved_line_endpoints(spline_line_path)==trimmed
+        capture(window,"sketch-trim-spline.png",True)
+        key("Escape")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        app,window=open_app(spline_line_path,"Click two rectangle corners")
+        key("Shift_L+q")
+        verify(window,"Click a line near the end to extend")
+        click(window,440,322)
+        verify(window,"Line extended")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_line_endpoints(spline_line_path)==trimmed | {"native-entity-1":((-25,9),(7.5,9))}
+        saved=json.loads(spline_line_path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        assert next(node for node in saved if node["id"]==spline_id)==spline_node
+        key("Escape")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        # Contacts at the two spline endpoints can also close an extrudable loop.
+        spline_profile=Path(tmp)/"Spline boundary solid.pcad"
+        target["p0"]["y"]=target["p1"]["y"]=0
+        spline_profile.write_text(json.dumps(spline_doc))
+        app,window=open_app(spline_profile,"Click two rectangle corners")
+        key("q")
+        click(window,400,358)
+        verify(window,"Line trimmed")
+        click(window,560,358)
+        verify(window,"Line trimmed")
+        key("Escape")
+        verify(window,"Line edit cancelled")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_line_endpoints(spline_profile)=={"native-entity-1":((-15,0),(15,0))}
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(spline_profile)
+        capture(window,"sketch-spline-boundary-solid.png",False)
+        key("Control_L+e")
+        verify(window,"Exported")
+        spline_stl=spline_profile.with_suffix(".stl")
+        bounds,volume=triangulation(spline_stl)
+        assert bounds==[(-15,15),(0,12),(0,10)] and math.isclose(volume,2400,abs_tol=6)
+        shutil.copyfile(spline_profile,output_dir/"spline-boundary-authoring.pcad")
+        shutil.copyfile(spline_stl,output_dir/"spline-boundary-authoring.stl")
         key("Escape")
         app.wait(3)
 
@@ -1198,6 +1273,86 @@ with tempfile.TemporaryDirectory() as tmp:
         edited=json.loads(twins.read_bytes())
         assert edited["selectedPath"]==[1] and edited["items"][0]==document["items"][0]
         assert len(edited["items"][1]["data"]["cad"]["nodes"])==len(second["data"]["cad"]["nodes"])+1
+        key("Escape")
+        app.wait(3)
+
+        shell_path=Path(tmp)/"Shell authoring.pcad"
+        stock={"format":"puppycorp.pcad","schema_version":1,"units":"mm",
+               "nodes":[{"id":"stock","type":"box","size":[24,16,9]}],
+               "parts":[{"id":"enclosure","name":"Enclosure","node":"stock"}],"feature_order":["stock"]}
+        shell_path.write_text(json.dumps(stock))
+
+        def select_shell_menu(row_y):
+            click(window,85,row_y,button=3)
+            click(window,109,row_y+15)
+
+        app,window=open_app(shell_path,"PCAD design opened",design_tree=True)
+        select_shell_menu(186)
+        verify(window,"Shell part / Enclosure / +Z / 2 mm")
+        key("t")
+        verify(window,"Wall thickness")
+        type_value("32")
+        key("Return")
+        key("e")
+        verify(window,"Shell thickness leaves no cavity")
+        assert json.loads(shell_path.read_bytes())==stock
+        key("Escape")
+        verify(window,"Shell cancelled")
+        select_shell_menu(186)
+        verify(window,"Shell part / Enclosure / +Z / 2 mm")
+        key("e")
+        verify(window,"Shell preview ready / +Z / 2 mm")
+        capture(window,"shell-part-preview.png",False,surface=(76,167,192))
+        assert json.loads(shell_path.read_bytes())==stock
+        key("Return")
+        verify(window,"Shell applied")
+        for stroke in ("Control_L+z","Control_L+y"):
+            key(stroke)
+            key("Control_L+s")
+            verify(window,"Saved")
+            saved_shell=json.loads(shell_path.read_bytes())
+            if stroke=="Control_L+z":
+                assert saved_shell==stock
+        shell=saved_shell["nodes"][1]
+        assert shell=={"id":"shell-1","type":"shell","source":"stock","open_side":"z","thickness":2}
+        assert saved_shell["parts"]==[{**stock["parts"][0],"node":shell["id"]}]
+        assert saved_shell["feature_order"]==["stock",shell["id"]]
+        key("F2")
+        verify(window,"Set value")
+        type_value("30")
+        key("Return")
+        verify(window,"stock / x")
+        click(window,26,186)  # Expand Enclosure and expose its saved shell feature.
+        select_shell_menu(212)
+        verify(window,"Edit shell / shell-1 / +Z / 2 mm")
+        key("4")
+        key("t")
+        verify(window,"Wall thickness")
+        type_value("1.5")
+        key("Return")
+        key("e")
+        verify(window,"Shell preview ready / −X / 1.5 mm")
+        key("Return")
+        verify(window,"Shell updated")
+        key("Control_L+s")
+        verify(window,"Saved")
+        final_shell=json.loads(shell_path.read_bytes())
+        assert final_shell["nodes"]==[{**stock["nodes"][0],"size":[30,16,9]},
+                                     {**shell,"open_side":"-x","thickness":1.5}]
+        assert final_shell["parts"]==saved_shell["parts"] and final_shell["feature_order"]==saved_shell["feature_order"]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(shell_path,"PCAD design opened")
+        key("5")
+        verify(window,"Left view")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"shell-part-reopened.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        shell_stl=shell_path.with_suffix(".stl")
+        bounds,volume=triangulation(shell_stl)
+        assert bounds==[(0,30),(0,16),(0,9)] and math.isclose(volume,2097,abs_tol=.02)
+        shutil.copyfile(shell_path,output_dir/"shell-authoring.pcad")
+        shutil.copyfile(shell_stl,output_dir/"shell-authoring.stl")
         key("Escape")
         app.wait(3)
 

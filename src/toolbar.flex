@@ -276,7 +276,7 @@ fn puppy_toolbar_build(w) {
     let part=cad_project_item(project);let feature=puppy_feature(project);
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
-    if puppy_extrusion_open || puppy_revolve_open {
+    if puppy_extrusion_open || puppy_revolve_open || puppy_shell_open {
         if puppy_number_text {puppy_number_bar(rgb,w,project);}
         else {
             if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
@@ -595,7 +595,7 @@ fn puppy_curve_bar(project,rgb,w,x) {
     return 1;
 }
 fn puppy_compact_actions(project) {
-    if puppy_extrusion_open || puppy_revolve_open {return puppy_feature_preview_actions();}
+    if puppy_extrusion_open || puppy_revolve_open || puppy_shell_open {return puppy_feature_preview_actions();}
     if puppy_patterns {return puppy_pattern_actions(project);}
     if puppy_line_report {return puppy_line_actions();}
     if puppy_history_rows {return puppy_history_actions(project);}

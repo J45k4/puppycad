@@ -295,8 +295,22 @@ fn puppy_design_hit(rows,y,h) {
 fn puppy_design_menu_close() {
     if puppy_design_menu_count {puppy_design_menu_count=0;puppy_tree_dirty=1;}
 }
+fn puppy_design_shell_part(project,row) {
+    let node=load64(row+24);let kind=load64(row+16);
+    if m_eq(kind,"definition") {return node;}
+    if m_eq(kind,"instance") {return pc_find(j_get(project,"parts"),j_string(node,"part"));}
+    return 0;
+}
 fn puppy_design_menu_entries(project,row) {
-    let entries=cg_array();let action=puppy_design_action(row);
+    let entries=cg_array();
+    if cad_project_is_studio(project) {
+        if m_eq(load64(row+16),"feature") && m_eq(j_string(load64(row+24),"type"),"shell") {
+            cg_push(entries,cg_v("Edit shell",6,0));
+        }else if puppy_design_shell_part(project,row) && cg_j_count(j_get(project,"nodes"))<48 {
+            cg_push(entries,cg_v("Shell part",5,0));
+        }
+    }
+    let action=puppy_design_action(row);
     if action {cg_push(entries,cg_v(action,1,0));}
     if load64(row+56) && !m_len(puppy_query()) {
         let label="Expand";if load64(row+72) {label="Collapse";}
@@ -339,6 +353,8 @@ fn puppy_design_menu_activate(choice) {
             if command==2 {puppy_design_fold(row);}
             if command==3 {puppy_design_toggle_sketch(project,row);}
             if command==4 {puppy_extrusion_begin(project,load64(row+24));}
+            if command==5 {puppy_shell_begin(project,puppy_design_shell_part(project,row),0);}
+            if command==6 {puppy_shell_begin(project,0,load64(row+24));}
         }
     }
     return 1;

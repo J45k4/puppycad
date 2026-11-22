@@ -85,6 +85,13 @@ the tree, or press **Escape** to return to the model. **Export PDF**
 uses the next available name. The CLI also accepts
 `--export INPUT.pcad OUTPUT.pdf`.
 
+Right-click a standalone part and choose **Shell part** to hollow its
+convex body. Select the open face in the part's local axes and set **Thickness**
+in millimetres. **Evaluate** shows the proposed shell. **Apply** adds it to the
+part's feature history as one undoable edit. Escape cancels the preview.
+Right-click the shell feature and choose **Edit shell** to change the open
+side or thickness. The shell rebuilds when its source changes.
+
 Expand **Drawing sheets** and select **New sheet** to create a top view.
 Open **Settings** (F2) on a sheet. Use Left and Right to choose a field
 and Enter to edit it. You can change the sheet name, orientation, scale,
@@ -394,9 +401,10 @@ and reopening, editing the width, height or rotation of any piece in
 Choose **More tools → Edit → Trim** (Q), then click the interval of a straight
 line you want to remove. **Extend** (Shift+Q) lengthens the end nearest your
 click to the first boundary it reaches. Lines, circles, ellipses, circular and
-elliptic arcs, rectangles, polygons, and slots can serve as boundaries. Arc
-intersections respect the saved sweep. Projected boundaries continue to follow
-their source. Each edit can be undone.
+elliptic arcs, rectangles, polygons, slots, and both fit and control splines
+can serve as boundaries. Arc intersections respect the saved sweep. Splines
+use the exact cubic spans, including periodic fit splines. Projected boundaries
+continue to follow their source. Each edit can be undone.
 
 In **More tools**, choose **Tangent** (Shift+J), click a free line, circular
 arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**

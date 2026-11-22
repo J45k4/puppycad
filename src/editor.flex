@@ -10,6 +10,7 @@ import "step-import.flex";
 import "mate-editor.flex";
 import "extrusion.flex";
 import "revolve.flex";
+import "shell.flex";
 
 // History owns immutable document snapshots. Temporary evaluation and drawing
 // allocations belong to the event's arena and are discarded after each event.
@@ -254,6 +255,7 @@ fn puppy_export_shortcut(project,extension) {
 }
 fn puppy_command(key,mods) {
     puppy_forget_click();
+    if puppy_shell_open {return puppy_shell_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_revolve_open {return puppy_revolve_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_extrusion_open {return puppy_extrusion_key(cad_project_open(puppy_history+24),key,mods);}
     if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
@@ -725,7 +727,7 @@ fn puppy_editor(path,source,project,report) {
     if puppy_reader_offsets {syscall(11,puppy_reader_offsets,(puppy_reader_count+1)*8,0,0,0,0);}
     puppy_distance_cancel();puppy_line_cancel_drag();if puppy_line_report {puppy_drop(puppy_line_report);}
     if puppy_number_text {puppy_number_close();}
-    puppy_extrusion_close();puppy_revolve_close();
+    puppy_extrusion_close();puppy_revolve_close();puppy_shell_close();
     puppy_workspace_clear_parent();
     puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
     if puppy_pending_title {puppy_drop(puppy_pending_title);}

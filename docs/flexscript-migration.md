@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`50b258651232223ac750273d1f8faa54891b26f0` includes the shared library and
+`49646670c285379e0539cb3a4cdc7d322c9ff5da` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -248,6 +248,12 @@ and circular arcs can serve as boundaries. The window regression trims a
 line at the two intersections of a 20 mm radius circle, saves and reopens
 the sketch, and extends one fragment back to the circle. Its intersections
 remain at −16 and +16 mm with the line at Y = 12 mm.
+
+Fit and control splines are also boundaries. The SDK intersects finite
+cubic spans directly, including tangent contacts and the seam of a periodic
+fit spline. The native test saves and reopens the two fragments at ±7.5 mm,
+extends one to the next contact, and closes a second profile by trimming to
+the spline endpoints. Its reopened extrusion exports as a closed STL.
 
 The graph suite compares directed axes, axis-touching profiles, partial and
 full turns, rectangular and round holes, mirrored face sketches, joins and
@@ -580,6 +586,27 @@ passing board checks and leaves the earlier release downloadable. The
 shared circuit, motion and schematic APIs retain the standalone import
 paths for checked scripts.
 
+Biscuit's `native-project-checks-6` profile restores the integrated PCAD
+assembly check for STL and STEP. Interference, a suppressed mate or a
+missing root assembly leaves the earlier promoted release available and
+withholds the new exports. The separate CAD input still supports mesh-only
+STL for a standalone part. The headless upgrade test downloads the original
+v5 ZIP byte for byte and reruns the exact pinned v5 checker with the worker's
+explicit v5 operator profile. Checked programs can import
+`/biscuit/runtime/pcad-mechanical.flex` again for part, assembly and individual
+feature previews.
+
+The native standalone editor authors and edits Shell features on convex
+bodies. The headless window test rejects a 32 mm wall, previews and applies a
+2 mm wall on the +Z face, and exercises undo and redo. It widens the source
+box, edits the existing feature to a 1.5 mm wall with a −X opening, and saves
+and reopens the same part and feature IDs. The exported 30 × 16 × 9 mm shell
+is closed and has a signed volume of 2,097 mm³. The preview capture is
+`workdir/flexscript/shell-part-preview.png`. Biscuit's checked VM and two
+frozen worker runs reproduced the STL bytes for both this shell and the
+native extrusion closed by trimming to the spline. The verification record
+is `workdir/cad-migration/spline-shell-consumers/verification.json`.
+
 The native object tree browses bodies, nested occurrences and driving fields.
 The window regression searched for `right/upper` across two copies of one
 subassembly, selected the occluded occurrence, pinned it, and verified the
@@ -890,10 +917,10 @@ polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
 Remaining standalone work includes additional sketch and feature authoring
-and design inspectors. Straight-line Trim and Extend still need spline
-boundaries, and sketch authoring still needs the open items in the parity
-inventory. Compare standalone paths against Biscuit's
-`docs/pcad-electrical.md` and its original release fixtures.
+and design inspectors. Editing curved targets with Trim and Extend still
+needs the open cases in the parity inventory. The legacy copper and BOM
+checked entry points and per-board routing evidence still need compatibility
+checks against Biscuit's `docs/pcad-electrical.md` and original release fixtures.
 
 ## Later milestone: WASM editor in Biscuit
 

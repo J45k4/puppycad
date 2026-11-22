@@ -166,13 +166,14 @@ fn puppy_extrusion_key(project,key,mods) {
     puppy_extrusion_picking=0;return puppy_extrusion_draw_result(project);
 }
 fn puppy_feature_preview_actions() {
+    if puppy_shell_open {return puppy_shell_actions();}
     if puppy_revolve_open {return puppy_revolve_actions();}
     return puppy_extrusion_actions();
 }
 fn puppy_feature_preview_event(event) {
-    if !puppy_extrusion_open && !puppy_revolve_open {return 0;}
+    if !puppy_extrusion_open && !puppy_revolve_open && !puppy_shell_open {return 0;}
     let kind=gui_event_kind(event);
-    if kind==GUI_CLOSE || kind==GUI_QUIT {puppy_extrusion_close();puppy_revolve_close();return 0;}
+    if kind==GUI_CLOSE || kind==GUI_QUIT {puppy_extrusion_close();puppy_revolve_close();puppy_shell_close();return 0;}
     if puppy_extrusion_view_event(event) {return 1;}
     if kind==GUI_KEY_DOWN {return puppy_command(gui_event_code(event),gui_event_modifiers(event));}
     if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
