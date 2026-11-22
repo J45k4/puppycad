@@ -2194,6 +2194,56 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # A reversed PartBuilder arc rebuilds its source sketch and the attached boss.
+        path=Path(tmp)/"Legacy elliptic sketch.pcad"
+        source=json.loads((libs/"cad/tests/fixtures/legacy-typescript-elliptic-sketch.pcad").read_bytes())
+        source["selectedPath"]=[1]
+        path.write_text(json.dumps(source))
+        shutil.copyfile(path,output_dir/"legacy-elliptic-sketch-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,94,264)
+        verify(window,"Editing body")
+        key("F8")
+        verify(window,"chord   20 mm")
+        for _ in range(3):
+            key("Tab")
+        verify(window,"ellipse-rim   Height 10 mm")
+        legacy_number("12 mm")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"ellipse-rim   Height 10 mm")
+        key("Control_L+y")
+        verify(window,"ellipse-rim   Height 12 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        before,after=(doc["items"][1]["data"] for doc in (source,saved))
+        sketch=after["features"][0];original=before["features"][0]
+        assert "cad" not in after and before["solidSteps"]==after["solidSteps"]
+        assert after["features"][1:]==before["features"][1:]
+        assert [row["id"] for row in sketch["entities"]]==[row["id"] for row in original["entities"]]
+        assert sketch["entities"]==[dict(row,height=12) if row["id"]=="ellipse-rim" else row for row in original["entities"]]
+        for key_name in ("target","profiles","loops"):
+            assert sketch[key_name]==original[key_name]
+        assert len(sketch["vertices"])==len(original["vertices"])
+        assert max(v["y"] for v in sketch["vertices"])>max(v["y"] for v in original["vertices"])
+        assert after["features"][2]["target"]["face"]["faceId"]=="body-solid-face-39"
+        shutil.copyfile(path,output_dir/"legacy-elliptic-sketch-edited.pcad")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-elliptic-sketch.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(-10,10),(0,6),(0,11)] and math.isclose(volume,777.02561734,abs_tol=.001),(bounds,volume)
+        shutil.copyfile(stl,output_dir/"legacy-elliptic-sketch-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -3586,7 +3636,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,890,20)
         verify(window,"Choose a relation")
         click(window,185,54)
-        verify(window,"Pick the source line, circle or circular arc for Point on curve")
+        verify(window,"Pick the source line, circle, ellipse or arc for Point on curve")
         click(window,190,358)
         verify(window,"Pick the follower anchor for Point on curve")
         click(window,138,244)
@@ -3703,6 +3753,105 @@ with tempfile.TemporaryDirectory() as tmp:
         reference=path.with_name("Point on arc reference.3mf")
         subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
         compare_solid_packages(path.with_suffix(".3mf"),reference)
+        key("Escape")
+        app.wait(3)
+
+        # A saved contact slides on a resized ellipse or stops at a shortened arc's endpoint.
+        contact_fixture=json.loads((libs/"cad/tests/fixtures/point-on-ellipse.pcad").read_bytes())
+        contact_cases=(
+            ("ellipse-guide","primitive","Width 40","Width 46","46 mm",(8.640774,11.892268),
+             640*23*6*math.sin(math.tau/128)),
+            ("swept-guide","arc","Sweep -120","Sweep -60","-60 deg",(16.218547,-13.492040),
+             160*25*math.sin(math.tau/32)),
+        )
+        for index,(guide,wrapper,before,after,value,expected,expected_volume) in enumerate(contact_cases):
+            artifact=f"point-on-{guide}"
+            path=Path(tmp)/f"{artifact}.pcad"
+            contact_fixture["selectedPath"]=[index]
+            path.write_text(json.dumps(contact_fixture))
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            baseline=path.with_name(f"{artifact}-initial.stl")
+            subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+            app,window=open_app(path)
+            key("F8")
+            verify(window,f"{guide}   {before}")
+            legacy_number(value)
+            verify(window,"Edited")
+            key("Control_L+z")
+            verify(window,f"{guide}   {before}")
+            key("Control_L+y")
+            verify(window,f"{guide}   {after}")
+            key("Home")
+            if wrapper=="arc":
+                click(window,480,358,button=5,count=2)
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            saved=json.loads(path.read_bytes())
+            assert saved["items"][1-index]==contact_fixture["items"][1-index]
+            nodes={n["id"]:n for n in saved["items"][index]["data"]["cad"]["nodes"]}
+            shape=nodes[guide][wrapper]
+            if wrapper=="arc":
+                assert nodes[guide]["type"]=="sketchArc" and "primitive" not in nodes[guide]
+                assert shape["construction"] and math.isclose(shape["sweep"],-math.pi/3,abs_tol=1e-12)
+            else:
+                assert shape["width"]==46 and shape["height"]==12 and shape["rotation"]==32
+            center=nodes["probe"]["primitive"]["center"]
+            assert math.dist((center["x"],center["y"]),expected)<.000003,center
+            original=next(n for n in contact_fixture["items"][index]["data"]["cad"]["nodes"] if n["id"]=="native-sketch-1")
+            assert nodes["native-sketch-1"]["relations"][0]==original["relations"][0]
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("F8")
+            verify(window,f"{guide}   {after}")
+            key("Escape")
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            _,volume=triangulation(stl)
+            assert math.isclose(volume,expected_volume,abs_tol=.004),volume
+            assert (stl.read_bytes()==baseline.read_bytes())==(wrapper=="arc")
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
+        # Create the same relation from the native picker on a sketch with no lines.
+        path=Path(tmp)/"Author point on ellipse.pcad"
+        contact_fixture["selectedPath"]=[0]
+        sketch,ellipse,probe,*_=[node for node in contact_fixture["items"][0]["data"]["cad"]["nodes"]
+                                if node["type"]!="referencePlane"]
+        sketch["relations"].pop(0)
+        probe["primitive"]["center"]=dict(x=3,y=0)
+        path.write_text(json.dumps(contact_fixture))
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"ellipse-guide   Width 40 mm")
+        key("Home")
+        cosine=math.cos(math.radians(ellipse["primitive"]["rotation"]))
+        sine=math.sin(math.radians(ellipse["primitive"]["rotation"]))
+        vertical_half_extent=math.hypot(20*sine,6*cosine)
+        scale=(640-76-48)/(2*vertical_half_extent)
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,68,55)
+        verify(window,"Pick the source line, circle, ellipse or arc for Point on curve")
+        click(window,round(480+20*cosine*scale),round(358-20*sine*scale))
+        verify(window,"Pick the follower anchor for Point on curve")
+        click(window,480,round(358+2*scale))
+        verify(window,"Point on curve updated")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved_nodes={n["id"]:n for n in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+        created=next(rel for rel in saved_nodes[sketch["id"]]["relations"] if rel["type"]=="pointOnCurve")
+        assert created==dict(id="native-point-on-curve-probe-ellipse-guide",type="pointOnCurve",
+                             a=dict(entityId="probe",point="center"),b="ellipse-guide")
+        center=saved_nodes["probe"]["primitive"]["center"]
+        x,y=center["x"]-3,center["y"]-2
+        assert math.isclose(((x*cosine+y*sine)/20)**2+((y*cosine-x*sine)/6)**2,1,abs_tol=.000001)
+        key("Escape")
         key("Escape")
         app.wait(3)
 

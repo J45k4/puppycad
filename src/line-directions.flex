@@ -74,7 +74,7 @@ fn puppy_direction_hint() {
     }
     if puppy_direction_mode==9 {
         if puppy_direction_source {return "Pick the follower anchor for Point on curve";}
-        return "Pick the source line, circle or circular arc for Point on curve";
+        return "Pick the source line, circle, ellipse or arc for Point on curve";
     }
     let pick="Pick the source ";if puppy_direction_source {pick="Pick the follower ";}
     if puppy_direction_mode==7 {

@@ -258,8 +258,10 @@ moves the follower. On an arc, the midpoint lies halfway through the signed
 sweep. Pick the same source and follower again to remove the relation.
 
 Choose **Point on curve** in **Relations**, then click a straight line,
-circle or circular arc and the follower anchor. The anchor can slide along
-the curve. A drag beyond a finite line or arc stops at the nearest endpoint.
+circle, ellipse or arc and the follower anchor. The anchor can slide along
+the curve. A drag beyond a finite line, circular arc or elliptic arc stops at
+the nearest endpoint. Changing a driving width, height or sweep updates the
+contact on the retained curve.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -446,11 +448,13 @@ Down move a step one slot. Each accepted edit keeps the document's original
 sketch and solid-step records and can be undone.
 
 Click a PartBuilder sketch in Design to edit it. **Dimensions** (F8)
-opens the saved dimensions and relations for supported lines, circles and
-points. The sketch toolbar also adds lines, circles, rectangles and points,
-including in files without a solid. The editor saves the original records
-and sketch IDs. An edit that would move an extrusion to a different profile
-is rejected before it enters Undo history.
+opens the saved dimensions and relations for supported lines, circles,
+circular arcs, elliptic arcs and points. The sketch toolbar also adds
+lines, circles, rectangles and points, including in files without a solid.
+The editor saves the original records and sketch IDs. Editing an arc
+rebuilds its saved outline in the original vertex order. An edit that would
+change a referenced profile or extrusion face is rejected before it enters
+Undo history.
 
 For Biscuit standalone schema-1 files, open **History** (F7), or right-click
 a feature or part in Design and choose **Feature history**. In a narrow

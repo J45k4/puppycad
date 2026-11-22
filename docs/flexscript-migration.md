@@ -77,12 +77,12 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`a492df1eed9c0ad16ffbdf2e88fdeced9e51345a` includes the shared library and
+`da58397a7df6618a5da7871d789715be34ec160a` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
-archived VM across all 45 historical CAD and runtime import paths. Its
-headless browser tests passed desktop and mobile builds, protected ZIP
+archived VM across all 45 historical CAD and runtime import paths. The
+`a492df1` headless browser tests passed desktop and mobile builds, protected ZIP
 downloads, and integrated PCAD fabrication with the pinned KiCad
 executable. The KiCad v3/v4 upgrade preserves the earlier fabrication
 ZIP and produces matching board data and rear silkscreen in new builds.
@@ -144,6 +144,16 @@ at the retained endpoint. The saved relation ID round-trips through Rust.
 The checked VM and two frozen jobs match this STL. A point on the discarded
 sweep fails the mesh check before export.
 
+The same relation now supports an ellipse and a finite elliptic arc. The
+headless editor changes a rotated ellipse from 40 to 46 mm wide and moves
+its constrained point. A clockwise construction arc changes from −120° to
+−60°, moving its point to the new endpoint and keeping the circle STL
+byte-identical. The SDK also exercises an independently locked coordinate,
+an off-sweep conflict and a drag along the curve. Against TypeScript's
+nearest-arc routine, 576 differential cases agree within 1 nm. The native
+picker also creates the relation on a sketch containing an ellipse and a
+point.
+
 The shared SDK evaluates original TypeScript PartBuilder v4 files in their
 `features` and `solidSteps` representation. Six reference fixtures cover a
 translated intersection, face sockets before and after a source translation,
@@ -189,7 +199,7 @@ file retains both wrappers, IDs and signed angles. The native STL and the
 original TypeScript export of that file are watertight. Their bounds agree
 within 0.000002 mm and their volumes within 0.00005 mm³. Existing Rust-style
 elliptic arcs keep their sampling. Biscuit's checked VM repeats the native
-edit and two frozen v11 builds match the native STL bytes. The combined
+edit and two frozen v11 builds match the native STL bytes. The `a492df1`
 pin passed all 70 headless SDK tests.
 
 Original PartBuilder sketches with supported lines, circles, rectangles and
@@ -202,7 +212,16 @@ the native save and reproduces its 2,206.033 mm³ solid and through-hole rim.
 The checked VM repeats the width edit and matches the native saved graph.
 Two frozen builds match the native STL byte for byte. The same editor adds
 a construction point to an original sketch-only file.
-Sampled curve and pattern editing in this representation remains open.
+Original PartBuilder circular and elliptic arcs also edit in place. The
+headless editor changes the ellipse height from 10 to 12 mm and regenerates
+the outline cache in its original order. The downstream boss retains saved
+face `body-solid-face-39`. The reopened 777.025610 mm³ solid and the
+original TypeScript export differ in volume by less than 0.000008 mm³.
+The SDK rejects an edit that would change a referenced cap into a wall.
+The Biscuit checked VM repeats this edit and the two point contacts.
+Two frozen v11 builds of each model match the native STL byte for byte.
+The combined `da58397` pin passed 72 headless CAD SDK tests. PartBuilder
+spline and pattern editing remains open.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the
