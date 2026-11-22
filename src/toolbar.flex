@@ -124,8 +124,11 @@ fn puppy_toolbar_build(w) {
         let scene=j_parse(puppy_sheet_scene+24);
         let title=j_string(scene,"name");
         if puppy_status {title=puppy_status+24;}
-        puppy_bar_text(rgb,w,12,25,title,w-10);
-        puppy_action_bar(puppy_sheet_actions(),rgb,w,-1);
+        if puppy_sheet_entry {puppy_number_bar(rgb,w,project);}
+        else {
+            puppy_bar_text(rgb,w,12,25,title,w-10);
+            puppy_action_bar(puppy_sheet_actions(),rgb,w,-1);
+        }
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;
         return 1;
     }

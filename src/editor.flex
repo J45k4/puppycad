@@ -227,12 +227,7 @@ fn puppy_export_shortcut(project,extension) {
 fn puppy_command(key,mods) {
     puppy_forget_click();
     if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
-    if puppy_sheet_scene {
-        let project=cad_project_open(puppy_history+24);
-        if key==GUI_KEY_ESCAPE {puppy_sheet_close();return puppy_title(project,"Model view");}
-        if key==19 && mods&192 {return puppy_export_shortcut(project,".pdf");}
-        return 1;
-    }
+    if puppy_sheet_scene {return puppy_sheet_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_join_drag {
         if key==GUI_KEY_ESCAPE {puppy_join_end_drag();return puppy_title(cad_project_open(puppy_history+24),"Smooth drag cancelled");}return 1;
     }

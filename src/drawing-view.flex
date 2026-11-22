@@ -1,3 +1,5 @@
+import "drawing-settings.flex";
+
 // The SDK returns paper coordinates in tenths of a millimetre, with Y up.
 global puppy_sheet_scene=0;
 global puppy_sheet_texture=0;
@@ -10,22 +12,35 @@ fn puppy_sheet_open(project,id) {
     cg_j_text(input,"sheet_id",id);
     let scene=pdd_interactive(input);
     if j_get(scene,"error") {return puppy_title(project,j_string(scene,"error"));}
+    puppy_sheet_setting=-1;puppy_exit_requested=0;puppy_sheet_show(scene);
+    return puppy_title(project,m_cat("Drawing sheet  ",j_string(scene,"name")));
+}
+
+fn puppy_sheet_show(scene) {
     if puppy_sheet_scene {puppy_drop(puppy_sheet_scene);}
     puppy_sheet_scene=puppy_snapshot(j_encode(scene));
-    puppy_sheet_width=0;
-    return puppy_title(project,m_cat("Drawing sheet  ",j_string(scene,"name")));
+    puppy_sheet_width=0;puppy_toolbar_dirty=1;
 }
 
 fn puppy_sheet_close() {
     if !puppy_sheet_scene {return 0;}
-    puppy_drop(puppy_sheet_scene);puppy_sheet_scene=0;puppy_toolbar_dirty=1;
+    puppy_drop(puppy_sheet_scene);puppy_sheet_scene=0;puppy_sheet_setting=-1;puppy_toolbar_dirty=1;
     return 1;
 }
 
 fn puppy_sheet_actions() {
     let rows=cg_array();
-    puppy_compact_button(rows,"Back to model",GUI_KEY_ESCAPE,0);
-    puppy_compact_button(rows,"Export PDF",19,192);
+    if puppy_sheet_setting>=0 {
+        puppy_compact_button(rows,"Previous",80,0);
+        puppy_compact_button(rows,"Next",79,0);
+        puppy_compact_button(rows,"Edit",40,0);
+        puppy_compact_button(rows,"Done",GUI_KEY_ESCAPE,0);
+    }else {
+        puppy_compact_button(rows,"Back to model",GUI_KEY_ESCAPE,0);
+        puppy_compact_button(rows,"Export PDF",19,192);
+        puppy_compact_button(rows,"Settings",59,0);
+        puppy_compact_button(rows,"Save",22,192);
+    }
     return rows;
 }
 

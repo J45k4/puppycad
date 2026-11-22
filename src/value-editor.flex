@@ -7,6 +7,10 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_sheet_entry {
+        let field=cg_at(puppy_sheet_setting_fields(project),puppy_sheet_setting);
+        return cg_v(0,0,load64(field+8));
+    }
     if puppy_patterns {return puppy_pattern_field(project);}
     if puppy_offset_pick_id {
         if !puppy_offset_editing {return cg_v(0,5000000,"New offset  mm");}
@@ -95,9 +99,12 @@ fn puppy_write_field(project,field,value) {
     puppy_push(updated);return 1;
 }
 fn puppy_number_open(project,field) {
-    puppy_search_focus(0);puppy_copy_focus=0;
     let text=puppy_display_number(load64(field+8));
     if puppy_line_report && j_get(load64(field),"expression") {text=j_string(load64(field),"expression");}
+    return puppy_text_open(project,text);
+}
+fn puppy_text_open(project,text) {
+    puppy_search_focus(0);puppy_copy_focus=0;
     puppy_number_text=puppy_snapshot(text);
     puppy_number_cursor=m_len(puppy_number_text+24);puppy_number_selected=1;
     gui_text_focus(load64(puppy_device),2);
@@ -129,6 +136,7 @@ fn puppy_variable_apply(project,text) {
     puppy_number_close();return puppy_title(updated,"Variables updated");
 }
 fn puppy_number_close() {
+    puppy_sheet_entry=0;
     puppy_new_offset=0;
     if puppy_offset_pick_id {puppy_drop(puppy_offset_pick_id);puppy_offset_pick_id=0;}
     puppy_placement_slot=-1;
@@ -139,6 +147,7 @@ fn puppy_number_close() {
 }
 fn puppy_number_apply(project) {
     let text=puppy_number_text+24;
+    if puppy_sheet_entry {return puppy_sheet_entry_apply(project,text);}
     if puppy_patterns {return puppy_pattern_apply(project,text);}
     if puppy_step_path_entry {return puppy_step_start(project,text);}
     if puppy_offset_pick_id {
@@ -200,9 +209,10 @@ fn puppy_number_replace(text,remove_left,remove_right) {
     let limit=512;if puppy_variable_slot>=0 {limit=580;}
     if puppy_step_path_entry && length+n-(end-at)>4095 {return puppy_title(cad_project_open(puppy_history+24),"STEP path is too long");}
     if puppy_line_report && length+n-(end-at)>limit {return puppy_title(cad_project_open(puppy_history+24),"Expression entry is too long");}
+    if puppy_sheet_entry && length+n-(end-at)>256 {return puppy_title(cad_project_open(puppy_history+24),"Drawing field is too long");}
     while i<length {
         let c=load8(text+i);
-        if c<32 || c==127 || (!puppy_step_path_entry && !puppy_line_report && (c>126 || length+n-(end-at)>40)) {
+        if c<32 || c==127 || (!puppy_sheet_entry && !puppy_step_path_entry && !puppy_line_report && (c>126 || length+n-(end-at)>40)) {
             return puppy_title(cad_project_open(puppy_history+24),"Enter a decimal number of up to 40 characters");
         }
         i=i+1;

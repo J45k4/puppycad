@@ -419,7 +419,7 @@ fn puppy_objects_event(event) {
             }puppy_design_focus=0;puppy_search_focus(0);
         }
         if inside && kind==GUI_WHEEL && puppy_design_open {puppy_design_scroll=puppy_design_scroll-gui_event_dy(event)*3;puppy_tree_dirty=1;return 1;}
-        if kind==GUI_KEY_DOWN && puppy_design_focus && !puppy_search_active && !(gui_event_modifiers(event)&0x3c3) {
+        if kind==GUI_KEY_DOWN && puppy_design_focus && puppy_sheet_setting<0 && !puppy_search_active && !(gui_event_modifiers(event)&0x3c3) {
             let key=gui_event_code(event);if key==40 || (key>=79 && key<=82) {return puppy_design_navigation(key);}
         }
         return puppy_search_event(event);

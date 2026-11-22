@@ -110,12 +110,13 @@ fn puppy_design_studio(rows,project) {
     }
     puppy_design_group(rows,0,j_get(project,"parameters"),"parameter","Parameters",0);
     let sheets=j_get(project,"drawings");
-    if pc_first(sheets) {
+    if pc_first(j_get(project,"parts")) {
         let group=puppy_design_row(rows,0,"group",0,"Drawing sheets",0);let sheet=pc_first(sheets);
         while sheet {
             let row=puppy_design_row(rows,group,"sheet",sheet,puppy_design_name(sheet,"Sheet"),0);
             puppy_design_list(rows,row,j_get(sheet,"dimensions"),"dimension");sheet=load64(sheet+24);
         }
+        if cg_j_count(sheets)<4 {puppy_design_row(rows,group,"add-sheet",0,"New sheet",0);}
     }
     let electrical=j_get(project,"electrical");
     if electrical {
@@ -169,6 +170,7 @@ fn puppy_design_action(row) {
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {return "Edit sketch";}
     if m_eq(kind,"part") || m_eq(kind,"assembly") {return "Open item";}
     if m_eq(kind,"sheet") {return "Open sheet";}
+    if m_eq(kind,"add-sheet") {return "Create sheet";}
     if m_eq(kind,j_string(node,"type")) && pc_model_feature(node) && m_eq(j_string(puppy_design_owner(row),"type"),"part") {return "Feature history";}
     return 0;
 }
@@ -178,6 +180,7 @@ fn puppy_design_owner(row) {
 fn puppy_design_activate(project,row) {
     let kind=load64(row+16);let node=load64(row+24);
     if m_eq(kind,"sheet") {return puppy_sheet_open(project,j_string(node,"id"));}
+    if m_eq(kind,"add-sheet") {return puppy_sheet_add(project);}
     let item=puppy_design_owner(row);let items=pc_first(j_get(project,"items"));let index=0;
     while items && items!=item {items=load64(items+24);index=index+1;}
     if !items {return 1;}

@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`dd050f2c266bc30a442cd3fec0b747fe2e03a38f` includes the shared library and
+`d0be309111bb08854d16cdd67543f996757290f4` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -687,6 +687,14 @@ produces a PDF alongside STEP or STL and discards exports for duplicate
 sheet IDs. Two independent build jobs downloaded byte-identical PDFs with
 the frozen source digest in the footer. Earlier build artifacts remain
 retrievable under their recorded profiles.
+
+PuppyCAD creates projection sheets and edits the view settings through the
+shared library. The native test creates an empty top view, names it
+Inspection, changes it to a front section at 1:2 and −6 mm, and exercises
+undo, redo, save, reopen, and PDF export. The CAD SDK rejects invalid scales
+and out-of-model section planes. Biscuit’s checked VM authors the same
+document. Two frozen builds produce byte-identical PDFs that include the
+frozen source digest and preserve the 1,728 mm³ block in STL.
 
 Remaining standalone UI work also includes additional sketch and feature authoring and
 inspectors for additional design records. Include its `docs/pcad-electrical.md` workflows

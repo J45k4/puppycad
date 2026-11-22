@@ -42,6 +42,15 @@ the tree, or press **Escape** to return to the model. **Export PDF**
 uses the next available name. The CLI also accepts
 `--export INPUT.pcad OUTPUT.pdf`.
 
+Expand **Drawing sheets** and select **New sheet** to create a top view.
+Open **Settings** (F2) on a sheet. Use Left and Right to choose a field
+and Enter to edit it. You can change the sheet name, orientation, scale,
+occurrence, edge visibility, and section depth. Set a scale denominator
+of 0 for automatic fit, or clear the section depth to restore a projection.
+On a detail sheet, you can change its name and magnification. Applied
+settings update the preview and support Undo and Redo. Press Ctrl+S or
+click **Save** to write them to the PCAD file.
+
 ## Finding a part in the drawing
 
 Click **Objects** or press T in the solid viewport. Search for a body name, an
