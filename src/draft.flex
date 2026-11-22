@@ -414,7 +414,7 @@ fn puppy_loft_key(project,key,mods) {
 }
 fn puppy_draft_key(project,key,mods) {
     if pc_legacy_solid_part(cad_project_part(project)) {
-        if key!=55 && key!=74 && (mods&3 || (key!=21 && key!=6 && key!=15)) {return 1;}
+        if key!=55 && key!=74 && (mods&3 || (key!=21 && key!=6 && key!=15 && key!=13)) {return 1;}
     }
     if key==37 {
         puppy_revolve_axis=!puppy_revolve_axis;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());
@@ -569,7 +569,7 @@ fn puppy_draw_draft() {
         }
     }
     if !puppy_revolve_axis && puppy_tool==-4 && puppy_anchor && puppy_join_source {
-        let preview=puppy_join_preview(project,id);if preview {if !puppy_draft_path(preview,3,w,h) {return 0;}}cg_begin();
+        let preview=puppy_join_preview(model,id);if preview {if !puppy_draft_path(preview,3,w,h) {return 0;}}cg_begin();
     }
     let selected=0;if puppy_tool==-5 && puppy_anchor && puppy_join_source {selected=j_string(j_parse(puppy_join_source+24),"entityId");}
     let split_cuts=0;if puppy_tool==-6 && puppy_anchor && puppy_split_ellipse && !puppy_revolve_axis {

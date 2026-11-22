@@ -35,10 +35,20 @@ fn puppy_direction_has_tangent(project) {
 fn puppy_direction_has_curve_anchor(project,on_curve) {
     let report=j_parse(puppy_line_report+24);
     let line=pc_first(j_get(report,"lines"));let point=pc_first(j_get(report,"points"));
-    if line {return point || load64(line+24);}
-    if !point || !load64(point+24) {return 0;}
-    let model=puppy_sketch_model(project,j_string(puppy_draft_sketch(project),"id"));
+    if line && (point || load64(line+24)) {return 1;}
+    if !line && !point {return 0;}
+    if !on_curve && (!point || !load64(point+24)) {return 0;}
+    let sk=j_string(puppy_draft_sketch(project),"id");
+    let model=puppy_sketch_model(project,sk);
     let nodes=pc_nodes(cad_project_part(model));
+    if on_curve {
+        let row=pc_first(nodes);
+        while row {
+            if m_eq(j_string(row,"sketchId"),sk) && m_eq(j_string(row,"type"),"sketchSpline") {return 1;}
+            row=load64(row+24);
+        }
+    }
+    if !point || !load64(point+24) {return 0;}
     while point {
         let row=pc_find(nodes,j_string(point,"id"));
         if (on_curve && pc_point_on_curve_kind(row)) || (!on_curve && pc_midpoint_kind(row)) {return 1;}
@@ -74,7 +84,7 @@ fn puppy_direction_hint() {
     }
     if puppy_direction_mode==9 {
         if puppy_direction_source {return "Pick the follower anchor for Point on curve";}
-        return "Pick the source line, circle, ellipse or arc for Point on curve";
+        return "Pick the source curve for Point on curve";
     }
     let pick="Pick the source ";if puppy_direction_source {pick="Pick the follower ";}
     if puppy_direction_mode==7 {

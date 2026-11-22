@@ -2244,6 +2244,104 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Drag an original PartBuilder cubic handle without redirecting its face boss.
+        path=Path(tmp)/"Legacy spline handle.pcad"
+        source=json.loads((libs/"cad/tests/fixtures/legacy-typescript-splines.pcad").read_bytes())
+        path.write_text(json.dumps(source))
+        shutil.copyfile(path,output_dir/"legacy-spline-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,94,238)
+        verify(window,"Editing body")
+        key("F3")
+        key("Home")
+        key("j")
+        verify(window,"Pick the source curve for Smooth")
+        click(window,480,250)
+        verify(window,"Pick the curve that should follow")
+        drag(window,1,(224,178),(224,175))
+        verify(window,"Sketch edit changes a face used by boss/sketch")
+        assert json.loads(path.read_bytes())==source
+        drag(window,1,(224,178),(224,184),cancel=True,dragging="Dragging joined curve")
+        verify(window,"Smooth drag cancelled")
+        assert json.loads(path.read_bytes())==source
+        drag(window,1,(224,178),(224,184))
+        verify(window,"Smooth point moved")
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(path.read_bytes())["items"]==source["items"]
+        key("Control_L+y")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        before,after=(doc["items"][0]["data"] for doc in (source,saved))
+        sketch=after["features"][0];original=before["features"][0]
+        expected=json.loads(json.dumps(original["entities"]))
+        spline=next(entity for entity in expected if entity["id"]=="spline-rim")
+        spline["points"][1]["y"]=8.8125
+        assert sketch["entities"]==expected
+        assert "cad" not in after and before["solidSteps"]==after["solidSteps"]
+        assert after["features"][1:]==before["features"][1:]
+        assert sketch["profiles"]==original["profiles"] and sketch["loops"]==original["loops"]
+        assert len(sketch["vertices"])==len(original["vertices"])==51
+        assert after["features"][2]["target"]["face"]["faceId"]=="body-solid-face-53"
+        shutil.copyfile(path,output_dir/"legacy-spline-edited.pcad")
+        (output_dir/"legacy-spline-target.json").write_text(json.dumps(spline["points"][1]))
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-spline.png"],check=True)
+        key("F12")
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds[0]==(-12,12) and bounds[2]==(0,11)
+        assert math.isclose(bounds[1][1],6.6796875,abs_tol=.000002)
+        assert math.isclose(volume,957.831469214,abs_tol=.0001),volume
+        shutil.copyfile(stl,output_dir/"legacy-spline-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A closed legacy fit spline has draggable points even without endpoints.
+        path=Path(tmp)/"Legacy periodic spline.pcad"
+        source["selectedPath"]=[2]
+        path.write_text(json.dumps(source))
+        periodic=source["items"][2]["data"]["features"][0]
+        app,window=open_app(path,design_tree=True)
+        click(window,94,264)
+        verify(window,"Editing body")
+        key("F3")
+        key("Home")
+        key("j")
+        ranges=[(min(v[axis] for v in periodic["vertices"]),max(v[axis] for v in periodic["vertices"]))
+                for axis in ("x","y")]
+        scale=min(32000, int(912000/(ranges[0][1]-ranges[0][0])),int(516000/(ranges[1][1]-ranges[1][0])))
+        cx,cy=(sum(pair)/2 for pair in ranges)
+
+        def periodic_pixel(x,y):
+            return round(480+(x-cx)*scale/1000),round(358-(y-cy)*scale/1000)
+
+        click(window,*periodic_pixel(-2,9))
+        verify(window,"Drag a spline point")
+        x,y=periodic_pixel(0,-8)
+        drag(window,1,(x,y),(x,y-6))
+        verify(window,"Smooth point moved")
+        key("Control_L+s")
+        verify(window,"Saved")
+        actual=json.loads(path.read_bytes())["items"][2]["data"]["features"][0]["entities"][0]
+        expected=periodic["entities"][0]
+        assert actual["closed"] and actual["points"][:-1]==expected["points"][:-1]
+        assert actual["points"][-1]["x"]==0 and -7.81<actual["points"][-1]["y"]<-7.79
+        assert {name:value for name,value in actual.items() if name!="points"}=={
+            name:value for name,value in expected.items() if name!="points"}
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-periodic-spline.png"],check=True)
+        key("F12")
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -3636,7 +3734,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,890,20)
         verify(window,"Choose a relation")
         click(window,185,54)
-        verify(window,"Pick the source line, circle, ellipse or arc for Point on curve")
+        verify(window,"Pick the source curve for Point on curve")
         click(window,190,358)
         verify(window,"Pick the follower anchor for Point on curve")
         click(window,138,244)
@@ -3837,7 +3935,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,890,20)
         verify(window,"Choose a relation")
         click(window,68,55)
-        verify(window,"Pick the source line, circle, ellipse or arc for Point on curve")
+        verify(window,"Pick the source curve for Point on curve")
         click(window,round(480+20*cosine*scale),round(358-20*sine*scale))
         verify(window,"Pick the follower anchor for Point on curve")
         click(window,480,round(358+2*scale))
@@ -3852,6 +3950,133 @@ with tempfile.TemporaryDirectory() as tmp:
         x,y=center["x"]-3,center["y"]-2
         assert math.isclose(((x*cosine+y*sine)/20)**2+((y*cosine-x*sine)/6)**2,1,abs_tol=.000001)
         key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        # A saved point follows the nearer cubic branch on either side of a crossing.
+        spline_fixture=json.loads((libs/"cad/tests/fixtures/point-on-spline.pcad").read_bytes())
+        path=Path(tmp)/"Crossing spline contact.pcad"
+        path.write_text(json.dumps(spline_fixture))
+        shutil.copyfile(path,output_dir/"spline-contact-input.pcad")
+        baseline=path.with_name("Crossing spline contact original.stl")
+        subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"body-profile   Diameter 10 mm")
+        # The fitted sketch spans X = -18 to 47 and Y = -12 to 18 mm.
+        scale=(960-48)*1000//65
+
+        def spline_contact_pixel(x,y):
+            return (round(480+(x-14.5)*scale/1000),round(358-(y-3)*scale/1000))
+
+        def saved_spline_contact():
+            key("Control_L+s")
+            verify(window,"Saved")
+            document=json.loads(path.read_bytes())
+            nodes={n["id"]:n for n in document["items"][0]["data"]["cad"]["nodes"]}
+            return document,nodes["probe"]["primitive"]["center"]
+
+        origin=spline_contact_pixel(0,0)
+        drag(window,1,origin,spline_contact_pixel(8,6),dragging="Dragging sketch point")
+        _,upper=saved_spline_contact()
+        assert math.dist((upper["x"],upper["y"]),(8.307692,5.538462))<.05,upper
+        key("Control_L+z")
+        assert saved_spline_contact()[1]==dict(x=0,y=0)
+        lower_pixel=spline_contact_pixel(8,-6)
+        drag(window,1,origin,lower_pixel,dragging="Dragging sketch point")
+        key("Control_L+z")
+        assert saved_spline_contact()[1]==dict(x=0,y=0)
+        key("Control_L+y")
+        saved,lower=saved_spline_contact()
+        assert math.dist((lower["x"],lower["y"]),(8.307692,-5.538462))<.05,lower
+        expected=json.loads(json.dumps(spline_fixture))
+        expected["revision"]=saved["revision"]
+        nodes=expected["items"][0]["data"]["cad"]["nodes"]
+        next(n for n in nodes if n["id"]=="probe")["primitive"]["center"]=lower
+        assert saved==expected
+        raw_target={"x":14.5+int((lower_pixel[0]-480)*1e9/scale)/1e6,
+                    "y":3+int((358-lower_pixel[1])*1e9/scale)/1e6}
+        (output_dir/"spline-contact-target.json").write_text(json.dumps(raw_target))
+        shutil.copyfile(path,output_dir/"spline-contact-edited.pcad")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"spline-contact.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(37,47),(-5,5),(0,10)] and math.isclose(volume,780.36206,abs_tol=.001)
+        assert stl.read_bytes()==baseline.read_bytes()
+        shutil.copyfile(stl,output_dir/"spline-contact-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A periodic spline and one point can create a contact at the stored seam.
+        path=Path(tmp)/"Periodic spline contact.pcad"
+        spline_fixture["selectedPath"]=[2]
+        periodic_nodes=spline_fixture["items"][2]["data"]["cad"]["nodes"]
+        periodic_sketch=next(n for n in periodic_nodes if n["id"]=="native-sketch-1")
+        periodic_sketch["relations"]=[]
+        path.write_text(json.dumps(spline_fixture))
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"Choose New distance")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,68,55)
+        verify(window,"Pick the source curve for Point on curve")
+        click(window,550,100)
+        verify(window,"Pick the follower anchor for Point on curve")
+        click(window,134,374)
+        verify(window,"Point on curve updated")
+        key("Control_L+s")
+        verify(window,"Saved")
+        periodic_sketch["relations"]=[dict(id="native-point-on-curve-probe-periodic-spline",
+                                          type="pointOnCurve",a=dict(entityId="probe",point="center"),
+                                          b="periodic-spline")]
+        actual=json.loads(path.read_bytes())
+        assert actual["items"][2]["data"]["cad"]["nodes"]==periodic_nodes
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"periodic-spline-contact.png"],check=True)
+        shutil.copyfile(path,output_dir/"spline-source-contact-input.pcad")
+        baseline=path.with_name("Periodic contact original.stl")
+        subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+        key("Escape")
+        key("F12")
+        verify(window,"Editing Spline contact")
+        key("Home")
+        key("j")
+        click(window,550,100)
+        verify(window,"Drag a spline point")
+        drag(window,1,(134,374),(134,355))
+        verify(window,"Smooth point moved")
+        key("Control_L+s")
+        verify(window,"Saved")
+        changed=json.loads(path.read_bytes())
+        moved_nodes=changed["items"][2]["data"]["cad"]["nodes"]
+        original_spline=next(n["spline"] for n in periodic_nodes if n["id"]=="periodic-spline")
+        moved_spline=next(n["spline"] for n in moved_nodes if n["id"]=="periodic-spline")
+        assert original_spline["points"][1:]==moved_spline["points"][1:]
+        control=moved_spline["points"][0]
+        assert control==dict(x=-20,y=1.057258)
+        follower=next(n["primitive"]["center"] for n in moved_nodes if n["id"]=="probe")
+        assert math.dist((follower["x"],follower["y"]),(-20.149122614,.010223545))<.000001
+        assert next(n for n in moved_nodes if n["id"]==periodic_sketch["id"])==periodic_sketch
+        (output_dir/"spline-source-contact-target.json").write_text(json.dumps(control))
+        shutil.copyfile(path,output_dir/"spline-source-contact-edited.pcad")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"spline-source-contact.png"],check=True)
+        key("F12")
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert math.isclose(triangulation(stl)[1],8395.521379435,abs_tol=.0001)
+        assert stl.read_bytes()!=baseline.read_bytes()
+        shutil.copyfile(stl,output_dir/"spline-source-contact-edited.stl")
         key("Escape")
         app.wait(3)
 

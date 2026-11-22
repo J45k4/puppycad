@@ -77,17 +77,24 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`da58397a7df6618a5da7871d789715be34ec160a` includes the shared library and
+`0eec3211d1bc38ff455719d05b4bb09e3adad8f0` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
 archived VM across all 45 historical CAD and runtime import paths. The
-`a492df1` headless browser tests passed desktop and mobile builds, protected ZIP
+`da58397` headless browser tests passed desktop and mobile builds, protected ZIP
 downloads, and integrated PCAD fabrication with the pinned KiCad
 executable. The KiCad v3/v4 upgrade preserves the earlier fabrication
 ZIP and produces matching board data and rear silkscreen in new builds.
 The earlier SDK pin verified v10 artifact lineage. Hosted CI verification
 requires publishing the SDK commit.
+
+Biscuit's CI script runs the archived geometry, spatial and assembly
+regressions. Native and archived checked guests reproduce the seven gripper
+poses and four orthographic RGB snapshots. The checked VM returns the same
+errors for out-of-travel poses and an incomplete collision sweep. A change
+of SDK within driver v11 preserves the archived release ZIP and journal
+while rejecting new admissions under the older fingerprint.
 
 The native editor now authors external and internal tangency for circles
 and circular arcs. A construction arc and a follower circle retain their
@@ -153,6 +160,22 @@ an off-sweep conflict and a drag along the curve. Against TypeScript's
 nearest-arc routine, 576 differential cases agree within 1 nm. The native
 picker also creates the relation on a sketch containing an ellipse and a
 point.
+
+The shared solver handles a point or line endpoint on an open control,
+open fit or periodic fit spline. The headless editor drags across both
+branches of a saved self-intersection, undoes and redoes the drag, and
+reopens the saved file. The chosen point agrees with TypeScript within
+1 nm and the construction spline keeps the exported solid byte-identical.
+The editor also creates a contact at a periodic seam and moves its follower
+when a source handle reshapes the spline. The solver preserves the other
+controls and rejects a source edit that conflicts with a fixed follower.
+The periodic edit agrees with the TypeScript nearest point within 1 nm.
+The native v4 mesh keeps its existing sampling. Its vertices and sampled
+face centers are within 0.0075 mm of the original TypeScript export.
+Editing and exporting this curved solid use separate checked calls under
+the existing Biscuit time limit. Two v11 builds for each of the crossing
+drag, periodic source edit and PartBuilder handle drag match their native
+STLs byte for byte. The `0eec321` archive passed all 74 SDK tests.
 
 The shared SDK evaluates original TypeScript PartBuilder v4 files in their
 `features` and `solidSteps` representation. Six reference fixtures cover a
@@ -220,8 +243,17 @@ original TypeScript export differ in volume by less than 0.000008 mm³.
 The SDK rejects an edit that would change a referenced cap into a wall.
 The Biscuit checked VM repeats this edit and the two point contacts.
 Two frozen v11 builds of each model match the native STL byte for byte.
-The combined `da58397` pin passed 72 headless CAD SDK tests. PartBuilder
-spline and pattern editing remains open.
+The `da58397` pin passed 72 headless CAD SDK tests.
+
+A native cubic handle drag on an original PartBuilder sketch preserves
+its control records and the boss on face `body-solid-face-53`. A drag that
+would change the sampled face ordering is rejected. The reopened 957.831460
+mm³ STL agrees with the original TypeScript exporter within 0.00001 mm³.
+Native editing also covers the points of a closed fit spline. The SDK
+checks open fit splines with saved endpoint coincidences and sampling close
+to TypeScript's subdivision threshold. On a 108-edge periodic fixture,
+checked save and checked export fit the existing instruction budget when
+run as separate executions. PartBuilder pattern editing remains open.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the

@@ -258,10 +258,10 @@ moves the follower. On an arc, the midpoint lies halfway through the signed
 sweep. Pick the same source and follower again to remove the relation.
 
 Choose **Point on curve** in **Relations**, then click a straight line,
-circle, ellipse or arc and the follower anchor. The anchor can slide along
-the curve. A drag beyond a finite line, circular arc or elliptic arc stops at
-the nearest endpoint. Changing a driving width, height or sweep updates the
-contact on the retained curve.
+circle, ellipse, arc or spline and the follower anchor. The anchor can slide
+along the curve and stops at the nearest endpoint of an open curve. At a
+spline crossing, the drag follows the branch nearest the cursor. Changing a
+driving dimension or dragging a source spline handle updates the contact.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -449,12 +449,13 @@ sketch and solid-step records and can be undone.
 
 Click a PartBuilder sketch in Design to edit it. **Dimensions** (F8)
 opens the saved dimensions and relations for supported lines, circles,
-circular arcs, elliptic arcs and points. The sketch toolbar also adds
-lines, circles, rectangles and points, including in files without a solid.
-The editor saves the original records and sketch IDs. Editing an arc
-rebuilds its saved outline in the original vertex order. An edit that would
-change a referenced profile or extrusion face is rejected before it enters
-Undo history.
+circular arcs, elliptic arcs and points. Choose **Smooth** (J), select a
+control or fit spline and drag one of its points to reshape it. Closed fit
+splines also expose their points. The sketch toolbar adds lines, circles,
+rectangles and points, including in files without a solid. The editor saves
+the original records and sketch IDs. Editing an arc or spline rebuilds the
+outline in its original order. An edit that would change a referenced profile
+or extrusion face is rejected before it enters Undo history.
 
 For Biscuit standalone schema-1 files, open **History** (F7), or right-click
 a feature or part in Design and choose **Feature history**. In a narrow
@@ -519,9 +520,10 @@ arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**
 place first, then the curve to align. Selecting the same pair again removes
 their smooth join. To reshape a joined chain, select a curve with **Smooth**
 and drag one of its handles. Release to apply one undo step. Escape cancels
-the drag. The tools also accept editable line and circular dimensions in
-the same sketch. The editor rejects an edit if it conflicts with another
-driver or requires deforming a closed smooth chain.
+the drag. Select a closed spline with **Smooth** to edit its points.
+The tools also accept editable line and circular dimensions in the same
+sketch. The editor rejects an edit if it conflicts with another driver or
+requires deforming a closed smooth chain.
 
 Choose **More tools** for arcs and splines. For a three-point arc (A), click
 the start, a point on the arc and the end. A fit spline (S) passes through

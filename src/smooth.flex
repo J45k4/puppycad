@@ -27,18 +27,29 @@ fn puppy_join_endpoint(nodes,sk,cursor) {
     }return hit;
 }
 fn puppy_join_click(project,cursor) {
-    let nodes=pc_nodes(cad_project_part(project));let sk=j_string(puppy_draft_sketch(project),"id");let hit=0;let updated=0;
+    let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
+    if !model {return puppy_title(project,cg_error);}
+    let nodes=pc_nodes(cad_project_part(model));let hit=0;let updated=0;let closed=0;
     if puppy_tool==-4 {
         if puppy_anchor {
-            updated=cad_project_add_tangent_arc(project,sk,j_parse(puppy_join_source+24),pc_json_point(cursor));
+            updated=cad_project_add_tangent_arc(model,sk,j_parse(puppy_join_source+24),pc_json_point(cursor));
         }else {hit=puppy_join_endpoint(nodes,sk,cursor);}
     }else {
         let node=puppy_sketch_hit(nodes,sk,cursor);
-        if node && ps_end_name(node,0) {
-            hit=ps_anchor(j_string(node,"id"),ps_end_name(node,0));
-            if puppy_anchor {updated=cad_project_toggle_smooth_curves(project,sk,j_string(j_parse(puppy_join_source+24),"entityId"),j_string(node,"id"));}
+        let end=ps_end_name(node,0);
+        if !end && m_eq(j_string(node,"type"),"sketchSpline") {end="point0";closed=1;}
+        if end {
+            let id=j_string(node,"id");
+            hit=ps_anchor(id,end);
+            if puppy_anchor {
+                let source=j_string(j_parse(puppy_join_source+24),"entityId");
+                if !closed && ps_end_name(pc_find(nodes,source),0) {
+                    updated=cad_project_toggle_smooth_curves(model,sk,source,id);
+                }else {puppy_anchor=0;}
+            }
         }
     }
+    if updated {updated=puppy_sketch_result(project,sk,updated);}
     if updated {
         puppy_join_select(0);puppy_anchor=0;puppy_push(updated);puppy_fit_sketch(updated,1);
         if puppy_tool==-4 {return puppy_title(updated,"Tangent arc added");}return puppy_title(updated,"Smooth join updated");
@@ -46,11 +57,12 @@ fn puppy_join_click(project,cursor) {
     if cg_error {return puppy_title(project,cg_error);}
     if !puppy_anchor && hit {
         puppy_join_select(hit);puppy_anchor=1;puppy_ax=load64(cursor);puppy_ay=load64(cursor+8);
+        if closed {return puppy_title(project,"Drag a spline point");}
     }
     return puppy_title(project,puppy_draft_hint());
 }
-fn puppy_join_preview(project,id) {
-    let nodes=pc_nodes(cad_project_part(project));let frame=ps_anchor_frame(nodes,id,j_parse(puppy_join_source+24));
+fn puppy_join_preview(model,id) {
+    let nodes=pc_nodes(cad_project_part(model));let frame=ps_anchor_frame(nodes,id,j_parse(puppy_join_source+24));
     if !frame {return 0;}let arc=ps_tangent_arc("preview",frame,cg_v(puppy_mx,puppy_my,0));if !arc {return 0;}
     let node=j_object();cg_j_text(node,"type","sketchArc");j_add(node,"arc",arc);return pc_arc_path(node);
 }
@@ -81,7 +93,8 @@ fn puppy_join_event(event) {
     if !puppy_join_drag && (kind!=GUI_MOUSE_DOWN || gui_event_button(event)!=1 || y<76) {return 0;}
     let project=cad_project_open(puppy_history+24);let sk=j_string(puppy_draft_sketch(project),"id");
     if !puppy_join_drag {
-        let node=pc_find(pc_nodes(cad_project_part(project)),j_string(j_parse(puppy_join_source+24),"entityId"));
+        let model=puppy_sketch_model(project,sk);if !model {return puppy_title(project,cg_error);}
+        let node=pc_find(pc_nodes(cad_project_part(model)),j_string(j_parse(puppy_join_source+24),"entityId"));
         let rows=puppy_join_handles(node);let at=puppy_draft_point(x,y);let i=0;let best=8000000000/puppy_draft_scale+1;let hit=0;
         while i<cg_count(rows) {let row=cg_at(rows,i);let d=pc_line_span(load64(row),at);if d<best {best=d;hit=row;}i=i+1;}
         if !hit {return 0;}puppy_join_drag=puppy_snapshot(j_encode(load64(hit+8)));puppy_join_down_x=x;puppy_join_down_y=y;
@@ -92,8 +105,13 @@ fn puppy_join_event(event) {
     if kind!=GUI_MOUSE_MOVE && !release {if kind==GUI_WHEEL {return 1;}return 0;}
     puppy_join_clear_preview();let dx=x-puppy_join_down_x;let dy=puppy_join_down_y-y;
     if cg_abs(dx)<2 && cg_abs(dy)<2 {if release {puppy_join_end_drag();}return puppy_title(project,puppy_draft_hint());}
+    let model=puppy_sketch_model(project,sk);
     let pt=cg_v(puppy_join_origin_x+dx*1000000000/puppy_draft_scale,puppy_join_origin_y+dy*1000000000/puppy_draft_scale,0);
-    let changed=cad_project_move_smooth_point(project,sk,j_parse(puppy_join_drag+24),pc_json_point(pt));
+    let changed=0;
+    if model {
+        changed=cad_project_move_smooth_point(model,sk,j_parse(puppy_join_drag+24),pc_json_point(pt));
+        changed=puppy_sketch_result(project,sk,changed);
+    }
     if !changed {if release {puppy_join_end_drag();}return puppy_title(project,cg_error);}
     if release {puppy_join_end_drag();puppy_push(changed);return puppy_title(changed,"Smooth point moved");}
     puppy_join_preview_doc=puppy_snapshot(j_encode(changed));return puppy_title(changed,"Dragging joined curve");
