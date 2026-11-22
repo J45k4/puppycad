@@ -18,8 +18,8 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
   tree and choose **Open assembly**. Use **Insert** to place parts and
   **Mate** to constrain how they move.
 - **Part** shows the solid and its features. Select a part in the tree and
-  choose **Open part**. Use **Edit sketch** to open its current sketch, or
-  select a specific sketch under that part.
+  choose **Open part**. Use **Sketch** in the toolbar to open its current
+  sketch, or select a specific sketch under that part.
 - **Sketch** provides the 2D drawing and dimension tools. Choose **Done
   sketch** to return to the owning part, even if the sketch has no solid.
   F12 switches between Part and Sketch. Extrude and Revolve create a feature
@@ -31,6 +31,8 @@ to an existing solid, then click its face. Keys 1, 2, and 3 select a plane
 while the chooser is open. Escape cancels.
 
 Save writes all of the items and their sketches to the same PCAD file.
+The curved arrows in the toolbar undo and redo edits. A dim arrow marks
+an unavailable action. Ctrl+Z and Ctrl+Y are available from the keyboard.
 
 The shared Flexscript CAD library evaluates the selected part or assembly.
 The native editor draws the resulting

@@ -86,6 +86,72 @@ fn puppy_bar_button(rgb,w,x,width,label) {
     puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
     return puppy_bar_text(rgb,w,x+8,60,label,x+width);
 }
+// Blend 16×16 masks into the toolbar texture. The marks . + # encode increasing coverage.
+fn puppy_bar_icon(rgb,w,x,y,mask,tone,mirror) {
+    let row=0;while row<16 {
+        let line=cg_at(mask,row);let col=0;while col<16 && x+col<w {
+            let sample=col;if mirror {sample=15-col;}
+            let mark=load8(line+sample);
+            let coverage=0;
+            if mark==46 {coverage=1;}else if mark==43 {coverage=2;}else if mark==35 {coverage=3;}
+            if coverage && x+col>=0 {
+                let pixel=rgb+((y+row)*w+x+col)*4;
+                let channel=0;while channel<3 {
+                    store8(pixel+channel,(load8(pixel+channel)*(3-coverage)+tone*coverage)/3);
+                    channel=channel+1;
+                }
+            }
+            col=col+1;
+        }
+        row=row+1;
+    }
+}
+fn puppy_bar_history(rgb,w,x,width,redo) {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"      +.        ");
+    cg_push(mask,"     ##.        ");
+    cg_push(mask,"   .###+..      ");
+    cg_push(mask,"  .########+.   ");
+    cg_push(mask," +###########.  ");
+    cg_push(mask," +############  ");
+    cg_push(mask,"  .###########+ ");
+    cg_push(mask,"   .###.   .### ");
+    cg_push(mask,"     +#.     +# ");
+    cg_push(mask,"      +.      # ");
+    cg_push(mask,"              . ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    let offset=0;if redo {offset=8;}
+    let tone=126;if load64(puppy_history+offset) {tone=236;}
+    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    return puppy_bar_icon(rgb,w,x+(width-16)/2,48,mask,tone,redo);
+}
+fn puppy_bar_sketch(rgb,w,x,width,label) {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"          +##.  ");
+    cg_push(mask,"         +#++#. ");
+    cg_push(mask,"        +#+#.+# ");
+    cg_push(mask,"       +#. +#+# ");
+    cg_push(mask,"      +#.   ##. ");
+    cg_push(mask,"     +#.   +#.  ");
+    cg_push(mask,"    +#.   +#.   ");
+    cg_push(mask,"   +#.   +#.    ");
+    cg_push(mask,"  .#.   +#.     ");
+    cg_push(mask,"  ++   +#.      ");
+    cg_push(mask,"  #. .+#.       ");
+    cg_push(mask," .####+.        ");
+    cg_push(mask," +#+.           ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    puppy_bar_icon(rgb,w,x+5,47,mask,236,0);
+    puppy_bar_rect(rgb,w,x+5,62,15,1,143,217,184);
+    return puppy_bar_text(rgb,w,x+25,60,label,x+width-4);
+}
 fn puppy_value_button_hit(x) {
     if puppy_draft || puppy_empty {return 0;}
     let left=12;if !puppy_sketch {left=98;if puppy_isolated {left=194;}}
@@ -253,7 +319,7 @@ fn puppy_toolbar_build(w) {
         puppy_bar_text(rgb,w,w-497,25,"Loft",w-429);
     }
     if puppy_status {puppy_bar_text(rgb,w,title_end+8,25,puppy_status+24,status_edge);}
-    puppy_bar_button(rgb,w,12,52,"Undo");puppy_bar_button(rgb,w,70,52,"Redo");
+    puppy_bar_history(rgb,w,12,52,0);puppy_bar_history(rgb,w,70,52,1);
     puppy_bar_button(rgb,w,128,52,"Save");
     if cad_project_is_studio(project) {
         if puppy_studio_field(project) {
@@ -300,12 +366,12 @@ fn puppy_toolbar_build(w) {
         puppy_bar_text(rgb,w,label_x,60,label,w-140);
     }
     if !puppy_draft && cad_project_part(project) {
-        puppy_bar_button(rgb,w,452,108,"New sketch");
+        puppy_bar_sketch(rgb,w,452,108,"New sketch");
         if puppy_picking_face {puppy_bar_rect(rgb,w,452,66,108,2,143,217,184);}
 
         if puppy_draft_sketch(project) {
-            let view="Edit sketch";if puppy_sketch {view="Part";}
-            puppy_bar_button(rgb,w,288,84,view);
+            if puppy_sketch {puppy_bar_button(rgb,w,288,84,"Part");}
+            else {puppy_bar_sketch(rgb,w,288,84,"Sketch");}
         }
         if feature {puppy_bar_button(rgb,w,568,80,"History");}
     }
@@ -488,7 +554,13 @@ fn puppy_compact_bar(rgb,w,project,click) {
     puppy_bar_button(rgb,w,6,28,"‹");puppy_bar_button(rgb,w,w-34,28,"›");
     let i=0;while i<slots {
         let entry=cg_at(rows,puppy_bar_page*slots+i);
-        if entry {puppy_bar_button(rgb,w,36+i*cell,cell-3,load64(entry));}
+        if entry {
+            let x=36+i*cell;let width=cell-3;let label=load64(entry);
+            if m_eq(label,"Undo") || m_eq(label,"Redo") {puppy_bar_history(rgb,w,x,width,m_eq(label,"Redo"));}
+            else if m_eq(label,"Edit sketch") {puppy_bar_sketch(rgb,w,x,width,"Sketch");}
+            else if m_eq(label,"New sketch") {puppy_bar_sketch(rgb,w,x,width,label);}
+            else {puppy_bar_button(rgb,w,x,width,label);}
+        }
         i=i+1;
     }
     return 1;

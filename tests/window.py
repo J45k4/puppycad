@@ -225,8 +225,51 @@ with tempfile.TemporaryDirectory() as tmp:
         app,window=open_app(blank,"Click two rectangle corners",design_tree=True)
         click(window,900,20)
         verify(window,"Part workspace")
+
+        from PIL import Image
+
+        def toolbar_frame(name):
+            path=output_dir/name
+            subprocess.run(["magick","import","-window",hex(window),path],check=True)
+            with Image.open(path) as image:
+                return image.convert("RGB")
+
+        def arrow_tones(frame,undo_x,redo_x):
+            return tuple(frame.crop((x,48,x+16,64)).getextrema()[0][1] for x in (undo_x,redo_x))
+
+        toolbar=toolbar_frame("toolbar-sketch-icons.png")
+        assert arrow_tones(toolbar,30,88)==(126,126)
+        for x in (293,457):
+            assert toolbar.getpixel((x,62))==(143,217,184)
+
+        xlib.XResizeWindow.argtypes = [pointer, XID, C.c_uint, C.c_uint]
+        xlib.XResizeWindow(connection,window,420,460)
+        xlib.XSync(connection,0)
+        time.sleep(.22)
+        compact=toolbar_frame("toolbar-compact-history.png")
+        assert compact.size==(420,460)
+        assert arrow_tones(compact,84,200)==(126,126)
+        click(window,395,55)
+        compact=toolbar_frame("toolbar-compact-sketch.png")
+        for x in (41,157):
+            assert compact.getpixel((x,62))==(143,217,184)
+        xlib.XResizeWindow(connection,window,960,640)
+        xlib.XSync(connection,0)
+        time.sleep(.22)
+
         click(window,325,55)
         verify(window,"Editing Sketch 1")
+        click(window,440,378)
+        click(window,520,338)
+        verify(window,"Sketch edited")
+        assert arrow_tones(toolbar_frame("toolbar-undo.png"),30,88)==(236,126)
+        click(window,38,55)
+        assert arrow_tones(toolbar_frame("toolbar-redo.png"),30,88)==(126,236)
+        click(window,96,55)
+        key("Control_L+s")
+        verify(window,"Saved")
+        graph=json.loads(blank.read_bytes())["items"][0]["data"]["cad"]
+        assert sum(n["type"]=="sketchCornerRectangle" for n in graph["nodes"])==1
         key("Escape")
         app.wait(3)
 
@@ -281,7 +324,6 @@ with tempfile.TemporaryDirectory() as tmp:
         app.wait(3)
 
         # The first launch shows the authored tree before the sketch has a solid.
-        from PIL import Image
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
         click(window,64,212,button=3)  # Sketch 1
