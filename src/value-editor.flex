@@ -20,8 +20,8 @@ fn puppy_active_field(project) {
         let distance=puppy_distance_row();if distance {return cg_v(distance,pc_serial_number(j_get(distance,"measured"),6,1000000,1500),puppy_distance_name(distance));}
         let row=puppy_line_row();if !row {return 0;}
         if j_get(row,"field") {
-            let unit="  mm";if m_eq(j_string(row,"field"),"arcSweep") {unit="  deg";}
-            return cg_v(row,pc_serial_number(j_get(row,"measured"),6,1000000,1000),m_cat(puppy_curve_label(row),unit));
+            let unit="  mm";if pc_angular_field(j_string(row,"field")) {unit="  deg";}
+            return cg_v(row,pc_field_number(j_get(row,"measured"),j_string(row,"field")),m_cat(puppy_curve_label(row),unit));
         }
         return cg_v(row,pc_pose_number(j_get(row,"length")),m_cat(j_string(row,"id")," / Length  mm"));
     }

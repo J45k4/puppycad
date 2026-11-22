@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`9a630069e57bf094534a4c9a1debe8538d4960fb` includes the shared library and
+`aabb970fefdc879cf8fe221ee1c0af371a3611dc` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -602,8 +602,18 @@ Biscuit’s checked program changes its quarter-ellipse fixture to the
 complementary −270° arc. Two frozen worker builds reproduce the same STL
 and its independently calculated volume. Replacing the saved sweep with
 +90° keeps the endpoints coincident with the chord but disagrees with the
-formula. The worker then rejects the drawing. Sketch dimensions for ellipse
-axes and rotation and solver support for arc-end constraints remain open.
+formula. The worker then rejects the drawing. Constraints on an arc’s endpoints
+remain open.
+
+The F8 dimension editor drives full width, full height and rotation on
+ellipses and elliptic arcs. A native edit changes the washer’s first axis
+using `2 * #span`, sets its height to 24 mm, and rotates it to −30°. The
+test undoes and redoes the rotation and toggles it between driving and
+reference. The reopened 60 × 24 mm washer matches the Rust 3MF. Replaying
+the edits in Biscuit produces the same CAD graph. Two frozen builds verify
+STL byte identity, volume and the 128 oriented outer rim vertices. Changing
+the saved width to 61 mm without updating its driver makes the worker reject
+the export. See `workdir/flexscript/ellipse-rotation-dimension.png`.
 
 The headless library reads faceted STEP bodies from Part 21 files and
 validates their closed shells. All five definitions in the native sensor

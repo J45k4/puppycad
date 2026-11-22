@@ -166,6 +166,14 @@ measurement. A driving diameter updates a reference radius when the sketch
 variable changes. Delete removes the selected annotation. Circle centers
 can also anchor distances or be dragged subject to their constraints.
 
+For an ellipse, open **Dimensions** (F8) and click the rim to select
+**Width**. Tab cycles through **Height** and **Rotation**. Both lengths
+measure the full axis. Rotation uses degrees counterclockwise from sketch X.
+F2 accepts a value or expression such as `2 * #span` or `-0.5 rad`.
+On an elliptic arc, clicking the curve selects sweep first, followed by
+the same three fields. **Set reference** releases the selected driver and
+displays the measured value. **Set driving** fixes its current value.
+
 Click a circular arc to select its radius. Tab selects its signed sweep.
 Click an elliptic arc to select its sweep directly. F2 accepts an angle in
 degrees or radians, including expressions such as `-2 * #turn`. The two

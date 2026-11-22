@@ -413,6 +413,17 @@ fn puppy_draw_draft() {
             let a=cg_v(load64(c),load64(c+8),0);if m_eq(j_string(puppy_line_row(),"field"),"diameter") {store64(a,load64(a)-r);}
             let guide=cg_array();cg_push(guide,a);cg_push(guide,cg_v(load64(c)+r,load64(c+8),0));
             if !puppy_draft_path(guide,1,w,h) {return 0;}
+        }else if highlight && puppy_line_report && pc_ellipse_entity(entity) && pc_axis_field(j_string(puppy_line_row(),"field")) {
+            let geom=pc_curve_geometry(entity);let center=pc_uv(j_get(geom,"center"));let angle=pc_ellipse_rotation(geom);
+            let field=j_string(puppy_line_row(),"field");let axis="width";
+            if m_eq(field,"height") {axis="height";angle=f64_add(angle,0x3ff921fb54442d18);}
+            let radius=f64_from_i64(pc_pose_number(j_get(geom,axis))/2);
+            let dx=f64_to_i64_round(f64_mul(radius,f64_cos(angle)));let dy=f64_to_i64_round(f64_mul(radius,f64_sin(angle)));
+            let guide=cg_array();let x=load64(center);let y=load64(center+8);
+            if m_eq(field,"rotation") {cg_push(guide,cg_v(x+f64_to_i64_round(radius),y,0));cg_push(guide,center);}
+            else {cg_push(guide,cg_v(x-dx,y-dy,0));}
+            cg_push(guide,cg_v(x+dx,y+dy,0));
+            if !puppy_draft_path(guide,3,w,h) {return 0;}
         }else if highlight && puppy_line_report && !offset && pc_finite_arc(entity) && j_get(puppy_line_row(),"field") {
             let c=pc_uv(j_get(pc_curve_geometry(entity),"center"));let guide=cg_array();
             cg_push(guide,c);cg_push(guide,cg_at(points,0));

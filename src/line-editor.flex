@@ -33,7 +33,9 @@ fn puppy_offset_field(row) {
 fn puppy_curve_label(row) {
     if po_kind(row) {return "Offset";}
     let label="Diameter";if m_eq(j_string(row,"field"),"radius") {label="Radius";}
-    if m_eq(j_string(row,"field"),"arcSweep") {label="Sweep";}
+    let field=j_string(row,"field");
+    if m_eq(field,"arcSweep") {label="Sweep";}if m_eq(field,"rotation") {label="Rotation";}
+    if m_eq(field,"width") {label="Width";}if m_eq(field,"height") {label="Height";}
     if j_value(j_get(row,"reference")) {return m_cat("Reference ",label);}return label;
 }
 fn puppy_distance_row() {
@@ -49,7 +51,7 @@ fn puppy_distance_name(row) {
 fn puppy_line_label() {
     if puppy_symmetry_mode {return puppy_symmetry_hint();}
     let row=puppy_line_row();if !row && !puppy_distance_row() {return "Choose New distance to measure sketch points";}let value="";if row {
-        if j_get(row,"field") {value=m_cat(puppy_curve_label(row),m_cat(" ",puppy_display_number(pc_serial_number(j_get(row,"measured"),6,1000000,1000))));}
+        if j_get(row,"field") {value=m_cat(puppy_curve_label(row),m_cat(" ",puppy_display_number(pc_field_number(j_get(row,"measured"),j_string(row,"field")))));}
         else {value=puppy_display_number(pc_pose_number(j_get(row,"length")));}
     }
     let distance=puppy_distance_row();
@@ -57,7 +59,7 @@ fn puppy_line_label() {
         value=puppy_display_number(pc_serial_number(j_get(distance,"measured"),6,1000000,1500));
         value=m_cat(puppy_distance_name(distance),m_cat("   ",value));row=distance;
     }
-    let unit=" mm";if m_eq(j_string(row,"field"),"arcSweep") {unit=" deg";}
+    let unit=" mm";if pc_angular_field(j_string(row,"field")) {unit=" deg";}
     let report=j_parse(puppy_line_report+24);let text=m_cat(j_string(row,"id"),m_cat("   ",m_cat(value,unit)));
     return m_cat(text,m_cat("   DOF ",m_int(j_integer(report,"degrees_of_freedom"))));
 }
@@ -132,6 +134,7 @@ fn puppy_line_actions() {
     }else if j_get(puppy_line_row(),"field") {
         let row=puppy_line_row();let label="Set diameter";if m_eq(j_string(row,"field"),"radius") {label="Set radius";}
         if m_eq(j_string(row,"field"),"arcSweep") {label="Set sweep";}
+        if pc_axis_field(j_string(row,"field")) {label=m_cat("Set ",j_string(row,"field"));}
         if !j_value(j_get(row,"reference")) {puppy_compact_button(buttons,label,59,0);}
         puppy_compact_button(buttons,"Next field",43,0);puppy_compact_button(buttons,"Next sketch",19,0);
         label="Set reference";if j_value(j_get(row,"reference")) {label="Set driving";}
@@ -240,6 +243,7 @@ fn puppy_line_command(project,key) {
         if distance && j_value(j_get(distance,"reference")) {return puppy_title(project,"Reference distance is measured");}
         if !distance && j_value(j_get(circle,"reference")) {
             let node=pc_find(pc_nodes(cad_project_part(project)),j_string(circle,"id"));
+            if pc_axis_field(j_string(circle,"field")) {return puppy_title(project,"Reference ellipse dimension is measured");}
             if pc_finite_arc(node) {return puppy_title(project,"Reference arc dimension is measured");}
             return puppy_title(project,"Reference circle dimension is measured");
         }
@@ -287,10 +291,12 @@ fn puppy_line_down(project,x,y) {
             if d<best {best=d;selected=i;}
         }else {
             let node=pc_find(pc_nodes(cad_project_part(project)),j_string(dim,"id"));
-            if pc_finite_arc(node) && (!pc_circular_arc(node) || m_eq(j_string(dim,"field"),"radius")) {
-                let path=pc_arc_path(node);let k=1;
-                while k<cg_count(path) {
-                    let a=cg_at(path,k-1);let b=cg_at(path,k);let d=puppy_segment_distance(point,a,b);
+            let field=j_string(dim,"field");let closed=pc_ellipse_entity(node) && !pc_finite_arc(node) && m_eq(field,"width");
+            if closed || pc_finite_arc(node) && (m_eq(field,"radius") || !pc_circular_arc(node) && m_eq(field,"arcSweep")) {
+                let path=0;if closed {path=pc_primitive_loop(node);}else {path=pc_arc_path(node);}
+                let k=1;let n=cg_count(path);
+                while n && k<n+closed {
+                    let a=cg_at(path,k-1);let b=cg_at(path,k%n);let d=puppy_segment_distance(point,a,b);
                     if d<best {best=d;selected=i;}k=k+1;
                 }
             }
