@@ -408,8 +408,11 @@ In a face sketch, **Use edges** in Conics or Shift+U projects the supporting
 face's straight boundary lines. **Pick edge** or U lets you click a straight
 body edge guide, and Escape leaves the picking tool. The blue projected lines
 follow their source and can form a profile. Their endpoints are fixed by
-the projection. Use **Construction** to turn selected lines into guides
-that do not contribute to a solid.
+the projection. The **Line** tool snaps to a projected edge within six
+pixels. A line across a closed projected outline splits it into separate
+profiles. Click **Profile** or press P to cycle through them. The amber
+outline shows the region used by the next extrusion. **Construction**
+turns selected lines into guides and excludes them from the profile.
 
 | Control | Action |
 | --- | --- |
@@ -434,7 +437,8 @@ and spline segments on XY, XZ and YZ reference planes
 and on the cap or side faces of earlier extrusions. Editing a supporting
 extrusion rebuilds its face sketches. A cut on a face runs inward by default.
 It uses the saved segment counts and profile IDs, including holes, islands
-and disconnected regions. Touching or intersecting loops produce an error.
+and disconnected regions. The evaluator rejects touching or intersecting
+contours outside projected subdivisions.
 Extrusions support blind, symmetric, through-all or up-to-body extents and
 cut/join operations. The evaluator respects feature order,
 suppression and rollback. Width and height edits preserve the rectangle centre

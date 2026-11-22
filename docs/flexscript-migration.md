@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`0ba550b52da8863d4091c543f1e83f9842d00d4c` includes the shared library and
+`b487445f6c07ae15f34392f3e0def604e1f4f3c9` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -302,7 +302,7 @@ them. Biscuit's checked program and frozen worker both built a v4 quarter
 ellipse closed with a chord. Its mesh measures 10 × 5 × 10 mm and encloses
 132.68343 mm³. The legacy per-part volume report sums quantized tetrahedra
 and returns 132.607 mm³ for this example. General constraint-driven curve
-editing and projected arrangements remain open.
+editing remains open.
 
 Face-attached sketches now resolve saved side and cap IDs against the generating
 extrusion, including its hole boundaries. The face-sketch fixture’s pocket and
@@ -328,6 +328,17 @@ and signed volume. Biscuit's checked VM edits the same saved drawing to
 82 mm and matches both frozen builds byte for byte at 1,230,000 mm³.
 Separate frozen jobs prove that a stale endpoint cache rebuilds to the
 same STL as a refreshed drawing.
+
+Crossing straight lines can divide a projected outline into separate sketch
+profiles. The line tool snaps to the projected boundary and the sketch
+viewport highlights the selected region. The headless native test picks
+both regions of an off-center side cut, saves and reopens each drawing, and
+matches Rust's profile order and volumes of 921,000 and 939,000 mm³. The SDK
+tests cover a hole contained in one region and confirm that reversing the
+first boundary segment reverses the order of the two regions. Biscuit's
+checked VM and two frozen builds per region produced the same STL bytes as
+the native editor from both saved drawings.
+
 After orbiting the camera, the test also picked the right wall and joined
 a 20 × 20 × 10 mm boss. Both exports reached X = 90 mm and placed the boss
 between Z = 20 and 40 mm. Biscuit's checked VM picked a cap and verified the

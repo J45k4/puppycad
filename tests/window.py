@@ -579,6 +579,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,715,55)  # Use edges
         verify(window,"Face edges already projected")
         assert save_projected_data()==created
+        projected_outline=projected_path.read_bytes()
         key("o")
         verify(window,"|  cut")
         key("e")
@@ -631,6 +632,76 @@ with tempfile.TemporaryDirectory() as tmp:
         assert projected_boundary(save_projected_data(),74)==links
         key("Escape")
         app.wait(3)
+
+        # Draw a divider between projected edges. Both clicks miss the lines by
+        # three pixels, so snapped endpoints are required for two closed regions.
+        divider_path=Path(tmp)/"Projected divider.pcad"
+        divider_path.write_bytes(projected_outline)
+        app,window=open_app(divider_path,"Sketch 2  |  Click two rectangle corners")
+        key("l")
+        verify(window,"Click the two endpoints")
+        click(window,620,355)
+        verify(window,"Click the line endpoint")
+        click(window,620,121)
+        verify(window,"Sketch edited")
+        key("Control_L+s")
+        verify(window,"Saved")
+        divider_source=divider_path.read_bytes()
+        divider_graph=json.loads(divider_source)["items"][0]["data"]["cad"]
+        before_ids={n["id"] for n in created["cad"]["nodes"]}
+        divider,=[n for n in divider_graph["nodes"] if n["id"] not in before_ids]
+        assert (divider["type"],divider["sketchId"])==("sketchLine","native-sketch-2")
+        assert (divider["p0"],divider["p1"])==({"x":35,"y":0},{"x":35,"y":60})
+        key("Escape")
+        app.wait(3)
+
+        # Each region makes a different cut, according to the stored profile ID.
+        from PIL import Image
+
+        for profile,volume in ((1,921000),(2,939000)):
+            cut_path=Path(tmp)/f"Projected divider profile {profile}.pcad"
+            cut_path.write_bytes(divider_source)
+            app,window=open_app(cut_path,"Sketch 2  |  Click two rectangle corners")
+            key("p")
+            verify(window,"Profile 2")
+            if profile==1:
+                key("p")
+                verify(window,"Profile 1")
+            outline=output_dir/f"projected-divider-outline-{profile}.png"
+            subprocess.run(["magick","import","-window",hex(window),outline],check=True)
+            with Image.open(outline) as image:
+                rgb=image.convert("RGB")
+                left=rgb.crop((470,77,617,362))
+                right=rgb.crop((623,77,884,362))
+                counts=[dict((color,count) for count,color in region.getcolors(region.width*region.height))
+                        .get((255,176,69),0) for region in (right,left)]
+                assert counts[profile-1]>300 and counts[2-profile]==0, counts
+            key("o")
+            verify(window,"|  cut")
+            click(window,400,55)
+            verify(window,"Extrusion preview / Cut / Blind")
+            capture(window,f"projected-divider-preview-{profile}.png",False,surface=(76,167,192))
+            key("Return")
+            verify(window,"Extruded")
+            key("Control_L+s")
+            verify(window,"Saved")
+            cut_nodes=json.loads(cut_path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+            divider_cut,=[n for n in cut_nodes if n.get("operation")=="cut"]
+            assert divider_cut["profileId"]==f"native-sketch-2-profile-{profile}" and divider_cut["depth"]==10
+            assert next(n for n in cut_nodes if n["id"]==divider["id"])==divider
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(cut_path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            ref=Path(tmp)/f"projected-divider-rust-{profile}.stl"
+            subprocess.run([root/"rust/target/debug/puppycad","--export",cut_path,ref],check=True)
+            native_stl=cut_path.with_suffix(".stl")
+            assert triangulation(native_stl)==triangulation(ref)==([(-80,80),(-50,50),(0,60)],volume)
+            shutil.copyfile(cut_path,output_dir/f"projected-divider-profile-{profile}.pcad")
+            shutil.copyfile(native_stl,output_dir/f"projected-divider-profile-{profile}.stl")
+            key("Escape")
+            app.wait(3)
 
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"

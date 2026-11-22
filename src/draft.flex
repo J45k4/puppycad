@@ -124,6 +124,10 @@ fn puppy_draft_point(x,y) {
     return cg_v(puppy_draft_cx+(x-gui_width(window)/2)*1000000000/puppy_draft_scale,
         puppy_draft_cy+((gui_height(window)+76)/2-y)*1000000000/puppy_draft_scale,0);
 }
+fn puppy_projected_snap(nodes,sketch,point) {
+    let tolerance=puppy_limit(6000000000/puppy_draft_scale,1,500000000);
+    return cad_sketch_snap_projected_edges(nodes,sketch,point,tolerance);
+}
 fn puppy_tool_name() {
     if puppy_tool==-1 {return "point";}if puppy_tool==-2 {return "constructionPoint";}
     if puppy_tool==3 {return "arc";}if puppy_tool==4 {return "fit";}
@@ -282,6 +286,10 @@ fn puppy_split_click(project,p) {
 }
 fn puppy_draft_click(x,y) {
     let project=cad_project_open(puppy_history+24);let p=puppy_draft_point(x,y);
+    if puppy_tool==2 && !puppy_revolve_axis {
+        let snap=puppy_projected_snap(pc_nodes(cad_project_part(project)),puppy_draft_sketch(project),p);
+        if snap {p=snap;}
+    }
     puppy_mx=load64(p);puppy_my=load64(p+8);
     if puppy_revolve_axis {
         if puppy_anchor {return puppy_draft_revolve(project,cg_v(puppy_ax,puppy_ay,0),p);}
@@ -491,10 +499,13 @@ fn puppy_draw_draft() {
     if !w || !h {return 1;}
     let source=puppy_history;if puppy_line_preview {source=puppy_line_preview;}if puppy_pattern_preview {source=puppy_pattern_preview;}if puppy_join_preview_doc {source=puppy_join_preview_doc;}
     let project=cad_project_open(source+24);let sketch=puppy_draft_sketch(project);let id=j_string(sketch,"id");
+    let nodes=pc_nodes(cad_project_part(project));let snap=0;
     if !puppy_revolve_axis && puppy_tool>=0 && puppy_tool<3 && puppy_anchor && (puppy_ax!=puppy_mx || puppy_ay!=puppy_my) {
-        cad_project_add_primitive(project,id,puppy_tool_name(),cg_v(puppy_ax,puppy_ay,0),cg_v(puppy_mx,puppy_my,0));cg_begin();
+        let end=cg_v(puppy_mx,puppy_my,0);
+        if puppy_tool==2 {snap=puppy_projected_snap(nodes,sketch,end);if snap {end=snap;}}
+        cad_project_add_primitive(project,id,puppy_tool_name(),cg_v(puppy_ax,puppy_ay,0),end);cg_begin();
     }
-    let paths=cad_sketch_paths(pc_nodes(cad_project_part(project)),id);
+    let paths=cad_sketch_paths(nodes,id);
     if !paths {return 0;}
     render_gl(puppy_device,"glUseProgram",puppy_sketch_program,0,0,0,0,0);
     render_gl(puppy_device,"glDisable",0x0b71,0,0,0,0,0);
@@ -557,6 +568,7 @@ fn puppy_draw_draft() {
     let pattern=0;let sources=0;if puppy_patterns {pattern=puppy_pattern_rel(project);if puppy_pattern_sources {sources=j_parse(puppy_pattern_sources+24);}}
     if puppy_construction_ids {sources=j_parse(puppy_construction_ids+24);}
     let projected=puppy_projected_entities(sketch);
+    let projected_profile=0;
     let i=0;
     while i<cg_count(paths) {
         let path=cg_at(paths,i);let points=load64(path);let mode=3;
@@ -572,6 +584,7 @@ fn puppy_draw_draft() {
         let src=pc_first(sources);while src {if m_eq(j_value(src),j_string(entity,"id")) {highlight=1;}src=load64(src+24);}
         let style=puppy_loft_open;
         if j_get(projected,j_string(entity,"id")) {style=7;}
+        else if projected && m_eq(j_string(entity,"type"),"sketchLine") && !cad_sketch_is_construction(entity) {projected_profile=1;}
         if cad_sketch_is_construction(entity) {style=6;if mode==0 {style=3;}}
         if highlight {style=2;}
         render_gl(puppy_device,"glUniform1i",color,style,0,0,0,0);
@@ -613,6 +626,12 @@ fn puppy_draw_draft() {
         }
         i=i+1;
     }
+    if snap {
+        let marker=cg_array();cg_push(marker,snap);
+        render_gl(puppy_device,"glUniform1i",color,2,0,0,0,0);render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);
+        if !puppy_draft_path(marker,0,w,h) {return 0;}
+        render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
+    }
     if cg_count(split_cuts) {
         render_gl(puppy_device,"glUniform1i",color,5,0,0,0,0);render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);
         if !puppy_draft_path(split_cuts,0,w,h) {return 0;}render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
@@ -638,9 +657,11 @@ fn puppy_draw_draft() {
         let ends=cg_array();cg_push(ends,a);cg_push(ends,b);render_gl(puppy_device,"glUniform1i",color,2,0,0,0,0);
         render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);puppy_draft_path(ends,0,w,h);render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
     }
-    if puppy_loft_open {
-        render_gl(puppy_device,"glUniform1i",color,0,0,0,0,0);
-        let region=cad_project_profile(pc_nodes(cad_project_part(project)),sketch,pc_profile_ref(id,puppy_profile_index));
+    if puppy_loft_open || (projected_profile && !puppy_anchor && !puppy_revolve_axis && puppy_tool!=-7 && puppy_design_available()) {
+        let style=0;if !puppy_loft_open {style=2;}
+        render_gl(puppy_device,"glUniform1i",color,style,0,0,0,0);
+        cg_begin();
+        let region=cad_project_profile(nodes,sketch,pc_profile_ref(id,puppy_profile_index));
         if region {
             i=0;while i<cg_count(region) {
                 if !puppy_draft_path(load64(cg_at(region,i)),2,w,h) {return 0;}i=i+1;
