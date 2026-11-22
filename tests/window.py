@@ -3408,6 +3408,7 @@ with tempfile.TemporaryDirectory() as tmp:
         app, window = open_app(damaged)
         key("Control_L+Alt_L+e")
         verify(window, "Exported")
+        reference = Path(tmp)/"failed-feature-rust.3mf"
         subprocess.run([root/"rust/target/debug/puppycad","--export",damaged,reference],check=True)
         compare_solid_packages(damaged.with_suffix(".3mf"),reference)
         key("Escape")
