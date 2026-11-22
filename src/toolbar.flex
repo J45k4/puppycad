@@ -285,9 +285,9 @@ fn puppy_toolbar_build(w) {
         }
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
-    if puppy_plane_chooser || puppy_replace_target {
+    if puppy_plane_chooser || puppy_assembly_choice_kind {
         if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
-        let actions=0;if puppy_replace_target {actions=puppy_replace_actions();}else {actions=puppy_plane_actions();}
+        let actions=0;if puppy_assembly_choice_kind {actions=puppy_assembly_choice_actions();}else {actions=puppy_plane_actions();}
         puppy_action_bar(actions,rgb,w,-1);
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;
         return 1;
@@ -340,10 +340,19 @@ fn puppy_toolbar_build(w) {
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_line_report {
-        let label=puppy_line_label();puppy_bar_text(rgb,w,12,25,label,w/2);
         let status_right=w-8;
         if puppy_direction_available() {status_right=puppy_direction_button_left(w)-8;puppy_direction_draw(rgb,w);}
-        if puppy_status && !m_eq(label,puppy_status+24) {puppy_bar_text(rgb,w,w/2,25,puppy_status+24,status_right);}
+        let path_edge=puppy_limit(w/2,12,status_right);
+        let status_x=puppy_toolbar_breadcrumbs(project,rgb,w,12,path_edge)+8;
+        let label=puppy_line_label();
+        if puppy_status && !m_eq(label,puppy_status+24) {
+            let label_end=status_x+puppy_toolbar_text_width(label)+16;
+            if label_end+puppy_toolbar_text_width(puppy_status+24)<=status_right {
+                puppy_bar_text(rgb,w,status_x,25,label,label_end-8);status_x=label_end;
+            }
+            label=puppy_status+24;
+        }
+        puppy_bar_text(rgb,w,status_x,25,label,status_right);
         if w<800 {puppy_compact_bar(rgb,w,project,-1);}else {puppy_action_bar(puppy_line_actions(),rgb,w,-1);}
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
@@ -480,9 +489,10 @@ fn puppy_breadcrumb_target(x,y) {
 }
 fn puppy_breadcrumb_click(project,x,y) {
     let target=puppy_breadcrumb_target(x,y);
+    if !target {return 0;}
+    if puppy_line_report {puppy_line_end();}
     if target==1 {return puppy_workspace_return_to_assembly(project);}
-    if target==2 {return puppy_workspace_return_to_part(project);}
-    return 0;
+    return puppy_workspace_return_to_part(project);
 }
 fn puppy_ui_upload(rgb,w,h) {
     let args=m_take(88);gui__zero(args,88);

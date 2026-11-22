@@ -7,6 +7,7 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_connector_rename {return cg_v(0,0,"Connector ID");}
     if puppy_connector_slot>=0 {
         return puppy_connector_field(project,puppy_design_selected(puppy_design_rows(project)),puppy_connector_slot);
     }
@@ -164,6 +165,7 @@ fn puppy_number_close() {
     if puppy_offset_pick_id {puppy_drop(puppy_offset_pick_id);puppy_offset_pick_id=0;}
     puppy_placement_slot=-1;
     puppy_connector_slot=-1;
+    puppy_connector_rename=0;
     puppy_step_path_entry=0;
     if puppy_number_paste {gui_clipboard_cancel(puppy_number_paste);puppy_number_paste=0;}
     puppy_variable_slot=-1;puppy_drop(puppy_number_text);puppy_number_text=0;puppy_toolbar_dirty=1;
@@ -171,6 +173,7 @@ fn puppy_number_close() {
 }
 fn puppy_number_apply(project) {
     let text=puppy_number_text+24;
+    if puppy_connector_rename {return puppy_connector_rename_apply(project,text);}
     if puppy_revolve_open {return puppy_revolve_apply(project);}
     if puppy_profile_value_id {return puppy_profile_apply(project,text);}
     if puppy_sheet_entry {return puppy_sheet_entry_apply(project,text);}

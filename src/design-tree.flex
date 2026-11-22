@@ -2,7 +2,7 @@
 // Selection and expansion use document-scoped keys. They never enter model history.
 import "sketch-visibility.flex";
 import "connector-editor.flex";
-import "instance-replace.flex";
+import "assembly-choice.flex";
 
 global puppy_design_open=1;
 global puppy_design_focus=0;
@@ -23,7 +23,7 @@ fn puppy_design_available() {
         && !puppy_line_report && !puppy_number_text && !puppy_loft_open && !puppy_patterns && !puppy_edge_kind && !puppy_construction_ids;
 }
 fn puppy_design_toggle() {
-    if puppy_replace_target {return puppy_replace_cancel(cad_project_open(puppy_history+24));}
+    if puppy_assembly_choice_kind {return puppy_assembly_choice_cancel(cad_project_open(puppy_history+24));}
     puppy_design_menu_close();puppy_design_eye_clear();
     puppy_design_focus=0;puppy_search_focus(0);puppy_query_set("");puppy_design_open=puppy_tree_open || !puppy_design_open;puppy_tree_open=0;
     puppy_tree_dirty=1;return 1;
@@ -52,7 +52,7 @@ fn puppy_design_key(kind,id) {return m_cat(kind,m_cat(m_int(m_len(id)),m_cat("/"
 fn puppy_design_row(rows,parent,kind,node,label,open) {
     let id=j_string(node,"id");if !m_len(id) {id=label;}
     let key=puppy_design_key(kind,id);
-    if m_eq(kind,"connector") {key=m_cat(puppy_design_key("owner",j_string(node,"instanceId")),key);}
+    if m_eq(kind,"connector") {key=puppy_connector_key(j_string(node,"instanceId"),id);}
     let depth=0;if parent {key=m_cat(load64(parent+8),m_cat("/",key));depth=load64(parent+40)+1;store64(parent+56,1);}
     let row=m_take(96);gui__zero(row,96);
     store64(row,label);store64(row+8,key);store64(row+16,kind);store64(row+24,node);store64(row+32,parent);
@@ -170,13 +170,7 @@ fn puppy_design_studio(rows,project) {
 }
 fn puppy_design_rows(project) {
     let rows=cg_array();
-    if puppy_replace_target {
-        let instance=pc_find(j_get(j_get(cad_project_item(project),"data"),"instances"),puppy_replace_target+24);
-        let item=pc_first(j_get(project,"items"));
-        while item {
-            if puppy_replace_candidate(item,instance) {puppy_design_row(rows,0,"part",item,puppy_design_item_name(item,"part"),0);}
-            item=load64(item+24);
-        }
+    if puppy_assembly_choice_kind {puppy_assembly_choice_rows(rows,project);
     }else if cad_project_is_studio(project) {puppy_design_studio(rows,project);}else {
         let item=pc_first(j_get(project,"items"));let active=cad_project_item(project);
         while item {
@@ -338,10 +332,13 @@ fn puppy_design_menu_entries(project,row) {
     if !puppy_sketch && m_eq(load64(row+16),"extrude") && puppy_design_owner(row)==cad_project_part(project) {
         cg_push(entries,cg_v("Extrusion options",4,0));
     }
+    if puppy_connector_row(row) && puppy_design_owner(row)==cad_project_item(project) {
+        cg_push(entries,cg_v("Rename ID",7,0));cg_push(entries,cg_v("Attach to",8,0));
+    }
     return entries;
 }
 fn puppy_design_context(x,y) {
-    if puppy_replace_target {return 1;}
+    if puppy_assembly_choice_kind {return 1;}
     let h=gui_height(load64(puppy_device))-76;
     let project=cad_project_open(puppy_history+24);
     let row=puppy_design_hit(puppy_design_rows(project),y,h);
@@ -371,6 +368,8 @@ fn puppy_design_menu_activate(choice) {
             if command==4 {puppy_extrusion_begin(project,load64(row+24));}
             if command==5 {puppy_shell_begin(project,puppy_design_shell_part(project,row),0);}
             if command==6 {puppy_shell_begin(project,0,load64(row+24));}
+            if command==7 {puppy_connector_rename_begin(project,load64(row+24));}
+            if command==8 {puppy_connector_attach_begin(project,load64(row+24));}
         }
     }
     return 1;
@@ -477,16 +476,16 @@ fn puppy_design_eye_tooltip(rgb,w,h,y,label) {
 fn puppy_design_panel(w,h) {
     let rgb=m_take(w*h*4);puppy_ui_rect(rgb,w,h,0,0,w,h,30,43,47);
     puppy_ui_rect(rgb,w,h,w-1,0,1,h,74,96,95);
-    if puppy_replace_target {puppy_ui_text(rgb,w,h,13,23,"Replace part",w-8);}
+    if puppy_assembly_choice_kind {puppy_ui_text(rgb,w,h,13,23,puppy_assembly_choice_title(),w-8);}
     else {puppy_ui_text(rgb,w,h,13,23,"Design",w-35);puppy_ui_text(rgb,w,h,w-27,23,"‹",w-6);}
     puppy_ui_rect(rgb,w,h,10,35,w-20,30,19,30,33);let q=puppy_query();let hint=q;
-    if !m_len(q) {hint="Search design";if puppy_replace_target {hint="Search parts";}}puppy_ui_text(rgb,w,h,17,55,hint,w-36);
+    if !m_len(q) {hint="Search design";if puppy_assembly_choice_kind {hint=puppy_assembly_choice_search();}}puppy_ui_text(rgb,w,h,17,55,hint,w-36);
     if m_len(q) {puppy_ui_text(rgb,w,h,w-31,55,"×",w-12);}
     if puppy_search_active {puppy_ui_rect(rgb,w,h,10,63,w-20,2,143,217,184);}
     let project=cad_project_open(puppy_history+24);let rows=puppy_design_rows(project);
     let count=puppy_design_capacity(h);let max=cg_count(rows)-count;if max<0 {max=0;}
     puppy_design_scroll=puppy_limit(puppy_design_scroll,0,max);let i=0;let selected=puppy_design_selected(rows);
-    if puppy_replace_target {selected=cg_at(rows,puppy_replace_cursor);}
+    if puppy_assembly_choice_kind {selected=cg_at(rows,puppy_assembly_choice_cursor);}
     let eye_tip=0;let eye_y=0;
     while i<count && i+puppy_design_scroll<cg_count(rows) {
         let r=cg_at(rows,i+puppy_design_scroll);let x=10+load64(r+40)*13;let y=72+i*26;
@@ -511,11 +510,13 @@ fn puppy_design_panel(w,h) {
         puppy_ui_text(rgb,w,h,x+15,y+18,label,right);i=i+1;
     }
     if !cg_count(rows) {puppy_ui_text(rgb,w,h,14,93,"No matches",w-8);}
-    if selected && !puppy_replace_target {
+    if selected && !puppy_assembly_choice_kind {
         let node=load64(selected+24);let detail=j_string(node,"id");if !m_len(detail) {detail=load64(selected+16);}
         puppy_ui_rect(rgb,w,h,0,h-96,w,1,72,91,92);
         if puppy_connector_row(selected) && puppy_design_owner(selected)==cad_project_item(project) {
-            puppy_ui_text(rgb,w,h,13,h-80,load64(selected),w-8);
+            let label=load64(selected);
+            if !m_eq(label,detail) {label=m_cat(label,m_cat(" · ",detail));}
+            puppy_ui_text(rgb,w,h,13,h-80,label,w-8);
             puppy_connector_grid(rgb,w,h,project,selected);
         }else {
             puppy_ui_text(rgb,w,h,13,h-73,load64(selected),w-8);
@@ -530,13 +531,13 @@ fn puppy_design_panel(w,h) {
 }
 fn puppy_design_click(x,y) {
     let w=puppy_design_width();let h=gui_height(load64(puppy_device))-76;
-    if !puppy_replace_target && y<31 && x>=w-45 {return puppy_design_toggle();}
+    if !puppy_assembly_choice_kind && y<31 && x>=w-45 {return puppy_design_toggle();}
     puppy_design_focus=1;
     if y>=35 && y<65 {if x>=w-37 {puppy_query_set("");}return puppy_search_focus(1);}
     puppy_search_focus(0);
     let project=cad_project_open(puppy_history+24);let rows=puppy_design_rows(project);
-    if puppy_replace_target {
-        let row=puppy_design_hit(rows,y,h);if row {return puppy_replace_apply(project,load64(row+24));}return 1;
+    if puppy_assembly_choice_kind {
+        let row=puppy_design_hit(rows,y,h);if row {return puppy_assembly_choice_apply(project,load64(row+24));}return 1;
     }
     let selected=puppy_design_selected(rows);
     if y>=h-96 && puppy_connector_row(selected) && puppy_design_owner(selected)==cad_project_item(project) {
@@ -559,12 +560,12 @@ fn puppy_design_click(x,y) {
 fn puppy_design_navigation(key) {
     let project=cad_project_open(puppy_history+24);let rows=puppy_design_rows(project);
     let count=cg_count(rows);if !count {return 1;}
-    if puppy_replace_target {
-        let cursor=puppy_limit(puppy_replace_cursor,0,count-1);
-        if key==40 {return puppy_replace_apply(project,load64(cg_at(rows,cursor)+24));}
-        if key==81 {cursor=puppy_limit(puppy_replace_cursor+1,0,count-1);}
-        if key==82 {cursor=puppy_limit(puppy_replace_cursor-1,0,count-1);}
-        puppy_replace_cursor=cursor;
+    if puppy_assembly_choice_kind {
+        let cursor=puppy_limit(puppy_assembly_choice_cursor,0,count-1);
+        if key==40 {return puppy_assembly_choice_apply(project,load64(cg_at(rows,cursor)+24));}
+        if key==81 {cursor=puppy_limit(puppy_assembly_choice_cursor+1,0,count-1);}
+        if key==82 {cursor=puppy_limit(puppy_assembly_choice_cursor-1,0,count-1);}
+        puppy_assembly_choice_cursor=cursor;
         let capacity=puppy_design_capacity(gui_height(load64(puppy_device))-76);
         if cursor<puppy_design_scroll {puppy_design_scroll=cursor;}
         if capacity && cursor>=puppy_design_scroll+capacity {puppy_design_scroll=cursor-capacity+1;}

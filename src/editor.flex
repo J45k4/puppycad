@@ -270,8 +270,8 @@ fn puppy_export_shortcut(project,extension) {
     return puppy_title(project,m_cat("Exported ",out));
 }
 fn puppy_command(key,mods) {
-    if puppy_replace_target {
-        if key==GUI_KEY_ESCAPE || key==60 {return puppy_replace_cancel(cad_project_open(puppy_history+24));}
+    if puppy_assembly_choice_kind {
+        if key==GUI_KEY_ESCAPE || key==60 {return puppy_assembly_choice_cancel(cad_project_open(puppy_history+24));}
         return 1;
     }
     puppy_forget_click();
@@ -588,7 +588,7 @@ fn puppy_editor(path,source,project,report) {
             else if puppy_pattern_event(event) {dirty=1;}
             else if puppy_plane_chooser && puppy_plane_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
             else if puppy_design_available() && puppy_objects_event(event) {dirty=1;}
-            else if puppy_replace_target && puppy_replace_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
+            else if puppy_assembly_choice_kind && puppy_assembly_choice_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
             else if puppy_sheet_scene && (kind==GUI_QUIT || kind==GUI_CLOSE) {
                 puppy_sheet_close();running=puppy_command(GUI_KEY_ESCAPE,0);dirty=1;
             }

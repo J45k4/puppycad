@@ -414,6 +414,42 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        dimensions_path=Path(tmp)/"Workspace dimensions.pcad"
+        dimensions_doc=json.loads(workspace_path.read_bytes())
+        base=dimensions_doc["items"][0]["data"]
+        sketch_id="breadcrumb-dimension-sketch"
+        base["cad"]["nodes"].extend([
+            dict(id=sketch_id,type="sketch",name="Guide sketch",targetId="plane-top",relations=[]),
+            *[dict(id=f"guide-{index}",type="sketchLine",sketchId=sketch_id,construction=True,
+                   p0=dict(x=-10,y=y),p1=dict(x=10,y=y)) for index,y in enumerate((-10,10),1)],
+        ])
+        base["cad"]["rootNodeIds"].append(sketch_id)
+        base["tree"]["orderedNodeIds"].append(sketch_id)
+        dimensions_path.write_text(json.dumps(dimensions_doc))
+        app,window=open_app(dimensions_path,"Assembly opened",design_tree=True)
+        click(window,55,160)
+        verify(window,"Opened Base")
+        key("F3")
+        key("F8")
+        verify(window,"guide-1   20 mm   DOF")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,68,55)
+        verify(window,"Pick the source line for Parallel")
+        _,part_link=breadcrumb_links(window,"workspace-relations-breadcrumbs.png")
+        click(window,part_link,20)
+        verify(window,"Part workspace")
+        assert "  |  Base  |  Solid" in title(window)
+        key("F8")
+        verify(window,"guide-1   20 mm   DOF")
+        assembly_link,_=breadcrumb_links(window,"workspace-dimensions-breadcrumbs.png")
+        click(window,assembly_link,20)
+        verify(window,"Opened Arm assembly")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Escape")
+        app.wait(3)
+
         blank=Path(tmp)/"Workspace blank.pcad"
         app,window=open_app(blank,"Click two rectangle corners",design_tree=True)
         click(window,65,160)  # The default Part row is independent of the filename.
@@ -2503,6 +2539,90 @@ with tempfile.TemporaryDirectory() as tmp:
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         area=(15**2-6*3)*32*math.sin(math.tau/64)
         assert bounds==[(1.0,31.0),(-15.0,15.0),(0.0,10.0)] and math.isclose(volume,area*10,rel_tol=1e-6)
+        key("Escape")
+        app.wait(3)
+
+        # Whole-curve tangency follows a finite construction arc without an endpoint join.
+        path=Path(tmp)/"Circular tangent stop.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        item=document["items"][0]
+        item["name"]="Circular tangent stop"
+        graph=item["data"]["cad"]
+        sketch=graph["nodes"][3]
+        sk=sketch["id"]
+        guide,stop="guide-arc","stop-circle"
+        graph["nodes"]=graph["nodes"][:4]+[
+            dict(id=guide,type="sketchArc",sketchId=sk,arc=dict(id=guide,type="arc",center=dict(x=0,y=0),
+                 radius=20,startAngle=-math.pi/4,sweep=math.pi/2,segments=64,construction=True)),
+            dict(id=stop,type="sketchPrimitive",sketchId=sk,primitive=dict(id=stop,type="circle",center=dict(x=40,y=0),radius=10,segments=64)),
+        ]
+        sketch["relations"]=[
+            dict(id="guide-center",type="fixed",anchor=dict(entityId=guide,point="center"),position=dict(x=0,y=0)),
+            dict(id="guide-radius",type="radius",entityId=guide,value=20),
+            dict(id="guide-sweep",type="arcSweep",entityId=guide,value=90),
+            dict(id="stop-diameter",type="diameter",entityId=stop,value=20),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"guide-arc   Radius 20 mm   DOF 3")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,310,54)
+        verify(window,"Pick the outer curve for Internal tangent")
+        click(window,211,176)
+        verify(window,"Pick the inner curve for Internal tangent")
+        click(window,807,358)
+        verify(window,"Internal tangent updated")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        assert saved[-1]["primitive"]["center"]==dict(x=10,y=0)
+        assert saved[3]["relations"][-1]==dict(id=f"native-internal-tangent-{guide}-{stop}",type="internalTangent",a=guide,b=stop)
+        key("Control_L+z")
+        verify(window,"stop-circle   Diameter 20 mm   DOF 3")
+
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,190,54)
+        verify(window,"Pick the source curve for Tangent")
+        click(window,211,176)
+        verify(window,"Pick the follower curve for Tangent")
+        click(window,807,358)
+        verify(window,"Tangent updated")
+        click(window,211,176)
+        verify(window,"guide-arc   Radius 20 mm   DOF 2")
+        key("F2")
+        verify(window,"Set value")
+        key("Control_L+a")
+        type_value("25 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        nodes={node["id"]:node for node in saved}
+        assert nodes[guide]["arc"]==dict(graph["nodes"][4]["arc"],radius=25)
+        assert nodes[stop]["primitive"]==dict(graph["nodes"][5]["primitive"],center=dict(x=35,y=0))
+        relation_id=f"native-external-tangent-{guide}-{stop}"
+        assert nodes[sk]["relations"][-1]==dict(id=relation_id,type="tangent",a=guide,b=stop)
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"circular-tangent.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"circular-tangent-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        assert bounds==[(25.0,45.0),(-10.0,10.0),(0.0,10.0)] and math.isclose(volume,32000*math.sin(math.tau/64),rel_tol=1e-6)
         key("Escape")
         app.wait(3)
 
@@ -6030,6 +6150,54 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # A top-cap chamfer follows the attached source even on a reversed parent sketch.
+        path=Path(tmp)/"Face chamfer.pcad"
+        document=json.loads((libs/"cad/tests/fixtures/typescript-face-chamfers.pcad").read_bytes())
+        document["items"]=[next(item for item in document["items"] if item["id"]=="top-cap")]
+        nodes=document["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(node for node in nodes if node["type"]=="chamfer")
+        bevel["notes"]={"keep":"original face and edge IDs"}
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"face-chamfer-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,316)
+        verify(window,"Attached bevel  d1 2 mm")
+        key("F2")
+        type_value("4")
+        key("Return")
+        verify(window,"Attached bevel  d1 4 mm")
+        key("Tab")
+        verify(window,"Attached bevel  d2 3 mm")
+        key("F2")
+        type_value("1")
+        key("Return")
+        verify(window,"Attached bevel  d2 1 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assert saved["items"][0]["data"]["cad"]["nodes"]==[
+            dict(node,d1=4,d2=1) if node is bevel else node for node in nodes
+        ]
+        shutil.copyfile(path,output_dir/"face-chamfer-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,316)
+        verify(window,"Attached bevel  d1 4 mm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"face-chamfer.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(0,20),(0,20),(0,14)] and math.isclose(volume,3240,abs_tol=.001),(bounds,volume)
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        for expected in ((4,5,10),(16,5,10),(4,6,14),(16,6,14)):
+            assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
+        shutil.copyfile(stl,output_dir/"face-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
         # Replacing a part keeps the occurrence and its two mate endpoints.
         path=Path(tmp)/"Replace occurrence.pcad"
         document=json.loads((root/"rust/fixtures/assembly.pcad").read_bytes())
@@ -6156,6 +6324,70 @@ with tempfile.TemporaryDirectory() as tmp:
         shutil.copyfile(path,output_dir/"assembly-connector-frame-edited.pcad")
         shutil.copyfile(path.with_suffix(".3mf"),output_dir/"assembly-connector-frame.3mf")
         for stl in path.parent.glob("Assembly connector*.stl"):
+            shutil.copyfile(stl,output_dir/stl.name)
+        key("Escape")
+        app.wait(3)
+        # Rename a v4 connector and reattach it to World without losing its mate.
+        path=Path(tmp)/"Connector ownership.pcad"
+        document=json.loads((root/"rust/fixtures/assembly.pcad").read_bytes())
+        document["selectedPath"]=[2]
+        data=document["items"][2]["data"]
+        data["instances"][0]["transform"]=dict(translation=dict(x=15,y=0,z=0))
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"connector-ownership-input.pcad")
+        app,window=open_app(path,"Assembly opened",design_tree=True)
+        click(window,76,395)  # Connectors group.
+        click(window,88,421,button=3)
+        verify(window,"Selected Base top")
+        click(window,120,460)  # Rename ID.
+        verify(window,"Set value")
+        type_value("mount-datum")
+        key("Return")
+        verify(window,"Connector ID changed to mount-datum")
+        key("Control_L+s")
+        verify(window,"Saved")
+        renamed=json.loads(path.read_bytes())["items"][2]["data"]
+        data["connectors"][0]["id"]="mount-datum"
+        data["mates"][0]["a"]["connectorId"]="mount-datum"
+        assert renamed==data
+        click(window,88,421,button=3)
+        click(window,120,486)  # Attach to.
+        verify(window,"Attach Base top to an occurrence or World")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"connector-attach-chooser.png"],check=True)
+        click(window,75,187)  # Upper arm already owns the other endpoint of this mate.
+        verify(window,"Mate needs distinct instances")
+        assert json.loads(path.read_bytes())["items"][2]["data"]==renamed
+        click(window,75,161)  # World.
+        verify(window,"Connector attached to World")
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(path.read_bytes())["items"][2]["data"]==renamed
+        key("Control_L+y")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        data["connectors"][0]["instanceId"]=None
+        data["mates"][0]["a"]["instanceId"]=None
+        assert saved["items"]==document["items"] and saved["selectedPath"]==[2]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Assembly opened",design_tree=True)
+        click(window,76,395)
+        click(window,88,421)
+        verify(window,"Selected Base top")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"connector-attached-to-world.png"],check=True)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"reference-connector-ownership.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        _,bodies=package_geometry(path.with_suffix(".3mf"))
+        assert bodies[0][1][0][0]==(-5.0,35.0) and bodies[1][1][0][0]==(-5.0,5.0)
+        key("Control_L+e")
+        verify(window,"Exported")
+        shutil.copyfile(path,output_dir/"connector-ownership-edited.pcad")
+        for stl in path.parent.glob("Connector ownership*.stl"):
             shutil.copyfile(stl,output_dir/stl.name)
         key("Escape")
         app.wait(3)

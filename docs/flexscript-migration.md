@@ -77,10 +77,28 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`eb5a115e404458f38acc335d179ca25a9d9c6d91` includes the shared library and
-the FlexDB blob APIs required by the backend. The backend, project checker
-and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
-requires publishing the SDK commit.
+`38a35eee5725f8e518b3d4c0364af94222b89b5b` includes the shared library and
+the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
+VM verified all 45 historical CAD and runtime import paths against the
+archived catalog and VM. The v10 artifact lineage, the v11 worker and
+headless KiCad browser flows passed using identical checker and worker
+binaries in the staged build. Hosted CI verification requires publishing
+the SDK commit.
+
+The native editor now authors external and internal tangency for circles
+and circular arcs. A construction arc and a follower circle retain their
+contact after a radius edit. The checked VM and two v11 frozen jobs
+produced the same STL as the native editor. The same three consumers
+matched on face-attached TypeScript chamfers from top, mirrored bottom
+and aligned side faces. Face selectors still require matching the source
+face ordering to rebuild the referenced edge.
+
+The assembly editor can rename a connector ID and attach its frame to an
+occurrence or World. The native test checks that the mate retains its
+endpoint after both edits, rejects an attachment to the mate's opposite
+occurrence and compares the saved assembly export with Rust.
+The checked VM and two v11 frozen workers reproduced the native STL and
+its three solved occurrences from the resulting assembly graph.
 
 The pinned compiler and verifier scanner share a 4,096-function source
 limit. PuppyCAD and the assembled Biscuit portal build through the direct
@@ -371,8 +389,9 @@ original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
 within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with holes, traced boundaries or face attachments still need selector
-and clipping support. See `workdir/flexscript/rotated-chamfer.png`.
+with holes or traced boundaries still need selector and clipping support.
+Face attachments are covered for the documented aligned cases. See
+`workdir/flexscript/rotated-chamfer.png`.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.

@@ -98,9 +98,12 @@ fn puppy_line_cancel_drag() {
     if puppy_drag_point_id {puppy_drop(puppy_drag_point_id);puppy_drag_point_id=0;}
     puppy_line_drag=0;return 1;
 }
-fn puppy_line_close(project) {
+fn puppy_line_end() {
     puppy_direction_end();
     puppy_symmetry_end();puppy_distance_cancel();puppy_line_cancel_drag();puppy_drop(puppy_line_report);puppy_line_report=0;
+}
+fn puppy_line_close(project) {
+    puppy_line_end();
     puppy_draft_index=puppy_line_old_sketch;puppy_draft=puppy_line_was_draft;puppy_sketch=puppy_line_was_sketch;
     puppy_refresh(project);return puppy_title(project,"Line editing closed");
 }
@@ -335,6 +338,7 @@ fn puppy_line_event(event) {
     let x=gui_event_x(event);let y=gui_event_y(event);let project=cad_project_open(puppy_history+24);
     if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
         let w=gui_width(load64(puppy_device));
+        if puppy_breadcrumb_click(project,x,y) {return 1;}
         if y>=7 && y<33 && x>=puppy_direction_button_left(w) && x<w-12 && puppy_direction_available() {return puppy_direction_command(project,15);}
         if y>=42 && y<68 {
             if w<800 {puppy_compact_bar(0,w,project,x);}else {puppy_action_bar(puppy_line_actions(),0,w,x);}

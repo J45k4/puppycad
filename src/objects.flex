@@ -56,7 +56,7 @@ fn puppy_query() {if puppy_search {return puppy_search+24;}return "";}
 fn puppy_query_set(text) {
     let next=0;if m_len(text) {next=puppy_snapshot(text);}
     if puppy_search {puppy_drop(puppy_search);}puppy_search=next;
-    puppy_replace_cursor=-1;
+    puppy_assembly_choice_cursor=-1;
     puppy_tree_scroll=0;puppy_design_scroll=0;puppy_tree_dirty=1;return 1;
 }
 fn puppy_panel_group(rows,children,bit,label) {

@@ -29,8 +29,9 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
 When you open a referenced part from an assembly, click the underlined
 **Assembly** breadcrumb to return to that assembly from Part or Sketch.
 The Assembly link stays available when you switch to another part used by
-that assembly. Breadcrumb links highlight on hover and work with the
-Design sidebar collapsed. Clicking a breadcrumb also dismisses an open
+that assembly. Breadcrumb links highlight on hover and work from
+**Dimensions** and **Relations**, including with the Design sidebar
+collapsed. Clicking a breadcrumb also dismisses an open
 Design context menu and takes you to the chosen workspace. Undo and Redo
 restore the Assembly link from the original visit to a part. In a narrow
 window the path can use the workspace names **Assembly**, **Part**, and
@@ -235,6 +236,12 @@ arcs. Click the curve to keep first, then the follower. A driving distance
 or permitted drag on either center moves both. Each curve keeps its own
 size and orientation.
 
+Choose **Tangent** for two circles or circular arcs that touch externally.
+Pick the source first, then the follower. For **Internal tangent**, pick
+the outer curve first and the inner curve second. A finite arc must include
+the contact point. Changing a driving radius rebuilds the contact while
+keeping the relation.
+
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
 existing pattern, or press P to cycle through patterns. Tab selects the
@@ -377,6 +384,9 @@ both fields under **Driving fields**. Enter millimetres. Entering zero for
 `d2` makes it follow `d1`. The feature keeps its original extrusion-edge
 reference. Supported selectors include a single corner or rotated rectangle,
 regular polygon, circle, ellipse or capsule extruded blind from a reference plane.
+For face-attached blind joined extrusions, the parent face must resolve to
+the same host face in both editors. Saved fixtures cover a top cap, a
+mirrored bottom cap and an aligned side face.
 
 Open **History** or press **F7** to inspect a v4 part’s solid features.
 Click a row or use Left and Right to select it. **Suppress** (S) toggles
@@ -617,6 +627,12 @@ the tree and enter its position in millimetres or rotation in degrees.
 Attached frames use the occurrence's local coordinates. Ground connectors
 use world coordinates. Enter solves the linked mates and records one undo
 step. If the mates conflict, the editor keeps the previous assembly pose.
+
+Use **Rename ID** to change the connector's saved ID and update its mate
+references. **Attach to** opens a list of eligible occurrences and **World**.
+The entered position and rotation carry over to the destination coordinate
+system. The editor rejects an attachment that puts both ends of a mate on
+the same occurrence.
 
 To inspect a connection, open **Objects**, select an occurrence, and choose
 a row under **Mates**. The row names the mating partner. The inspector shows
