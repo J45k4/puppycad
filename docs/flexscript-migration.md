@@ -63,8 +63,9 @@ native window captures. Browser embedding remains the later WASM milestone.
 The sibling Flexscript checkout now exposes constructive solids, mesh/STL,
 assembly evaluation and playback through `import "cad";`. Biscuit forwards
 its previous import paths to the SDK. Its project checker imports the same
-code through `cad/api.flex`. Biscuit still owns the preview, RGB snapshot
-adapter, electrical, component and gripper integrations.
+code through `cad/api.flex`. The SDK also renders orthographic RGB snapshots.
+Biscuit wraps the pixels in its existing image value and owns preview
+delivery, electrical, component and gripper integrations.
 
 The two-hole mounting plate builds at 80 × 50 × 6 mm with 932 triangles.
 The pre-extraction Biscuit fixture, the standalone SDK, the checked VM, and
@@ -76,10 +77,18 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`264b81bb59e77b27d1442632adffdbcc7ea71509` includes the shared library and
+`a712a552d9de7d1a93e3cfa7fb0179b44fbd5dba` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
+
+The SDK's `cad_render_rgb` and the existing
+`/biscuit/cad/render.flex` import reproduced the original renderer's
+ISO, top, front and right RGB bytes. Tests covered a two-hole plate and
+cover, depth occlusion in both part orders, and the saved render example.
+The Biscuit program endpoint delivered the same authenticated PNGs before
+and after a backend restart with the new SDK. Earlier snapshot URLs
+continued to return their original PNG bytes.
 
 Two frozen Biscuit project builds reproduced the mounting plate STL. A
 subsequent version built the selected part from the PuppyCAD v4 face-sketch
