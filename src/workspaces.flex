@@ -1,11 +1,14 @@
 global puppy_explicit_sketch=0;
 global puppy_plane_chooser=0;
 
-fn puppy_workspace_heading(project) {
+fn puppy_workspace_heading(project,space) {
     let item=cad_project_item(project);
     let name=puppy_document_name(project);
     if puppy_draft {
-        return m_cat("Sketch / ",puppy_design_name(puppy_draft_sketch(project),"Sketch"));
+        let sketch=m_cat("Sketch / ",puppy_design_name(puppy_draft_sketch(project),"Sketch"));
+        let path=m_cat("Part / ",m_cat(name,m_cat(" / ",sketch)));
+        if puppy_toolbar_text_width(path)>space {return sketch;}
+        return path;
     }
     if puppy_sketch {return m_cat("Sketch preview / ",name);}
     if m_eq(j_string(item,"type"),"assembly") || j_get(project,"assembly") {

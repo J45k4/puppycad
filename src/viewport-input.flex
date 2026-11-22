@@ -103,6 +103,7 @@ fn puppy_clear_pick() {
 }
 fn puppy_limit(value,low,high) {if value<low {return low;}if value>high {return high;}return value;}
 fn puppy_fit() {
+    puppy_part_sketch_fit();
     gui__zero(puppy_pan,24);puppy_zoom=280;
     return puppy_title(cad_project_open(puppy_history+24),"View fitted");
 }
@@ -204,7 +205,7 @@ fn puppy_view_down(button,x,y) {
     let source=puppy_history;if puppy_step_preview {source=puppy_step_preview;}
     let project=cad_project_open(source+24);let ray=puppy_ray(x,y);
     let hit=0;let element=0;
-    if ray {
+    if ray && !puppy_empty {
         if button==1 && m_eq(j_string(cad_project_item(project),"type"),"assembly") {
             element=puppy_mate_hit(project,ray);if element {hit=load64(element+32);}
         }else {hit=cad_project_surface_hit_in(project,load64(ray),load64(ray+8),puppy_visible_id());}

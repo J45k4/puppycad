@@ -63,10 +63,14 @@ fn puppy_draw_harness() {
 }
 fn puppy_draw_lines(mesh,mode) {
     if !mesh || !load64(mesh+32) {return 1;}
+    return puppy_draw_wire(mesh,mode,1,0,load64(mesh+32));
+}
+fn puppy_draw_wire(mesh,mode,primitive,first,count) {
+    if !count {return 1;}
     let overlay=render_uniform(puppy_material,0,"lineOverlay");
     render_gl(puppy_device,"glUniform1i",render_uniform(puppy_material,0,"moving"),0,0,0,0,0);
     render_gl(puppy_device,"glUniform1i",overlay,mode,0,0,0,0);
-    let ok=render_draw(puppy_device,load64(mesh+8),1,0,load64(mesh+32));
+    let ok=render_draw(puppy_device,load64(mesh+8),primitive,first,count);
     render_gl(puppy_device,"glUniform1i",overlay,0,0,0,0,0);return ok;
 }
 fn puppy_moving_supports(rows,followers) {

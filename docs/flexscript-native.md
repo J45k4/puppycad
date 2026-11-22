@@ -44,7 +44,9 @@ for the toolbar.
 The **Design** sidebar opens with the file, including a new empty sketch.
 Click a disclosure triangle to expand a part, sketch or group. Search by
 name, type or ID to reveal matching records and their parents. Click a
-row to see its ID and available action. Right-click a sketch to choose
+part, assembly or sketch row to open its workspace and update the
+breadcrumb. Other rows show their ID and available action.
+Right-click a sketch to choose
 **Edit sketch**, or right-click another row to see its available actions.
 Press Escape to dismiss the menu. With the tree focused, Up and Down
 select rows, Left and Right navigate branches, and Enter opens the selected
@@ -53,7 +55,13 @@ F3 and reopen it with **Design ›** or F3.
 
 In a v4 part, expand a sketch to select its geometry or inspect its
 constraints and dimensions. **Edit sketch** opens that sketch in its
-owning part. Select a solid feature and choose **Feature history** to
+owning part. Click the eye beside a sketch, or use **Show sketch** and
+**Hide sketch** in its context menu, to control whether it appears in
+Part mode. Unused sketches appear by default. Sketches used by an active
+feature start hidden. Visibility changes support Undo and are saved in
+the drawing. **Fit** includes visible sketches, even in a part with no solid.
+
+Select a solid feature and choose **Feature history** to
 inspect its rebuild state. **Open item** switches directly to another
 part or assembly. In an assembly, selecting an occurrence highlights it.
 

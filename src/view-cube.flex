@@ -98,7 +98,7 @@ fn puppy_cube_rect(x,y,w,h) {
     return render_gl(puppy_device,"glViewport",x*pw/width,ph-(y+h)*ph/height,(x+w)*pw/width-x*pw/width,(y+h)*ph/height-y*ph/height,0,0);
 }
 fn puppy_cube_draw() {
-    if puppy_sketch || puppy_empty {puppy_views_open=0;return 1;}
+    if !puppy_camera_available() {puppy_views_open=0;return 1;}
     let window=load64(puppy_device);let x=gui_width(window)-104;let h=gui_height(window);
     if x<0 || h<196 {return 1;}
     render_gl(puppy_device,"glActiveTexture",0x84c0,0,0,0,0,0);
@@ -172,7 +172,7 @@ fn puppy_context_event(event) {
     return 0;
 }
 fn puppy_cube_click(x,y) {
-    if puppy_sketch || puppy_empty {return 0;}
+    if !puppy_camera_available() {return 0;}
     let window=load64(puppy_device);let h=gui_height(window);x=x-gui_width(window)+104;
     if h<196 || x<0 || x>=96 || y<80 {puppy_views_open=0;return 0;}
     let row=puppy_limit((h-170)/8,1,24);

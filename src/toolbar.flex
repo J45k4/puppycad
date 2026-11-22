@@ -253,7 +253,6 @@ fn puppy_toolbar_build(w) {
         if w<800 {puppy_compact_bar(rgb,w,project,-1);}else {puppy_action_bar(puppy_line_actions(),rgb,w,-1);}
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
-    let title_end=(w-327)/2;if w<800 {title_end=w/2+45;}
     let title_x=12;
     if puppy_isolated {
         puppy_bar_rect(rgb,w,12,6,86,28,45,64,67);puppy_bar_text(rgb,w,20,25,"Show all",98);title_x=108;
@@ -269,16 +268,13 @@ fn puppy_toolbar_build(w) {
     if w>=800 && puppy_active_field(project) {
         puppy_bar_rect(rgb,w,title_x,6,76,28,45,64,67);puppy_bar_text(rgb,w,title_x+8,25,"Set value",title_x+76);
         title_x=title_x+86;
-        if title_end<title_x {title_end=title_x;}
     }
-    let heading=puppy_workspace_heading(project);
     let status_edge=w-335;
     if cad_project_is_studio(project) {status_edge=w-268;}
     if cad_project_part(project) {status_edge=w-513;}
-    if w>=800 {
-        let space=puppy_limit(status_edge-title_x-96,0,status_edge-title_x);
-        title_end=title_x+puppy_limit(puppy_toolbar_text_width(heading)+4,0,space);
-    }
+    if w<800 {status_edge=w-8;}
+    let space=status_edge-title_x;let heading=puppy_workspace_heading(project,space);
+    let title_end=title_x+puppy_limit(puppy_toolbar_text_width(heading)+4,0,space);
     puppy_bar_text(rgb,w,title_x,25,heading,title_end);
     if !cad_project_is_studio(project) && w>=800 {
         puppy_bar_rect(rgb,w,w-327,6,84,28,45,64,67);puppy_bar_text(rgb,w,w-319,25,"New part",w-243);
@@ -376,7 +372,7 @@ fn puppy_toolbar_build(w) {
         if feature {puppy_bar_button(rgb,w,568,80,"History");}
     }
     if !puppy_draft && !puppy_empty {puppy_bar_button(rgb,w,w-132,64,"STEP");}
-    if (puppy_draft || !puppy_sketch) && !puppy_empty {puppy_bar_button(rgb,w,w-60,48,"Fit");}
+    if puppy_draft || puppy_camera_available() {puppy_bar_button(rgb,w,w-60,48,"Fit");}
     puppy_ui_upload(rgb,w,76);
     puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
 }
@@ -529,7 +525,7 @@ fn puppy_compact_actions(project) {
         puppy_compact_button(rows,"New part",17,3);puppy_compact_button(rows,"New assembly",4,3);
         if puppy_has_other_item(project) {puppy_compact_button(rows,"Next item",63,0);}
     }
-    if solid {
+    if puppy_camera_available() {
         puppy_compact_button(rows,"Fit",74,0);
         let projection="Orthographic";if puppy_orthographic {projection="Perspective";}
         puppy_compact_button(rows,projection,18,0);

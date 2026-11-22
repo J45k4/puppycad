@@ -180,21 +180,14 @@ with tempfile.TemporaryDirectory() as tmp:
         workspace_doc["selectedPath"]=[2]
         workspace_path.write_text(json.dumps(workspace_doc))
         app,window=open_app(workspace_path,"Assembly opened",design_tree=True)
-        subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-assembly.png"],check=True)
-
-        def open_workspace_item(query,name):
-            click(window,229,125)
-            for letter in query:
-                key("minus" if letter=="-" else letter)
-            key("Return")
-            key("Down")
-            verify(window,"Selected "+name)
-            key("Return")
-            verify(window,"Opened "+name)
-
-        open_workspace_item("part-base","Base")
+        click(window,55,160)  # Open Base directly from the assembly workspace.
+        verify(window,"Opened Base")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-part.png"],check=True)
-        click(window,325,55)
+        click(window,26,212)  # Expand Base sketch without opening it.
+        assert "Opened Base" in title(window)
+        click(window,110,238)
+        verify(window,"Selected Corner rectangle")
+        click(window,85,212)  # The sketch label opens the editor in one click.
         verify(window,"Editing Base sketch")
         key("Shift_L+period")
         click(window,490,340)
@@ -210,7 +203,13 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Editing Base sketch")
         key("F12")
         verify(window,"Part workspace")
-        open_workspace_item("assembly-1","Arm assembly")
+        click(window,229,125)
+        for letter in "assembly-1":
+            key("minus" if letter=="-" else letter)
+        key("Return")
+        click(window,85,160)
+        verify(window,"Opened Arm assembly")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-assembly.png"],check=True)
         key("Control_L+s")
         verify(window,"Saved")
         saved=json.loads(workspace_path.read_bytes())
@@ -236,6 +235,11 @@ with tempfile.TemporaryDirectory() as tmp:
 
         def arrow_tones(frame,undo_x,redo_x):
             return tuple(frame.crop((x,48,x+16,64)).getextrema()[0][1] for x in (undo_x,redo_x))
+
+        def part_sketch_pixels(name):
+            image=toolbar_frame(name)
+            canvas=image.crop((254,76,image.width,image.height))
+            return sum(count for count,color in canvas.getcolors(canvas.width*canvas.height) if color==(138,215,232))
 
         toolbar=toolbar_frame("toolbar-sketch-icons.png")
         assert arrow_tones(toolbar,30,88)==(126,126)
@@ -270,6 +274,41 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Saved")
         graph=json.loads(blank.read_bytes())["items"][0]["data"]["cad"]
         assert sum(n["type"]=="sketchCornerRectangle" for n in graph["nodes"])==1
+        click(window,900,20)
+        verify(window,"Part workspace")
+        assert part_sketch_pixels("part-sketch-visible.png")>200
+        xlib.XWarpPointer(connection,0,window,0,0,0,0,232,212)
+        xlib.XSync(connection,0)
+        time.sleep(.15)
+        assert toolbar_frame("part-sketch-visibility-tooltip.png").getpixel((136,226))==(89,111,109)
+        drag(window,3,(560,320),(646,296))
+        assert part_sketch_pixels(Path(tmp)/"part-sketch-orbit.png")>150
+        key("3")
+        verify(window,"Top view")
+        assert part_sketch_pixels("part-sketch-top.png")>200
+        click(window,232,212)  # The eye on Sketch 1.
+        verify(window,"Hidden Sketch 1")
+        assert part_sketch_pixels("part-sketch-hidden.png")==0
+        key("Control_L+z")
+        assert part_sketch_pixels("part-sketch-visibility-undone.png")>200
+        key("Control_L+y")
+        assert part_sketch_pixels("part-sketch-visibility-redone.png")==0
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(blank.read_bytes())["items"][0]["data"]
+        assert saved["tree"]["sketchVisibility"]=={"native-sketch-1":False}
+        assert saved["cad"]==graph
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(blank,"Click two rectangle corners",design_tree=True)
+        click(window,900,20)
+        verify(window,"Part workspace")
+        assert part_sketch_pixels(Path(tmp)/"part-sketch-reopened.png")==0
+        click(window,232,212)
+        verify(window,"Shown Sketch 1")
+        assert part_sketch_pixels(Path(tmp)/"part-sketch-shown.png")>200
+        key("Control_L+s")
+        verify(window,"Saved")
         key("Escape")
         app.wait(3)
 
@@ -291,6 +330,9 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Sketch edited")
         click(window,900,20)
         verify(window,"Part workspace")
+        key("1")
+        verify(window,"Front view")
+        assert part_sketch_pixels("part-front-plane-sketch.png")>100
         key("Control_L+s")
         verify(window,"Saved")
         document=json.loads(plane_path.read_bytes())
@@ -306,8 +348,6 @@ with tempfile.TemporaryDirectory() as tmp:
             key("space" if letter==" " else letter)
         key("Return")
         click(window,80,186)
-        verify(window,"Selected Sketch 2")
-        key("Return")
         verify(window,"Editing Sketch 2")
         key("e")
         verify(window,"Extruded")
@@ -354,7 +394,19 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
         app,window=open_app(path,design_tree=True)
+        assert part_sketch_pixels(Path(tmp)/"consumed-default.png")==0
+        click(window,232,212)
+        verify(window,"Shown Sketch 1")
+        key("6")  # Bottom view looks directly at the consumed sketch's plane.
+        verify(window,"Bottom view")
+        assert part_sketch_pixels("part-consumed-sketch.png")>100
         click(window,64,212,button=3)
+        click(window,84,279)  # Hide sketch
+        verify(window,"Hidden Sketch 1")
+        assert part_sketch_pixels(Path(tmp)/"consumed-hidden.png")==0
+        click(window,64,212,button=3)
+        verify(window,"Selected Sketch 1")
+        assert "|  Solid" in title(window)
         click(window,84,227)  # Re-enter Sketch from the reopened Part.
         verify(window,"Editing Sketch 1")
         key("F12")
@@ -363,12 +415,14 @@ with tempfile.TemporaryDirectory() as tmp:
         for letter in "extrude":
             key(letter)
         key("Return")
-        click(window,75,185,button=3)
+        click(window,75,185)
         verify(window,"Selected Extrusion 1")
         key("Return")  # Feature history
         verify(window,"Extrusion 1   active")
         key("Escape")
         verify(window,"Feature history closed")
+        key("Control_L+s")
+        verify(window,"Saved")
         key("Escape")
         app.wait(3)
 

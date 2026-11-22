@@ -7,6 +7,7 @@ import "objects.flex";
 import "harness.flex";
 import "view-cube.flex";
 import "drawing-view.flex";
+import "part-sketches.flex";
 
 global puppy_device=0;
 global puppy_empty=0;
@@ -19,6 +20,7 @@ global puppy_pitch=26000;
 global puppy_zoom=280;
 global puppy_orthographic=0;
 global puppy_solved_assembly=0;
+global puppy_mesh_bounds=0;
 
 // Positions use three floats, followed by a normalized RGB and padding byte.
 fn puppy_colored_mesh() {
@@ -38,13 +40,27 @@ fn puppy_part_rgb(part) {
 fn puppy_view_open() {
     puppy_device=render_open("PuppyCAD",960,640,GUI_RESIZABLE|GUI_HIGH_DPI);
     if !puppy_device {return 0;}
-    let vertex="#version 450 core\nlayout(location=0) in vec3 position;layout(location=1) in vec3 vertexColor;flat out vec3 ink; uniform mat4 camera; uniform vec2 ortho; out vec3 world;flat out int picked;uniform ivec2 selection;uniform vec3 cameraPan;uniform int moving,lineOverlay;uniform vec3 axis,pivot;uniform vec2 cs; void main(){ink=vertexColor;picked=int(gl_VertexID>=selection.x && gl_VertexID<selection.y);world=position;if(moving!=0){vec3 r=position-pivot;world=pivot+cs.x*r+cs.y*cross(axis,r)+(1.0-cs.x)*dot(axis,r)*axis;}gl_Position=camera*vec4(world-cameraPan,1.0);if(ortho.x>0.0){gl_Position.z=ortho.x*(2.0*(gl_Position.w-0.001)/(ortho.y-0.001)-1.0);gl_Position.w=ortho.x;}if(lineOverlay==2){gl_Position.z-=0.00001*gl_Position.w;}}";
+    let vertex="#version 450 core\nlayout(location=0) in vec3 position;layout(location=1) in vec3 vertexColor;flat out vec3 ink; uniform mat4 camera; uniform vec2 ortho; out vec3 world;flat out int picked;uniform ivec2 selection;uniform vec3 cameraPan;uniform int moving,lineOverlay;uniform vec3 axis,pivot;uniform vec2 cs; void main(){ink=vertexColor;picked=int(gl_VertexID>=selection.x && gl_VertexID<selection.y);world=position;if(moving!=0){vec3 r=position-pivot;world=pivot+cs.x*r+cs.y*cross(axis,r)+(1.0-cs.x)*dot(axis,r)*axis;}gl_Position=camera*vec4(world-cameraPan,1.0);if(ortho.x>0.0){gl_Position.z=ortho.x*(2.0*(gl_Position.w-0.001)/(ortho.y-0.001)-1.0);gl_Position.w=ortho.x;}if(lineOverlay==2){gl_Position.z-=0.00001*gl_Position.w;}gl_PointSize=5.0;}";
     let fragment="#version 450 core\nin vec3 world;flat in int picked;flat in vec3 ink;uniform int lineOverlay;out vec4 color; void main(){if(lineOverlay!=0){color=vec4(ink,1.0);return;}vec3 n=normalize(cross(dFdx(world),dFdy(world)));float light=max(0.0,dot(n,normalize(vec3(-0.4,-0.6,1.0))));color=vec4((picked==1?vec3(0.98,0.69,0.28):ink)*(0.54+light*0.46),1.0);}";
     puppy_material=render_material(puppy_device,vertex,fragment);
     if !puppy_material {return 0;}
     puppy_surface=puppy_colored_mesh();
     puppy_center=cg_v(0,0,0);puppy_pan=cg_v(0,0,0);puppy_arc=m_take(96);puppy_orbit_point=m_take(24);
+    puppy_mesh_bounds=m_take(48);puppy_part_sketch_bounds=m_take(48);
     return puppy_surface && puppy_toolbar_open() && puppy_sketch_open();
+}
+fn puppy_frame_bounds(low,high) {
+    if puppy_hinge {return 1;}
+    let size=0;let k=0;
+    while k<24 {
+        let a=load64(low+k);let b=load64(high+k);
+        store64(puppy_center+k,(a+b)/2000000);
+        if b-a>size {size=b-a;}
+        k=k+8;
+    }
+    puppy_radius=(size+999999)/1000000;
+    if !puppy_radius {puppy_radius=1;}
+    return 1;
 }
 fn puppy_upload(project,mesh) {
     let points=pc_first(j_get(mesh,"vertices"));
@@ -75,14 +91,8 @@ fn puppy_upload(project,mesh) {
         }else {puppy_end_isolation();}
     }
     if !puppy_upload_harness(mesh,low,high) {return 0;}
-    let size=0;let k=0;
-    while k<3 {
-        let a=load64(low+k*8);let b=load64(high+k*8);
-        if !puppy_hinge {store64(puppy_center+k*8,(a+b)/2000000);}
-        if b-a>size {size=b-a;}
-        k=k+1;
-    }
-    if !puppy_hinge {puppy_radius=(size+999999)/1000000;}
+    m_copy(puppy_mesh_bounds,low,24);m_copy(puppy_mesh_bounds+24,high,24);
+    puppy_frame_bounds(low,high);
     let triangles=j_integer(mesh,"triangles");
     let data=m_take(triangles*48);let at=0;
     puppy_visible_first=0;puppy_visible_count=triangles*3;
@@ -157,6 +167,9 @@ fn puppy_draw() {
         if !render_begin(puppy_device,0,w,h) {return 0;}
         return puppy_toolbar_draw(w,h) && puppy_sheet_draw(w,h) && puppy_objects_draw(w,h) && gui_gl_swap(window);
     }
+    if puppy_part_sketch_dirty && !puppy_sketch && !puppy_reader_report && !puppy_step_input {
+        if !puppy_part_sketch_upload(cad_project_open(puppy_history+24)) {return 0;}
+    }
     let distance=puppy_radius*puppy_zoom/100+2;
     let eye=puppy_eye(distance);
     let camera=m_take(64);
@@ -166,7 +179,7 @@ fn puppy_draw() {
     render_float(clear,20,255);render_float(clear+4,29,255);render_float(clear+8,33,255);render_float(clear+12,1,1);
     render_gl(puppy_device,"glClearBufferfv",0x1800,0,clear,0,0,0);
     let drawn=0;
-    if puppy_empty {drawn=1;}
+    if puppy_empty && !puppy_part_sketch_available() {drawn=1;}
     else if puppy_draft {drawn=puppy_draw_draft();}
     else if puppy_sketch {drawn=puppy_draw_sketch(w,h);}
     else {
@@ -178,7 +191,8 @@ fn puppy_draw() {
         while k<3 {render_float(shift+k*4,load64(puppy_pan+k*8),1000000000);k=k+1;}
         render_gl(puppy_device,"glUniform3fv",render_uniform(puppy_material,0,"cameraPan"),1,shift,0,0,0);
         render_gl(puppy_device,"glUniform2i",render_uniform(puppy_material,0,"selection"),puppy_first,puppy_last,0,0,0);
-        drawn=puppy_draw_occurrences() && puppy_draw_harness();
+        drawn=puppy_empty || (puppy_draw_occurrences() && puppy_draw_harness());
+        if drawn {drawn=puppy_part_sketch_draw();}
         if drawn && puppy_mating {
             if puppy_mate_first {drawn=puppy_draw_lines(puppy_first_marker,2);}
             if drawn && puppy_mate_second {drawn=puppy_draw_lines(puppy_second_marker,2);}
@@ -198,6 +212,7 @@ fn puppy_view_close() {
     if puppy_toolbar_context {tf_context_free(puppy_toolbar_context);}
     render_mesh_close(puppy_first_marker);render_mesh_close(puppy_second_marker);
     if puppy_edge_kind {puppy_edge_close();}render_mesh_close(puppy_edge_mesh);
+    render_mesh_close(puppy_part_sketch_mesh);
     render_mesh_close(puppy_harness_mesh);render_mesh_close(puppy_sketch_mesh);render_mesh_close(puppy_surface);render_material_close(puppy_material);
     render_close(puppy_device);gui_quit();return 0;
 }

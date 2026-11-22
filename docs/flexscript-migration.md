@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`5f192a1e4813aa99efc3fbd6b6070967d5c0cb89` includes the shared library and
+`264b81bb59e77b27d1442632adffdbcc7ea71509` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -675,11 +675,21 @@ verifies that editing its outline changes only that part. The separate
 Objects panel still supports occurrence picking and isolation.
 
 The v4 editor shows distinct Assembly, Part and Sketch workspaces in one
-window. The headless test opens Base from the Arm assembly, edits Base’s
-sketch, undoes and redoes the edit without leaving it, then returns to
-Part and reopens the assembly. The saved file retains the other items and
+window. The headless test clicks Base in the Design tree from the Arm
+assembly, expands Base to open its sketch with one click, and uses the
+tree to return to Part and Assembly. The breadcrumb follows each
+workspace. Undo and Redo preserve the active sketch during an edit.
+The saved file retains the other items and
 the assembly references. A blank sketch can also return to Part before
 it contributes a solid.
+
+Part mode draws visible sketches on their actual reference planes and
+attachment faces through the shared CAD path evaluator. The Design tree
+eye and context menu toggle a sketch independently of its geometry. A
+headless window test shows a rectangle before extrusion, switches to a
+standard view, saves and reopens a hidden sketch, then reveals a sketch
+used by an extrusion. The SDK cases also check that a face sketch follows
+its supporting extrusion when its depth changes.
 
 The Part workspace creates sketches on Top, Front or Right, or starts a
 face sketch. The SDK reuses existing plane IDs and adds missing planes to
