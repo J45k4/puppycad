@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`657bb4755c5fc083d80c0e5203207d557f49f4a8` includes the shared library and
+`1c15bed75d7c6676cf94e6a7a0ca430a6001cd1b` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
@@ -323,6 +323,14 @@ The editor previews and commits a free cap drag while rejecting fixed cap
 dragging and edits that would redirect a saved face. At the `657bb47` pin,
 82 SDK test programs passed. Biscuit's checked VM and 12 frozen v11 jobs
 reproduced the six native slot and spline Normal edits and their STL bytes.
+
+The native editor also drags an end of an original PartBuilder capsule
+with a driving center distance. With the opposite cap free, it moves to
+retain the span and updates the measured reference. With the opposite cap
+fixed, the off-radius drag leaves the document unchanged. The accepted drag
+preserves the width driver and the saved boss on `slot-solid-face-18`.
+Both edited files reopen in TypeScript, and the TypeScript and native STL
+surfaces match within 0.000001 mm on the sampled comparison.
 
 Original v1 Biscuit builds preserve the 16-file split profile and the
 21-file standalone profile. The migration test creates archived releases
@@ -588,6 +596,14 @@ test trims the middle out of a cubic, opens a four-span periodic spline and
 splits the arch of a closed profile. Undo and Redo restore the intended
 control points. The saved endpoint join survives reopening and the resulting
 extrusion agrees with Rust in bounds and signed volume.
+Saved Normals and Point on curve relations keep their IDs on the retained
+piece, including a contact exactly at the cut. Trim drops the relations
+whose contacts were removed while preserving the existing follower geometry.
+The native test reopens both edits, changes the Normal length from 5 to
+8 mm, and exports the same independent solid. At `1c15bed`, all 84 CAD SDK
+test programs passed. Biscuit's checked VM reproduced both intermediate
+spline cuts and all four final native graphs. Two frozen jobs per final
+part matched the native STL bytes across the two spline and two slot edits.
 The rebuilt Biscuit checked VM replays both the ellipse trim and the spline
 split. Its STL bytes match the native editor, and two independent frozen
 v8 jobs reproduce each saved part. The verification record is

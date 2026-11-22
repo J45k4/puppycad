@@ -467,7 +467,9 @@ or **Set width**. You can also point at its outline in Sketch and press F2.
 An existing capsule width expression opens in the width editor. Use
 **Dimensions** (F8) to inspect the width, update sketch variables, or switch
 between a driving and measured width. Choose **Smooth** (J), click the slot
-outline, and drag a free cap center. Fixed or driven cap centers are protected.
+outline, and drag a free cap center. With one driving center distance, the
+opposite cap follows as needed to keep that distance. If the opposite cap
+is fixed, drag along the set radius around it.
 The same tool exposes the points of control and fit splines, including closed
 fit splines. The sketch toolbar adds lines, circles,
 rectangles and points, including in files without a solid. The editor saves
@@ -529,7 +531,10 @@ elliptic piece in **Dimensions** (F8) still updates the whole ellipse.
 
 Choose **More tools → Edit → Trim** (Q), then click the interval you want to
 remove from a line, circle, ellipse, arc or spline. Retained spline pieces
-use editable control points. **Extend** (Shift+Q) lengthens the end of a line
+use editable control points. Trim and Split keep existing Normal and Point
+on curve relations on the piece that contains their contact. Trim removes
+the relation when its contact is cut away and keeps the follower geometry.
+**Extend** (Shift+Q) lengthens the end of a line
 or a circular or elliptic arc nearest your click to the first boundary it
 reaches. Arc intersections respect the saved sweep. Projected boundaries
 continue to follow their source. Each edit can be undone.

@@ -2422,6 +2422,71 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # The saved span stays driving when either a free or fixed opposite cap is present.
+        span_fixture=json.loads((libs/"cad/tests/fixtures/legacy-typescript-capsule-span.pcad").read_bytes())
+        for index,(variant,sketch_y,to,volume) in enumerate((
+                ("free",212,dict(x=-1.808169,y=1.752400),417.190003),
+                ("fixed",238,dict(x=0,y=0),418.689945))):
+            artifact=f"legacy-slot-span-{variant}"
+            path=Path(tmp)/f"{artifact}.pcad"
+            document=dict(span_fixture,items=[span_fixture["items"][index]],selectedPath=[0])
+            initial=json.dumps(document).encode()
+            path.write_bytes(initial)
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            app,window=open_app(path,design_tree=True)
+            click(window,94,sketch_y)
+            verify(window,"Editing slot")
+            key("F3")
+            key("F8")
+            verify(window,f"slot/sketch/0   Width 4 mm   DOF {1 if index else 3}")
+            key("Escape")
+            key("Home")
+            key("j")
+            click(window,480,294)
+            verify(window,"Drag a slot cap center")
+            start,target=(640,358),(512,102)  # (10, 0) to (6, 8), at 32 pixels/mm.
+            if index:
+                drag(window,1,start,(515,102))
+                verify(window,"Capsule endpoint conflicts with the driving center distance")
+                key("Control_L+s")
+                verify(window,"Saved")
+                assert path.read_bytes()==initial
+            else:
+                drag(window,1,start,target,cancel=True,dragging="Dragging slot cap center")
+                verify(window,"Smooth drag cancelled")
+            drag(window,1,start,target)
+            verify(window,"Slot cap center moved")
+            key("Control_L+z")
+            key("Control_L+s")
+            verify(window,"Saved")
+            assert path.read_bytes()==initial
+            key("Control_L+y")
+            key("Home")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            before,after=(d["items"][0]["data"] for d in (document,json.loads(path.read_bytes())))
+            original,slot=before["features"][0],after["features"][0]
+            assert after["features"][1:]==before["features"][1:]
+            assert after["solidSteps"]==before["solidSteps"] and "cad" not in after
+            assert slot["entities"]==[dict(original["entities"][0],**{"from":dict(x=6,y=8),"to":to})]
+            assert slot["relations"]==[
+                dict(r,value=round(to["x"]-6,6)) if r["id"]=="slot-x-reference" else r for r in original["relations"]]
+            assert slot["profiles"]==original["profiles"] and len(slot["vertices"])==16
+            if index:
+                assert after["features"][2]["target"]["face"]["faceId"]=="slot-solid-face-18"
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            assert math.isclose(triangulation(stl)[1],volume,abs_tol=.002)
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
         # A PartBuilder sketch without any solid can open and save its own editing state.
         path=Path(tmp)/"Legacy sketch only.pcad"
         initial=(libs/"cad/tests/fixtures/legacy-typescript-sketch-only.pcad").read_bytes()
@@ -4821,6 +4886,88 @@ with tempfile.TemporaryDirectory() as tmp:
         shutil.copyfile(stl,output_dir/"normal-spline-split-edited.stl")
         key("Escape")
         app.wait(3)
+
+        # Trim and Split retarget saved relations by the retained spline contact.
+        initial=(libs/"cad/tests/fixtures/spline-dependent-edit.pcad").read_bytes()
+        original=json.loads(initial)
+        for action,button,pick,pieces in (
+            ("split","Shift_L+x",(309,304),
+             ([(0,0),(5,10),(10,15),(15,15)],[(15,15),(20,15),(25,10),(30,0)])),
+            ("trim","q",(255,315),
+             ([(0,0),(2,4),(4,7.2),(6,9.6)],[(18,14.4),(22,12.8),(26,8),(30,0)])),
+        ):
+            artifact=f"dependent-spline-{action}"
+            path=Path(tmp)/f"{artifact}.pcad"
+            path.write_bytes(initial)
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            baseline=path.with_name(f"{artifact}-before.stl")
+            subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+            app,window=open_app(path)
+            key("F12")
+            verify(window,"Editing Spline normals")
+            key("Home")
+            click(window,480,358,button=4,count=20)
+            click(window,480,358,button=5,count=14)  # 18 pixels/mm lands exactly on the split contact.
+            key(button)
+            click(window,*pick)
+            verify(window,"Spline split" if action=="split" else "Spline trimmed")
+            key("Control_L+z")
+            key("Control_L+s")
+            verify(window,"Saved")
+            assert path.read_bytes()==initial
+            key("Control_L+y")
+            key("Control_L+s")
+            verify(window,"Saved")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            before,after=({n["id"]:n for n in d["items"][0]["data"]["cad"]["nodes"]}
+                          for d in (original,json.loads(path.read_bytes())))
+            for id,expected in zip(("spline-guide","native-entity-1"),pieces):
+                spline=after[id]["spline"]
+                assert dict(id=id,type="spline",mode="control",closed=False,construction=True,
+                            points=[dict(x=x,y=y) for x,y in expected])==spline
+            old,new=({r["id"]:r for r in nodes["native-sketch-1"]["relations"]} for nodes in (before,after))
+            for id in ("normal-from-web","contact-right"):
+                assert new[id]==dict(old[id],b="native-entity-1")
+            assert new["fixed-source-last"]["anchor"]==dict(entityId="native-entity-1",point="point3")
+            for id in ("follower-between","follower-at-split","follower-right","normal-line","normal-solid"):
+                assert after[id]==before[id]
+            if action=="split":
+                assert new["contact-at-split"]==old["contact-at-split"] and new["contact-between"]==old["contact-between"]
+                assert new["native-spline-coincident-1"]==dict(id="native-spline-coincident-1",type="coincident",
+                    a=dict(entityId="spline-guide",point="point3"),b=dict(entityId="native-entity-1",point="point0"))
+            else:
+                assert set(old)-set(new)=={"contact-at-split","contact-between"}
+            shutil.copyfile(path,output_dir/f"{artifact}-cut.pcad")
+            if action=="trim":
+                key("Escape")
+                verify(window,"Curve edit cancelled")
+            key("Escape")
+            app.wait(3)
+
+            app,window=open_app(path)
+            key("F8")
+            verify(window,"normal-line   5 mm")
+            legacy_number("8 mm")
+            verify(window,"Edited")
+            key("Control_L+s")
+            verify(window,"Saved")
+            edited={n["id"]:n for n in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+            assert edited["spline-guide"]==after["spline-guide"] and edited["native-entity-1"]==after["native-entity-1"]
+            assert edited["native-sketch-1"]["relations"]==[
+                dict(rel,value=8,expression="8 mm") if rel["id"]=="normal-length" else rel
+                for rel in after["native-sketch-1"]["relations"]]
+            foot,tip=(edited["normal-line"][key] for key in ("p0","p1"))
+            assert math.dist((foot["x"],foot["y"]),(24,9.6))<.00004
+            assert math.isclose(math.dist((foot["x"],foot["y"]),(tip["x"],tip["y"])),8,abs_tol=.00004)
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            assert stl.read_bytes()==baseline.read_bytes()
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
 
         # A saved smooth join follows a finite clockwise elliptic arc after a height edit.
         path=Path(tmp)/"Elliptic arc smooth join.pcad"
