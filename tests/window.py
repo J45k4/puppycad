@@ -4279,6 +4279,120 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # A saved Normal keeps the line at an elliptic arc midpoint after a height edit.
+        normal_fixture=json.loads((libs/"cad/tests/fixtures/elliptic-normal.pcad").read_bytes())
+        normal_fixture["selectedPath"]=[1]
+        path=Path(tmp)/"Signed elliptic normal.pcad"
+        path.write_text(json.dumps(normal_fixture))
+        shutil.copyfile(path,output_dir/"normal-signed-input.pcad")
+        original_stl=path.with_name("Signed elliptic normal original.stl")
+        subprocess.run([output_dir/"puppycad","--export",path,original_stl],check=True)
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"normal-line   12 mm")
+        for _ in range(3):
+            key("Tab")
+        verify(window,"oval-guide   Height 8 mm")
+        legacy_number("14 mm")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"oval-guide   Height 8 mm")
+        key("Control_L+y")
+        verify(window,"oval-guide   Height 14 mm")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"normal-signed.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        before,after=({n["id"]:n for n in doc["items"][1]["data"]["cad"]["nodes"]}
+                      for doc in (normal_fixture,saved))
+        assert saved["items"][0]==normal_fixture["items"][0] and saved["items"][2]==normal_fixture["items"][2]
+        assert after["oval-guide"]["arc"]==dict(before["oval-guide"]["arc"],height=14)
+        assert after["native-sketch-1"]["relations"]==[
+            dict(rel,value=14,expression="14 mm") if rel["id"]=="oval-height" else rel
+            for rel in before["native-sketch-1"]["relations"]]
+        for endpoint,expected in (("p0",(8.263825,11.782664)),("p1",(11.778370,23.256459))):
+            point=after["normal-line"][endpoint]
+            assert math.dist((point["x"],point["y"]),expected)<.000003
+        shutil.copyfile(path,output_dir/"normal-signed-edited.pcad")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert stl.read_bytes()==original_stl.read_bytes()
+        shutil.copyfile(stl,output_dir/"normal-signed-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Create a Normal on the opposite end of a line and resize the active ellipse.
+        path=Path(tmp)/"Author a closed ellipse normal.pcad"
+        normal_fixture["selectedPath"]=[2]
+        nodes={n["id"]:n for n in normal_fixture["items"][2]["data"]["cad"]["nodes"]}
+        sketch=nodes["native-sketch-1"]
+        sketch["relations"]=[rel for rel in sketch["relations"] if rel["type"]!="normal"]
+        line=nodes["normal-line"]
+        for endpoint in ("p0","p1"):
+            line[endpoint]["y"]+=2
+        path.write_text(json.dumps(normal_fixture))
+        shutil.copyfile(path,output_dir/"normal-ellipse-input.pcad")
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"normal-line   10 mm")
+        key("Home")
+        angle=math.radians(32)
+        cosine,sine=math.cos(angle),math.sin(angle)
+        low_y=2-math.hypot(20*sine,6*cosine)
+        high_y=line["p0"]["y"]
+        scale=516/(high_y-low_y)
+
+        def normal_pixel(x,y):
+            return round(480+(x-3)*scale),round(358-(y-(low_y+high_y)/2)*scale)
+
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        key("n")
+        verify(window,"Pick an ellipse or elliptic arc for Normal")
+        click(window,*normal_pixel(3-20*cosine,2-20*sine))
+        verify(window,"Pick the line endpoint for Normal")
+        click(window,*normal_pixel(line["p1"]["x"],line["p1"]["y"]))
+        verify(window,"Normal updated")
+        key("Tab")
+        verify(window,"oval-guide   Width 40 mm")
+        legacy_number("46 mm")
+        verify(window,"Edited")
+        key("Control_L+s")
+        verify(window,"Saved")
+        result={n["id"]:n for n in json.loads(path.read_bytes())["items"][2]["data"]["cad"]["nodes"]}
+        normal=next(rel for rel in result["native-sketch-1"]["relations"] if rel["type"]=="normal")
+        assert normal==dict(id="native-normal-normal-line-oval-guide",type="normal",
+                            a=dict(entityId="normal-line",point="p1"),b="oval-guide")
+        foot=result["normal-line"]["p1"];tip=result["normal-line"]["p0"]
+        x,y=foot["x"]-3,foot["y"]-2
+        param_x=(x*cosine+y*sine)/23;param_y=(y*cosine-x*sine)/6
+        assert math.isclose(param_x**2+param_y**2,1,abs_tol=.000001)
+        tx=-23*param_y*cosine-6*param_x*sine;ty=-23*param_y*sine+6*param_x*cosine
+        dx,dy=tip["x"]-foot["x"],tip["y"]-foot["y"]
+        assert math.isclose(math.hypot(dx,dy),10,abs_tol=.00004)
+        assert next(rel for rel in result["native-sketch-1"]["relations"] if rel["id"]=="line-length")["value"]==10
+        assert abs(dx*tx+dy*ty)<.00003
+        shutil.copyfile(path,output_dir/"normal-ellipse-edited.pcad")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"normal-ellipse.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert math.isclose(triangulation(stl)[1],640*23*6*math.sin(math.tau/128),abs_tol=.004)
+        shutil.copyfile(stl,output_dir/"normal-ellipse-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # A saved smooth join follows a finite clockwise elliptic arc after a height edit.
         path=Path(tmp)/"Elliptic arc smooth join.pcad"
         initial=(libs/"cad/tests/fixtures/elliptic-smooth-join.pcad").read_bytes()

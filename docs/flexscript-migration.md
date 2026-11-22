@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`55f28903cfd788fa037c70a116d10d7d3f5b2efa` includes the shared library and
+`540b5ff305c97aa44227c7212e2b6833544324c8` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
@@ -282,6 +282,14 @@ The shared `55f2890` archive passed all 76 SDK tests. Biscuit's checked VM
 replayed each native grid, circular pattern, elliptic join and outer bevel
 edit. Two frozen v11 builds per model produced STL bytes identical to
 PuppyCAD's exports and repeated the same reports.
+
+Saved Normal constraints rebuild on closed ellipses and finite elliptic
+arcs. PuppyCAD tested an authored Normal while resizing its ellipse and a
+saved Normal while changing the height of a signed arc. Both files reopened
+with their relations and exported geometry intact. The `540b5ff` archive
+passed 77 SDK tests. Biscuit's checked VM reproduced both saved graphs and
+four frozen v11 builds matched the native STL bytes. The checked ellipse
+fixture authors the relation and changes the width in separate calls.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the

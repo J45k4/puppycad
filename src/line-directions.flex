@@ -2,6 +2,7 @@ import "cad/project-line-directions.flex";
 import "cad/project-concentric.flex";
 import "cad/project-tangent-author.flex";
 import "cad/project-point-on-curve-author.flex";
+import "cad/project-normal-author.flex";
 
 global puppy_direction_mode=0;
 global puppy_direction_source=0;
@@ -32,6 +33,16 @@ fn puppy_direction_has_tangent(project) {
     if puppy_direction_lines() {return puppy_direction_has_curves(project,0,1);}
     return puppy_direction_has_curves(project,1,2);
 }
+fn puppy_direction_has_normal(project) {
+    if !puppy_direction_lines() {return 0;}
+    let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
+    let row=pc_first(pc_nodes(cad_project_part(model)));
+    while row {
+        if m_eq(j_string(row,"sketchId"),sk) && pc_ellipse_entity(row) {return 1;}
+        row=load64(row+24);
+    }
+    return 0;
+}
 fn puppy_direction_has_curve_anchor(project,on_curve) {
     let report=j_parse(puppy_line_report+24);
     let line=pc_first(j_get(report,"lines"));let point=pc_first(j_get(report,"points"));
@@ -61,7 +72,8 @@ fn puppy_direction_available() {
     if puppy_direction_has_lines() {return 1;}
     let project=cad_project_open(puppy_history+24);
     return puppy_direction_has_curves(project,0,2) || puppy_direction_has_tangent(project)
-        || puppy_direction_has_curve_anchor(project,0) || puppy_direction_has_curve_anchor(project,1);
+        || puppy_direction_has_curve_anchor(project,0) || puppy_direction_has_curve_anchor(project,1)
+        || puppy_direction_has_normal(project);
 }
 fn puppy_direction_button_left(w) {return w-128;}
 fn puppy_direction_draw(rgb,w) {
@@ -86,6 +98,10 @@ fn puppy_direction_hint() {
         if puppy_direction_source {return "Pick the follower anchor for Point on curve";}
         return "Pick the source curve for Point on curve";
     }
+    if puppy_direction_mode==10 {
+        if puppy_direction_source {return "Pick the line endpoint for Normal";}
+        return "Pick an ellipse or elliptic arc for Normal";
+    }
     let pick="Pick the source ";if puppy_direction_source {pick="Pick the follower ";}
     if puppy_direction_mode==7 {
         if puppy_direction_source {return "Pick the inner curve for Internal tangent";}
@@ -106,6 +122,7 @@ fn puppy_direction_actions(buttons) {
     if circular_pair {puppy_compact_button(buttons,"Internal tangent",12,0);}
     if puppy_direction_has_curve_anchor(project,0) {puppy_compact_button(buttons,"Midpoint",16,0);}
     if puppy_direction_has_curve_anchor(project,1) {puppy_compact_button(buttons,"Point on curve",10,0);}
+    if puppy_direction_has_normal(project) {puppy_compact_button(buttons,"Normal",17,0);}
     puppy_compact_button(buttons,"Cancel",GUI_KEY_ESCAPE,0);return buttons;
 }
 fn puppy_direction_command(project,key) {
@@ -118,23 +135,28 @@ fn puppy_direction_command(project,key) {
     if key==12 && puppy_direction_has_curves(project,1,2) {mode=7;}
     if key==16 && puppy_direction_has_curve_anchor(project,0) {mode=8;}
     if key==10 && puppy_direction_has_curve_anchor(project,1) {mode=9;}
+    if key==17 && puppy_direction_has_normal(project) {mode=10;}
     if mode {puppy_direction_end();puppy_bar_page=0;puppy_direction_mode=mode;}
     return puppy_title(project,puppy_direction_hint());
 }
 fn puppy_direction_pick_curve_anchor(project,model,nodes,sk,point) {
     let on_curve=puppy_direction_mode==9;
+    let normal=puppy_direction_mode==10;
     if !puppy_direction_source {
         let curve=puppy_sketch_hit(nodes,sk,point);
         let supported=pc_midpoint_kind(curve);if on_curve {supported=pc_point_on_curve_kind(curve);}
+        if normal {supported=pc_ellipse_entity(curve);}
         if supported {puppy_direction_source=puppy_snapshot(j_string(curve,"id"));}
         return puppy_title(project,puppy_direction_hint());
     }
     let anchor=puppy_distance_hit(point);
-    if !anchor {return puppy_title(project,puppy_direction_hint());}
+    if !anchor || normal && !pc_normal_end(anchor) {return puppy_title(project,puppy_direction_hint());}
     let source=m_slice(puppy_direction_source+24,load64(puppy_direction_source+16));
     if m_eq(j_string(anchor,"entityId"),source) {return puppy_title(project,"Pick an anchor on a different entity");}
     let updated=0;let label="Midpoint updated";
-    if on_curve {
+    if normal {
+        updated=cad_project_toggle_normal(model,sk,source,anchor);label="Normal updated";
+    }else if on_curve {
         updated=cad_project_toggle_point_on_curve(model,sk,source,anchor);label="Point on curve updated";
     }else {updated=cad_project_toggle_midpoint(model,sk,source,anchor);}
     updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}

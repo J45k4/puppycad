@@ -252,6 +252,11 @@ within its sweep. For **Internal tangent**, pick the outer circular curve
 first and the inner curve second. A driving dimension rebuilds the contact
 while keeping the relation.
 
+Choose **Normal** (N) in **Dimensions → Relations**, then click an ellipse
+or elliptic arc and the endpoint of a line. The endpoint stays on the
+curve and the line stays perpendicular as dimensions change. An elliptic
+arc limits the endpoint to its signed sweep.
+
 Choose **Midpoint** in **Relations**, click the source line or arc, then click
 a point, line endpoint or supported shape center. Changing a source dimension
 moves the follower. On an arc, the midpoint lies halfway through the signed
