@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`38a35eee5725f8e518b3d4c0364af94222b89b5b` includes the shared library and
+`c26c9c8ae340baa76ed737c52bdd2e9838a9ce89` includes the shared library and
 the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
 VM verified all 45 historical CAD and runtime import paths against the
 archived catalog and VM. The v10 artifact lineage, the v11 worker and
@@ -99,6 +99,31 @@ endpoint after both edits, rejects an attachment to the mate's opposite
 occurrence and compares the saved assembly export with Rust.
 The checked VM and two v11 frozen workers reproduced the native STL and
 its three solved occurrences from the resulting assembly graph.
+
+The native editor also moves an existing sketch to a reference plane or
+extrusion face. The face picker only shows the geometry before its first
+consuming feature. The test reattaches a sketch to Front and then to the top
+of a 60 mm block. It exercises undo and redo and checks that the saved file
+retains the local outline and extrusion references. Rust confirms the
+reattached 3,840 mm³ solid and the original 960,000 mm³ block. Biscuit's
+checked VM replays the same edit and two v11 frozen jobs match the native
+STL bytes. The SDK rejects support cycles and edits that lose projected
+edges. See `workdir/flexscript/sketch-support-picker.png`.
+
+Whole-curve Tangent includes lines paired with circles or circular arcs.
+The saved v4 relation resolves a line and curve in either order against the
+line's supporting direction. A circular arc must include the contact in
+its signed sweep. The headless editor changes the tangent circle's diameter
+from 20 to 24 mm, reopens, extrudes and matches Rust's 3MF. The checked VM
+and two v11 frozen jobs match the native STL bytes.
+
+Standalone History previews suppression, restoration and feature ordering
+before Apply writes an edit. It also previews an earlier feature of the
+selected part while leaving its saved output intact. With the original
+Biscuit history fixture, the native editor and the current and archived
+checked VMs agree on the 1,146 mm³ active part and the 1,200 mm³ suppressed
+part. Two frozen v11 jobs retained their matching artifacts after restart.
+The GUI regression also checks earlier-state previews in a two-part file.
 
 The pinned compiler and verifier scanner share a 4,096-function source
 limit. PuppyCAD and the assembled Biscuit portal build through the direct
@@ -389,9 +414,12 @@ original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
 within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with holes or traced boundaries still need selector and clipping support.
-Face attachments are covered for the documented aligned cases. See
-`workdir/flexscript/rotated-chamfer.png`.
+with holes or concave traced boundaries still need clipping support.
+For a closed convex loop of straight segments, TypeScript's edge ordinals
+and vertical aliases match native geometry with shuffled and reversed
+segments. The edited square's closed 3,960 mm³ STL also matches the checked
+VM and two frozen builds. Face attachments are covered for the documented
+aligned cases. See `workdir/flexscript/rotated-chamfer.png`.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.

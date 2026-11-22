@@ -1,5 +1,7 @@
 global puppy_explicit_sketch=0;
 global puppy_plane_chooser=0;
+global puppy_support_sketch=0;
+global puppy_support_stage=0;
 // Parts are top-level records. Remember the assembly used to reach this part.
 global puppy_workspace_parent_id=0;
 
@@ -125,14 +127,17 @@ fn puppy_plane_actions() {
 fn puppy_start_plane_chooser(project) {
     puppy_search_focus(0);puppy_design_focus=0;puppy_tree_open=0;
     puppy_plane_chooser=1;puppy_picking_face=0;
+    if puppy_support_sketch {return puppy_title(project,"Choose a sketch support");}
     return puppy_title(project,"Choose a plane for the new sketch");
 }
 fn puppy_plane_command(project,key,mods) {
     if key==GUI_KEY_ESCAPE {
+        if puppy_support_sketch {return puppy_support_cancel(project);}
         puppy_plane_chooser=0;return puppy_title(project,"New sketch cancelled");
     }
     if mods&0x3c3 {return 1;}
     if key==9 && !puppy_empty {
+        if puppy_support_sketch {return puppy_support_pick_begin(project);}
         puppy_plane_chooser=0;
         puppy_sketch=0;puppy_picking_face=1;
         return puppy_title(project,"Click a face for the new sketch");
@@ -142,6 +147,7 @@ fn puppy_plane_command(project,key,mods) {
     if key==31 {plane="XZ";}
     if key==32 {plane="YZ";}
     if !m_len(plane) {return 1;}
+    if puppy_support_sketch {return puppy_support_apply(project,plane,0);}
     let updated=cad_project_add_plane_sketch(project,plane);
     if !updated {return puppy_title(project,cg_error);}
     let row=pc_first(pc_nodes(cad_project_part(updated)));
@@ -160,4 +166,65 @@ fn puppy_plane_event(event) {
         }
     }
     return kind==GUI_MOUSE_DOWN || kind==GUI_MOUSE_UP || kind==GUI_MOUSE_MOVE || kind==GUI_WHEEL;
+}
+
+fn puppy_support_begin(project,sketch) {
+    puppy_support_sketch=puppy_snapshot(j_string(sketch,"id"));
+    return puppy_start_plane_chooser(project);
+}
+fn puppy_support_end() {
+    if puppy_support_stage {
+        puppy_extrusion_view_end();puppy_drop(puppy_support_stage);puppy_support_stage=0;
+    }
+    puppy_drop(puppy_support_sketch);puppy_support_sketch=0;puppy_plane_chooser=0;
+}
+fn puppy_support_cancel(project) {
+    puppy_support_end();return puppy_title(project,"Sketch support edit cancelled");
+}
+fn puppy_support_apply(project,plane,face) {
+    let id=m_slice(puppy_support_sketch+24,load64(puppy_support_sketch+16));
+    let updated=cad_project_set_sketch_support(project,id,plane,face);
+    if !updated {return puppy_title(project,cg_error);}
+    puppy_support_end();
+    if updated==project {return puppy_title(project,"Sketch support unchanged");}
+    if !puppy_refresh(updated) {return puppy_title(project,cg_error);}
+    puppy_push(updated);puppy_workspace_edit_sketch(updated,id);
+    return puppy_title(updated,"Sketch support updated");
+}
+fn puppy_support_pick_begin(project) {
+    let stage=cad_project_sketch_support_stage(project,puppy_support_sketch+24);
+    if !stage {return puppy_title(project,cg_error);}
+    let history=cad_project_feature_history(stage);
+    if j_get(history,"error") {return puppy_title(project,cg_error);}
+    let mesh=j_get(history,"mesh");
+    if !mesh {return puppy_title(project,"No earlier extrusion faces. Choose a reference plane.");}
+    if !puppy_extrusion_view_begin_mesh(mesh) {return puppy_title(project,"Cannot show the supporting geometry");}
+    puppy_support_stage=puppy_snapshot(j_encode(stage));puppy_plane_chooser=0;
+    return puppy_title(project,"Click an earlier extrusion face");
+}
+fn puppy_support_actions() {
+    let rows=cg_array();
+    puppy_compact_button(rows,"Fit",74,0);puppy_compact_button(rows,"Cancel",GUI_KEY_ESCAPE,0);
+    return rows;
+}
+fn puppy_support_key(project,key,mods) {
+    if key==GUI_KEY_ESCAPE {return puppy_support_cancel(project);}
+    if mods&0x3c3 {return 1;}
+    if key==74 {return puppy_extrusion_view_fit();}
+    if key>=30 && key<=35 {
+        puppy_standard_view(key-30);return puppy_title(project,"Click an earlier extrusion face");
+    }
+    return 1;
+}
+fn puppy_support_event(event) {
+    if puppy_extrusion_view_event(event) {return 1;}
+    if gui_event_kind(event)!=GUI_MOUSE_DOWN || gui_event_button(event)!=1 {return 0;}
+    let x=gui_event_x(event);let y=gui_event_y(event);
+    if y>=42 && y<68 {return puppy_action_bar(puppy_support_actions(),0,gui_width(load64(puppy_device)),x);}
+    if y<76 {return 1;}
+    let project=cad_project_open(puppy_history+24);let stage=cad_project_open(puppy_support_stage+24);
+    let ray=puppy_ray(x,y);if !ray {return 1;}
+    let face=cad_project_pick_face(stage,load64(ray),load64(ray+8));
+    if !face {return puppy_title(project,cg_error);}
+    return puppy_support_apply(project,"",face);
 }

@@ -19,7 +19,7 @@ global PUPPY_DESIGN_MENU_WIDTH=148;
 global PUPPY_DESIGN_MENU_ROW=26;
 
 fn puppy_design_available() {
-    return !puppy_plane_chooser && !puppy_reader_report && !puppy_tree_open && !puppy_history_rows && !puppy_step_input && !puppy_mating
+    return !puppy_plane_chooser && !puppy_support_stage && !puppy_reader_report && !puppy_tree_open && !puppy_history_rows && !puppy_step_input && !puppy_mating
         && !puppy_line_report && !puppy_number_text && !puppy_loft_open && !puppy_patterns && !puppy_edge_kind && !puppy_construction_ids;
 }
 fn puppy_design_toggle() {
@@ -211,6 +211,7 @@ fn puppy_design_action(row) {
     if m_eq(kind,"assembly") {return "Open assembly";}
     if m_eq(kind,"sheet") {return "Open sheet";}
     if m_eq(kind,"add-sheet") {return "Create sheet";}
+    if m_eq(kind,"feature") || m_eq(kind,"definition") {return "Feature history";}
     if puppy_connector_row(row) {return "Edit connector";}
     if puppy_replace_row(row) {return "Replace part";}
     if m_eq(kind,j_string(node,"type")) && pc_model_feature(node) && m_eq(j_string(puppy_design_owner(row),"type"),"part") {return "Feature history";}
@@ -232,6 +233,10 @@ fn puppy_design_activate(project,row) {
     let kind=load64(row+16);let node=load64(row+24);
     if m_eq(kind,"sheet") {return puppy_sheet_open(project,j_string(node,"id"));}
     if m_eq(kind,"add-sheet") {return puppy_sheet_add(project);}
+    if cad_project_is_studio(project) && (m_eq(kind,"feature") || m_eq(kind,"definition")) {
+        let id="";if m_eq(kind,"feature") {id=j_string(node,"id");}
+        return puppy_history_begin_at(project,id,puppy_design_history_part(project,row));
+    }
     let item=puppy_design_owner(row);let index=puppy_item_index(project,item);
     if index<0 {return 1;}
     let switched=cad_project_item(project)!=item;
@@ -248,10 +253,7 @@ fn puppy_design_activate(project,row) {
         return result;
     }
     if !m_eq(kind,"part") && !m_eq(kind,"assembly") && pc_model_feature(node) {
-        puppy_history_begin(project);if !puppy_history_rows {return 1;}
-        let features=j_parse(puppy_history_rows+24);let n=pc_first(features);let i=0;
-        while n && !m_eq(j_string(n,"id"),j_string(node,"id")) {n=load64(n+24);i=i+1;}
-        if n {puppy_history_index=i;}return puppy_history_select(project,features);
+        return puppy_history_begin_at(project,j_string(node,"id"),0);
     }
     if !switched && !puppy_refresh(project) {return puppy_title(project,cg_error);}
     if m_eq(kind,"part") {puppy_workspace_show_part(project);}
@@ -310,6 +312,11 @@ fn puppy_design_shell_part(project,row) {
     if m_eq(kind,"instance") {return pc_find(j_get(project,"parts"),j_string(node,"part"));}
     return 0;
 }
+fn puppy_design_history_part(project,row) {
+    if m_eq(load64(row+16),"feature") {row=load64(row+32);}
+    if row {return puppy_design_shell_part(project,row);}
+    return 0;
+}
 fn puppy_design_menu_entries(project,row) {
     let entries=cg_array();
     if cad_project_is_studio(project) {
@@ -328,6 +335,9 @@ fn puppy_design_menu_entries(project,row) {
     if puppy_design_sketch_row(row) {
         let label="Show sketch";if load64(row+88) {label="Hide sketch";}
         cg_push(entries,cg_v(label,3,0));
+        if !puppy_sketch && puppy_design_owner(row)==cad_project_part(project) {
+            cg_push(entries,cg_v("Sketch support",9,0));
+        }
     }
     if !puppy_sketch && m_eq(load64(row+16),"extrude") && puppy_design_owner(row)==cad_project_part(project) {
         cg_push(entries,cg_v("Extrusion options",4,0));
@@ -370,6 +380,7 @@ fn puppy_design_menu_activate(choice) {
             if command==6 {puppy_shell_begin(project,0,load64(row+24));}
             if command==7 {puppy_connector_rename_begin(project,load64(row+24));}
             if command==8 {puppy_connector_attach_begin(project,load64(row+24));}
+            if command==9 {puppy_support_begin(project,load64(row+24));}
         }
     }
     return 1;

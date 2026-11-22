@@ -599,6 +599,80 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Reattach a consumed sketch to a reference plane and then to an earlier cap.
+        support_path=Path(tmp)/"Sketch support.pcad"
+        support_doc=json.loads((root/"rust/fixtures/extruded-rectangle.pcad").read_bytes())
+        support_part=support_doc["items"][0]["data"]
+        sk="native-sketch-2"
+        outline=dict(id="support-tab",type="sketchCornerRectangle",sketchId=sk,p0=dict(x=-12,y=-8),p1=dict(x=12,y=8))
+        tab=dict(id="support-extrude",name="Tab",type="extrude",sketchId=sk,profileId=f"{sk}-profile-1",operation="newBody",depth=10)
+        sketch=dict(id=sk,type="sketch",name="Tab sketch",targetId="plane-right",relations=[],dimensions=[],variables=[],referenceNote="keep")
+        support_part["cad"]["nodes"].extend([sketch,outline,tab])
+        support_part["cad"]["rootNodeIds"].extend([sk,tab["id"]])
+        support_part["tree"]["orderedNodeIds"].extend([sk,tab["id"]])
+        support_path.write_text(json.dumps(support_doc))
+        shutil.copyfile(support_path,output_dir/"sketch-support-input.pcad")
+        app,window=open_app(support_path,design_tree=True)
+
+        def open_support(row_y):
+            click(window,83,row_y,button=3)
+            key("Up")  # Sketch support is the last action in the sketch context menu.
+            key("Return")
+            verify(window,"Choose a sketch support")
+
+        def saved_support():
+            key("Control_L+s")
+            verify(window,"Saved")
+            return {node["id"]:node for node in json.loads(support_path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+
+        open_support(212)
+        click(window,410,55)
+        verify(window,"No earlier extrusion faces")
+        key("Escape")
+        verify(window,"Sketch support edit cancelled")
+        assert support_path.read_bytes()==(output_dir/"sketch-support-input.pcad").read_bytes()
+        open_support(264)
+        click(window,180,55)
+        verify(window,"Sketch support updated")
+        assert "  |  Sketch  |  Tab sketch" in title(window)
+        assert saved_support()[sk]==dict(sketch,targetId="plane-front")
+        key("Control_L+z")
+        assert saved_support()[sk]==sketch
+        key("Control_L+y")
+        assert saved_support()[sk]==dict(sketch,targetId="plane-front")
+        key("F12")
+        verify(window,"Part workspace")
+        open_support(264)
+        click(window,410,55)
+        verify(window,"Click an earlier extrusion face")
+        key("3")
+        verify(window,"Click an earlier extrusion face")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"sketch-support-picker.png"],check=True)
+        click(window,480,320)
+        verify(window,"Sketch support updated")
+        nodes=saved_support()
+        face_id="face-extrude-1-extrude-1-solid-face-6"
+        assert nodes[sk]==dict(sketch,targetId=face_id)
+        assert nodes[outline["id"]]==outline and nodes[tab["id"]]==tab
+        assert nodes[face_id]==dict(id=face_id,type="face",sourceId="extrude-1",faceId="extrude-1-solid-face-6")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(support_path)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"sketch-support-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",support_path,reference],check=True)
+        compare_solid_packages(support_path.with_suffix(".3mf"),reference)
+        tab_bounds,tab_volume=package_geometry(support_path.with_suffix(".3mf"))[1][1][1]
+        assert tab_bounds==[(-12,12),(-8,8),(60,70)] and math.isclose(tab_volume,3840,rel_tol=1e-6)
+        shutil.copyfile(support_path,output_dir/"sketch-support-edited.pcad")
+        key("Control_L+e")
+        verify(window,"Exported")
+        for export in support_path.parent.glob("Sketch support*.stl"):
+            shutil.copyfile(export,output_dir/export.name)
+        key("Escape")
+        app.wait(3)
+
         # Depth edits are temporary until Apply commits one feature history step.
         extrusion_path=Path(tmp)/"Extrusion options.pcad"
         app,window=open_app(extrusion_path,"Click two rectangle corners")
@@ -1702,6 +1776,134 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # The original Biscuit standalone feature-history plate, with a
+        # through cut and a dependent transform of the result.
+        history_path=Path(tmp)/"Standalone feature history.pcad"
+        history_doc={"format":"puppycorp.pcad","schema_version":1,"units":"mm",
+                     "nodes":[{"id":"stock","type":"box","size":[20,10,6]},
+                              {"id":"punch","type":"box","size":[3,3,10],"position":[5,4,-2]},
+                              {"id":"cut","type":"subtract","a":"stock","b":"punch"},
+                              {"id":"finish","type":"transform","source":"cut","position":[2,0,0]}],
+                     "parts":[{"id":"plate","name":"Cut plate","node":"finish"}]}
+        original=(json.dumps(history_doc,indent=2)+"\n").encode()
+        history_path.write_bytes(original)
+        app,window=open_app(history_path,"PCAD design opened",design_tree=True)
+
+        def history_frame(name):
+            from PIL import Image
+            frame=output_dir/f"standalone-history-{name}.png"
+            subprocess.run(["magick","import","-window",hex(window),frame],check=True)
+            with Image.open(frame) as image:
+                return image.convert("RGB").crop((289,80,image.width,image.height)).tobytes()
+
+        def history_export(name,volume):
+            key("Control_L+e")
+            verify(window,"Exported")
+            mesh=history_path.with_suffix(".stl")
+            assert triangulation(mesh)==([(2,22),(0,10),(0,6)],volume)
+            shutil.copyfile(history_path,output_dir/f"standalone-history-{name}.pcad")
+            shutil.copyfile(mesh,output_dir/f"standalone-history-{name}.stl")
+            mesh.unlink()
+
+        click(window,645,21)  # History toolbar button.
+        verify(window,"finish   active")
+        key("Escape")
+        verify(window,"Feature history closed")
+        click(window,19,212)  # Features group.
+        click(window,96,290,button=3)
+        verify(window,"Selected cut")
+        click(window,120,306)  # Feature history context action.
+        verify(window,"cut   active")
+        active_frame=history_frame("active")
+        history_export("authored",1146)
+        key("s")
+        verify(window,"Suppress preview / cut")
+        assert active_frame!=history_frame("suppress-preview")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert history_path.read_bytes()==original
+        history_export("while-previewing",1146)
+        click(window,170,54)  # Cancel button.
+        verify(window,"Feature preview cancelled")
+        assert history_frame("cancelled")==active_frame
+        key("s")
+        verify(window,"Suppress preview / cut")
+        click(window,78,54)  # Apply button.
+        verify(window,"cut   suppressed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        suppressed=json.loads(history_path.read_bytes())
+        assert suppressed=={**history_doc,"nodes":[*history_doc["nodes"][:2],
+                                                    {**history_doc["nodes"][2],"suppressed":True},history_doc["nodes"][3]]}
+        history_export("suppressed",1200)
+        key("Control_L+z")
+        verify(window,"cut   active")
+        key("Control_L+y")
+        verify(window,"cut   suppressed")
+        key("s")
+        verify(window,"Restore preview / cut")
+        key("Return")
+        verify(window,"cut   active")
+        key("Up")
+        verify(window,"Node references must name an earlier node in the design: punch")
+        key("Left")
+        verify(window,"punch   active")
+        key("Up")
+        verify(window,"Move earlier preview / punch")
+        key("Return")
+        verify(window,"1 / 4   punch   active")
+        key("Control_L+s")
+        verify(window,"Saved")
+        reordered={**history_doc,"feature_order":["punch","stock","cut","finish"]}
+        assert json.loads(history_path.read_bytes())==reordered
+        history_export("reordered",1146)
+        key("Right")
+        verify(window,"stock   active")
+        key("a")
+        verify(window,"Earlier preview / stock")
+        assert active_frame!=history_frame("earlier-preview")
+        key("Return")  # An earlier-state preview has no Apply operation.
+        verify(window,"Earlier preview / stock")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(history_path.read_bytes())==reordered
+        key("Escape")
+        verify(window,"Feature preview cancelled")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(history_path,"PCAD design opened")
+        key("F7")
+        verify(window,"4 / 4   finish   active")
+        history_export("reopened",1146)
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+
+        multi=Path(tmp)/"Standalone history with two parts.pcad"
+        second_part={"id":"spacer","name":"Spacer","node":"spacer-stock"}
+        multi.write_text(json.dumps({**history_doc,
+            "nodes":[*history_doc["nodes"],{"id":"spacer-stock","type":"box","size":[2,4,6],"position":[26,0,0]}],
+            "parts":[*history_doc["parts"],second_part]}))
+        app,window=open_app(multi,"PCAD design opened",design_tree=True)
+        click(window,88,186,button=3)  # The Cut plate part definition.
+        verify(window,"Selected Cut plate")
+        key("Down")  # Feature history follows the existing Shell part action.
+        key("Return")
+        verify(window,"4 / 5   finish   active")
+        key("Left")
+        verify(window,"cut   active")
+        key("a")
+        verify(window,"Earlier preview / cut")
+        key("Escape")
+        verify(window,"Feature preview cancelled")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+
         sheets=Path(tmp)/"Sensor sheets.pcad"
         shutil.copy(root/"tests/fixtures/sensor-unit.pcad",sheets)
         app,window=open_app(sheets,"PCAD design opened",design_tree=True)
@@ -2623,6 +2825,78 @@ with tempfile.TemporaryDirectory() as tmp:
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         assert bounds==[(25.0,45.0),(-10.0,10.0),(0.0,10.0)] and math.isclose(volume,32000*math.sin(math.tau/64),rel_tol=1e-6)
+        key("Escape")
+        app.wait(3)
+
+        # A construction line and one circle can use the same Relations > Tangent command.
+        path=Path(tmp)/"Line tangent roller.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        item=document["items"][0]
+        item["name"]="Line tangent roller"
+        graph=item["data"]["cad"]
+        sketch=graph["nodes"][3]
+        sk=sketch["id"]
+        guide,roller="guide-line","roller-circle"
+        left,right=dict(x=-20,y=0),dict(x=20,y=0)
+        graph["nodes"]=graph["nodes"][:4]+[
+            dict(id=guide,type="sketchLine",sketchId=sk,p0=left,p1=right,construction=True),
+            dict(id=roller,type="sketchPrimitive",sketchId=sk,
+                 primitive=dict(id=roller,type="circle",center=dict(x=0,y=20),radius=10,segments=64)),
+        ]
+        sketch["relations"]=[
+            dict(id="guide-start",type="fixed",anchor=dict(entityId=guide,point="p0"),position=left),
+            dict(id="guide-end",type="fixed",anchor=dict(entityId=guide,point="p1"),position=right),
+            dict(id="roller-diameter",type="diameter",entityId=roller,value=20),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"guide-line   40 mm   DOF 2")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,46,54)
+        verify(window,"Pick the source line or circular curve for Tangent")
+        click(window,480,616)
+        verify(window,"Pick the follower line or circular curve for Tangent")
+        click(window,652,272)
+        verify(window,"Tangent updated")
+        key("F2")
+        verify(window,"Set value")
+        key("Control_L+a")
+        type_value("24 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"roller-circle   Diameter 20 mm   DOF 1")
+        key("Control_L+y")
+        verify(window,"roller-circle   Diameter 24 mm   DOF 1")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved={node["id"]:node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+        link_id=f"native-external-tangent-{guide}-{roller}"
+        assert saved[guide]==graph["nodes"][4]
+        assert saved[roller]["primitive"]==dict(graph["nodes"][5]["primitive"],center=dict(x=0,y=12),radius=12)
+        assert saved[sk]["relations"][-1]==dict(id=link_id,type="tangent",a=guide,b=roller)
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"line-tangent.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"guide-line   40 mm   DOF 1")
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"line-tangent-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        assert bounds==[(-12.0,12.0),(0.0,24.0),(0.0,10.0)] and math.isclose(volume,46080*math.sin(math.tau/64),rel_tol=1e-6)
         key("Escape")
         app.wait(3)
 
@@ -6195,6 +6469,60 @@ with tempfile.TemporaryDirectory() as tmp:
         for expected in ((4,5,10),(16,5,10),(4,6,14),(16,6,14)):
             assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
         shutil.copyfile(stl,output_dir/"face-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A closed line outline keeps the authored starting segment after winding normalization.
+        path=Path(tmp)/"Line chamfer.pcad"
+        document=json.loads((libs/"cad/tests/fixtures/typescript-line-chamfers.pcad").read_bytes())
+        document["items"]=[next(item for item in document["items"] if item["id"]=="ordered-square")]
+        nodes=document["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(node for node in nodes if node["type"]=="chamfer")
+        bevel["notes"]={"keep":"original line and edge order"}
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"line-chamfer-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Line bevel  d1 2 mm")
+        key("F2")
+        type_value("4")
+        key("Return")
+        verify(window,"Line bevel  d1 4 mm")
+        key("Tab")
+        verify(window,"Line bevel  d2 3 mm")
+        key("F2")
+        type_value("1")
+        key("Return")
+        verify(window,"Line bevel  d2 1 mm")
+        key("Control_L+z")
+        verify(window,"Line bevel  d2 3 mm")
+        key("Control_L+y")
+        verify(window,"Line bevel  d2 1 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assert saved["items"][0]["data"]["cad"]["nodes"]==[
+            dict(node,d1=4,d2=1) if node is bevel else node for node in nodes
+        ]
+        shutil.copyfile(path,output_dir/"line-chamfer-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Line bevel  d1 4 mm")
+        key("1")
+        verify(window,"Front view")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"line-chamfer.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(0,20),(0,20),(0,10)] and math.isclose(volume,3960,abs_tol=.001),(bounds,volume)
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        for expected in ((20,0,6),(20,20,6),(19,0,10),(19,20,10)):
+            assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
+        shutil.copyfile(stl,output_dir/"line-chamfer.stl")
         key("Escape")
         app.wait(3)
 

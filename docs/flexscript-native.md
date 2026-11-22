@@ -43,6 +43,13 @@ From Part, click **New sketch** or press Shift+S. Choose **Top (XY)**,
 to an existing solid, then click its face. Keys 1, 2, and 3 select a plane
 while the chooser is open. Escape cancels.
 
+To move an existing v4 sketch, right-click its Design row in Part and
+choose **Sketch support**. Pick a reference plane or choose **On face**.
+The face picker shows geometry from before the first feature that uses the
+sketch. The edit keeps the sketch's local dimensions and feature references.
+Undo restores the earlier support. If the change would lose a projected
+edge, PuppyCAD keeps the original support.
+
 Save writes all of the items and their sketches to the same PCAD file.
 The curved arrows in the toolbar undo and redo edits. A dim arrow marks
 an unavailable action. Ctrl+Z and Ctrl+Y are available from the keyboard.
@@ -237,10 +244,12 @@ or permitted drag on either center moves both. Each curve keeps its own
 size and orientation.
 
 Choose **Tangent** for two circles or circular arcs that touch externally.
-Pick the source first, then the follower. For **Internal tangent**, pick
-the outer curve first and the inner curve second. A finite arc must include
-the contact point. Changing a driving radius rebuilds the contact while
-keeping the relation.
+It also works between one straight line and a circle or circular arc. Pick
+the source first, then the follower. The straight line can be extended
+mathematically to reach the contact point. A finite arc must include the
+contact point within its sweep. For **Internal tangent**, pick the outer
+curve first and the inner curve second. Changing a driving radius rebuilds
+the contact while keeping the relation.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -383,7 +392,8 @@ Press F2 to edit `d1`, or press Tab to select `d2` first. **Objects** lists
 both fields under **Driving fields**. Enter millimetres. Entering zero for
 `d2` makes it follow `d1`. The feature keeps its original extrusion-edge
 reference. Supported selectors include a single corner or rotated rectangle,
-regular polygon, circle, ellipse or capsule extruded blind from a reference plane.
+regular polygon, circle, ellipse, capsule or one closed convex loop of
+straight sketch lines extruded blind from a reference plane.
 For face-attached blind joined extrusions, the parent face must resolve to
 the same host face in both editors. Saved fixtures cover a top cap, a
 mirrored bottom cap and an aligned side face.
@@ -403,6 +413,16 @@ A failed feature shows its reason in the toolbar when selected. The viewport
 can still display independent bodies. Repair or suppress the failed feature
 before exporting. Rolling back before the first feature leaves an empty
 viewport. Reopen History to move the rollback position forward.
+
+For Biscuit standalone schema-1 files, open **History** (F7), or right-click
+a feature or part in Design and choose **Feature history**. Select a modifier
+and use **Suppress** or **Restore** (S) to preview the change. **Move earlier**
+and **Move later** (Up and Down) preview an adjacent reorder. Press **Apply**
+(Enter) to add the edit to Undo history, or **Cancel** (Escape) to return to
+the applied feature state. Dependency errors leave the authored order in place.
+Open History from a part to preview an earlier feature on that part’s main
+body (A). Earlier previews close with Escape and never change the part’s output
+feature. Saving and exporting during a preview use the applied document.
 
 The **Profiles** toolbar provides these placement modes.
 
