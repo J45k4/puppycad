@@ -10,6 +10,8 @@ global puppy_toolbar_width=0;
 global puppy_toolbar_dirty=1;
 global puppy_status=0;
 global puppy_bar_page=0;
+global puppy_breadcrumb_left=0;
+global puppy_breadcrumb_right=0;
 
 fn puppy_toolbar_open() {
     puppy_toolbar_context=tf_context();
@@ -186,6 +188,7 @@ fn puppy_line_button(project) {
     return 0;
 }
 fn puppy_toolbar_build(w) {
+    puppy_breadcrumb_right=0;
     if puppy_reader_report {
         let rgb=m_take(w*76*4);puppy_reader_bar(rgb,w);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
@@ -273,7 +276,16 @@ fn puppy_toolbar_build(w) {
     if cad_project_is_studio(project) {status_edge=w-268;}
     if cad_project_part(project) {status_edge=w-513;}
     if w<800 {status_edge=w-8;}
-    let space=status_edge-title_x;let heading=puppy_workspace_heading(project,space);
+    let space=status_edge-title_x;let heading=puppy_workspace_heading(project);
+    if puppy_sketch && cad_project_part(project) {
+        let parent=m_cat("Part / ",puppy_document_name(project));
+        let suffix=m_cat(" / ",heading);
+        if puppy_toolbar_text_width(m_cat(parent,suffix))>space {parent="Part";}
+        puppy_breadcrumb_left=title_x;
+        puppy_breadcrumb_right=title_x+puppy_limit(puppy_toolbar_text_width(parent),0,space);
+        puppy_bar_rect(rgb,w,title_x,29,puppy_breadcrumb_right-title_x,1,143,217,184);
+        heading=m_cat(parent,suffix);
+    }
     let title_end=title_x+puppy_limit(puppy_toolbar_text_width(heading)+4,0,space);
     puppy_bar_text(rgb,w,title_x,25,heading,title_end);
     if !cad_project_is_studio(project) && w>=800 {
@@ -375,6 +387,9 @@ fn puppy_toolbar_build(w) {
     if puppy_draft || puppy_camera_available() {puppy_bar_button(rgb,w,w-60,48,"Fit");}
     puppy_ui_upload(rgb,w,76);
     puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
+}
+fn puppy_breadcrumb_hit(x,y) {
+    return puppy_sketch && y>=6 && y<34 && x>=puppy_breadcrumb_left && x<puppy_breadcrumb_right;
 }
 fn puppy_ui_upload(rgb,w,h) {
     let args=m_take(88);gui__zero(args,88);

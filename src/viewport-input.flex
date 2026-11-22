@@ -103,9 +103,10 @@ fn puppy_clear_pick() {
 }
 fn puppy_limit(value,low,high) {if value<low {return low;}if value>high {return high;}return value;}
 fn puppy_fit() {
-    puppy_part_sketch_fit();
+    let project=cad_project_open(puppy_history+24);
+    if cad_project_part(project) {puppy_part_sketch_fit();}
     gui__zero(puppy_pan,24);puppy_zoom=280;
-    return puppy_title(cad_project_open(puppy_history+24),"View fitted");
+    return puppy_title(project,"View fitted");
 }
 fn puppy_draw_occurrences() {
     let moving=render_uniform(puppy_material,0,"moving");

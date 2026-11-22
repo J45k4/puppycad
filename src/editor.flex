@@ -549,6 +549,9 @@ fn puppy_editor(path,source,project,report) {
                     }
                     dirty=1;
                 }
+                else if puppy_breadcrumb_hit(x,y) {
+                    puppy_workspace_switch(cad_project_open(puppy_history+24));dirty=1;
+                }
                 else if width>=800 && y>=6 && y<34 && x>=width-505 && x<width-429 && cad_project_part(cad_project_open(puppy_history+24)) {
                     puppy_command(38,0);dirty=1;
                 }

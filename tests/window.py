@@ -197,6 +197,11 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Control_L+y")
         verify(window,"|  Sketch")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-sketch.png"],check=True)
+        click(window,120,20)  # The parent breadcrumb returns to Base's Part workspace.
+        verify(window,"Part workspace")
+        assert "|  Solid" in title(window)
+        click(window,85,212)
+        verify(window,"Editing Base sketch")
         click(window,900,20)
         verify(window,"Part workspace")
         key("F12")
@@ -222,8 +227,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
         blank=Path(tmp)/"Workspace blank.pcad"
         app,window=open_app(blank,"Click two rectangle corners",design_tree=True)
-        click(window,900,20)
-        verify(window,"Part workspace")
+        click(window,65,160)  # The default Part row is independent of the filename.
+        verify(window,"Opened Part 1")
 
         from PIL import Image
 
@@ -257,6 +262,11 @@ with tempfile.TemporaryDirectory() as tmp:
         compact=toolbar_frame("toolbar-compact-sketch.png")
         for x in (41,157):
             assert compact.getpixel((x,62))==(143,217,184)
+        click(window,80,55)
+        verify(window,"Editing Sketch 1")
+        toolbar_frame("workspace-sketch-breadcrumb-compact.png")
+        click(window,20,20)
+        verify(window,"Part workspace")
         xlib.XResizeWindow(connection,window,960,640)
         xlib.XSync(connection,0)
         time.sleep(.22)
@@ -285,6 +295,8 @@ with tempfile.TemporaryDirectory() as tmp:
         assert part_sketch_pixels(Path(tmp)/"part-sketch-orbit.png")>150
         key("3")
         verify(window,"Top view")
+        key("Home")
+        verify(window,"View fitted")
         assert part_sketch_pixels("part-sketch-top.png")>200
         click(window,232,212)  # The eye on Sketch 1.
         verify(window,"Hidden Sketch 1")

@@ -21,7 +21,8 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
   choose **Open part**. Use **Sketch** in the toolbar to open its current
   sketch, or select a specific sketch under that part.
 - **Sketch** provides the 2D drawing and dimension tools. Choose **Done
-  sketch** to return to the owning part, even if the sketch has no solid.
+  sketch** or click the underlined **Part** breadcrumb to return to the
+  owning part, even if the sketch has no solid.
   F12 switches between Part and Sketch. Extrude and Revolve create a feature
   and return to Part.
 
@@ -42,6 +43,7 @@ for the toolbar.
 ## Design tree
 
 The **Design** sidebar opens with the file, including a new empty sketch.
+The default part appears as **Part 1** when its name comes from the filename.
 Click a disclosure triangle to expand a part, sketch or group. Search by
 name, type or ID to reveal matching records and their parents. Click a
 part, assembly or sketch row to open its workspace and update the

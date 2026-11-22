@@ -32,6 +32,16 @@ fn puppy_design_name(node,fallback) {
     let name=j_string(node,"name");if m_len(name) {return name;}
     let id=j_string(node,"id");if m_len(id) {return id;}return fallback;
 }
+fn puppy_design_item_name(item,kind) {
+    let name=puppy_design_name(item,kind);
+    if !m_eq(j_string(item,"id"),"native-part-1") || !m_eq(kind,"part") {return name;}
+    let base=puppy_path;let p=puppy_path;
+    while load8(p) {if load8(p)==47 {base=p+1;}p=p+1;}
+    let end=p-base;
+    if end>=5 && m_eq(p-5,".pcad") {end=end-5;}
+    if m_eq(name,m_slice(base,end)) {return "Part 1";}
+    return name;
+}
 // Each row holds the label, key, kind, document record, parent, depth,
 // initial expansion, child flag, search match, current expansion, row visibility
 // and whether the sketch is shown in Part.
@@ -153,7 +163,7 @@ fn puppy_design_rows(project) {
     if cad_project_is_studio(project) {puppy_design_studio(rows,project);}else {
         let item=pc_first(j_get(project,"items"));let active=cad_project_item(project);
         while item {
-            let kind=j_string(item,"type");let row=puppy_design_row(rows,0,kind,item,puppy_design_name(item,kind),item==active);
+            let kind=j_string(item,"type");let row=puppy_design_row(rows,0,kind,item,puppy_design_item_name(item,kind),item==active);
             if m_eq(kind,"part") {puppy_design_part(rows,row,item);}
             if m_eq(kind,"assembly") {puppy_design_assembly(rows,row,j_get(item,"data"));}
             item=load64(item+24);
