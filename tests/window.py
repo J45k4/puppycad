@@ -245,16 +245,61 @@ with tempfile.TemporaryDirectory() as tmp:
         app,window=open_app(sheets,"PCAD design opened",design_tree=True)
         click(window,26,185)  # Expand the first part to expose its feature and datums.
         subprocess.run(["magick","import","-window",hex(window),output_dir/"design-tree.png"],check=True)
-        click(window,53,125)
-        for letter in "enclosure-plan":
-            key("minus" if letter=="-" else letter)
-        key("Return")
-        click(window,80,185)
-        verify(window,"Selected Sensor enclosure base")
-        subprocess.run(["magick","import","-window",hex(window),output_dir/"design-drawing-tree.png"],check=True)
-        click(window,72,615)
+        def open_sheet(query, name):
+            click(window,229,125)
+            for letter in query:
+                key("minus" if letter=="-" else letter)
+            key("Return")
+            click(window,80,185)
+            verify(window,"Selected "+name)
+            click(window,72,615)
+            verify(window,"Drawing sheet  "+name)
+
+        open_sheet("enclosure-plan","Sensor enclosure base")
+        plan=output_dir/"drawing-sheet-plan.png"
+        subprocess.run(["magick","import","-window",hex(window),plan],check=True)
+        from PIL import Image
+        with Image.open(plan) as image:
+            viewport=image.convert("RGB").crop((260,76,960,550))
+            colors=viewport.getcolors(viewport.width*viewport.height)
+            counts={rgb:n for n,rgb in colors}
+            assert counts.get((246,247,245),0)>100000 and counts.get((49,57,61),0)>200
+        click(window,177,54)  # Export from the preview.
         verify(window,"Exported")
         assert b"/Count 4" in sheets.with_suffix(".pdf").read_bytes()
+        # Select a different sheet while the current one is open.
+        open_sheet("enclosure-section","Sensor enclosure section")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"drawing-sheet-section.png"],check=True)
+        open_sheet("hinge-detail","Base hinge detail")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"drawing-sheet-detail.png"],check=True)
+        open_sheet("exploded","Sensor unit exploded assembly")
+        exploded=output_dir/"drawing-sheet-exploded.png"
+        subprocess.run(["magick","import","-window",hex(window),exploded],check=True)
+        with Image.open(exploded) as image:
+            # A BOM balloon has a different stroke and background from the face edges.
+            colors=image.convert("RGB").getcolors(image.width*image.height)
+            assert dict((rgb,n) for n,rgb in colors)[(67,90,107)]>800
+        key("F3")
+        xlib.XResizeWindow.argtypes = [pointer, XID, C.c_uint, C.c_uint]
+        xlib.XResizeWindow(connection, window, 420, 460)
+        xlib.XSync(connection, 0)
+        time.sleep(.22)
+        compact=output_dir/"drawing-sheet-compact.png"
+        subprocess.run(["magick","import","-window",hex(window),compact],check=True)
+        with Image.open(compact) as image:
+            assert image.size==(420,460)
+            assert image.convert("RGB").getpixel((102,118))==(246,247,245)
+        xlib.XResizeWindow(connection, window, 960, 640)
+        xlib.XSync(connection, 0)
+        key("Escape")
+        verify(window,"Model view")
+        from PIL import ImageChops
+        returned=Path(tmp)/"returned-model.png"
+        subprocess.run(["magick","import","-window",hex(window),returned],check=True)
+        with Image.open(output_dir/"design-tree.png") as before, Image.open(returned) as after:
+            area=(270,76,960,640)
+            assert ImageChops.difference(before.convert("RGB").crop(area),after.convert("RGB").crop(area)).getbbox() is None
+        assert sheets.read_bytes()==(root/"tests/fixtures/sensor-unit.pcad").read_bytes()
         key("Escape")
         app.wait(3)
 

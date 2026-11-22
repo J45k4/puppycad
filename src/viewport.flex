@@ -6,6 +6,7 @@ import "viewport-input.flex";
 import "objects.flex";
 import "harness.flex";
 import "view-cube.flex";
+import "drawing-view.flex";
 
 global puppy_device=0;
 global puppy_empty=0;
@@ -152,6 +153,10 @@ fn puppy_draw() {
     let w=gui_pixel_width(window);let h=gui_pixel_height(window);
     if !w || !h {return 1;}
     if puppy_reader_source {return puppy_reader_draw_source(w,h);}
+    if puppy_sheet_scene {
+        if !render_begin(puppy_device,0,w,h) {return 0;}
+        return puppy_toolbar_draw(w,h) && puppy_sheet_draw(w,h) && puppy_objects_draw(w,h) && gui_gl_swap(window);
+    }
     let distance=puppy_radius*puppy_zoom/100+2;
     let eye=puppy_eye(distance);
     let camera=m_take(64);

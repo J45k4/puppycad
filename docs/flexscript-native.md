@@ -35,10 +35,12 @@ part or assembly. In an assembly, selecting an occurrence highlights it.
 
 In a standalone Biscuit file, expand **Parts**, **Features**, **Assembly**,
 **Drawing sheets** or **Electrical** to inspect the saved design. Select
-a sheet and choose **Export drawing sheets** (Ctrl+P) to export the complete
-set beside the PCAD file. A repeated export uses the next available name.
-The CLI also accepts `--export INPUT.pcad OUTPUT.pdf`. The PDF resolves
-dimensions and callouts from the current model.
+a sheet and choose **Open sheet**. The viewport shows the projected edges,
+dimensions and callouts for the current model. Open another sheet from
+the tree, or press **Escape** to return to the model. **Export PDF**
+(Ctrl+P) writes the complete set beside the PCAD file. A repeated export
+uses the next available name. The CLI also accepts
+`--export INPUT.pcad OUTPUT.pdf`.
 
 ## Finding a part in the drawing
 

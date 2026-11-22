@@ -676,8 +676,13 @@ Objects panel still supports occurrence picking and isolation.
 
 The shared drawing renderer exports the standalone sensor fixture’s four A4
 sheets, including the projected dimensions, section, enlarged hinge detail
-and exploded parts list. The window exports the complete PDF from the
-selected sheet. The checked VM measures a 24.00 mm block. The frozen worker
+and exploded parts list. The native window opens each sheet from the
+Design tree and draws the shared scene with its dimension values, section,
+detail markers and BOM balloons. The headless test switches among all
+four previews, exports the complete PDF, and returns to the model with
+the original file bytes preserved. Biscuit’s checked VM renders the same
+four sheets through the standalone import path. The plan resolves 102.00 mm
+and 48.00 mm ± 0.150 mm, and the exploded view resolves all six BOM balloons. The frozen worker
 produces a PDF alongside STEP or STL and discards exports for duplicate
 sheet IDs. Two independent build jobs downloaded byte-identical PDFs with
 the frozen source digest in the footer. Earlier build artifacts remain

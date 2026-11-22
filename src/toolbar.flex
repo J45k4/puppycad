@@ -45,6 +45,9 @@ fn puppy_ui_text(rgb,w,h,x,baseline,text,right) {
     return puppy_ui_font_text(rgb,w,h,x,baseline,text,right,puppy_toolbar_font);
 }
 fn puppy_ui_font_text(rgb,w,h,x,baseline,text,right,font) {
+    return puppy_ui_tinted_text(rgb,w,h,x,baseline,text,right,font,236);
+}
+fn puppy_ui_tinted_text(rgb,w,h,x,baseline,text,right,font,tone) {
     let shape=tf_shape(font,text,m_len(text),0);
     if !shape {return 0;}
     let i=0;let pen=x*64;
@@ -60,7 +63,7 @@ fn puppy_ui_font_text(rgb,w,h,x,baseline,text,right,font) {
                     if px>=0 && px>=x && px<w && px<right && py>=0 && py<h {
                         let alpha=load8(load64(bitmap+16)+dy*tf_i32(bitmap+8)+dx);
                         let dst=rgb+(py*w+px)*4;let k=0;
-                        while k<3 {store8(dst+k,(load8(dst+k)*(255-alpha)+236*alpha)/255);k=k+1;}
+                        while k<3 {store8(dst+k,(load8(dst+k)*(255-alpha)+tone*alpha)/255);k=k+1;}
                     }
                     dx=dx+1;
                 }
@@ -117,6 +120,15 @@ fn puppy_toolbar_build(w) {
     let part=cad_project_item(project);let feature=puppy_feature(project);
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
+    if puppy_sheet_scene {
+        let scene=j_parse(puppy_sheet_scene+24);
+        let title=j_string(scene,"name");
+        if puppy_status {title=puppy_status+24;}
+        puppy_bar_text(rgb,w,12,25,title,w-10);
+        puppy_action_bar(puppy_sheet_actions(),rgb,w,-1);
+        puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;
+        return 1;
+    }
     if puppy_step_input || puppy_mating || puppy_construction_ids {
         if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-12);}
         let rows=0;if puppy_construction_ids {rows=puppy_construction_actions();}else if puppy_mating {rows=puppy_mate_actions();}else {rows=puppy_step_actions(project);}

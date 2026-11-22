@@ -217,9 +217,22 @@ fn puppy_add_item(project,kind) {
     if puppy_draft {return puppy_title(updated,puppy_draft_hint());}
     return puppy_title(updated,"Choose a part to insert");
 }
+fn puppy_export_shortcut(project,extension) {
+    let base=puppy_path;let n=m_len(base);
+    if n>=5 && m_eq(base+n-5,".pcad") {base=m_slice(base,n-5);}
+    let out=puppy_export(project,m_cat(base,extension),1);
+    if !out {return puppy_title(project,cg_error);}
+    return puppy_title(project,m_cat("Exported ",out));
+}
 fn puppy_command(key,mods) {
     puppy_forget_click();
     if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
+    if puppy_sheet_scene {
+        let project=cad_project_open(puppy_history+24);
+        if key==GUI_KEY_ESCAPE {puppy_sheet_close();return puppy_title(project,"Model view");}
+        if key==19 && mods&192 {return puppy_export_shortcut(project,".pdf");}
+        return 1;
+    }
     if puppy_join_drag {
         if key==GUI_KEY_ESCAPE {puppy_join_end_drag();return puppy_title(cad_project_open(puppy_history+24),"Smooth drag cancelled");}return 1;
     }
@@ -310,13 +323,9 @@ fn puppy_command(key,mods) {
         if !puppy_sketch && !j_get(puppy_feature(project),"sketchId") {return puppy_title(project,"Select a sketch-based feature");}
         puppy_sketch=!puppy_sketch;return puppy_title(project,0);}
     if (mods&192) && (key==8 || (key==19 && cad_project_is_studio(project))) {
-        let base=puppy_path;let n=m_len(base);
-        if n>=5 && m_eq(base+n-5,".pcad") {base=m_slice(base,n-5);}
         let extension=".stl";if mods&768 {extension=".3mf";}else if mods&3 {extension=".step";}
         if key==19 {extension=".pdf";}
-        let out=puppy_export(project,m_cat(base,extension),1);
-        if !out {return puppy_title(project,cg_error);}
-        return puppy_title(project,m_cat("Exported ",out));
+        return puppy_export_shortcut(project,extension);
     }
     if (mods&192) && key==22 {return puppy_save(project);}
     if (mods&192) && (key==29 || key==28) {
@@ -482,6 +491,10 @@ fn puppy_editor(path,source,project,report) {
             else if puppy_step_event(event) {dirty=1;}
             else if puppy_pattern_event(event) {dirty=1;}
             else if puppy_design_available() && puppy_objects_event(event) {dirty=1;}
+            else if puppy_sheet_scene && (kind==GUI_QUIT || kind==GUI_CLOSE) {
+                puppy_sheet_close();running=puppy_command(GUI_KEY_ESCAPE,0);dirty=1;
+            }
+            else if puppy_sheet_scene && puppy_sheet_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
             else if puppy_join_event(event) {dirty=1;}
             else if puppy_line_event(event) {dirty=1;}
             else if puppy_context_event(event) {dirty=1;}
@@ -631,7 +644,7 @@ fn puppy_editor(path,source,project,report) {
     if puppy_reader_offsets {syscall(11,puppy_reader_offsets,(puppy_reader_count+1)*8,0,0,0,0);}
     puppy_distance_cancel();puppy_line_cancel_drag();if puppy_line_report {puppy_drop(puppy_line_report);}
     if puppy_number_text {puppy_number_close();}
-    puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
+    puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
     if puppy_pending_title {puppy_drop(puppy_pending_title);}
     puppy_forget_click();puppy_end_isolation();puppy_clear_pick();puppy_trim(puppy_root);if puppy_disk {puppy_drop(puppy_disk);}if puppy_status {puppy_drop(puppy_status);}puppy_view_close();return 0;
 }
