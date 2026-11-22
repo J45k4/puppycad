@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`1f838b86eeac549640d06ac71432744c1175d9b1` includes the shared library and
+`50b258651232223ac750273d1f8faa54891b26f0` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -241,6 +241,13 @@ preserves the surviving endpoint identities through save and undo, and
 extends one fragment back to the nearest finite boundary. The CAD tests
 cover projected boundaries and reject edits that would invalidate a
 dependent solid.
+
+The Trim and Extend tools also use exact circle, ellipse and finite arc
+intersections. Rectangles, polygons, capsules and projected lines, circles
+and circular arcs can serve as boundaries. The window regression trims a
+line at the two intersections of a 20 mm radius circle, saves and reopens
+the sketch, and extends one fragment back to the circle. Its intersections
+remain at −16 and +16 mm with the line at Y = 12 mm.
 
 The graph suite compares directed axes, axis-touching profiles, partial and
 full turns, rectangular and round holes, mirrored face sketches, joins and
@@ -534,6 +541,13 @@ drill files. The headless browser verified that one receipt blocks
 promotion and that two passing receipts unlock the release ZIP. A board
 with a deleted route failed DRC, withheld fabrication files and left the
 previously promoted release available to authorized readers.
+
+The extended `kicad-pcb-exports-4` descriptor adds the rear silkscreen and
+requires all seven plot names in the Gerber job file. The test uses the
+original v3 worker to promote a six-plot release, switches the same portal
+database to v4, and downloads the earlier ZIP byte for byte. The v4 worker
+produces a valid empty rear legend for a front-only board and rear drawing
+commands for a board with a back-mounted footprint.
 
 The shared continuity evaluator follows every declared terminal path
 through physical copper, mating contacts and harness conductors. The
@@ -875,10 +889,11 @@ CAD graph, two frozen builds produce byte-identical STLs, and a saved
 polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
-Remaining standalone work includes additional sketch and feature authoring,
-design inspectors and the original extended KiCad fabrication profile.
-Compare these paths against Biscuit's `docs/pcad-electrical.md` and its
-original release fixtures.
+Remaining standalone work includes additional sketch and feature authoring
+and design inspectors. Straight-line Trim and Extend still need spline
+boundaries, and sketch authoring still needs the open items in the parity
+inventory. Compare standalone paths against Biscuit's
+`docs/pcad-electrical.md` and its original release fixtures.
 
 ## Later milestone: WASM editor in Biscuit
 

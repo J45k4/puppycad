@@ -391,8 +391,10 @@ and reopening, editing the width, height or rotation of any piece in
 
 Choose **More tools → Edit → Trim** (Q), then click the interval of a straight
 line you want to remove. **Extend** (Shift+Q) lengthens the end nearest your
-click to the first straight boundary it reaches. Projected straight edges can
-serve as boundaries and continue to follow their source. Each edit can be undone.
+click to the first boundary it reaches. Lines, circles, ellipses, circular and
+elliptic arcs, rectangles, polygons, and slots can serve as boundaries. Arc
+intersections respect the saved sweep. Projected boundaries continue to follow
+their source. Each edit can be undone.
 
 In **More tools**, choose **Tangent** (Shift+J), click a free line, circular
 arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**

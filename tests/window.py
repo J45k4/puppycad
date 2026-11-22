@@ -998,6 +998,49 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        curved_line_path=Path(tmp)/"Curved sketch boundaries.pcad"
+        curved_doc=json.loads(line_edit_path.read_bytes())
+        curved_part=curved_doc["items"][0]
+        curved_part["name"]="Curved boundaries"
+        curved_graph=curved_part["data"]["cad"]
+        curved_graph["nodes"]=curved_graph["nodes"][:4]
+        curved_graph["nodes"][3]["name"]="Line and circle"
+        curved_graph["nodes"] += [{"id":"native-entity-1","type":"sketchLine","sketchId":"native-sketch-1",
+            "p0":{"x":-30,"y":12},"p1":{"x":30,"y":12}},
+            {"id":"native-entity-2","type":"sketchPrimitive","sketchId":"native-sketch-1",
+             "primitive":{"type":"circle","center":{"x":0,"y":0},"radius":20,"segments":32}}]
+        curved_line_path.write_text(json.dumps(curved_doc))
+
+        def saved_curved_lines():
+            graph=json.loads(curved_line_path.read_bytes())["items"][0]["data"]["cad"]
+            return [(node["id"],node["p0"]["x"],node["p1"]["x"]) for node in graph["nodes"] if node["type"]=="sketchLine"]
+
+        app,window=open_app(curved_line_path,"Click two rectangle corners")
+        key("q")
+        verify(window,"Click the line segment to trim")
+        click(window,480,310)
+        verify(window,"Line trimmed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_curved_lines()==[("native-entity-1",-30,-16),("native-entity-3",16,30)]
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"sketch-trim-circle.png"],check=True)
+        key("Escape")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(curved_line_path,"Click two rectangle corners")
+        key("Shift_L+q")
+        verify(window,"Click a line near the end to extend")
+        click(window,400,310)
+        verify(window,"Line extended")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_curved_lines()==[("native-entity-1",-30,16),("native-entity-3",16,30)]
+        key("Escape")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
