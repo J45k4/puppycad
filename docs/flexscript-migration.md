@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`b0ece8c3369dc708d07ffac5fcc61dbf57a90672` includes the shared library and
+`1f838b86eeac549640d06ac71432744c1175d9b1` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -550,6 +550,22 @@ private build even though both board checks pass. The headless release
 test checks the frozen source digest and the additional continuity and
 manufacturing requirements before promoting the two-board package.
 
+Biscuit's `native-project-checks-5` profile runs the original three-wire
+fixture's voltage window, lid clearance and three harness motion studies.
+The ideal RC experiment reports 4.965463 V at 5 ms after 500 backward-Euler
+steps. The same exported circuit runs in ngspice 47 and reaches 4.966312 V.
+The report binds the checked experiment to the frozen ground, sample count
+and final time. The five poses give a minimum lid clearance of 6.4 mm, and
+the three wires clear their checks at all 15 sampled positions.
+
+The headless browser promotes the frozen release with its board receipts,
+STEP, combined nine-page PDF, SPICE deck and four CSV tables. Open CASCADE
+reopens the STEP as six valid placed solids and verifies the mounting bores
+of both boards. A failed voltage window prevents promotion even with
+passing board checks and leaves the earlier release downloadable. The
+shared circuit, motion and schematic APIs retain the standalone import
+paths for checked scripts.
+
 The native object tree browses bodies, nested occurrences and driving fields.
 The window regression searched for `right/upper` across two copies of one
 subassembly, selected the occluded occurrence, pinned it, and verified the
@@ -859,10 +875,10 @@ CAD graph, two frozen builds produce byte-identical STLs, and a saved
 polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
-Remaining standalone work includes sketch and feature authoring, additional
-design inspectors, circuit release checks and SPICE export, sampled harness
-motion, schematic sheets and release tables. Compare these paths against
-Biscuit's `docs/pcad-electrical.md` and its original release fixtures.
+Remaining standalone work includes additional sketch and feature authoring,
+design inspectors and the original extended KiCad fabrication profile.
+Compare these paths against Biscuit's `docs/pcad-electrical.md` and its
+original release fixtures.
 
 ## Later milestone: WASM editor in Biscuit
 
