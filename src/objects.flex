@@ -158,11 +158,11 @@ fn puppy_panel_rows(project,parts) {
         let feature=pc_first(pc_nodes(item));while feature && (!bar || position<j_value(bar)) {
             if pc_model_feature(feature) {position=position+1;}
             if puppy_driving_feature(feature) {
-                let rect=puppy_rectangle(project,feature);let property=0;
-                while property==0 || (rect && property<3) {
-                    let name=puppy_property_name(feature,property);let value=0;
-                    if property {value=cad_rectangle_dimension(rect,name);}
-                    else {value=pc_pose_number(j_get(feature,name));}
+                let rectangle=puppy_rectangle(project,feature);
+                let count=puppy_property_count(feature,rectangle);let property=0;
+                while property<count {
+                    let name=puppy_property_name(feature,property);
+                    let value=puppy_feature_measure(feature,property,rectangle);
                     let label=m_cat(j_string(feature,"name"),m_cat(" / ",m_cat(name,m_cat("   ",m_cat(puppy_display_number(value),puppy_property_unit(feature,property))))));
                     puppy_panel_field(fields,index,property,label,j_string(feature,"id"),query);
                     property=property+1;

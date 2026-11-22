@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`aa626a459b633e1ad2fe8be5fc2ffbd4ea953ffd` includes the shared library and
+`1930d64403d8e6ff74e735cb0881c96029c97737` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -145,6 +145,15 @@ geometry before export. The window test saves and reopens the right-angle
 sketch, closes it and extrudes a 1,500 mm³ triangular prism. Rust matches
 its bounds and volume. Biscuit's checked VM reproduces the native part and
 two frozen jobs produce the same STL. See `workdir/flexscript/line-perpendicular.png`.
+
+The native **Line relations** control also links straight-line lengths with
+Equal. It preserves the parallel or perpendicular relation and the saved
+coincident and fixed anchors. The window test drives the follower to 25 mm,
+undoes that change, then drives the source to 30 mm and reopens and extrudes
+the linked profile. Rejected dual drivers leave the original sketch and any
+downstream solid intact. The saved 9,000 mm³ profile extrusion matches Rust's
+3MF, and Biscuit's checked VM and two frozen builds reproduce the native
+STL. See `workdir/flexscript/line-equal.png`.
 
 The native editor also authors three-point ellipses and circles. The
 headless window test draws a 50 × 20 mm ellipse rotated 53.130102° and
@@ -335,6 +344,19 @@ original 8,000 mm³ cube. Flexscript rounds both edges and produces the same
 7,963.064 mm³ volume as the corresponding corner where Rust succeeds.
 Biscuit's checked VM picks and edits a bevel on a plate. Two frozen worker
 builds exercise a fillet, revolve and loft together and compare their STL bytes.
+
+Saved TypeScript `chamfer` nodes can also reference a numbered extrusion
+edge through an existing v4 `edge` node. The shared evaluator resolves that
+selector on a single corner rectangle extruded blind from a reference plane.
+It applies both bevel distances before combining the source body with a join
+or cut. Six comparisons with the TypeScript exporter cover unequal distances,
+the default second distance, vertical-edge aliases and both Boolean operations.
+The native window test edits `d1` and `d2`, rejects a negative distance, and
+preserves the feature, selector and opaque metadata on save. Reopening and
+exporting the edited body matches the TypeScript bevel vertices and 3,960 mm³
+volume. The checked VM and two frozen builds reproduce the native STL.
+Other legacy extrusion selector topologies still need to be resolved.
+See `workdir/flexscript/legacy-chamfer.png`.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.
@@ -700,6 +722,14 @@ accept renumbered pads with the reviewed binding and reject a mismatched
 revision before publishing manufacturing outputs. They also download and
 re-execute the original v9 release under its exact profile and verify its
 archived ZIP and journal byte for byte.
+
+The original authenticated Files CAD routes also use the checked VM and
+shared CAD SDK. They cover revision-bound previews and checks, copper and
+continuity review, BOM and drawings, sweeps and circuit results. The original
+standalone database test reopens a persisted report with its original run ID,
+metadata and download bytes. The Files API retains the original revision
+cursor and checks access to a saved revision or an unsaved draft before
+serving results.
 
 The native standalone editor authors and edits Shell features on convex
 bodies. The headless window test rejects a 32 mm wall, previews and applies a

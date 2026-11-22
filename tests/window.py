@@ -2281,7 +2281,7 @@ with tempfile.TemporaryDirectory() as tmp:
         key("F8")
         def pick_direction(label,button_x):
             click(window,890,20)
-            verify(window,"Choose Parallel or Perpendicular")
+            verify(window,"Choose a line relation")
             click(window,button_x,54)
             verify(window,f"Pick the source line for {label}")
             click(window,384,486)
@@ -2332,6 +2332,96 @@ with tempfile.TemporaryDirectory() as tmp:
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         assert bounds==[(0.0,20.0),(0.0,15.0),(0.0,10.0)] and math.isclose(volume,1500,rel_tol=1e-6)
+        key("Escape")
+        app.wait(3)
+
+        # Either line can drive Equal without detaching the other profile edges.
+        path=Path(tmp)/"Equal profile.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        part=document["items"][0]
+        part["name"]="Equal profile"
+        graph=part["data"]["cad"]
+        sketch,source=graph["nodes"][3:5]
+        sk=sketch["id"]
+        first,second,datum,chord,closing=(f"native-entity-{i}" for i in range(1,6))
+        origin=dict(x=0,y=0)
+        start=dict(x=0,y=30)
+        source.update(p0=origin,p1=dict(x=20,y=0))
+        follower=dict(source,id=second,p0=start,p1=dict(x=0,y=40))
+        anchor=dict(id=datum,type="sketchPrimitive",sketchId=sk,primitive=dict(id=datum,type="point",center=start,construction=True))
+        diagonal=dict(source,id=chord,p0=source["p1"],p1=follower["p1"])
+        tail=dict(source,id=closing,p0=start,p1=origin)
+        graph["nodes"]=graph["nodes"][:5]+[follower,anchor,diagonal,tail]
+        def equal_anchor(entity,point):
+            return dict(entityId=entity,point=point)
+        sketch["relations"]=[
+            dict(id="left-start",type="fixed",anchor=equal_anchor(first,"p0"),position=origin),
+            dict(id="right-start",type="fixed",anchor=equal_anchor(datum,"center"),position=start),
+            dict(id="horizontal",type="horizontal",entityId=first),
+            dict(id="upright",type="perpendicular",a=first,b=second),
+            dict(id="at-datum",type="coincident",a=equal_anchor(datum,"center"),b=equal_anchor(second,"p0")),
+            dict(id="diagonal-start",type="coincident",a=equal_anchor(first,"p1"),b=equal_anchor(chord,"p0")),
+            dict(id="diagonal-end",type="coincident",a=equal_anchor(second,"p1"),b=equal_anchor(chord,"p1")),
+            dict(id="tail-start",type="coincident",a=equal_anchor(second,"p0"),b=equal_anchor(closing,"p0")),
+            dict(id="tail-end",type="coincident",a=equal_anchor(first,"p0"),b=equal_anchor(closing,"p1")),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"native-entity-1   20 mm   DOF 2")
+        click(window,890,20)
+        verify(window,"Choose a line relation")
+        click(window,310,54)
+        verify(window,"Pick the source line for Equal")
+        click(window,480,616)
+        verify(window,"Pick the follower line for Equal")
+        click(window,351,164)
+        verify(window,"Equal updated")
+
+        def drive_equal(side,length):
+            key("F2")
+            verify(window,"Set value")
+            type_value(f"{length} mm")
+            key("Return")
+            verify(window,"Edited")
+            key("Control_L+s")
+            verify(window,"Saved")
+            rows=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+            nodes={node["id"]:node for node in rows}
+            a,b,c=nodes[first],nodes[second],nodes[chord]
+            assert a["p0"]==origin and b["p0"]==start
+            assert math.isclose(a["p1"]["x"],length,abs_tol=.0004) and a["p1"]["y"]==0
+            assert math.isclose(b["p1"]["y"],30+length,abs_tol=.0004) and b["p1"]["x"]==0
+            assert c["p0"]==a["p1"] and c["p1"]==b["p1"]
+            rel=f"native-equal-{first}-{second}"
+            relations={row["id"]:row for row in nodes[sk]["relations"]}
+            assert relations[rel]==dict(id=rel,type="equal",a=first,b=second)
+            lengths=[row for row in relations.values() if row["type"]=="length"]
+            assert len(lengths)==1 and lengths[0]["entityId"]==side and lengths[0]["value"]==length
+
+        drive_equal(second,25)
+        key("Control_L+z")
+        verify(window,"native-entity-2   20 mm   DOF 1")
+        click(window,480,616)
+        verify(window,"native-entity-1   20 mm   DOF 1")
+        drive_equal(first,30)
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"line-equal.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"equal-profile-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        assert bounds[2]==(0.0,10.0) and math.isclose(volume,9000,rel_tol=5e-5)
         key("Escape")
         app.wait(3)
 
@@ -5727,6 +5817,77 @@ with tempfile.TemporaryDirectory() as tmp:
         assert [box[0] for _, (box, _) in objects] == [(-80, 80), (90, 110), (120, 140)]
         assert [round(volume) for _, (_, volume) in objects] == [960000, 4000, 4000]
         key('Escape')
+        app.wait(3)
+        # A legacy TypeScript bevel keeps the authored extrusion-edge reference.
+        path=Path(tmp)/"Legacy bevel.pcad"
+        document=json.loads((libs/"cad/tests/fixtures/typescript-chamfer.pcad").read_bytes())
+        nodes=document["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(node for node in nodes if node["type"]=="chamfer")
+        bevel["labelData"]={"note":"Preserve the original selector"}
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"legacy-chamfer-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Unequal chamfer  d1 2 mm")
+        key("F2")
+        verify(window,"Set value")
+        type_value("4")
+        key("Return")
+        verify(window,"Unequal chamfer  d1 4 mm")
+        key("Tab")
+        verify(window,"Unequal chamfer  d2 3 mm")
+        key("F2")
+        type_value("1")
+        key("Return")
+        verify(window,"Unequal chamfer  d2 1 mm")
+        key("Control_L+z")
+        verify(window,"Unequal chamfer  d2 3 mm")
+        key("Control_L+y")
+        verify(window,"Unequal chamfer  d2 1 mm")
+        key("F2")
+        type_value("-1")
+        key("Return")
+        verify(window,"Chamfer distances must be positive")
+        key("Escape")
+        verify(window,"Edit cancelled")
+        key("F2")
+        type_value("0")
+        key("Return")
+        verify(window,"Unequal chamfer  d2 4 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        inherited=next(node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"] if node["id"]==bevel["id"])
+        assert "d2" not in inherited
+        key("F2")
+        type_value("0")
+        key("Return")
+        verify(window,"Value unchanged")
+        key("Control_L+z")
+        verify(window,"Unequal chamfer  d2 1 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]==[
+            dict(node,d1=4,d2=1) if node is bevel else node for node in nodes
+        ]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Unequal chamfer  d1 4 mm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-chamfer.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(0.0,20.0),(0.0,10.0),(-20.0,0.0)] and math.isclose(volume,3960,abs_tol=.01)
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        for x in (0,20):
+            for expected in ((x,6,0),(x,10,-1)):
+                assert any(math.dist(vertex,expected)<.0001 for vertex in vertices), expected
+        shutil.copyfile(path,output_dir/"legacy-chamfer-edited.pcad")
+        shutil.copyfile(stl,output_dir/"legacy-chamfer.stl")
+        key("Escape")
         app.wait(3)
         # Editing a connector moves the attached arm and its hinged follower.
         path=Path(tmp)/"Assembly connector.pcad"

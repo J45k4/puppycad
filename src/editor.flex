@@ -61,7 +61,8 @@ fn puppy_push(project) {
 }
 fn puppy_driving_feature(row) {
     let kind=j_string(row,"type");
-    return (m_eq(kind,"extrude") || m_eq(kind,"revolve") || m_eq(kind,"edgeFinish")) && !j_value(j_get(row,"suppressed"));
+    return (m_eq(kind,"extrude") || m_eq(kind,"revolve") || m_eq(kind,"edgeFinish") || m_eq(kind,"chamfer"))
+        && !j_value(j_get(row,"suppressed"));
 }
 fn puppy_feature(project) {
     let part=cad_project_part(project);if !part {return 0;}
@@ -77,6 +78,7 @@ fn puppy_feature(project) {
     puppy_selected=0;return first;
 }
 fn puppy_property_name(feature,property) {
+    if m_eq(j_string(feature,"type"),"chamfer") {if property==1 {return "d2";}return "d1";}
     if property==1 {return "width";}
     if property==2 {return "height";}
     if m_eq(j_string(feature,"type"),"revolve") {return "angle";}
@@ -119,9 +121,23 @@ fn puppy_rectangle(project,feature) {
     if m_eq(j_string(entity,"type"),"sketchCornerRectangle") {return entity;}
     return 0;
 }
+fn puppy_property_count(feature,rectangle) {
+    if m_eq(j_string(feature,"type"),"chamfer") {return 2;}
+    if rectangle {return 3;}
+    return 1;
+}
+fn puppy_feature_measure(feature,property,rectangle) {
+    let field=puppy_property_name(feature,property);
+    if m_eq(j_string(feature,"type"),"chamfer") {
+        let value=j_get(feature,field);if !value {value=j_get(feature,"d1");}
+        return pc_pose_number(value);
+    }
+    if !property {return pc_pose_number(j_get(feature,field));}
+    return cad_rectangle_dimension(rectangle,field);
+}
 fn puppy_measure(project,feature) {
-    if !puppy_property {return pc_pose_number(j_get(feature,puppy_field(feature)));}
-    return cad_rectangle_dimension(puppy_rectangle(project,feature),puppy_field(feature));
+    let rectangle=0;if puppy_property {rectangle=puppy_rectangle(project,feature);}
+    return puppy_feature_measure(feature,puppy_property,rectangle);
 }
 fn puppy_display_dimension(project,feature) {
     return puppy_display_number(puppy_measure(project,feature));
@@ -450,8 +466,8 @@ fn puppy_command(key,mods) {
         return 1;
     }
     if key==43 {
-        if puppy_rectangle(project,puppy_feature(project)) {puppy_property=(puppy_property+1)%3;}
-        else {puppy_property=0;}
+        let feature=puppy_feature(project);
+        puppy_property=(puppy_property+1)%puppy_property_count(feature,puppy_rectangle(project,feature));
         if !puppy_property {puppy_selected=puppy_selected+1;}
         if puppy_sketch && !j_get(puppy_feature(project),"sketchId") {puppy_sketch=0;}
         return puppy_title(project,0);

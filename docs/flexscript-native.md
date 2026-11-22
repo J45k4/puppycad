@@ -219,11 +219,16 @@ endpoint stays in place. Escape cancels a drag, and releasing the pointer
 accepts it as one undo step. **Done** returns to the previous view. Ctrl+S
 saves the drawing.
 
-In **Dimensions**, choose **Line direction** and select **Parallel** or
+In **Dimensions**, choose **Line relations** and select **Parallel** or
 **Perpendicular**. Click the line to keep first, then click the follower.
 The relation works with existing lengths, fixed points and coincident
 endpoints. The follower stays selected for **Set length** (F2). Select the
 same pair and direction again to remove the relation.
+
+Choose **Equal** in the same control to link the lengths of two straight
+lines. Pick the line to keep first and the follower second. Once linked,
+a driving dimension on either line changes both lengths. A conflicting
+fixed point or another driving length can prevent the edit.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -360,6 +365,12 @@ it. Selected edges turn amber, and clicking one again removes it. Choose
 radius. Press F2 on its dimension to enter an exact value. Escape cancels
 the selection. The saved file records the edges and the dimension so you
 can reopen the drawing and edit the finish.
+
+For a saved TypeScript chamfer on a blind reference-plane rectangle,
+select its feature in the Design tree. Press F2 to edit `d1`, or press
+Tab to select `d2` first. **Objects** lists both fields under **Driving
+fields**. Enter millimetres. Entering zero for `d2` makes it follow `d1`.
+The feature keeps its original extrusion-edge reference.
 
 Open **History** or press **F7** to inspect a v4 part’s solid features.
 Click a row or use Left and Right to select it. **Suppress** (S) toggles

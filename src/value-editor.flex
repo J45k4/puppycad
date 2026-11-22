@@ -66,8 +66,10 @@ fn puppy_active_field(project) {
     return cg_v(feature,puppy_measure(project,feature),label);
 }
 fn puppy_value_unchanged(project,field,value) {
+    let target=load64(field);
+    if !value && puppy_property==1 && m_eq(j_string(target,"type"),"chamfer") && !j_get(target,"d2") {return 1;}
     if load64(field+8)!=value {return 0;}
-    if puppy_selected_mate && m_eq(j_string(load64(field),"type"),"revolute") {
+    if puppy_selected_mate && m_eq(j_string(target,"type"),"revolute") {
         return pc_mate_servo(j_get(cad_project_item(project),"data"),puppy_selected_mate+24)!=0;
     }return 1;
 }
@@ -98,6 +100,11 @@ fn puppy_write_field(project,field,value) {
         if !updated || !puppy_refresh(updated) {return 0;}
         if owner {puppy_restore_mate_pick(owner,id);}
         if slot>=0 {puppy_placement_open=1;puppy_placement_slot=slot;}
+    }else if m_eq(j_string(target,"type"),"chamfer") {
+        let first=pc_pose_number(j_get(target,"d1"));let second=pc_pose_number(j_get(target,"d2"));
+        if puppy_property==0 {first=value;}else {second=value;}
+        updated=cad_project_set_chamfer_distances(project,j_string(target,"id"),first,second);
+        if !updated || !puppy_refresh(updated) {return 0;}
     }else {
         let number=cg_json_number(value);
         if puppy_property {
