@@ -570,7 +570,7 @@ fn puppy_curve_bar(project,rgb,w,x) {
             }
         }
         if rgb {
-            puppy_bar_button(rgb,w,194,86,"Ellipse");puppy_bar_button(rgb,w,288,128,"3-point circle");puppy_bar_button(rgb,w,424,110,"Split ellipse");puppy_bar_button(rgb,w,542,122,"Construction");
+            puppy_bar_button(rgb,w,194,86,"Ellipse");puppy_bar_button(rgb,w,288,128,"3-point circle");puppy_bar_button(rgb,w,424,110,"Split");puppy_bar_button(rgb,w,542,122,"Construction");
             if puppy_tool==7 {puppy_bar_rect(rgb,w,194,66,86,2,143,217,184);}
             if puppy_tool==-6 {puppy_bar_rect(rgb,w,424,66,110,2,143,217,184);}
             if puppy_tool==8 {puppy_bar_rect(rgb,w,288,66,128,2,143,217,184);}
@@ -630,7 +630,7 @@ fn puppy_compact_actions(project) {
             puppy_compact_button(rows,"Done sketch",69,0);
             puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Circle",6,0);
             puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Extrude",27,0);
-            puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split ellipse",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
+            puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
             puppy_profile_buttons(rows);
             puppy_compact_button(rows,"Next profile",19,0);puppy_compact_button(rows,"Patterns",62,0);
             puppy_compact_button(rows,"Trim",20,0);puppy_compact_button(rows,"Extend",20,3);

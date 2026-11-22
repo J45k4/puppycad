@@ -392,19 +392,17 @@ For a **3-point circle** (Shift+C), click three points on the rim. The third
 click commits the shape. Backspace retracts the last pending point. A
 collinear third point leaves the first two picks available for correction.
 
-Choose **More tools → Conics → Split ellipse** (Shift+X). Click two
-distinct points on an ellipse’s rim. To split an existing elliptic arc,
-click once inside its sweep. Each split is one undo step. After saving
-and reopening, editing the width, height or rotation of any piece in
-**Dimensions** (F8) still updates the whole ellipse.
+Choose **More tools → Conics → Split** (Shift+X). Click two distinct points
+on an ellipse’s rim, or click once inside an elliptic arc or spline. A split
+opens a periodic spline at the chosen point. Each split is one undo step.
+After saving and reopening, editing the width, height or rotation of an
+elliptic piece in **Dimensions** (F8) still updates the whole ellipse.
 
-Choose **More tools → Edit → Trim** (Q), then click the interval of a line,
-circle or circular arc you want to remove. Trimming a circle retains an open
-arc. **Extend** (Shift+Q) lengthens the end of a line or circular arc nearest
-your click to the first boundary it reaches. Lines, circles, ellipses, circular and
-elliptic arcs, rectangles, polygons, slots, and both fit and control splines
-can serve as boundaries. Arc intersections respect the saved sweep. Splines
-use the exact cubic spans, including periodic fit splines. Projected boundaries
+Choose **More tools → Edit → Trim** (Q), then click the interval you want to
+remove from a line, circle, ellipse, arc or spline. Retained spline pieces
+use editable control points. **Extend** (Shift+Q) lengthens the end of a line
+or a circular or elliptic arc nearest your click to the first boundary it
+reaches. Arc intersections respect the saved sweep. Projected boundaries
 continue to follow their source. Each edit can be undone.
 
 In **More tools**, choose **Tangent** (Shift+J), click a free line, circular

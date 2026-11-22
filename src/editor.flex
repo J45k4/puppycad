@@ -325,7 +325,10 @@ fn puppy_command(key,mods) {
         if puppy_revolve_axis {puppy_revolve_axis=0;puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),"Revolve cancelled");}
         if puppy_draft && puppy_line_edit_active() {return puppy_line_edit_cancel(cad_project_open(puppy_history+24));}
         if puppy_picking_face {puppy_picking_face=0;return puppy_title(cad_project_open(puppy_history+24),0);}
-        if puppy_anchor {puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());}
+        if puppy_anchor {
+            if puppy_tool==-6 {puppy_split_ellipse_clear();}
+            puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());
+        }
         if puppy_saved_history==puppy_history || puppy_exit_requested {return 0;}
         puppy_exit_requested=1;
         return puppy_title(cad_project_open(puppy_history+24),"Unsaved edits. Save or close again to discard.");
@@ -729,7 +732,7 @@ fn puppy_editor(path,source,project,report) {
     if puppy_number_text {puppy_number_close();}
     puppy_extrusion_close();puppy_revolve_close();puppy_shell_close();
     puppy_workspace_clear_parent();
-    puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
+    puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);puppy_split_ellipse_clear();
     if puppy_pending_title {puppy_drop(puppy_pending_title);}
     puppy_forget_click();puppy_end_isolation();puppy_clear_pick();puppy_trim(puppy_root);if puppy_disk {puppy_drop(puppy_disk);}if puppy_status {puppy_drop(puppy_status);}puppy_view_close();return 0;
 }

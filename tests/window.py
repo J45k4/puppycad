@@ -1205,6 +1205,11 @@ with tempfile.TemporaryDirectory() as tmp:
             assert math.isclose(arc["sweep"],sweep,abs_tol=2e-8)
             return arc
 
+        def rust_sketch_export(path):
+            reference=path.with_name(path.stem+"-rust.stl")
+            subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+            return triangulation(reference)
+
         app,window=open_app(arc_path,"Click two rectangle corners")
         key("Shift_L+q")
         click(window,501,281)
@@ -1260,9 +1265,7 @@ with tempfile.TemporaryDirectory() as tmp:
         bounds,volume=triangulation(exported)
         assert bounds==[(-20,20),(-20,0),(0,10)]
         assert math.isclose(volume,64*2000*math.sin(math.pi/64),abs_tol=.02)
-        reference=Path(tmp)/"circle-trim-reference.stl"
-        subprocess.run([root/"rust/target/debug/puppycad","--export",circle_profile,reference],check=True)
-        reference_bounds,reference_volume=triangulation(reference)
+        reference_bounds,reference_volume=rust_sketch_export(circle_profile)
         # Rust rounds the saved picoradian sweep up to its next sample count.
         reference_count=math.ceil(circle_arc["sweep"]/math.tau*circle_arc["segments"])
         assert all(math.isclose(a,b,abs_tol=.01) for interval,expected in zip(reference_bounds,bounds,strict=True)
@@ -1270,6 +1273,210 @@ with tempfile.TemporaryDirectory() as tmp:
         assert math.isclose(reference_volume,reference_count*2000*math.sin(math.pi/reference_count),abs_tol=.02)
         shutil.copyfile(circle_profile,output_dir/"circle-trim-authoring.pcad")
         shutil.copyfile(exported,output_dir/"circle-trim-authoring.stl")
+        key("Escape")
+        app.wait(3)
+
+        ellipse_path=Path(tmp)/"Elliptic curve editing.pcad"
+        ellipse={"center":{"x":0,"y":0},"width":40,"height":20,"rotation":0,"segments":128}
+        elliptic_node={"id":"native-entity-1","type":"sketchPrimitive","sketchId":"native-sketch-1",
+                       "primitive":{**ellipse,"type":"ellipticArc","startAngle":0,"sweep":math.pi/2}}
+        arc_graph["nodes"]=sketch_nodes+[elliptic_node]+[
+            {"id":f"native-entity-{i}","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":x,"y":7},"p1":{"x":x,"y":10}}
+            for i,x in enumerate((-10,10),2)
+        ]
+        ellipse_path.write_text(json.dumps(arc_doc))
+
+        def saved_nodes(path):
+            return json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+
+        def saved_elliptic_arc(path,start,sweep):
+            node=next(row for row in saved_nodes(path) if row["id"]=="native-entity-1")
+            primitive=node["primitive"]
+            assert node["type"]=="sketchPrimitive" and node["sketchId"]=="native-sketch-1"
+            assert primitive["type"]=="ellipticArc" and all(primitive[key]==value for key,value in ellipse.items())
+            assert math.isclose(primitive["startAngle"],start,abs_tol=2e-8)
+            assert math.isclose(primitive["sweep"],sweep,abs_tol=2e-8)
+
+        app,window=open_app(ellipse_path,"Click two rectangle corners")
+        key("Shift_L+q")
+        click(window,501,319)
+        verify(window,"Elliptic arc extended")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved_elliptic_arc(ellipse_path,0,2*math.pi/3)
+        capture(window,"sketch-extend-elliptic-arc.png",True)
+        key("Escape")
+        verify(window,"Curve edit cancelled")
+        key("Escape")
+        app.wait(3)
+
+        app,window=open_app(ellipse_path,"Click two rectangle corners")
+        key("q")
+        click(window,480,318)
+        verify(window,"Elliptic arc trimmed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved_elliptic_arc(ellipse_path,0,math.pi/3)
+        assert saved_line_endpoints(ellipse_path)=={"native-entity-2":((-10,7),(-10,10)),
+                                                    "native-entity-3":((10,7),(10,10))}
+        key("Escape")
+        verify(window,"Curve edit cancelled")
+        key("Escape")
+        app.wait(3)
+
+        ellipse_profile=Path(tmp)/"Trimmed ellipse profile.pcad"
+        elliptic_node["primitive"]={**ellipse,"type":"ellipse"}
+        arc_graph["nodes"]=sketch_nodes+[elliptic_node,
+            {"id":"native-entity-2","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":-20,"y":0},"p1":{"x":20,"y":0}}]
+        ellipse_profile.write_text(json.dumps(arc_doc))
+        app,window=open_app(ellipse_profile,"Click two rectangle corners")
+        key("q")
+        click(window,480,318)
+        verify(window,"Ellipse trimmed")
+        capture(window,"sketch-trim-ellipse-target.png",True)
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved_elliptic_arc(ellipse_profile,math.pi,math.pi)
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(ellipse_profile)
+        key("Control_L+e")
+        verify(window,"Exported")
+        exported=ellipse_profile.with_suffix(".stl")
+        bounds,volume=triangulation(exported)
+        assert bounds==[(-20,20),(-10,0),(0,10)]
+        assert math.isclose(volume,64*1000*math.sin(math.pi/64),abs_tol=.02)
+        reference_bounds,reference_volume=rust_sketch_export(ellipse_profile)
+        assert all(math.isclose(a,b,abs_tol=.01) for pair,other in zip(reference_bounds,bounds,strict=True)
+                   for a,b in zip(pair,other,strict=True)), (reference_bounds,bounds)
+        assert math.isclose(reference_volume,volume,abs_tol=.05), (reference_volume,volume)
+        shutil.copyfile(ellipse_profile,output_dir/"ellipse-trim-authoring.pcad")
+        shutil.copyfile(exported,output_dir/"ellipse-trim-authoring.stl")
+        key("Escape")
+        app.wait(3)
+
+        spline_target=Path(tmp)/"Spline target trimming.pcad"
+        authored_spline={"id":"native-entity-1","type":"sketchSpline","sketchId":"native-sketch-1",
+                         "spline":{"id":"native-entity-1","type":"spline","mode":"control","closed":False,
+                                   "points":[{"x":x,"y":y} for x,y in [(0,0),(10,20),(20,20),(30,0)]]}}
+        arc_graph["nodes"]=sketch_nodes+[authored_spline]+[
+            {"id":f"native-entity-{i}","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":x,"y":8},"p1":{"x":x,"y":12}}
+            for i,x in enumerate((6,24),2)
+        ]
+        spline_target.write_text(json.dumps(arc_doc))
+
+        def saved_spline_pieces(path):
+            result={}
+            for node in saved_nodes(path):
+                if node["type"]!="sketchSpline":
+                    continue
+                spline=node["spline"]
+                assert spline["id"]==node["id"] and spline["mode"]=="control" and not spline["closed"]
+                result[node["id"]]=[(point["x"],point["y"]) for point in spline["points"]]
+            return result
+
+        tied_path=Path(tmp)/"Line on spline tangent.pcad"
+        tied_doc=json.loads(spline_target.read_bytes())
+        tied_nodes=tied_doc["items"][0]["data"]["cad"]["nodes"]
+        tied_nodes[5].update(p0={"x":15,"y":15},p1={"x":20,"y":15})
+        tied_nodes[6].update(p0={"x":8,"y":13},p1={"x":8,"y":17})
+        tied_path.write_text(json.dumps(tied_doc))
+        app,window=open_app(tied_path,"Click two rectangle corners")
+        key("Shift_L+q")
+        click(window,540,298)  # The spline and line share the pixel; only the line can extend.
+        verify(window,"Line extended")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_line_endpoints(tied_path)["native-entity-2"]==((8,15),(20,15))
+        assert next(node for node in saved_nodes(tied_path) if node["id"]=="native-entity-1")==authored_spline
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        app,window=open_app(spline_target,"Click two rectangle corners")
+        key("q")
+        click(window,540,298)
+        verify(window,"Spline trimmed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_spline_pieces(spline_target)=={
+            "native-entity-1":[(0,0),(2,4),(4,7.2),(6,9.6)],
+            "native-entity-4":[(24,9.6),(26,7.2),(28,4),(30,0)],
+        }
+        assert saved_line_endpoints(spline_target)=={"native-entity-2":((6,8),(6,12)),
+                                                      "native-entity-3":((24,8),(24,12))}
+        capture(window,"sketch-trim-spline-target.png",True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        periodic_path=Path(tmp)/"Opened periodic spline.pcad"
+        periodic={**authored_spline["spline"],"mode":"fit","closed":True,
+                  "points":[{"x":x,"y":y} for x,y in [(-20,0),(0,20),(20,0),(0,-20)]]}
+        arc_graph["nodes"]=sketch_nodes+[{**authored_spline,"spline":periodic}]
+        periodic_path.write_text(json.dumps(arc_doc))
+        app,window=open_app(periodic_path,"Click two rectangle corners")
+        key("Shift_L+x")
+        click(window,400,358)
+        verify(window,"Spline split")
+        key("Control_L+s")
+        verify(window,"Saved")
+        pieces=saved_spline_pieces(periodic_path)
+        assert list(pieces)==["native-entity-1"]
+        opened=pieces["native-entity-1"]
+        assert len(opened)==13 and opened[0]==opened[-1]==(-20,0)
+        assert opened[3::3]==[(0,20),(20,0),(0,-20),(-20,0)]
+        key("Escape")
+        app.wait(3)
+
+        split_profile=Path(tmp)/"Split spline profile.pcad"
+        arc_graph["nodes"]=sketch_nodes+[authored_spline,
+            {"id":"native-entity-2","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":0,"y":0},"p1":{"x":30,"y":0}}]
+        split_profile.write_text(json.dumps(arc_doc))
+        app,window=open_app(split_profile,"Click two rectangle corners")
+        key("Shift_L+x")
+        click(window,540,298)
+        verify(window,"Spline split")
+        key("Control_L+s")
+        verify(window,"Saved")
+        divided={"native-entity-1":[(0,0),(5,10),(10,15),(15,15)],
+                 "native-entity-3":[(15,15),(20,15),(25,10),(30,0)]}
+        assert saved_spline_pieces(split_profile)==divided
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_spline_pieces(split_profile)=={"native-entity-1":[(0,0),(10,20),(20,20),(30,0)]}
+        key("Control_L+y")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_spline_pieces(split_profile)==divided
+        capture(window,"sketch-split-spline-target.png",True)
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(split_profile,"Click two rectangle corners")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(split_profile)
+        key("Control_L+e")
+        verify(window,"Exported")
+        exported=split_profile.with_suffix(".stl")
+        bounds,volume=triangulation(exported)
+        assert bounds==[(0,30),(0,15),(0,10)] and math.isclose(volume,3000,abs_tol=6)
+        reference_bounds,reference_volume=rust_sketch_export(split_profile)
+        assert reference_bounds==bounds and math.isclose(reference_volume,volume,abs_tol=.02)
+        shutil.copyfile(split_profile,output_dir/"spline-split-authoring.pcad")
+        shutil.copyfile(exported,output_dir/"spline-split-authoring.stl")
         key("Escape")
         app.wait(3)
 
@@ -1802,8 +2009,8 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,560,358)
         click(window,480,318)
         verify(window,"Curve added")
-        click(window,474,55)  # Split ellipse
-        verify(window,"Pick a cut on an ellipse or elliptic arc")
+        click(window,474,55)  # Split
+        verify(window,"Pick a cut on an ellipse, elliptic arc or spline")
         click(window,560,358)
         verify(window,"Pick the second cut")
         click(window,560,358)

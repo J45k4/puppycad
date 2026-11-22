@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`c1f90127c4f51f3fee7359d84987046263089a26` includes the shared library and
+`7d9ce9322530e8d5d3bde21e2fe3f20721a0d90d` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -261,6 +261,23 @@ It also trims a circle at a diameter, saves the retained semicircle and
 extrudes it. The reopened STL is closed and agrees with the Rust export
 within their sampling tolerances. Biscuit's checked VM and two independent
 frozen v7 builds reproduce the editor's STL byte for byte.
+
+Elliptic arcs now extend on their original supporting ellipse. The native
+test extends a 40 × 20 mm elliptic arc from 90° to 120°, reopens it and
+trims it to 60°. It trims the full ellipse at a diameter and extrudes the
+retained half. The exported STL agrees with the Rust result within their
+sampling tolerances.
+
+Spline Trim keeps the exact retained Bézier portions. Split opens a periodic
+fit spline or divides an open spline into joined control chains. The native
+test trims the middle out of a cubic, opens a four-span periodic spline and
+splits the arch of a closed profile. Undo and Redo restore the intended
+control points. The saved endpoint join survives reopening and the resulting
+extrusion agrees with Rust in bounds and signed volume.
+The rebuilt Biscuit checked VM replays both the ellipse trim and the spline
+split. Its STL bytes match the native editor, and two independent frozen
+v8 jobs reproduce each saved part. The verification record is
+`workdir/cad-migration/ellipse-spline-consumer-proof.json`.
 
 The graph suite compares directed axes, axis-touching profiles, partial and
 full turns, rectangular and round holes, mirrored face sketches, joins and
@@ -620,6 +637,13 @@ and v7. The two JSON reports add the board checks. After the operator upgrade,
 archived v5 and v6 releases still download byte for byte and the original
 checkers can reproduce their outputs under their recorded profiles.
 
+The `native-project-checks-8` profile restores saved `pcad.step` and
+`pcad.drawings` checks. Each binds to the frozen PCAD input. STL leaves the
+STEP criterion unknown. A PDF containing only schematics or wire schedules
+leaves the mechanical drawing criterion unknown. The authenticated release
+test verifies both checks against the original sensor fixture and confirms
+that archived v7 packages and journals retain their original bytes.
+
 The native standalone editor authors and edits Shell features on convex
 bodies. The headless window test rejects a 32 mm wall, previews and applies a
 2 mm wall on the +Z face, and exercises undo and redo. It widens the source
@@ -941,8 +965,8 @@ polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
 Remaining standalone work includes additional sketch and feature authoring
-and design inspectors. Editing elliptical and spline targets with Trim and
-Extend and the other open cases in the parity inventory remain in scope.
+and design inspectors, along with mixed-constraint solving and the other
+open cases in the parity inventory.
 
 ## Later milestone: WASM editor in Biscuit
 

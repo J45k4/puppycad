@@ -16,6 +16,7 @@ global puppy_curves_page=0;
 global puppy_revolve_axis=0;
 global puppy_curve_coords=0;
 global puppy_anchor=0;
+global puppy_split_ellipse=0;
 global puppy_ax=0;
 global puppy_ay=0;
 global puppy_mx=0;
@@ -148,7 +149,7 @@ fn puppy_draft_hint() {
     }
     if puppy_line_edit_active() && !puppy_revolve_axis {return puppy_line_edit_hint();}
     if puppy_tool==-7 {return "Click a body edge guide to project it";}
-    if puppy_tool==-6 {if puppy_anchor {return "Pick the second cut on this ellipse";}return "Pick a cut on an ellipse or elliptic arc";}
+    if puppy_tool==-6 {if puppy_anchor {return "Pick the second cut on this ellipse";}return "Pick a cut on an ellipse, elliptic arc or spline";}
     if puppy_tool==-4 {if puppy_anchor {return "Click the new tangent arc endpoint";}return "Pick a curve endpoint to start a tangent arc";}
     if puppy_tool==-5 {if puppy_anchor {return "Pick the curve that should follow or drag a source point";}return "Pick the source curve for Smooth";}
     if puppy_tool==-3 && !puppy_revolve_axis {return "Pick a source to offset or a copy to resize";}
@@ -273,18 +274,33 @@ fn puppy_offset_pick(project,point) {
     }
     puppy_offset_pick_id=puppy_snapshot(id);return puppy_number_open(project,puppy_active_field(project));
 }
+fn puppy_split_ellipse_clear() {
+    if puppy_split_ellipse {puppy_drop(puppy_split_ellipse);puppy_split_ellipse=0;}
+}
 fn puppy_split_click(project,p) {
+    cg_begin();
     let sk=j_string(puppy_draft_sketch(project),"id");let nodes=pc_nodes(cad_project_part(project));let a=p;let b=0;
     if puppy_anchor {a=cg_v(puppy_ax,puppy_ay,0);b=p;}
-    let node=puppy_sketch_hit(nodes,sk,a);if !pc_ellipse_entity(node) {return puppy_title(project,"Pick a cut on an ellipse or elliptic arc");}
     let tolerance=8000000000/puppy_draft_scale;
+    let node=0;
+    if puppy_anchor && puppy_split_ellipse {node=pc_find(nodes,puppy_split_ellipse+24);}
+    else {node=puppy_line_edit_target(nodes,sk,p,tolerance,-6);}
+    if cg_error {return puppy_title(project,cg_error);}
+    if !node {return puppy_title(project,puppy_draft_hint());}
+    if m_eq(j_string(node,"type"),"sketchSpline") {
+        let updated=cad_project_split_spline(project,sk,j_string(node,"id"),p,tolerance);
+        if !updated {return puppy_title(project,cg_error);}
+        puppy_profile_index=1;puppy_push(updated);return puppy_title(updated,"Spline split");
+    }
     if !puppy_anchor && !pc_finite_arc(node) {
-        pe_parameter(pc_curve_geometry(node),p,tolerance);if cg_error {return puppy_title(project,cg_error);}
-        puppy_ax=load64(p);puppy_ay=load64(p+8);puppy_anchor=1;return puppy_title(project,puppy_draft_hint());
+        let angle=pe_parameter(pc_curve_geometry(node),p,tolerance);if cg_error {return puppy_title(project,cg_error);}
+        let snapped=pbe_point(pbe_data(node),angle);if cg_error {return puppy_title(project,cg_error);}
+        puppy_split_ellipse_clear();puppy_split_ellipse=puppy_snapshot(j_string(node,"id"));
+        puppy_ax=load64(snapped);puppy_ay=load64(snapped+8);puppy_anchor=1;return puppy_title(project,puppy_draft_hint());
     }
     let updated=cad_project_split_ellipse(project,sk,j_string(node,"id"),a,b,tolerance);
     if !updated {return puppy_title(project,cg_error);}
-    puppy_anchor=0;puppy_push(updated);return puppy_title(updated,"Ellipse split");
+    puppy_split_ellipse_clear();puppy_anchor=0;puppy_push(updated);return puppy_title(updated,"Ellipse split");
 }
 fn puppy_draft_click(x,y) {
     let project=cad_project_open(puppy_history+24);let p=puppy_draft_point(x,y);
@@ -413,7 +429,7 @@ fn puppy_draft_key(project,key,mods) {
         if mods&3 {return puppy_use_edges(project,0);}
         puppy_tool=-7;return puppy_title(project,puppy_draft_hint());
     }
-    if key==27 && mods&3 {puppy_curves_page=2;puppy_tool=-6;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());}
+    if key==27 && mods&3 {puppy_split_ellipse_clear();puppy_curves_page=2;puppy_tool=-6;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());}
     if key==13 {
         puppy_join_select(0);puppy_anchor=0;puppy_curves_page=1;puppy_tool=-5;if mods&3 {puppy_tool=-4;}
         return puppy_title(project,puppy_draft_hint());
@@ -551,12 +567,13 @@ fn puppy_draw_draft() {
         let preview=puppy_join_preview(project,id);if preview {if !puppy_draft_path(preview,3,w,h) {return 0;}}cg_begin();
     }
     let selected=0;if puppy_tool==-5 && puppy_anchor && puppy_join_source {selected=j_string(j_parse(puppy_join_source+24),"entityId");}
-    let split_cuts=0;if puppy_tool==-6 && puppy_anchor && !puppy_revolve_axis {
-        let first=cg_v(puppy_ax,puppy_ay,0);let node=puppy_sketch_hit(pc_nodes(cad_project_part(project)),id,first);
+    let split_cuts=0;if puppy_tool==-6 && puppy_anchor && puppy_split_ellipse && !puppy_revolve_axis {
+        let first=cg_v(puppy_ax,puppy_ay,0);let tolerance=8000000000/puppy_draft_scale;
+        let node=pc_find(pc_nodes(cad_project_part(project)),puppy_split_ellipse+24);
         selected=j_string(node,"id");let geom=pc_curve_geometry(node);split_cuts=cg_array();let i=0;
         while i<2 && geom {
             let p=first;if i {p=cg_v(puppy_mx,puppy_my,0);}
-            let angle=pe_parameter(geom,p,8000000000/puppy_draft_scale);
+            let angle=pe_parameter(geom,p,tolerance);
             if !cg_error {
                 let pts=pc_ellipse_samples(pc_uv(j_get(geom,"center")),pc_pose_number(j_get(geom,"width"))/2,pc_pose_number(j_get(geom,"height"))/2,pc_ellipse_rotation(geom),angle,0,1,0);
                 cg_push(split_cuts,cg_at(pts,0));
