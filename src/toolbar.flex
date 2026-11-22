@@ -10,8 +10,10 @@ global puppy_toolbar_width=0;
 global puppy_toolbar_dirty=1;
 global puppy_status=0;
 global puppy_bar_page=0;
-global puppy_breadcrumb_left=0;
-global puppy_breadcrumb_right=0;
+global puppy_breadcrumb_assembly_left=0;
+global puppy_breadcrumb_assembly_right=0;
+global puppy_breadcrumb_part_left=0;
+global puppy_breadcrumb_part_right=0;
 
 fn puppy_toolbar_open() {
     puppy_toolbar_context=tf_context();
@@ -187,8 +189,52 @@ fn puppy_line_button(project) {
     }
     return 0;
 }
+fn puppy_bar_breadcrumb(rgb,w,x,right,label) {
+    let end=x+puppy_limit(puppy_toolbar_text_width(label),0,right-x);
+    puppy_bar_text(rgb,w,x,25,label,end);
+    puppy_bar_rect(rgb,w,x,29,end-x,1,143,217,184);
+    return end;
+}
+fn puppy_toolbar_breadcrumbs(project,rgb,w,x,right) {
+    if right<=x {return x;}
+    let heading=puppy_workspace_heading(project);
+    let assembly=puppy_workspace_parent(project);
+    let part=cad_project_part(project);
+    let assembly_label="";let part_label="";
+    let divider="  ›  ";let divider_width=puppy_toolbar_text_width(divider);
+    let heading_width=puppy_toolbar_text_width(heading);
+    let required=heading_width;
+    if assembly {
+        assembly_label=m_cat("Assembly / ",puppy_design_item_name(assembly,"assembly"));
+        required=required+puppy_toolbar_text_width(assembly_label)+divider_width;
+    }
+    if puppy_sketch && part {
+        part_label=m_cat("Part / ",puppy_document_name(project));
+        required=required+puppy_toolbar_text_width(part_label)+divider_width;
+    }
+    if assembly && required>right-x {
+        required=required-puppy_toolbar_text_width(assembly_label)+puppy_toolbar_text_width("Assembly");
+        assembly_label="Assembly";
+    }
+    if m_len(part_label) && required>right-x {part_label="Part";}
+    if assembly {
+        puppy_breadcrumb_assembly_left=x;
+        x=puppy_bar_breadcrumb(rgb,w,x,right,assembly_label);
+        puppy_breadcrumb_assembly_right=x;
+        puppy_bar_text(rgb,w,x,25,divider,right);x=puppy_limit(x+divider_width,x,right);
+    }
+    if m_len(part_label) {
+        puppy_breadcrumb_part_left=x;
+        x=puppy_bar_breadcrumb(rgb,w,x,right,part_label);
+        puppy_breadcrumb_part_right=x;
+        puppy_bar_text(rgb,w,x,25,divider,right);x=puppy_limit(x+divider_width,x,right);
+    }
+    let end=x+puppy_limit(heading_width+4,0,right-x);
+    puppy_bar_text(rgb,w,x,25,heading,end);
+    return end;
+}
 fn puppy_toolbar_build(w) {
-    puppy_breadcrumb_right=0;
+    puppy_breadcrumb_assembly_right=0;puppy_breadcrumb_part_right=0;
     if puppy_reader_report {
         let rgb=m_take(w*76*4);puppy_reader_bar(rgb,w);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
@@ -285,18 +331,7 @@ fn puppy_toolbar_build(w) {
     if cad_project_is_studio(project) {status_edge=w-268;}
     if cad_project_part(project) {status_edge=w-513;}
     if w<800 {status_edge=w-8;}
-    let space=status_edge-title_x;let heading=puppy_workspace_heading(project);
-    if puppy_sketch && cad_project_part(project) {
-        let parent=m_cat("Part / ",puppy_document_name(project));
-        let suffix=m_cat(" / ",heading);
-        if puppy_toolbar_text_width(m_cat(parent,suffix))>space {parent="Part";}
-        puppy_breadcrumb_left=title_x;
-        puppy_breadcrumb_right=title_x+puppy_limit(puppy_toolbar_text_width(parent),0,space);
-        puppy_bar_rect(rgb,w,title_x,29,puppy_breadcrumb_right-title_x,1,143,217,184);
-        heading=m_cat(parent,suffix);
-    }
-    let title_end=title_x+puppy_limit(puppy_toolbar_text_width(heading)+4,0,space);
-    puppy_bar_text(rgb,w,title_x,25,heading,title_end);
+    let title_end=puppy_toolbar_breadcrumbs(project,rgb,w,title_x,status_edge);
     if !cad_project_is_studio(project) && w>=800 {
         puppy_bar_rect(rgb,w,w-327,6,84,28,45,64,67);puppy_bar_text(rgb,w,w-319,25,"New part",w-243);
         puppy_bar_rect(rgb,w,w-235,6,118,28,45,64,67);puppy_bar_text(rgb,w,w-227,25,"New assembly",w-117);
@@ -397,8 +432,15 @@ fn puppy_toolbar_build(w) {
     puppy_ui_upload(rgb,w,76);
     puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
 }
-fn puppy_breadcrumb_hit(x,y) {
-    return puppy_sketch && y>=6 && y<34 && x>=puppy_breadcrumb_left && x<puppy_breadcrumb_right;
+fn puppy_breadcrumb_click(x,y) {
+    if y<6 || y>=34 {return 0;}
+    if x>=puppy_breadcrumb_assembly_left && x<puppy_breadcrumb_assembly_right {
+        return puppy_workspace_return_to_assembly(cad_project_open(puppy_history+24));
+    }
+    if puppy_sketch && x>=puppy_breadcrumb_part_left && x<puppy_breadcrumb_part_right {
+        return puppy_workspace_return_to_part(cad_project_open(puppy_history+24));
+    }
+    return 0;
 }
 fn puppy_ui_upload(rgb,w,h) {
     let args=m_take(88);gui__zero(args,88);

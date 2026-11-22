@@ -174,12 +174,35 @@ with tempfile.TemporaryDirectory() as tmp:
             for char in text:
                 key({'.':'period','-':'minus',' ':'space','=':'equal','#':'Shift_L+3','+':'Shift_L+equal','*':'Shift_L+8'}.get(char,char))
 
+        def breadcrumb_links(window, name):
+            """Locate visible breadcrumb links independently of label widths."""
+            from PIL import Image
+
+            output=output_dir/name
+            subprocess.run(["magick","import","-window",hex(window),output],check=True)
+            with Image.open(output) as image:
+                rgb=image.convert("RGB")
+            spans=[]
+            for x in range(rgb.width):
+                if rgb.getpixel((x,29)) != (143,217,184):
+                    continue
+                if spans and spans[-1][1]+1==x:
+                    spans[-1][1]=x
+                else:
+                    spans.append([x,x])
+            return [(left+right)//2 for left,right in spans if right-left>=6]
+
         # One drawing owns all three workspaces and the sketch history.
         workspace_path=Path(tmp)/"Workspaces.pcad"
         workspace_doc=json.loads((root/"rust/fixtures/assembly.pcad").read_bytes())
-        workspace_doc["selectedPath"]=[2]
+        other_assembly=json.loads(json.dumps(workspace_doc["items"][2]))
+        other_assembly.update(id="inspection-assembly",name="Inspection assembly")
+        other_assembly["data"].update(id="inspection-assembly",name="Inspection assembly")
+        workspace_doc["items"].insert(2,other_assembly)
+        workspace_doc["selectedPath"]=[3]
         workspace_path.write_text(json.dumps(workspace_doc))
         app,window=open_app(workspace_path,"Assembly opened",design_tree=True)
+        assert "  |  Arm assembly  |  Assembly" in title(window)
         click(window,55,160)  # Open Base directly from the assembly workspace.
         verify(window,"Opened Base")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-part.png"],check=True)
@@ -197,9 +220,19 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Control_L+y")
         verify(window,"|  Sketch")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-sketch.png"],check=True)
-        click(window,120,20)  # The parent breadcrumb returns to Base's Part workspace.
+        key("F3")  # Breadcrumb navigation also works with the sidebar hidden.
+        assembly_link,part_link=breadcrumb_links(window,"workspace-nested-sketch-breadcrumbs.png")
+        assert assembly_link<part_link
+        click(window,part_link,20)
         verify(window,"Part workspace")
-        assert "|  Solid" in title(window)
+        assert "  |  Base  |  Solid" in title(window)
+        assembly_link,=breadcrumb_links(window,"workspace-nested-part-breadcrumbs.png")
+        click(window,assembly_link,20)
+        verify(window,"Opened Arm assembly")
+        assert "  |  Arm assembly  |  Assembly" in title(window)
+        click(window,43,92)  # Show the Design tree after testing the hidden sidebar.
+        click(window,55,160)
+        verify(window,"Opened Base")
         click(window,85,212)
         verify(window,"Editing Base sketch")
         click(window,900,20)
@@ -208,6 +241,17 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Editing Base sketch")
         key("F12")
         verify(window,"Part workspace")
+        click(window,325,55)
+        verify(window,"Editing Base sketch")
+        key("F3")
+        assembly_link,part_link=breadcrumb_links(window,Path(tmp)/"nested-sketch-revisited.png")
+        click(window,assembly_link,20)  # Skip Part and go straight to the original assembly.
+        verify(window,"Opened Arm assembly")
+        assert "  |  Arm assembly  |  Assembly" in title(window)
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(workspace_path.read_bytes())["selectedPath"]==[3]
+        click(window,43,92)
         click(window,229,125)
         for letter in "assembly-1":
             key("minus" if letter=="-" else letter)
@@ -218,10 +262,24 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Control_L+s")
         verify(window,"Saved")
         saved=json.loads(workspace_path.read_bytes())
-        assert saved["selectedPath"]==[2] and saved["items"][1:]==workspace_doc["items"][1:]
+        assert saved["selectedPath"]==[3] and saved["items"][1:]==workspace_doc["items"][1:]
         base=saved["items"][0]["data"]["cad"]["nodes"]
         assert sum(n.get("primitive",{}).get("construction",False) for n in base)==1
         assert len(base)==len(workspace_doc["items"][0]["data"]["cad"]["nodes"])+1
+        key("Escape")
+        app.wait(3)
+
+        standalone_part=Path(tmp)/"Direct Part workspace.pcad"
+        saved["selectedPath"]=[0]
+        standalone_part.write_text(json.dumps(saved))
+        app,window=open_app(standalone_part)
+        assert breadcrumb_links(window,Path(tmp)/"standalone-part.png")==[]
+        click(window,325,55)
+        verify(window,"Editing Base sketch")
+        part_link,=breadcrumb_links(window,"workspace-standalone-sketch-breadcrumb.png")
+        click(window,part_link,20)
+        verify(window,"Part workspace")
+        assert "  |  Base  |  Solid" in title(window)
         key("Escape")
         app.wait(3)
 
@@ -264,8 +322,8 @@ with tempfile.TemporaryDirectory() as tmp:
             assert compact.getpixel((x,62))==(143,217,184)
         click(window,80,55)
         verify(window,"Editing Sketch 1")
-        toolbar_frame("workspace-sketch-breadcrumb-compact.png")
-        click(window,20,20)
+        part_link,=breadcrumb_links(window,"workspace-sketch-breadcrumb-compact.png")
+        click(window,part_link,20)
         verify(window,"Part workspace")
         xlib.XResizeWindow(connection,window,960,640)
         xlib.XSync(connection,0)

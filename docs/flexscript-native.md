@@ -26,6 +26,10 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
   F12 switches between Part and Sketch. Extrude and Revolve create a feature
   and return to Part.
 
+When you open a referenced part from an assembly, click the underlined
+**Assembly** breadcrumb to return to that assembly from Part or Sketch.
+The breadcrumb works with the Design sidebar collapsed.
+
 From Part, click **New sketch** or press Shift+S. Choose **Top (XY)**,
 **Front (XZ)**, or **Right (YZ)**. Choose **On face** to attach the sketch
 to an existing solid, then click its face. Keys 1, 2, and 3 select a plane

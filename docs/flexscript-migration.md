@@ -716,9 +716,9 @@ Objects panel still supports occurrence picking and isolation.
 
 The v4 editor shows distinct Assembly, Part and Sketch workspaces in one
 window. The headless test clicks Base in the Design tree from the Arm
-assembly, expands Base to open its sketch with one click, and uses the
-tree to return to Part and Assembly. The breadcrumb follows each
-workspace. Undo and Redo preserve the active sketch during an edit.
+assembly and expands Base to open its sketch with one click. With the
+sidebar collapsed, the breadcrumb returns to Base or directly to the Arm
+assembly. Undo and Redo preserve the active sketch during an edit.
 The saved file retains the other items and
 the assembly references. A blank sketch can also return to Part before
 it contributes a solid.

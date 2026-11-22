@@ -221,9 +221,8 @@ fn puppy_design_activate(project,row) {
     let kind=load64(row+16);let node=load64(row+24);
     if m_eq(kind,"sheet") {return puppy_sheet_open(project,j_string(node,"id"));}
     if m_eq(kind,"add-sheet") {return puppy_sheet_add(project);}
-    let item=puppy_design_owner(row);let items=pc_first(j_get(project,"items"));let index=0;
-    while items && items!=item {items=load64(items+24);index=index+1;}
-    if !items {return 1;}
+    let item=puppy_design_owner(row);let index=puppy_item_index(project,item);
+    if index<0 {return 1;}
     let switched=cad_project_item(project)!=item;
     if switched && !puppy_open_item(project,index) {
         return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");
@@ -245,12 +244,20 @@ fn puppy_design_activate(project,row) {
     if m_eq(kind,"part") {puppy_workspace_show_part(project);}
     return puppy_title(project,m_cat("Opened ",load64(row)));
 }
+fn puppy_design_select(key) {
+    if puppy_design_entity {puppy_drop(puppy_design_entity);puppy_design_entity=0;}
+    if puppy_design_selection {puppy_drop(puppy_design_selection);}
+    puppy_design_selection=puppy_snapshot(key);puppy_tree_dirty=1;
+}
+fn puppy_design_select_item(item) {
+    let kind=j_string(item,"type");let id=j_string(item,"id");
+    if !m_len(id) {id=puppy_design_item_name(item,kind);}
+    puppy_design_select(puppy_design_key(kind,id));
+}
 fn puppy_design_choose(project,row) {
     let kind=load64(row+16);let node=load64(row+24);let id=j_string(node,"id");
-    if puppy_design_entity {puppy_drop(puppy_design_entity);puppy_design_entity=0;}
+    puppy_design_select(load64(row+8));
     if m_eq(kind,"geometry") {puppy_design_entity=puppy_snapshot(load64(row+8));}
-    if puppy_design_selection {puppy_drop(puppy_design_selection);}
-    puppy_design_selection=puppy_snapshot(load64(row+8));puppy_tree_dirty=1;
     puppy_clear_pick();
     if m_eq(kind,"definition") {puppy_definition=puppy_snapshot(id);puppy_copy_index=0;}
     if m_eq(kind,"instance") && (cad_project_is_studio(project) || puppy_design_owner(row)==cad_project_item(project)) {

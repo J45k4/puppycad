@@ -198,10 +198,18 @@ fn puppy_next_item(project) {
     if next<0 {next=first;}
     if !puppy_open_item(project,next) {return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");}return 1;
 }
+fn puppy_item_index(project,item) {
+    let row=pc_first(j_get(project,"items"));let index=0;
+    while row && row!=item {row=load64(row+24);index=index+1;}
+    if row {return index;}return -1;
+}
 fn puppy_open_item(project,next) {
+    if next<0 {return 0;}
+    let previous_item=cad_project_item(project);
     let selection=j_array();j_add(selection,0,j_number(next));cg_j_set(project,"selectedPath",selection);
     let previous=puppy_draft_index;puppy_draft_index=0;
     if !puppy_refresh(project) {puppy_draft_index=previous;return 0;}
+    if previous_item!=cad_project_item(project) {puppy_workspace_track_parent(previous_item,cad_project_part(project));}
     puppy_selected=0;puppy_property=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_part_choice=0;puppy_sketch=puppy_draft;
     puppy_push(project);return puppy_title(project,"Item opened");
 }
@@ -219,6 +227,7 @@ fn puppy_insert_part_choice(project) {
 fn puppy_add_item(project,kind) {
     let updated=cad_project_add_item(project,kind);
     if !updated || !puppy_refresh(updated) {return puppy_title(project,cg_error);}
+    puppy_workspace_clear_parent();
     puppy_part_choice=0;puppy_selected=0;puppy_property=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_sketch=puppy_draft;
     puppy_push(updated);
     if puppy_draft {return puppy_title(updated,puppy_draft_hint());}
@@ -568,9 +577,7 @@ fn puppy_editor(path,source,project,report) {
                     }
                     dirty=1;
                 }
-                else if puppy_breadcrumb_hit(x,y) {
-                    puppy_workspace_switch(cad_project_open(puppy_history+24));dirty=1;
-                }
+                else if puppy_breadcrumb_click(x,y) {dirty=1;}
                 else if width>=800 && y>=6 && y<34 && x>=width-505 && x<width-429 && cad_project_part(cad_project_open(puppy_history+24)) {
                     puppy_command(38,0);dirty=1;
                 }
@@ -690,6 +697,7 @@ fn puppy_editor(path,source,project,report) {
     puppy_distance_cancel();puppy_line_cancel_drag();if puppy_line_report {puppy_drop(puppy_line_report);}
     if puppy_number_text {puppy_number_close();}
     puppy_extrusion_close();
+    puppy_workspace_clear_parent();
     puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
     if puppy_pending_title {puppy_drop(puppy_pending_title);}
     puppy_forget_click();puppy_end_isolation();puppy_clear_pick();puppy_trim(puppy_root);if puppy_disk {puppy_drop(puppy_disk);}if puppy_status {puppy_drop(puppy_status);}puppy_view_close();return 0;

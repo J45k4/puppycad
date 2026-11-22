@@ -1,5 +1,45 @@
 global puppy_explicit_sketch=0;
 global puppy_plane_chooser=0;
+// Parts are top-level records. Remember the assembly used to reach this part.
+global puppy_workspace_parent_id=0;
+global puppy_workspace_part_id=0;
+
+fn puppy_workspace_clear_parent() {
+    if puppy_workspace_parent_id {puppy_drop(puppy_workspace_parent_id);puppy_workspace_parent_id=0;}
+    if puppy_workspace_part_id {puppy_drop(puppy_workspace_part_id);puppy_workspace_part_id=0;}
+}
+
+fn puppy_workspace_track_parent(previous,part) {
+    puppy_workspace_clear_parent();
+    if !part || !m_eq(j_string(previous,"type"),"assembly") {return 0;}
+    let id=j_string(part,"id");let record=pc_first(j_get(j_get(previous,"data"),"instances"));
+    while record {
+        if m_eq(j_string(record,"partId"),id) {
+            puppy_workspace_parent_id=puppy_snapshot(j_string(previous,"id"));
+            puppy_workspace_part_id=puppy_snapshot(id);
+            return 1;
+        }
+        record=load64(record+24);
+    }
+    return 0;
+}
+
+fn puppy_workspace_parent(project) {
+    if !puppy_workspace_parent_id || !m_eq(j_string(cad_project_part(project),"id"),puppy_workspace_part_id+24) {return 0;}
+    let item=pc_find(j_get(project,"items"),puppy_workspace_parent_id+24);
+    if m_eq(j_string(item,"type"),"assembly") {return item;}
+    return 0;
+}
+
+fn puppy_workspace_return_to_assembly(project) {
+    let assembly=puppy_workspace_parent(project);
+    if !assembly {return 0;}
+    if !puppy_open_item(project,puppy_item_index(project,assembly)) {
+        return puppy_title(cad_project_open(puppy_history+24),"Cannot open this assembly");
+    }
+    puppy_design_select_item(assembly);
+    return puppy_title(project,m_cat("Opened ",puppy_design_item_name(assembly,"assembly")));
+}
 
 fn puppy_workspace_heading(project) {
     let item=cad_project_item(project);
@@ -60,6 +100,11 @@ fn puppy_workspace_switch(project) {
     return puppy_workspace_edit_sketch(project,j_string(sketch,"id"));
 }
 
+fn puppy_workspace_return_to_part(project) {
+    let result=puppy_workspace_switch(project);
+    if !puppy_sketch {puppy_design_select_item(cad_project_part(project));}
+    return result;
+}
 
 fn puppy_plane_actions() {
     let rows=cg_array();
