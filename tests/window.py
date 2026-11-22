@@ -1037,7 +1037,7 @@ with tempfile.TemporaryDirectory() as tmp:
         for _ in range(4):
             click(window,580,20)  # More tools → Curves → Conics → Profiles → Edit
         click(window,235,55)
-        verify(window,"Click the line segment to trim")
+        verify(window,"Click the curve segment to trim")
         click(window,480,358)
         verify(window,"Line trimmed")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"sketch-trim-toolbar.png"],check=True)
@@ -1050,14 +1050,14 @@ with tempfile.TemporaryDirectory() as tmp:
             verify(window,"Saved")
             assert saved_line_endpoints()==expected
         click(window,330,55)
-        verify(window,"Click a line near the end to extend")
+        verify(window,"Click near the end to extend")
         click(window,391,358)
         verify(window,"Line extended")
         key("Control_L+s")
         verify(window,"Saved")
         assert saved_line_endpoints()==trimmed_lines | {"native-entity-1":((-40,0),(20,0))}
         key("Escape")
-        verify(window,"Line edit cancelled")
+        verify(window,"Curve edit cancelled")
         key("Escape")
         key("Escape")
         app.wait(3)
@@ -1081,7 +1081,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
         app,window=open_app(curved_line_path,"Click two rectangle corners")
         key("q")
-        verify(window,"Click the line segment to trim")
+        verify(window,"Click the curve segment to trim")
         click(window,480,310)
         verify(window,"Line trimmed")
         key("Control_L+s")
@@ -1094,7 +1094,7 @@ with tempfile.TemporaryDirectory() as tmp:
         app.wait(3)
         app,window=open_app(curved_line_path,"Click two rectangle corners")
         key("Shift_L+q")
-        verify(window,"Click a line near the end to extend")
+        verify(window,"Click near the end to extend")
         click(window,400,310)
         verify(window,"Line extended")
         key("Control_L+s")
@@ -1121,7 +1121,7 @@ with tempfile.TemporaryDirectory() as tmp:
         spline_line_path.write_text(json.dumps(spline_doc))
         app,window=open_app(spline_line_path,"Click two rectangle corners")
         key("q")
-        verify(window,"Click the line segment to trim")
+        verify(window,"Click the curve segment to trim")
         click(window,480,322)
         verify(window,"Line trimmed")
         key("Control_L+s")
@@ -1136,7 +1136,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
         app,window=open_app(spline_line_path,"Click two rectangle corners")
         key("Shift_L+q")
-        verify(window,"Click a line near the end to extend")
+        verify(window,"Click near the end to extend")
         click(window,440,322)
         verify(window,"Line extended")
         key("Control_L+s")
@@ -1160,7 +1160,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,560,358)
         verify(window,"Line trimmed")
         key("Escape")
-        verify(window,"Line edit cancelled")
+        verify(window,"Curve edit cancelled")
         key("e")
         verify(window,"Extruded")
         key("Control_L+s")
@@ -1177,6 +1177,99 @@ with tempfile.TemporaryDirectory() as tmp:
         assert bounds==[(-15,15),(0,12),(0,10)] and math.isclose(volume,2400,abs_tol=6)
         shutil.copyfile(spline_profile,output_dir/"spline-boundary-authoring.pcad")
         shutil.copyfile(spline_stl,output_dir/"spline-boundary-authoring.stl")
+        key("Escape")
+        app.wait(3)
+
+        arc_path=Path(tmp)/"Circular arc editing.pcad"
+        arc_doc=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        arc_graph=arc_doc["items"][0]["data"]["cad"]
+        sketch_nodes=arc_graph["nodes"][:4]
+        arc_graph["nodes"]=sketch_nodes+[
+            {"id":"native-entity-1","type":"sketchArc","sketchId":"native-sketch-1",
+             "arc":{"id":"native-entity-1","type":"arc","center":{"x":0,"y":0},"radius":20,
+                    "startAngle":0,"sweep":math.pi/2,"segments":128}},
+            {"id":"native-entity-2","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":-10,"y":14},"p1":{"x":-10,"y":20}},
+            {"id":"native-entity-3","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":10,"y":14},"p1":{"x":10,"y":20}},
+        ]
+        arc_path.write_text(json.dumps(arc_doc))
+
+        def saved_arc(path, start, sweep):
+            nodes=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+            node=next(row for row in nodes if row["id"]=="native-entity-1")
+            assert node["type"]=="sketchArc" and node["sketchId"]=="native-sketch-1"
+            arc=node["arc"]
+            assert arc["id"]==node["id"] and arc["center"]=={"x":0,"y":0} and arc["radius"]==20
+            assert math.isclose(arc["startAngle"],start,abs_tol=2e-8)
+            assert math.isclose(arc["sweep"],sweep,abs_tol=2e-8)
+            return arc
+
+        app,window=open_app(arc_path,"Click two rectangle corners")
+        key("Shift_L+q")
+        click(window,501,281)
+        verify(window,"Arc extended")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved_arc(arc_path,0,2*math.pi/3)
+        capture(window,"sketch-extend-arc.png",True)
+        key("Escape")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(arc_path,"Click two rectangle corners")
+        key("q")
+        click(window,466,279)
+        verify(window,"Arc trimmed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved_arc(arc_path,0,math.pi/3)
+        assert saved_line_endpoints(arc_path)=={"native-entity-2":((-10,14),(-10,20)),
+                                                "native-entity-3":((10,14),(10,20))}
+        key("Escape")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        circle_profile=Path(tmp)/"Trimmed circle profile.pcad"
+        arc_graph["nodes"]=sketch_nodes+[
+            {"id":"native-entity-1","type":"sketchPrimitive","sketchId":"native-sketch-1",
+             "primitive":{"type":"circle","center":{"x":0,"y":0},"radius":20,"segments":128}},
+            {"id":"native-entity-2","type":"sketchLine","sketchId":"native-sketch-1",
+             "p0":{"x":-20,"y":0},"p1":{"x":20,"y":0}},
+        ]
+        circle_profile.write_text(json.dumps(arc_doc))
+        app,window=open_app(circle_profile,"Click two rectangle corners")
+        key("q")
+        click(window,480,278)
+        verify(window,"Circle trimmed")
+        capture(window,"sketch-trim-circle-target.png",True)
+        key("Escape")
+        verify(window,"Curve edit cancelled")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        circle_arc=saved_arc(circle_profile,math.pi,math.pi)
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(circle_profile)
+        key("Control_L+e")
+        verify(window,"Exported")
+        exported=circle_profile.with_suffix(".stl")
+        bounds,volume=triangulation(exported)
+        assert bounds==[(-20,20),(-20,0),(0,10)]
+        assert math.isclose(volume,64*2000*math.sin(math.pi/64),abs_tol=.02)
+        reference=Path(tmp)/"circle-trim-reference.stl"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",circle_profile,reference],check=True)
+        reference_bounds,reference_volume=triangulation(reference)
+        # Rust rounds the saved picoradian sweep up to its next sample count.
+        reference_count=math.ceil(circle_arc["sweep"]/math.tau*circle_arc["segments"])
+        assert all(math.isclose(a,b,abs_tol=.01) for interval,expected in zip(reference_bounds,bounds,strict=True)
+                   for a,b in zip(interval,expected,strict=True)), (reference_bounds,bounds)
+        assert math.isclose(reference_volume,reference_count*2000*math.sin(math.pi/reference_count),abs_tol=.02)
+        shutil.copyfile(circle_profile,output_dir/"circle-trim-authoring.pcad")
+        shutil.copyfile(exported,output_dir/"circle-trim-authoring.stl")
         key("Escape")
         app.wait(3)
 

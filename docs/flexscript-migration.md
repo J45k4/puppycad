@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`49646670c285379e0539cb3a4cdc7d322c9ff5da` includes the shared library and
+`c1f90127c4f51f3fee7359d84987046263089a26` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -254,6 +254,13 @@ cubic spans directly, including tangent contacts and the seam of a periodic
 fit spline. The native test saves and reopens the two fragments at ±7.5 mm,
 extends one to the next contact, and closes a second profile by trimming to
 the spline endpoints. Its reopened extrusion exports as a closed STL.
+
+Circular arcs now extend to finite boundaries along their signed sweep.
+The native test extends a 90° arc to 120°, reopens it, and trims it to 60°.
+It also trims a circle at a diameter, saves the retained semicircle and
+extrudes it. The reopened STL is closed and agrees with the Rust export
+within their sampling tolerances. Biscuit's checked VM and two independent
+frozen v7 builds reproduce the editor's STL byte for byte.
 
 The graph suite compares directed axes, axis-touching profiles, partial and
 full turns, rectangular and round holes, mirrored face sketches, joins and
@@ -596,6 +603,23 @@ explicit v5 operator profile. Checked programs can import
 `/biscuit/runtime/pcad-mechanical.flex` again for part, assembly and individual
 feature previews.
 
+The saved copper review, zone preview, board checks and product BOM imports
+run against the shared SDK in the checked VM. Historical copper reports,
+zone runs, BOM pages and procurement CSVs match the original standalone
+implementations byte for byte. Biscuit's native build now uses the shared
+BOM and wire-stock CSV writers.
+
+The `native-project-checks-7` profile records board diagnostics keyed by
+the frozen board ID and includes each routed net's class and effective
+clearance in the PCB assembly manifest. A failed board keeps its own
+diagnostic alongside the remaining boards. The worker and broker verify
+that both copies of the passing board evidence agree. Oversized diagnostics
+retain their counts and a bounded sample. The original three-wire bundle
+produces identical CSVs, KiCad boards, STEP, PDF and SPICE outputs under v6
+and v7. The two JSON reports add the board checks. After the operator upgrade,
+archived v5 and v6 releases still download byte for byte and the original
+checkers can reproduce their outputs under their recorded profiles.
+
 The native standalone editor authors and edits Shell features on convex
 bodies. The headless window test rejects a 32 mm wall, previews and applies a
 2 mm wall on the +Z face, and exercises undo and redo. It widens the source
@@ -917,10 +941,8 @@ polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
 Remaining standalone work includes additional sketch and feature authoring
-and design inspectors. Editing curved targets with Trim and Extend still
-needs the open cases in the parity inventory. The legacy copper and BOM
-checked entry points and per-board routing evidence still need compatibility
-checks against Biscuit's `docs/pcad-electrical.md` and original release fixtures.
+and design inspectors. Editing elliptical and spline targets with Trim and
+Extend and the other open cases in the parity inventory remain in scope.
 
 ## Later milestone: WASM editor in Biscuit
 

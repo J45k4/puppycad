@@ -398,9 +398,10 @@ click once inside its sweep. Each split is one undo step. After saving
 and reopening, editing the width, height or rotation of any piece in
 **Dimensions** (F8) still updates the whole ellipse.
 
-Choose **More tools → Edit → Trim** (Q), then click the interval of a straight
-line you want to remove. **Extend** (Shift+Q) lengthens the end nearest your
-click to the first boundary it reaches. Lines, circles, ellipses, circular and
+Choose **More tools → Edit → Trim** (Q), then click the interval of a line,
+circle or circular arc you want to remove. Trimming a circle retains an open
+arc. **Extend** (Shift+Q) lengthens the end of a line or circular arc nearest
+your click to the first boundary it reaches. Lines, circles, ellipses, circular and
 elliptic arcs, rectangles, polygons, slots, and both fit and control splines
 can serve as boundaries. Arc intersections respect the saved sweep. Splines
 use the exact cubic spans, including periodic fit splines. Projected boundaries
