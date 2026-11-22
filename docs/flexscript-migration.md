@@ -77,14 +77,15 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`53299c3c990a7f7b70d680223f76da95e00c9537` includes the shared library and
+`f882e983256ae5ffddab2d7ba73444214d994901` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
 
-The pinned compiler supports up to 4,096 ordinary Flexscript functions.
-The native editor builds through the direct pipeline as it grows. Compiler
-tests cover calls at the new limit and rejection of an extra declaration.
+The pinned compiler and verifier scanner share a 4,096-function source
+limit. PuppyCAD and the assembled Biscuit portal build through the direct
+pipeline. Compiler tests cover calls at the limit, including annotated
+source, and rejection of an extra declaration.
 
 The SDK's `cad_render_rgb` and the existing
 `/biscuit/cad/render.flex` import reproduced the original renderer's
@@ -493,6 +494,19 @@ Z = 8…14 mm. The original Biscuit electrical checker retains its supported
 board schema. The worker rejects a standalone document with an unsupported
 schema version. Browser tests cover deterministic frozen builds and retrieval
 of historical artifacts under the previous profile.
+
+Biscuit's native `pcad_input` profile freezes the assembly and its linked
+board layouts from one Files revision. The SDK supplies each board's pad,
+pin and net map and its mounted occurrence transform. The worker uses the
+same frozen input for the assembly, authored drawings, editable KiCad
+files and `pcb-assembly.json`. A headless browser built `sensor-unit.pcad`
+twice and downloaded a protected ZIP carrying the exact source. The two
+builds matched in every deterministic artifact. The STL matches all 920
+facets from the six PuppyCAD exports. A new 30° hinge revision produced a
+STEP assembly with the same board files, and the earlier ZIP still returned
+the original bytes. Removing a via from the sensor board failed the
+frozen build and withheld its exports. Revoking Files access also revoked
+the reader's access to the archived outputs.
 
 The native object tree browses bodies, nested occurrences and driving fields.
 The window regression searched for `right/upper` across two copies of one
