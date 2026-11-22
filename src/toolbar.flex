@@ -277,7 +277,7 @@ fn puppy_toolbar_build(w) {
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
     if puppy_extrusion_open || puppy_revolve_open || puppy_shell_open {
-        if puppy_number_text {puppy_number_bar(rgb,w,project);}
+        if puppy_number_text {puppy_number_bar(rgb,w,project,0);}
         else {
             if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
             if w<800 {puppy_compact_bar(rgb,w,project,-1);}
@@ -301,7 +301,7 @@ fn puppy_toolbar_build(w) {
         let scene=j_parse(puppy_sheet_scene+24);
         let title=j_string(scene,"name");
         if puppy_status {title=puppy_status+24;}
-        if puppy_sheet_entry {puppy_number_bar(rgb,w,project);}
+        if puppy_sheet_entry {puppy_number_bar(rgb,w,project,0);}
         else {
             puppy_bar_text(rgb,w,12,25,title,w-10);
             puppy_action_bar(puppy_sheet_actions(),rgb,w,-1);
@@ -337,7 +337,7 @@ fn puppy_toolbar_build(w) {
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_number_text {
-        puppy_number_bar(rgb,w,project);puppy_ui_upload(rgb,w,76);
+        puppy_number_bar(rgb,w,project,1);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_patterns {
@@ -502,6 +502,7 @@ fn puppy_breadcrumb_target(x,y) {
 fn puppy_breadcrumb_click(project,x,y) {
     let target=puppy_breadcrumb_target(x,y);
     if !target {return 0;}
+    if puppy_number_text {puppy_number_close();}
     if puppy_line_report {puppy_line_end();}
     if target==1 {return puppy_workspace_return_to_assembly(project);}
     return puppy_workspace_return_to_part(project);

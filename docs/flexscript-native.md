@@ -31,10 +31,10 @@ When you open a referenced part from an assembly, click the underlined
 The Assembly link stays available when you switch to another part used by
 that assembly. Breadcrumb links highlight on hover and work from
 **Dimensions** and **Relations**, including with the Design sidebar
-collapsed. Clicking a breadcrumb also dismisses an open
-Design context menu and takes you to the chosen workspace. Undo and Redo
-restore the Assembly link from the original visit to a part. In a narrow
-window the path can use the workspace names **Assembly**, **Part**, and
+collapsed. Clicking a breadcrumb dismisses an open Design context menu
+or cancels an unsubmitted dimension value and opens the chosen workspace.
+Undo and Redo restore the Assembly link from the original visit to a part.
+In a narrow window the path can use the workspace names **Assembly**, **Part**, and
 **Sketch** to fit. The toolbar uses paged controls when it needs more space
 for the path.
 

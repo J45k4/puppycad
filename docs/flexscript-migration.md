@@ -1119,7 +1119,9 @@ window. The headless test clicks Base in the Design tree from the Arm
 assembly and expands Base to open its sketch with one click. With the
 sidebar collapsed, the breadcrumb returns to Base or directly to the Arm
 assembly. The Part link also closes the Design context menu and returns to
-Base in one click. Undo and Redo preserve the active sketch during an edit.
+Base in one click. Both ancestor links remain available while typing a sketch
+dimension. The headless test follows each link, then checks that saving leaves
+the sketch unchanged. Undo and Redo preserve the active sketch during an edit.
 The saved file retains the other items and the assembly references. A blank
 sketch can also return to Part before it contributes a solid.
 
