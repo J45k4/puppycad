@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`f882e983256ae5ffddab2d7ba73444214d994901` includes the shared library and
+`cecfa673d5a7dbc5a909be0fadf6b37002145bd7` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -507,6 +507,22 @@ STEP assembly with the same board files, and the earlier ZIP still returned
 the original bytes. Removing a via from the sensor board failed the
 frozen build and withheld its exports. Revoking Files access also revoked
 the reader's access to the archived outputs.
+
+The shared PCB checker, editable KiCad writer and board mesh renderer also
+process the original standalone `sensor-unit-3-wire.pcad`. The sensor board
+uses a three-pin through-hole header, an axial resistor and an undrilled
+oval capacitor footprint. Biscuit's existing electrical imports forward to
+the shared code. The legacy LED fixture still produces the same netlist,
+check report, KiCad board, CAD mesh and front/back previews byte for byte.
+
+The `pcad.fabrication` check requires a pinned KiCad receipt for every
+board exported from the selected frozen PCAD build. Both three-wire boards
+passed KiCad 10.0.7 DRC with zero violations and zero unconnected items.
+Each produced six Gerbers, a job file and separate plated and non-plated
+drill files. The headless browser verified that one receipt blocks
+promotion and that two passing receipts unlock the release ZIP. A board
+with a deleted route failed DRC, withheld fabrication files and left the
+previously promoted release available to authorized readers.
 
 The native object tree browses bodies, nested occurrences and driving fields.
 The window regression searched for `right/upper` across two copies of one
