@@ -252,6 +252,12 @@ can still display independent bodies. Repair or suppress the failed feature
 before exporting. Rolling back before the first feature leaves an empty
 viewport. Reopen History to move the rollback position forward.
 
+Choose **More tools → Conics → Ellipse** (Shift+E). Click the center, the
+endpoint of the first axis, then a point to set the perpendicular height.
+For a **3-point circle** (Shift+C), click three points on the rim. The third
+click commits the shape. Backspace retracts the last pending point. A
+collinear third point leaves the first two picks available for correction.
+
 In **More tools**, choose **Tangent** (Shift+J), click a free line, circular
 arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**
 (J) joins the nearest endpoints of two curves. Select the curve to keep in

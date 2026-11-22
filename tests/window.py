@@ -169,6 +169,63 @@ with tempfile.TemporaryDirectory() as tmp:
             for char in text:
                 key({'.':'period','-':'minus',' ':'space','=':'equal','#':'Shift_L+3','+':'Shift_L+equal','*':'Shift_L+8'}.get(char,char))
 
+        path=Path(tmp)/"Elliptical washer.pcad"
+        app,window=open_app(path,"Click two rectangle corners")
+        click(window,576,20)  # More tools
+        click(window,576,20)  # Conics
+        click(window,236,55)  # Ellipse
+        verify(window,"Click the ellipse center")
+        click(window,480,358)
+        click(window,480,358)
+        verify(window,"Choose a first axis endpoint away from the center")
+        click(window,540,278)
+        click(window,600,198)
+        verify(window,"Choose a height away from the first axis")
+        xlib.XWarpPointer(connection,0,window,0,0,0,0,460,318)
+        xlib.XSync(connection,0)
+        capture(window,"rotated-ellipse-preview.png",True)
+        click(window,460,318)
+        verify(window,"Curve added")
+        key("Shift_L+c")
+        verify(window,"Click the first circle point")
+        click(window,464,358)
+        click(window,480,342)
+        key("BackSpace")
+        verify(window,"Click the second circle point")
+        click(window,480,342)
+        click(window,496,358)
+        verify(window,"Curve added")
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        def conic_shapes():
+            return [n["primitive"] for n in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"] if n["type"]=="sketchPrimitive"]
+        ellipse,=conic_shapes()
+        assert ellipse["type"]=="ellipse" and ellipse["width"]==50 and ellipse["height"]==20
+        assert abs(ellipse["rotation"]-math.degrees(math.atan2(4,3)))<.000001 and ellipse["segments"]==128
+        key("Control_L+y")
+        key("Control_L+s")
+        verify(window,"Saved")
+        ellipse,circle=conic_shapes()
+        assert circle["type"]=="circle" and circle["center"]==dict(x=0,y=0) and circle["radius"]==4 and circle["segments"]==64
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        ref=Path(tmp)/"conics-rust.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,ref],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),ref)
+        volume=package_geometry(ref)[1][0][1][1]
+        expected=10*(64*25*10*math.sin(math.tau/128)-32*4**2*math.sin(math.tau/64))
+        assert math.isclose(volume,expected,rel_tol=.000001)
+        key("Escape")
+        app.wait(3)
+
         path=Path(tmp)/"Tangent join.pcad"
         path.write_bytes((root/"rust/fixtures/tangent-arc.pcad").read_bytes())
         app,window=open_app(path,"Click two rectangle corners")

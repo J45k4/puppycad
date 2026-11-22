@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`dcecba7d015e05e87dde20d8b711c1fcb0ecb063` includes the shared library and
+`9a630069e57bf094534a4c9a1debe8538d4960fb` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -107,6 +107,20 @@ body name and signed volume. Biscuit’s checked program adds the closing arc an
 STL bytes with the Rust reference volume of 67,199.537 mm³. Moving a spline’s
 middle point out of tangency makes the worker reject the export. Mixed driving constraints and edits requiring
 deformation of a closed smooth chain remain open.
+
+The native editor also authors three-point ellipses and circles. The
+headless window test draws a 50 × 20 mm ellipse rotated 53.130102° and
+places a 4 mm radius hole using three points on its rim. Undo and redo
+preserve both primitive definitions. After save and reopen, the 10 mm
+extrusion matches the Rust 3MF and the volume computed from the ellipse’s
+128 segments and the hole’s 64 segments. Biscuit’s checked VM creates the
+same CAD graph, including the feature and profile IDs. The native file records
+three accepted edits in its revision. The checked program constructs the graph
+at its initial revision. Two frozen project builds produce byte-identical STLs.
+Four rotations of a 420 × 18 mm ellipse, including odd segment counts,
+exercise the full-precision sampler. Each sampled STL rim vertex lies within
+0.00002 mm of the analytical ellipse at its segment angle and 0.00015 mm of
+the corresponding Rust export.
 
 The headless native window test creates a linear grid from a picked circle
 and a circular pattern from a picked line, then attaches the rotation center

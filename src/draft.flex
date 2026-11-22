@@ -99,6 +99,7 @@ fn puppy_tool_name() {
     if puppy_tool==-1 {return "point";}if puppy_tool==-2 {return "constructionPoint";}
     if puppy_tool==3 {return "arc";}if puppy_tool==4 {return "fit";}
     if puppy_tool==5 {return "control";}if puppy_tool==6 {return "periodic";}
+    if puppy_tool==7 {return "ellipse";}if puppy_tool==8 {return "threePointCircle";}
     if puppy_tool==2 {return "line";}
     if puppy_tool==1 {return "circle";}
     return "rectangle";
@@ -115,6 +116,12 @@ fn puppy_draft_hint() {
     if puppy_tool==-2 {return "Click to place a construction point";}
     if puppy_tool==3 {
         if !puppy_anchor {return "Click the arc start";}if puppy_anchor==1 {return "Click a point on the arc";}return "Click the arc end";
+    }
+    if puppy_tool==7 {
+        if !puppy_anchor {return "Click the ellipse center";}if puppy_anchor==1 {return "Click the first axis endpoint";}return "Click to set the perpendicular height";
+    }
+    if puppy_tool==8 {
+        if !puppy_anchor {return "Click the first circle point";}if puppy_anchor==1 {return "Click the second circle point";}return "Click the third circle point";
     }
     if puppy_tool>=4 {
         if puppy_tool==5 {return "Control spline: pick 3n + 1 points, then Finish";}
@@ -182,9 +189,13 @@ fn puppy_draft_click(x,y) {
     }
     if puppy_tool>=3 {
         if puppy_anchor>=4096 {return puppy_title(project,"Finish the curve before adding more points");}
+        if puppy_tool>=7 && puppy_anchor==1 && puppy_mx==load64(puppy_curve_coords) && puppy_my==load64(puppy_curve_coords+8) {
+            if puppy_tool==7 {return puppy_title(project,"Choose a first axis endpoint away from the center");}
+            return puppy_title(project,"Choose a different point on the rim");
+        }
         let pair=puppy_curve_coords+puppy_anchor*16;
         store64(pair,puppy_mx);store64(pair+8,puppy_my);puppy_anchor=puppy_anchor+1;
-        if puppy_tool==3 && puppy_anchor==3 {
+        if (puppy_tool==3 || puppy_tool>=7) && puppy_anchor==3 {
             let status=puppy_curve_finish(project);if puppy_anchor {puppy_anchor=2;}return status;
         }
         return puppy_title(project,puppy_draft_hint());
@@ -279,7 +290,11 @@ fn puppy_draft_key(project,key,mods) {
         if !puppy_fit_sketch(project,0) {return puppy_title(project,cg_error);}
         return puppy_title(project,"Sketch fitted");
     }
-    if key==10 {puppy_curves_page=!puppy_curves_page;return puppy_title(project,puppy_draft_hint());}
+    if key==10 {puppy_curves_page=(puppy_curves_page+1)%3;return puppy_title(project,puppy_draft_hint());}
+    if (key==8 || key==6) && mods&3 {
+        puppy_anchor=0;puppy_curves_page=2;puppy_tool=7;if key==6 {puppy_tool=8;}
+        return puppy_title(project,puppy_draft_hint());
+    }
     if key==55 {
         puppy_anchor=0;puppy_curves_page=1;puppy_tool=-1;
         if mods&3 {puppy_tool=-2;}return puppy_title(project,puppy_draft_hint());
@@ -290,7 +305,7 @@ fn puppy_draft_key(project,key,mods) {
         return puppy_title(project,puppy_draft_hint());
     }
     if key==42 && puppy_anchor && puppy_tool>=3 {puppy_anchor=puppy_anchor-1;return puppy_title(project,puppy_draft_hint());}
-    if key==40 && puppy_tool>=4 {return puppy_curve_finish(project);}
+    if key==40 && puppy_tool>=4 && puppy_tool<=6 {return puppy_curve_finish(project);}
     if key==21 || key==6 || key==15 {
         puppy_curves_page=0;
         puppy_anchor=0;puppy_tool=key==6;
@@ -361,8 +376,9 @@ fn puppy_draw_draft() {
         if count>=2 {
             let curve=cad_project_add_curve(project,id,puppy_tool_name(),pending);
             if curve {
-                let preview=pc_curve_path(curve);
-                if preview {cg_push(paths,cg_v(preview,0,curve));}
+                let closed=puppy_tool>=7;let preview=0;
+                if closed {preview=pc_primitive_loop(curve);}else {preview=pc_curve_path(curve);}
+                if preview {cg_push(paths,cg_v(preview,closed,curve));}
             }
             cg_begin();
         }

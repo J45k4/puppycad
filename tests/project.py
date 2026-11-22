@@ -84,6 +84,33 @@ def check_profiles(editor, directory):
     ellipse = 16 / 2 * 80 * 50 * math.sin(math.tau / 16)
     hole = 12 / 2 * 20**2 * math.sin(math.tau / 12)
     check(FIXTURES / "segmented-primitives.pcad", [(-80, 80), (-50, 50), (0, 40)], 40*(ellipse-hole))
+    # Every sampled rim vertex must agree with Rust even for a highly eccentric
+    # ellipse. A millidegree truncation shifts its tips by several micrometres.
+    eccentric = json.loads((FIXTURES/"segmented-primitives.pcad").read_bytes())
+    nodes = eccentric["items"][0]["data"]["cad"]["nodes"]
+    outer, hole_node = [n for n in nodes if n["type"]=="sketchPrimitive"]
+    nodes.remove(hole_node)
+    for rotation, segments in ((31.291983,128),(-47.123783,43),(122.4359,128),(1.00095,33)):
+        outer["primitive"].update(width=420,height=18,rotation=rotation,segments=segments)
+        input_file.write_text(json.dumps(eccentric))
+        samples = []
+        for exe in (editor, ROOT/"rust/target/debug/puppycad"):
+            subprocess.run([exe,"--export",input_file,output],check=True)
+            vertices = set()
+            for face in struct.iter_unpack("<12fH",output.read_bytes()[84:]):
+                if max(face[5],face[8],face[11])>0:
+                    vertices.update(tuple(face[k:k+3]) for k in (3,6,9) if face[k+2]==0)
+            assert len(vertices)==segments
+            samples.append(vertices)
+        angle = math.radians(rotation)
+        expected = []
+        for i in range(segments):
+            x, y = 210*math.cos(math.tau*i/segments), 9*math.sin(math.tau*i/segments)
+            expected.append((x*math.cos(angle)-y*math.sin(angle), x*math.sin(angle)+y*math.cos(angle), 0))
+        for pt in samples[0]:
+            # Each STL vertex is float32. Rust also computes its angles in float32.
+            assert min(math.dist(pt,ref) for ref in expected) < .00002, (rotation,segments,pt)
+            assert min(math.dist(pt,ref) for ref in samples[1]) < .00015, (rotation,segments,pt)
     capsule = 100*40 + 12*20**2*math.sin(math.pi/12)
     check(FIXTURES / "segmented-slot.pcad", [(-70, 70), (-20, 20), (0, 40)], 40*capsule)
 
