@@ -61,7 +61,8 @@ fn puppy_line_label() {
     }
     let unit=" mm";if pc_angular_field(j_string(row,"field")) {unit=" deg";}
     let report=j_parse(puppy_line_report+24);let text=m_cat(j_string(row,"id"),m_cat("   ",m_cat(value,unit)));
-    return m_cat(text,m_cat("   DOF ",m_int(j_integer(report,"degrees_of_freedom"))));
+    let dof="   DOF ";if j_value(j_get(report,"degrees_of_freedom_is_upper_bound")) {dof="   DOF <= ";}
+    return m_cat(text,m_cat(dof,m_int(j_integer(report,"degrees_of_freedom"))));
 }
 fn puppy_line_cache(report) {
     if puppy_line_report {puppy_drop(puppy_line_report);}puppy_line_report=puppy_snapshot(j_encode(report));

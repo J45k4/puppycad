@@ -254,6 +254,15 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Opened Base")
         click(window,85,212)
         verify(window,"Editing Base sketch")
+        click(window,85,212,button=3)
+        verify(window,"Selected Base sketch")
+        menu,[_,(left,right)]=breadcrumb_frame(window,"workspace-breadcrumb-with-design-menu.png")
+        assert menu.getpixel((85,214))==(89,111,109), "The Design context menu should be open"
+        click(window,(left+right)//2,20)
+        verify(window,"Part workspace")
+        assert "  |  Base  |  Solid" in title(window)
+        click(window,85,212)
+        verify(window,"Editing Base sketch")
         click(window,900,20)
         verify(window,"Part workspace")
         key("F12")
@@ -2176,6 +2185,80 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # A driving line carries the tangent arc while a separate circle stays dimensioned.
+        path=Path(tmp)/"Driving tangent.pcad"
+        document=json.loads((root/"rust/fixtures/tangent-arc.pcad").read_bytes())
+        doc_part=document["items"][0]
+        doc_part["name"]="Driving tangent"
+        cad=doc_part["data"]["cad"]
+        nodes={node["id"]:node for node in cad["nodes"]}
+        sketch=nodes["native-sketch-1"]
+        line=nodes["native-entity-1"]
+        arc=nodes["native-entity-2"]
+        line.update(p0=dict(x=-40,y=0),p1=dict(x=0,y=0))
+        arc["arc"].update(center=dict(x=0,y=10),radius=10)
+        join=sketch["relations"][0]
+        sketch["relations"]=[join,
+                             dict(id="line-horizontal",type="horizontal",entityId=line["id"]),
+                             dict(id="line-length",type="length",entityId=line["id"],value=40),
+                             dict(id="circle-diameter",type="diameter",entityId="native-entity-3",value=12)]
+        circle=dict(id="native-entity-3",type="sketchPrimitive",sketchId=sketch["id"],
+                    primitive=dict(id="native-entity-3",type="circle",center=dict(x=0,y=40),radius=6,segments=128))
+        cad["nodes"]=list(nodes.values())[:-1]+[circle]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"native-entity-1   40 mm   DOF <=")
+        key("F2")
+        verify(window,"Set value")
+        type_value("50 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"40 mm   DOF <=")
+        key("Control_L+y")
+        verify(window,"50 mm   DOF <=")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        saved={node["id"]:node for node in saved}
+        assert saved[line["id"]]["p0"]==line["p0"] and saved[line["id"]]["p1"]==dict(x=10,y=0)
+        assert saved[arc["id"]]["arc"]==dict(arc["arc"],center=dict(x=10,y=10))
+        assert saved[circle["id"]]==circle and saved[sketch["id"]]["relations"][0]==join
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"native-entity-1   50 mm   DOF <=")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"driving-tangent.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        # Reopen the sketch at its default zoom so the clicks land at exact coordinates.
+        app,window=open_app(path,"Click two rectangle corners")
+        key("l")
+        verify(window,"Click the two endpoints")
+        click(window,560,318)  # The arc's moving endpoint (20, 10).
+        click(window,320,358)  # The line's retained start (-40, 0).
+        verify(window,"Sketch edited")
+        key("p")
+        verify(window,"Profile 2")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        ref=Path(tmp)/"driving-tangent-rust.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,ref],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),ref)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        print("Mixed smooth export",bounds,volume,flush=True)
+        assert bounds==[(-40.0,20.0),(0.0,10.0),(0.0,10.0)] and volume>0
+        key("Escape")
+        app.wait(3)
+
         path=Path(tmp)/"Tangent join.pcad"
         path.write_bytes((root/"rust/fixtures/tangent-arc.pcad").read_bytes())
         app,window=open_app(path,"Click two rectangle corners")
@@ -2707,7 +2790,7 @@ with tempfile.TemporaryDirectory() as tmp:
         key("m")
         verify(window,"Pick the mirror line")
         click(window,480,200)
-        verify(window,"Pick the point, line or circle to mirror")
+        verify(window,"Pick the point, line, circle or arc to mirror")
         click(window,351,520)
         verify(window,"Mirror copy added")
         key("m")
@@ -2734,7 +2817,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert sketch["relations"][:2]==json.loads(fixture.read_bytes())["items"][0]["data"]["cad"]["nodes"][3]["relations"]
         key("m")
         click(window,480,200)
-        verify(window,"Pick the point, line or circle to mirror")
+        verify(window,"Pick the point, line, circle or arc to mirror")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"sketch-mirror.png"],check=True)
         key("Escape")
         key("Escape")
@@ -2780,6 +2863,73 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
         assert stale.read_bytes()==original_bytes and not stale.with_suffix(".stl").exists()
+
+        path=Path(tmp)/"Arc mirror.pcad"
+        drawing=json.loads(fixture.read_bytes())
+        cad=drawing["items"][0]["data"]["cad"]
+        nodes=[node for node in cad["nodes"] if node["type"] in {"referencePlane","sketch"}]
+        sk="native-sketch-1"
+        next(node for node in nodes if node["id"]==sk)["relations"]=[]
+        axis,source,reflected=("native-entity-"+str(i) for i in (1,2,3))
+        cad["nodes"]=nodes+[
+            dict(id=axis,type="sketchLine",sketchId=sk,construction=True,p0=dict(x=0,y=-40),p1=dict(x=0,y=40)),
+            dict(id=source,type="sketchArc",sketchId=sk,arc=dict(id=source,type="arc",center=dict(x=30,y=10),
+                 radius=10,startAngle=0,sweep=math.pi/2,segments=64)),
+        ]
+        path.write_text(json.dumps(drawing))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"DOF 9")
+        key("m")
+        verify(window,"Pick the mirror line")
+        click(window,351,358)
+        mirror_hint="Pick the point, line, circle or arc to mirror"
+        verify(window,mirror_hint)
+        click(window,499,339)  # On the supporting circle, outside the finite arc.
+        verify(window,mirror_hint)
+        click(window,590,248)
+        verify(window,"Mirror copy added")
+        for field,value in (("Radius","10 mm"),("Sweep","90 deg")):
+            key("Tab")
+            verify(window,f"{source}   {field} {value}")
+            key("r")
+            verify(window,f"Reference {field} {value}")
+        for field,value,edited in (("Radius","10 mm","12 mm"),("Sweep","-90 deg","-110 deg")):
+            key("Tab")
+            verify(window,f"{reflected}   {field} {value}")
+            key("F2")
+            type_value(edited)
+            key("Return")
+            verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"Sweep -90 deg")
+        key("Control_L+y")
+        verify(window,"Sweep -110 deg")
+        key("Control_L+s")
+        verify(window,"Saved")
+        graph=mirror_nodes()
+        first,second=graph[source]["arc"],graph[reflected]["arc"]
+        assert first["center"]==dict(x=30,y=10) and second["center"]==dict(x=-30,y=10)
+        assert first["radius"]==second["radius"]==12
+        assert math.isclose(first["sweep"],math.radians(110),abs_tol=1e-12) and first["sweep"]==-second["sweep"]
+        assert math.isclose(abs(second["startAngle"]),math.pi,abs_tol=1e-12)
+        relations=graph[sk]["relations"]
+        assert relations[0]==dict(id="mirror-1",type="mirror",symmetryLine=axis,a=source,b=reflected)
+        assert {r["type"]:r["value"] for r in relations if r.get("reference")}==dict(radius=12,arcSweep=110)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"DOF 7")
+        key("Tab")
+        verify(window,"Reference Radius 12 mm")
+        key("Tab")
+        verify(window,"Reference Sweep 110 deg")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"sketch-arc-mirror.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
 
         path=Path(tmp)/"Signed sweep.pcad"
         drawing=json.loads((root/"rust/fixtures/extruded-rectangle.pcad").read_bytes())

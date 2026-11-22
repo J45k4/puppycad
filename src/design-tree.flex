@@ -396,6 +396,7 @@ fn puppy_design_menu_event(event,x,y) {
         if inside && gui_event_button(event)==1 {return puppy_design_menu_activate(dy/PUPPY_DESIGN_MENU_ROW);}
         puppy_design_menu_close();
         if gui_event_button(event)==3 && x>=0 && x<puppy_design_width() && y>=0 {return puppy_design_context(x,y);}
+        if gui_event_button(event)==1 && puppy_breadcrumb_target(x,y+76) {return 0;}
         return 1;
     }
     if kind==GUI_KEY_DOWN {

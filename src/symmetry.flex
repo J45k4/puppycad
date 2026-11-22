@@ -1,4 +1,5 @@
 import "cad/project-mirror-author.flex";
+import "cad/project-arc-edit.flex";
 
 global puppy_symmetry_mode=0;
 global puppy_symmetry_axis=0;
@@ -11,7 +12,7 @@ fn puppy_symmetry_end() {
 }
 fn puppy_symmetry_hint() {
     if !puppy_symmetry_axis {return "Pick the mirror line";}
-    if puppy_symmetry_mode==1 {return "Pick the point, line or circle to mirror";}
+    if puppy_symmetry_mode==1 {return "Pick the point, line, circle or arc to mirror";}
     if !puppy_symmetry_anchor {return "Pick the first symmetry anchor";}
     return "Pick the opposite symmetry anchor";
 }
@@ -34,6 +35,9 @@ fn puppy_mirror_hit(nodes,sk,point,only_lines) {
         if m_eq(j_string(row,"sketchId"),sk) {
             let kind=pc_mirror_kind(row);let d=best;
             if kind==3 {d=puppy_segment_distance(point,pc_uv(j_get(row,"p0")),pc_uv(j_get(row,"p1")));}
+            else if kind==4 && !only_lines {
+                let pick=cad_sketch_circular_pick(row,point,best);if pick {d=load64(pick+8);}
+            }
             else if kind && !only_lines {
                 d=pc_line_span(point,pc_uv(j_get(pc_curve_geometry(row),"center")));
                 if kind==1 {d=cg_abs(d-pc_circle_measure(row,"radius"));}

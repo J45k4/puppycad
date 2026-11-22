@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`7d9ce9322530e8d5d3bde21e2fe3f20721a0d90d` includes the shared library and
+`1112dfd685cbf71aba1fc578f7f38e97c3f04deb` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -119,8 +119,20 @@ After save and reopen, the native extrusion matches the Rust 3MF in bounds,
 body name and signed volume. Biscuit’s checked program adds the closing arc and
 10 mm extrusion to the same drawing. Two frozen worker runs produce identical
 STL bytes with the Rust reference volume of 67,199.537 mm³. Moving a spline’s
-middle point out of tangency makes the worker reject the export. Mixed driving constraints and edits requiring
-deformation of a closed smooth chain remain open.
+middle point out of tangency makes the worker reject the export.
+
+The native dimensions tool also changes a 40 mm line to 50 mm while keeping
+its start fixed. The joined arc moves 10 mm and retains its radius, sweep
+and relation ID. An independent driving circle in the same sketch stays
+at its saved diameter. The window test undoes, redoes, saves and reopens the
+edit, then closes and extrudes the outline. Its 3MF matches Rust. Biscuit's
+checked VM reproduces the native part, and two frozen worker runs export its
+exact STL. The SDK rejects an incompatible follower constraint or a solid
+rebuild failure without publishing the edit. The dimension report shows an
+upper bound for degrees of freedom while smooth joins are active. Edits
+that require deforming a closed smooth chain still need a general solve.
+See `workdir/flexscript/driving-tangent.png` and
+`workdir/cad-migration/mixed-smooth-consumer-proof-actual.json`.
 
 The native editor also authors three-point ellipses and circles. The
 headless window test draws a 50 × 20 mm ellipse rotated 53.130102° and
@@ -200,10 +212,19 @@ Biscuit's checked program edits the opposite circle and extrudes both
 regions in the same file. Two frozen worker builds produce identical
 STLs. Shifting only one saved center breaks the mirror relation. The native
 editor then opens the drawing read-only, preserves its bytes on Save and
-produces no STL. The next frozen build also fails. Linked mirrors of
-points, straight lines and circles, and
-reflected anchor pairs are supported. Other whole-curve mirror types,
-including finite arcs and splines, still need their geometry constraints.
+produces no STL. The next frozen build also fails.
+
+Mirror now picks a finite circular arc and links its reflected center,
+start angle, radius and signed sweep using the existing v4 relation. The
+window test changes the mirrored radius to 12 mm and sweep to −110°,
+then undoes, redoes and reopens the linked result. The source's reference
+dimensions track both edits. The checked VM replays that geometry and
+closes two sectors with radial lines. PuppyCAD and Rust agree on the two
+extrusions. Two frozen builds produce the same facets as the two native
+STLs combined, and a stale start angle fails the frozen build. Whole-curve
+mirrors of elliptic arcs and splines still need their geometry constraints.
+See `workdir/flexscript/sketch-arc-mirror.png` and
+`workdir/cad-migration/linked-arc-actual/verification.json`.
 
 The native UI trial changed a 160 mm sketch width to 161 mm, exercised undo
 and redo, and reopened the saved driving relation. The resulting sketch and
@@ -644,6 +665,14 @@ leaves the mechanical drawing criterion unknown. The authenticated release
 test verifies both checks against the original sensor fixture and confirms
 that archived v7 packages and journals retain their original bytes.
 
+The `native-project-checks-9` profile restores the standalone branch's
+`pcad.input` criterion. It binds the successful schema, units, root assembly,
+size, release options and product hierarchy checks to the frozen PCAD source.
+`pcad.assembly` evaluates the solved assembly. Authenticated tests verify
+both criteria, re-execute the original v8 checker and preserve the archived
+v8 ZIP and journal byte for byte. The original three-wire sensor release
+also passes the headless browser and real KiCad 10.0.7 fabrication tests.
+
 The native standalone editor authors and edits Shell features on convex
 bodies. The headless window test rejects a 32 mm wall, previews and applies a
 2 mm wall on the +Z face, and exercises undo and redo. It widens the source
@@ -904,10 +933,10 @@ The v4 editor shows distinct Assembly, Part and Sketch workspaces in one
 window. The headless test clicks Base in the Design tree from the Arm
 assembly and expands Base to open its sketch with one click. With the
 sidebar collapsed, the breadcrumb returns to Base or directly to the Arm
-assembly. Undo and Redo preserve the active sketch during an edit.
-The saved file retains the other items and
-the assembly references. A blank sketch can also return to Part before
-it contributes a solid.
+assembly. The Part link also closes the Design context menu and returns to
+Base in one click. Undo and Redo preserve the active sketch during an edit.
+The saved file retains the other items and the assembly references. A blank
+sketch can also return to Part before it contributes a solid.
 
 Part mode draws visible sketches on their actual reference planes and
 attachment faces through the shared CAD path evaluator. The Design tree

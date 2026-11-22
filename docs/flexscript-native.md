@@ -30,10 +30,12 @@ When you open a referenced part from an assembly, click the underlined
 **Assembly** breadcrumb to return to that assembly from Part or Sketch.
 The Assembly link stays available when you switch to another part used by
 that assembly. Breadcrumb links highlight on hover and work with the
-Design sidebar collapsed. Undo and Redo restore the Assembly link from
-the original visit to a part. In a narrow window the
-path can use the workspace names **Assembly**, **Part**, and **Sketch** to
-fit. The toolbar uses paged controls when it needs more space for the path.
+Design sidebar collapsed. Clicking a breadcrumb also dismisses an open
+Design context menu and takes you to the chosen workspace. Undo and Redo
+restore the Assembly link from the original visit to a part. In a narrow
+window the path can use the workspace names **Assembly**, **Part**, and
+**Sketch** to fit. The toolbar uses paged controls when it needs more space
+for the path.
 
 From Part, click **New sketch** or press Shift+S. Choose **Top (XY)**,
 **Front (XZ)**, or **Right (YZ)**. Choose **On face** to attach the sketch
@@ -209,11 +211,13 @@ Press **F8** or choose **Dimensions** to edit a sketch made of lines, circles
 and points. **Next sketch** cycles through the supported sketches in the part.
 Click a line to select it, or use **Next line** (Tab). Its length and the
 sketch's degrees of freedom appear above the viewport. **Set length** (F2)
-edits the driving dimension while holding the start point. Drag either
-endpoint to preview the motion permitted by the sketch constraints. The
-opposite endpoint stays in place. Escape cancels a drag, and releasing
-the pointer accepts it as one undo step. **Done** returns to the previous
-view. Ctrl+S saves the drawing.
+edits the driving dimension while holding the start point. Joined curves
+follow the edited line when the remaining constraints allow it. **DOF <=**
+marks an upper bound in sketches with smooth joins. Drag either endpoint
+to preview the motion permitted by the sketch constraints. The opposite
+endpoint stays in place. Escape cancels a drag, and releasing the pointer
+accepts it as one undo step. **Done** returns to the previous view. Ctrl+S
+saves the drawing.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -242,9 +246,11 @@ chain keeps its mitered corners when the distance changes. An edit that
 would collapse an edge or circle leaves the drawing at its previous size.
 
 In **Dimensions**, choose **Mirror** (M), click a straight line as the axis,
-then click the point, line or circle to copy. The new geometry stays linked.
-Dragging either member moves its counterpart across the line. A dimension
-on either mirrored circle drives both radii.
+then click the point, line, circle or circular arc to copy. The new geometry
+stays linked. Dragging either member moves its counterpart across the line.
+A dimension on either mirrored circle or arc drives both radii. Editing
+an arc's sweep updates its counterpart by the same angle in the opposite
+direction. Turning the axis reflects the arc's starting direction.
 
 To reflect two existing anchors, choose **Mirror**, then **Pair anchors**
 (P). Pick the axis, the anchor to keep, and its counterpart. Repeat the
@@ -411,8 +417,9 @@ arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**
 place first, then the curve to align. Selecting the same pair again removes
 their smooth join. To reshape a joined chain, select a curve with **Smooth**
 and drag one of its handles. Release to apply one undo step. Escape cancels
-the drag. These tools support sketches whose driving relations are smooth
-joins. An edit that requires deforming a closed chain is declined.
+the drag. The tools also accept editable line and circular dimensions in
+the same sketch. The editor rejects an edit if it conflicts with another
+driver or requires deforming a closed smooth chain.
 
 Choose **More tools** for arcs and splines. For a three-point arc (A), click
 the start, a point on the arc and the end. A fit spline (S) passes through
