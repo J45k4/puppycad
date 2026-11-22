@@ -242,7 +242,7 @@ fn puppy_toolbar_build(w) {
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_draft {
-        let label="More tools";if puppy_curves_page==1 {label="Conics";}if puppy_curves_page==2 {label="Sketch tools";}
+        let label="More tools";if puppy_curves_page==1 {label="Curves";}if puppy_curves_page==2 {label="Conics";}if puppy_curves_page==3 {label="Profiles";}
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,label,w-335);
     }
     if !puppy_sketch && !puppy_empty && cad_project_part(project) {
@@ -347,7 +347,28 @@ fn puppy_curve_buttons(rows) {
     puppy_compact_button(rows,"Point",55,0);puppy_compact_button(rows,"Datum",55,3);puppy_compact_button(rows,"Offset",61,0);
     puppy_compact_button(rows,"Tangent arc",13,3);puppy_compact_button(rows,"Smooth",13,0);
 }
+fn puppy_profile_buttons(rows) {
+    puppy_compact_button(rows,"Diameter circle",7,0);
+    puppy_compact_button(rows,"Center rectangle",21,3);
+    puppy_compact_button(rows,"3-point rectangle",23,0);
+    puppy_compact_button(rows,"3-point centered",23,3);
+}
 fn puppy_curve_bar(rgb,w,x) {
+    if puppy_curves_page==3 {
+        let rows=cg_array();puppy_profile_buttons(rows);
+        let left=194;let width=puppy_limit((w-68-left-24)/4,1,156);let i=0;
+        while i<cg_count(rows) {
+            let row=cg_at(rows,i);
+            if x>=left && x<left+width {return puppy_command(load64(row+8),load64(row+16));}
+            if rgb {
+                puppy_bar_button(rgb,w,left,width,load64(row));
+                if puppy_tool==i+9 {puppy_bar_rect(rgb,w,left,66,width,2,143,217,184);}
+            }
+            left=left+width+8;i=i+1;
+        }
+        return 1;
+    }
+
     if puppy_curves_page==2 {
         if x>=194 && x<280 {return puppy_command(8,3);}if x>=288 && x<416 {return puppy_command(6,3);}if x>=424 && x<534 {return puppy_command(27,3);}
         if x>=542 && x<664 {return puppy_command(26,0);}
@@ -412,6 +433,7 @@ fn puppy_compact_actions(project) {
             puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Circle",6,0);
             puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Extrude",8,0);
             puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split ellipse",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
+            puppy_profile_buttons(rows);
             puppy_compact_button(rows,"Next profile",19,0);puppy_compact_button(rows,"Patterns",62,0);
             if puppy_draft_on_face(project) {puppy_compact_button(rows,puppy_operation(project),18,0);}
             if puppy_pending_face_index(project)>=0 {puppy_compact_button(rows,"Solid",25,0);}

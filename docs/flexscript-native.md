@@ -323,6 +323,19 @@ can still display independent bodies. Repair or suppress the failed feature
 before exporting. Rolling back before the first feature leaves an empty
 viewport. Reopen History to move the rollback position forward.
 
+The **Profiles** toolbar adds four placement modes.
+
+| Tool | Picks |
+| --- | --- |
+| **Diameter circle** (D) | Two opposite points on the rim |
+| **Center rectangle** (Shift+R) | The center and a corner |
+| **3-point rectangle** (T) | Two points on the first edge, then a point setting the height |
+| **3-point centered** (Shift+T) | The center, a side midpoint, then a point setting the perpendicular half-height |
+
+Open **Dimensions** (F8) to drive the rectangle’s width, height or
+rotation. All three rectangle modes save an editable rectangle with its
+center and axes. The diameter circle uses the ordinary circle dimensions.
+
 Choose **More tools → Conics → Ellipse** (Shift+E). Click the center, the
 endpoint of the first axis, then a point to set the perpendicular height.
 For a **3-point circle** (Shift+C), click three points on the rim. The third

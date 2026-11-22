@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`f1b952d5e96c7fdf31d6dffffc72381d62185323` includes the shared library and
+`2dd36cad38ddb20f9a8c34d8ec24e5331c0620b6` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -709,6 +709,15 @@ undo, redo, save, reopen, and PDF export. The CAD SDK rejects invalid scales
 and out-of-model section planes. Biscuit’s checked VM authors the same
 document. Two frozen builds produce byte-identical PDFs that include the
 frozen source digest and preserve the 1,728 mm³ block in STL.
+
+The native sketch editor authors diameter circles and all three
+center-based or rotated rectangle placements. The headless test draws
+a 50 × 20 mm centered rectangle at 53.130102°, creates a diameter-defined
+hole, and drives the width to 60 mm. After reopening and extrusion its
+3MF matches Rust in bounds and signed volume. Biscuit’s checked program
+produces the same CAD graph. Two frozen builds export byte-identical
+STLs. A saved width that disagrees with its driver fails the build.
+See `workdir/flexscript/centered-rectangle-preview.png`.
 
 Remaining standalone UI work also includes additional sketch and feature authoring and
 inspectors for additional design records. Include its `docs/pcad-electrical.md` workflows

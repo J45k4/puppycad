@@ -291,7 +291,7 @@ fn puppy_line_down(project,x,y) {
             if d<best {best=d;selected=i;}
         }else {
             let node=pc_find(pc_nodes(cad_project_part(project)),j_string(dim,"id"));
-            let field=j_string(dim,"field");let closed=pc_ellipse_entity(node) && !pc_finite_arc(node) && m_eq(field,"width");
+            let field=j_string(dim,"field");let closed=pc_curve_axes(node) && !pc_finite_arc(node) && m_eq(field,"width");
             if closed || pc_finite_arc(node) && (m_eq(field,"radius") || !pc_circular_arc(node) && m_eq(field,"arcSweep")) {
                 let path=0;if closed {path=pc_primitive_loop(node);}else {path=pc_arc_path(node);}
                 let k=1;let n=cg_count(path);
