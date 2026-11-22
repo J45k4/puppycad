@@ -7,6 +7,9 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_connector_slot>=0 {
+        return puppy_connector_field(project,puppy_design_selected(puppy_design_rows(project)),puppy_connector_slot);
+    }
     if puppy_shell_open {return cg_v(0,puppy_shell_thickness,"Wall thickness  mm");}
     if puppy_revolve_open {return cg_v(0,puppy_revolve_angle(),"Revolve angle  deg");}
     if puppy_extrusion_open {return cg_v(0,puppy_extrusion_length,"Extrusion depth  mm");}
@@ -75,7 +78,12 @@ fn puppy_write_field(project,field,value) {
         updated=cad_project_set_line_length(project,j_string(puppy_draft_sketch(project),"id"),j_string(target,"id"),value);
         return puppy_line_update(project,updated);
     }
-    if cad_project_is_studio(project) {
+    if puppy_connector_slot>=0 {
+        let slot=puppy_connector_slot;
+        updated=cad_project_set_connector_component(project,j_string(target,"instanceId"),j_string(target,"id"),
+                                                    puppy_connector_group(slot),puppy_placement_axis(slot),value);
+        if !updated || !puppy_refresh(updated) {return 0;}
+    }else if cad_project_is_studio(project) {
         updated=cad_studio_set_property(project,puppy_selected,value);if !updated {return 0;}
         mesh=cad_project_mesh(updated);
     }else if m_eq(j_string(cad_project_item(project),"type"),"assembly") {
@@ -148,6 +156,7 @@ fn puppy_number_close() {
     puppy_new_offset=0;
     if puppy_offset_pick_id {puppy_drop(puppy_offset_pick_id);puppy_offset_pick_id=0;}
     puppy_placement_slot=-1;
+    puppy_connector_slot=-1;
     puppy_step_path_entry=0;
     if puppy_number_paste {gui_clipboard_cancel(puppy_number_paste);puppy_number_paste=0;}
     puppy_variable_slot=-1;puppy_drop(puppy_number_text);puppy_number_text=0;puppy_toolbar_dirty=1;

@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`1112dfd685cbf71aba1fc578f7f38e97c3f04deb` includes the shared library and
+`aa626a459b633e1ad2fe8be5fc2ffbd4ea953ffd` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -133,6 +133,18 @@ upper bound for degrees of freedom while smooth joins are active. Edits
 that require deforming a closed smooth chain still need a general solve.
 See `workdir/flexscript/driving-tangent.png` and
 `workdir/cad-migration/mixed-smooth-consumer-proof-actual.json`.
+
+The shared line solver also accepts saved parallel and perpendicular
+relations together with fixed points, coincident endpoints and driving
+lengths. A perpendicular relation keeps the selected source line in place
+while rotating its 10 mm follower. After driving the follower to 15 mm,
+the two lines still meet at the same right angle. The native editor can
+remove and restore the relation in one undo step. The library rejects an
+incompatible fixed endpoint or a saved direction that disagrees with its
+geometry before export. The window test saves and reopens the right-angle
+sketch, closes it and extrudes a 1,500 mm³ triangular prism. Rust matches
+its bounds and volume. Biscuit's checked VM reproduces the native part and
+two frozen jobs produce the same STL. See `workdir/flexscript/line-perpendicular.png`.
 
 The native editor also authors three-point ellipses and circles. The
 headless window test draws a 50 × 20 mm ellipse rotated 53.130102° and
@@ -488,6 +500,15 @@ also removes all three occurrences, reopens the empty assembly and inserts
 the base again. The shared library covers endpoint IDs reused on different
 instances and connectors shared by multiple mates.
 
+The native Design connector inspector edits all six frame components.
+Changing Base top from Z 10 mm to Z 25 mm in the v4 arm assembly moves
+the upper arm and hinged forearm exactly 15 mm without moving the base.
+The window test also changes rotation, undoes and redoes frame edits,
+saves and reopens the model, then compares its three bodies with Rust.
+The checked VM replays the same frame edit. Two frozen builds reproduce
+the native STL facets. A conflicting fasten leaves the saved assembly
+intact. See `workdir/flexscript/assembly-connector-frame.png`.
+
 Biscuit's checked VM drives the elbow to 90°, detaches it and removes the
 upper-arm occurrence. The frozen worker produces identical STL bytes before
 and after detaching the elbow. Two builds after removing the upper arm also
@@ -672,6 +693,13 @@ size, release options and product hierarchy checks to the frozen PCAD source.
 both criteria, re-execute the original v8 checker and preserve the archived
 v8 ZIP and journal byte for byte. The original three-wire sensor release
 also passes the headless browser and real KiCad 10.0.7 fabrication tests.
+
+The `native-project-checks-10` profile validates connector revision bindings
+even when a board release has no harness. The authenticated release tests
+accept renumbered pads with the reviewed binding and reject a mismatched
+revision before publishing manufacturing outputs. They also download and
+re-execute the original v9 release under its exact profile and verify its
+archived ZIP and journal byte for byte.
 
 The native standalone editor authors and edits Shell features on convex
 bodies. The headless window test rejects a 32 mm wall, previews and applies a

@@ -1,6 +1,7 @@
 // The report and drag preview outlive an event's arena. Only an accepted
 // dimension or mouse release pushes a document snapshot onto undo history.
 import "symmetry.flex";
+import "line-directions.flex";
 import "cad/project-offset-author.flex";
 
 global puppy_line_report=0;
@@ -49,6 +50,7 @@ fn puppy_distance_name(row) {
     if j_value(j_get(row,"reference")) {name=m_cat("Reference ",name);}return name;
 }
 fn puppy_line_label() {
+    if puppy_direction_mode {return puppy_direction_hint();}
     if puppy_symmetry_mode {return puppy_symmetry_hint();}
     let row=puppy_line_row();if !row && !puppy_distance_row() {return "Choose New distance to measure sketch points";}let value="";if row {
         if j_get(row,"field") {value=m_cat(puppy_curve_label(row),m_cat(" ",puppy_display_number(pc_field_number(j_get(row,"measured"),j_string(row,"field")))));}
@@ -65,6 +67,7 @@ fn puppy_line_label() {
     return m_cat(text,m_cat(dof,m_int(j_integer(report,"degrees_of_freedom"))));
 }
 fn puppy_line_cache(report) {
+    puppy_direction_end();
     if puppy_line_report {puppy_drop(puppy_line_report);}puppy_line_report=puppy_snapshot(j_encode(report));
     puppy_sketch=1;puppy_draft=1;puppy_anchor=0;puppy_revolve_axis=0;return 1;
 }
@@ -96,6 +99,7 @@ fn puppy_line_cancel_drag() {
     puppy_line_drag=0;return 1;
 }
 fn puppy_line_close(project) {
+    puppy_direction_end();
     puppy_symmetry_end();puppy_distance_cancel();puppy_line_cancel_drag();puppy_drop(puppy_line_report);puppy_line_report=0;
     puppy_draft_index=puppy_line_old_sketch;puppy_draft=puppy_line_was_draft;puppy_sketch=puppy_line_was_sketch;
     puppy_refresh(project);return puppy_title(project,"Line editing closed");
@@ -110,6 +114,7 @@ fn puppy_line_update(project,updated) {
 }
 fn puppy_line_actions() {
     let buttons=cg_array();
+    if puppy_direction_mode {return puppy_direction_actions(buttons);}
     if puppy_symmetry_mode {
         puppy_compact_button(buttons,"Mirror copy",16,0);puppy_compact_button(buttons,"Pair anchors",19,0);
         puppy_compact_button(buttons,"Cancel",GUI_KEY_ESCAPE,0);return buttons;
@@ -198,6 +203,7 @@ fn puppy_distance_pick(project,x,y) {
     puppy_distance_cancel();puppy_distance_index=cg_j_count(j_get(j_parse(puppy_line_report+24),"distances"))-1;return puppy_title(updated,puppy_line_label());
 }
 fn puppy_line_command(project,key) {
+    if puppy_direction_mode || key==15 && puppy_direction_available() {return puppy_direction_command(project,key);}
     if puppy_symmetry_mode {return puppy_symmetry_key(project,key);}
     if puppy_distance_picking {
         if key==GUI_KEY_ESCAPE {puppy_distance_cancel();return puppy_title(project,puppy_line_label());}
@@ -328,9 +334,16 @@ fn puppy_line_event(event) {
     let kind=gui_event_kind(event);if !puppy_line_report {return 0;}
     let x=gui_event_x(event);let y=gui_event_y(event);let project=cad_project_open(puppy_history+24);
     if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
+        let w=gui_width(load64(puppy_device));
+        if y>=7 && y<33 && x>=puppy_direction_button_left(w) && x<w-12 && puppy_direction_available() {return puppy_direction_command(project,15);}
         if y>=42 && y<68 {
-            let w=gui_width(load64(puppy_device));if w<800 {puppy_compact_bar(0,w,project,x);}else {puppy_action_bar(puppy_line_actions(),0,w,x);}
-        }else if y>=76 {if puppy_symmetry_mode {puppy_symmetry_pick(project,x,y);}else if puppy_distance_picking {puppy_distance_pick(project,x,y);}else {puppy_line_down(project,x,y);}}return 1;
+            if w<800 {puppy_compact_bar(0,w,project,x);}else {puppy_action_bar(puppy_line_actions(),0,w,x);}
+        }else if y>=76 {
+            if puppy_direction_mode {puppy_direction_pick(project,x,y);}
+            else if puppy_symmetry_mode {puppy_symmetry_pick(project,x,y);}
+            else if puppy_distance_picking {puppy_distance_pick(project,x,y);}
+            else {puppy_line_down(project,x,y);}
+        }return 1;
     }
     if kind==GUI_MOUSE_MOVE && puppy_line_drag {return puppy_line_move(project,x,y);}
     if kind==GUI_MOUSE_UP && gui_event_button(event)==1 && puppy_line_drag {

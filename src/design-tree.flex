@@ -1,6 +1,7 @@
 // The design tree reads authored records, including sketches with no evaluated body.
 // Selection and expansion use document-scoped keys. They never enter model history.
 import "sketch-visibility.flex";
+import "connector-editor.flex";
 
 global puppy_design_open=1;
 global puppy_design_focus=0;
@@ -49,6 +50,7 @@ fn puppy_design_key(kind,id) {return m_cat(kind,m_cat(m_int(m_len(id)),m_cat("/"
 fn puppy_design_row(rows,parent,kind,node,label,open) {
     let id=j_string(node,"id");if !m_len(id) {id=label;}
     let key=puppy_design_key(kind,id);
+    if m_eq(kind,"connector") {key=m_cat(puppy_design_key("owner",j_string(node,"instanceId")),key);}
     let depth=0;if parent {key=m_cat(load64(parent+8),m_cat("/",key));depth=load64(parent+40)+1;store64(parent+56,1);}
     let row=m_take(96);gui__zero(row,96);
     store64(row,label);store64(row+8,key);store64(row+16,kind);store64(row+24,node);store64(row+32,parent);
@@ -206,6 +208,7 @@ fn puppy_design_action(row) {
     if m_eq(kind,"assembly") {return "Open assembly";}
     if m_eq(kind,"sheet") {return "Open sheet";}
     if m_eq(kind,"add-sheet") {return "Create sheet";}
+    if puppy_connector_row(row) {return "Edit connector";}
     if m_eq(kind,j_string(node,"type")) && pc_model_feature(node) && m_eq(j_string(puppy_design_owner(row),"type"),"part") {return "Feature history";}
     return 0;
 }
@@ -231,6 +234,7 @@ fn puppy_design_activate(project,row) {
     if switched && !puppy_open_item(project,index) {
         return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");
     }
+    if puppy_connector_row(row) {return puppy_connector_begin(project,row,0);}
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {
         let geometry=0;
         if m_eq(kind,"geometry") {geometry=node;node=load64(load64(row+32)+24);}
@@ -495,10 +499,16 @@ fn puppy_design_panel(w,h) {
     if !cg_count(rows) {puppy_ui_text(rgb,w,h,14,93,"No matches",w-8);}
     if selected {
         let node=load64(selected+24);let detail=j_string(node,"id");if !m_len(detail) {detail=load64(selected+16);}
-        puppy_ui_rect(rgb,w,h,0,h-96,w,1,72,91,92);puppy_ui_text(rgb,w,h,13,h-73,load64(selected),w-8);
-        puppy_ui_text(rgb,w,h,13,h-51,detail,w-8);
-        let action=puppy_design_action(selected);
-        if action {puppy_ui_rect(rgb,w,h,10,h-36,w-20,27,48,68,70);puppy_ui_text(rgb,w,h,18,h-17,action,w-16);}
+        puppy_ui_rect(rgb,w,h,0,h-96,w,1,72,91,92);
+        if puppy_connector_row(selected) && puppy_design_owner(selected)==cad_project_item(project) {
+            puppy_ui_text(rgb,w,h,13,h-80,load64(selected),w-8);
+            puppy_connector_grid(rgb,w,h,project,selected);
+        }else {
+            puppy_ui_text(rgb,w,h,13,h-73,load64(selected),w-8);
+            puppy_ui_text(rgb,w,h,13,h-51,detail,w-8);
+            let action=puppy_design_action(selected);
+            if action {puppy_ui_rect(rgb,w,h,10,h-36,w-20,27,48,68,70);puppy_ui_text(rgb,w,h,18,h-17,action,w-16);}
+        }
         if puppy_design_menu_count {puppy_design_menu_draw(rgb,w,h,project,selected);}
     }
     if eye_tip && !puppy_design_menu_count {puppy_design_eye_tooltip(rgb,w,h,eye_y,eye_tip);}
@@ -511,8 +521,12 @@ fn puppy_design_click(x,y) {
     if y>=35 && y<65 {if x>=w-37 {puppy_query_set("");}return puppy_search_focus(1);}
     puppy_search_focus(0);
     let project=cad_project_open(puppy_history+24);let rows=puppy_design_rows(project);
+    let selected=puppy_design_selected(rows);
+    if y>=h-96 && puppy_connector_row(selected) && puppy_design_owner(selected)==cad_project_item(project) {
+        return puppy_connector_click(project,selected,x,y,w,h);
+    }
     if y>=h-36 && y<h-9 {
-        let r=puppy_design_selected(rows);if r && puppy_design_action(r) {return puppy_design_activate(project,r);}return 1;
+        if selected && puppy_design_action(selected) {return puppy_design_activate(project,selected);}return 1;
     }
     let r=puppy_design_hit(rows,y,h);if !r {return 1;}
     if puppy_design_sketch_row(r) && puppy_design_eye_hit(x,w) {return puppy_design_toggle_sketch(project,r);}

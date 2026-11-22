@@ -219,6 +219,12 @@ endpoint stays in place. Escape cancels a drag, and releasing the pointer
 accepts it as one undo step. **Done** returns to the previous view. Ctrl+S
 saves the drawing.
 
+In **Dimensions**, choose **Line direction** and select **Parallel** or
+**Perpendicular**. Click the line to keep first, then click the follower.
+The relation works with existing lengths, fixed points and coincident
+endpoints. The follower stays selected for **Set length** (F2). Select the
+same pair and direction again to remove the relation.
+
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
 existing pattern, or press P to cycle through patterns. Tab selects the
@@ -581,6 +587,13 @@ keep their placements. Enter applies the edit and solves the assembly.
 If a mate holds the occurrence, the panel shows its resulting placement.
 Ctrl+Z and Ctrl+Y undo and redo each accepted edit. **Back** returns to the
 occurrence details.
+
+To move or rotate a connector frame in a v4 assembly, expand **Connectors**
+in the Design tree and select the connector. Click an X, Y or Z value below
+the tree and enter its position in millimetres or rotation in degrees.
+Attached frames use the occurrence's local coordinates. Ground connectors
+use world coordinates. Enter solves the linked mates and records one undo
+step. If the mates conflict, the editor keeps the previous assembly pose.
 
 To inspect a connection, open **Objects**, select an occurrence, and choose
 a row under **Mates**. The row names the mating partner. The inspector shows

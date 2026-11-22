@@ -340,7 +340,9 @@ fn puppy_toolbar_build(w) {
     }
     if puppy_line_report {
         let label=puppy_line_label();puppy_bar_text(rgb,w,12,25,label,w/2);
-        if puppy_status && !m_eq(label,puppy_status+24) {puppy_bar_text(rgb,w,w/2,25,puppy_status+24,w-8);}
+        let status_right=w-8;
+        if puppy_direction_available() {status_right=puppy_direction_button_left(w)-8;puppy_direction_draw(rgb,w);}
+        if puppy_status && !m_eq(label,puppy_status+24) {puppy_bar_text(rgb,w,w/2,25,puppy_status+24,status_right);}
         if w<800 {puppy_compact_bar(rgb,w,project,-1);}else {puppy_action_bar(puppy_line_actions(),rgb,w,-1);}
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }

@@ -2259,6 +2259,82 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Parallel and Perpendicular coexist with a driving length and a shared corner.
+        path=Path(tmp)/"Right triangle.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        item=document["items"][0]
+        item["name"]="Right triangle"
+        cad=item["data"]["cad"]
+        sketch,source=cad["nodes"][3:5]
+        source.update(p0=dict(x=0,y=0),p1=dict(x=20,y=0))
+        follower=dict(source,id="native-entity-2",p0=dict(x=20,y=0),p1=dict(x=26,y=8))
+        cad["nodes"]=cad["nodes"][:5]+[follower]
+        source_id,follower_id=source["id"],follower["id"]
+        sketch["relations"]=[
+            dict(id="keep-start",type="fixed",anchor=dict(entityId=source_id,point="p0"),position=source["p0"]),
+            dict(id="keep-corner",type="fixed",anchor=dict(entityId=source_id,point="p1"),position=source["p1"]),
+            dict(id="corner",type="coincident",a=dict(entityId=source_id,point="p1"),b=dict(entityId=follower_id,point="p0")),
+            dict(id="side-length",type="length",entityId=follower_id,value=10,expression="10 mm"),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        def pick_direction(label,button_x):
+            click(window,890,20)
+            verify(window,"Choose Parallel or Perpendicular")
+            click(window,button_x,54)
+            verify(window,f"Pick the source line for {label}")
+            click(window,384,486)
+            verify(window,f"Pick the follower line for {label}")
+        pick_direction("Parallel",70)
+        click(window,800,358)
+        verify(window,"Parallel updated")
+        key("Control_L+z")
+        verify(window,"native-entity-2   10 mm   DOF 1")
+        pick_direction("Perpendicular",190)
+        click(window,800,358)
+        verify(window,"Perpendicular updated")
+        key("F2")
+        verify(window,"Set value")
+        key("Control_L+a")
+        type_value("15 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())["items"][0]["data"]["cad"]
+        nodes={node["id"]:node for node in saved["nodes"]}
+        assert nodes[source_id]==source and nodes[follower_id]==dict(follower,p1=dict(x=20,y=15))
+        records={rel["id"]:rel for rel in nodes[sketch["id"]]["relations"]}
+        relation_id=f"native-perpendicular-{source_id}-{follower_id}"
+        assert records[relation_id]==dict(id=relation_id,type="perpendicular",a=source_id,b=follower_id)
+        assert records["corner"]==sketch["relations"][2]
+        assert records["side-length"]["expression"]=="15 mm" and records["side-length"]["value"]==15
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"line-perpendicular.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("l")
+        verify(window,"Click the two endpoints")
+        click(window,560,298)  # (20, 15)
+        click(window,480,358)  # (0, 0)
+        verify(window,"Sketch edited")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"right-triangle-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        assert bounds==[(0.0,20.0),(0.0,15.0),(0.0,10.0)] and math.isclose(volume,1500,rel_tol=1e-6)
+        key("Escape")
+        app.wait(3)
+
         path=Path(tmp)/"Tangent join.pcad"
         path.write_bytes((root/"rust/fixtures/tangent-arc.pcad").read_bytes())
         app,window=open_app(path,"Click two rectangle corners")
@@ -5651,6 +5727,74 @@ with tempfile.TemporaryDirectory() as tmp:
         assert [box[0] for _, (box, _) in objects] == [(-80, 80), (90, 110), (120, 140)]
         assert [round(volume) for _, (_, volume) in objects] == [960000, 4000, 4000]
         key('Escape')
+        app.wait(3)
+        # Editing a connector moves the attached arm and its hinged follower.
+        path=Path(tmp)/"Assembly connector.pcad"
+        document=json.loads((root/"rust/fixtures/assembly.pcad").read_bytes())
+        document["selectedPath"]=[2]
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"assembly-connector-frame-input.pcad")
+        original=document["items"][2]["data"]
+        app,window=open_app(path,"Assembly opened",design_tree=True)
+        click(window,76,395)  # Connectors group.
+        click(window,88,421,button=3)
+        verify(window,"Selected Base top")
+        click(window,120,434)  # Edit connector opens the local X field.
+        verify(window,"Set value")
+        key("Escape")
+        verify(window,"Edit cancelled")
+        click(window,210,588)  # Local position Z.
+        verify(window,"Set value")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"assembly-connector-value.png"],check=True)
+        type_value("25")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(path.read_bytes())["items"][2]["data"]==original
+        key("Control_L+y")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assembly=saved["items"][2]["data"]
+        assert saved["items"][:2]==document["items"][:2]
+        assert assembly["connectors"]==[dict(original["connectors"][0],position=dict(x=0,y=0,z=25)),*original["connectors"][1:]]
+        assert assembly["mates"]==original["mates"] and assembly["actuators"]==original["actuators"]
+        assert [item.get("transform",{}).get("translation",{}).get("z",0) for item in assembly["instances"]]==[0,25,30]
+        click(window,210,624)  # Local rotation Z.
+        verify(window,"Set value")
+        type_value("90")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+s")
+        verify(window,"Saved")
+        rotated=json.loads(path.read_bytes())["items"][2]["data"]
+        assert rotated["connectors"][0]["rotation"]==dict(x=0,y=0,z=90)
+        assert rotated["instances"][1]["transform"]["rotation"]["z"]==90
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(path.read_bytes())["items"]==saved["items"]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Assembly opened",design_tree=True)
+        click(window,76,395)
+        click(window,88,421)
+        verify(window,"Selected Base top")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"assembly-connector-frame.png"],check=True)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"reference-connector.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        key("Control_L+e")
+        verify(window,"Exported")
+        shutil.copyfile(path,output_dir/"assembly-connector-frame-edited.pcad")
+        shutil.copyfile(path.with_suffix(".3mf"),output_dir/"assembly-connector-frame.3mf")
+        for stl in path.parent.glob("Assembly connector*.stl"):
+            shutil.copyfile(stl,output_dir/stl.name)
+        key("Escape")
         app.wait(3)
         # A second process may create the requested path before the editor's first save.
         collision = Path(tmp) / 'race.pcad'
