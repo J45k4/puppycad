@@ -674,6 +674,13 @@ The same test opens the second of two parts with identical sketch IDs and
 verifies that editing its outline changes only that part. The separate
 Objects panel still supports occurrence picking and isolation.
 
+The v4 editor shows distinct Assembly, Part and Sketch workspaces in one
+window. The headless test opens Base from the Arm assembly, edits Base’s
+sketch, undoes and redoes the edit without leaving it, then returns to
+Part and reopens the assembly. The saved file retains the other items and
+the assembly references. A blank sketch can also return to Part before
+it contributes a solid.
+
 The shared drawing renderer exports the standalone sensor fixture’s four A4
 sheets, including the projected dimensions, section, enlarged hinge detail
 and exploded parts list. The native window opens each sheet from the

@@ -168,7 +168,8 @@ fn puppy_design_selected(rows) {
 fn puppy_design_action(row) {
     let kind=load64(row+16);let node=load64(row+24);
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {return "Edit sketch";}
-    if m_eq(kind,"part") || m_eq(kind,"assembly") {return "Open item";}
+    if m_eq(kind,"part") {return "Open part";}
+    if m_eq(kind,"assembly") {return "Open assembly";}
     if m_eq(kind,"sheet") {return "Open sheet";}
     if m_eq(kind,"add-sheet") {return "Create sheet";}
     if m_eq(kind,j_string(node,"type")) && pc_model_feature(node) && m_eq(j_string(puppy_design_owner(row),"type"),"part") {return "Feature history";}
@@ -184,13 +185,13 @@ fn puppy_design_activate(project,row) {
     let item=puppy_design_owner(row);let items=pc_first(j_get(project,"items"));let index=0;
     while items && items!=item {items=load64(items+24);index=index+1;}
     if !items {return 1;}
-    if cad_project_item(project)!=item {if !puppy_open_item(project,index) {return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");}}
+    let switched=cad_project_item(project)!=item;
+    if switched && !puppy_open_item(project,index) {
+        return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");
+    }
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {
         if m_eq(kind,"geometry") {node=load64(load64(row+32)+24);}
-        let n=pc_first(pc_nodes(item));let i=0;while n && n!=node {if m_eq(j_string(n,"type"),"sketch") {i=i+1;}n=load64(n+24);}
-        puppy_clear_pick();puppy_draft_index=i;puppy_profile_index=1;puppy_anchor=0;puppy_tool=0;
-        puppy_draft=1;puppy_sketch=1;puppy_empty=0;puppy_fit_sketch(project,1);
-        return puppy_title(project,m_cat("Editing ",puppy_design_name(node,"Sketch")));
+        return puppy_workspace_edit_sketch(project,j_string(node,"id"));
     }
     if !m_eq(kind,"part") && !m_eq(kind,"assembly") && pc_model_feature(node) {
         puppy_history_begin(project);if !puppy_history_rows {return 1;}
@@ -198,7 +199,8 @@ fn puppy_design_activate(project,row) {
         while n && !m_eq(j_string(n,"id"),j_string(node,"id")) {n=load64(n+24);i=i+1;}
         if n {puppy_history_index=i;}return puppy_history_select(project,features);
     }
-    if !puppy_refresh(project) {return puppy_title(project,cg_error);}
+    if !switched && !puppy_refresh(project) {return puppy_title(project,cg_error);}
+    if m_eq(kind,"part") {puppy_workspace_show_part(project);}
     return puppy_title(project,m_cat("Opened ",load64(row)));
 }
 fn puppy_design_choose(project,row) {

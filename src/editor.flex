@@ -1,3 +1,4 @@
+import "workspaces.flex";
 import "viewport.flex";
 import "value-editor.flex";
 import "edge-finish.flex";
@@ -194,7 +195,8 @@ fn puppy_next_item(project) {
 }
 fn puppy_open_item(project,next) {
     let selection=j_array();j_add(selection,0,j_number(next));cg_j_set(project,"selectedPath",selection);
-    if !puppy_refresh(project) {return 0;}
+    let previous=puppy_draft_index;puppy_draft_index=0;
+    if !puppy_refresh(project) {puppy_draft_index=previous;return 0;}
     puppy_selected=0;puppy_property=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_part_choice=0;puppy_sketch=puppy_draft;
     puppy_push(project);return puppy_title(project,"Item opened");
 }
@@ -303,6 +305,7 @@ fn puppy_command(key,mods) {
         if key==17 {return puppy_add_item(project,"part");}
         if key==4 {return puppy_add_item(project,"assembly");}
     }
+    if key==69 && !(mods&0x3c3) {return puppy_workspace_switch(project);}
     if key==9 && !(mods&0x3c0) && cad_project_part(project) && !puppy_draft {
         puppy_sketch=0;puppy_picking_face=!puppy_picking_face;
         if puppy_picking_face {return puppy_title(project,"Click a face for the new sketch");}
@@ -327,9 +330,16 @@ fn puppy_command(key,mods) {
         let next=load64(puppy_history);
         if key==28 || (mods&3) {next=load64(puppy_history+8);}
         if next {
+            let owner=j_string(cad_project_part(project),"id");let sketch="";
+            if puppy_draft && puppy_explicit_sketch && !puppy_line_report {sketch=j_string(puppy_draft_sketch(project),"id");}
             project=cad_project_open(next+24);
-            if puppy_refresh(project) {puppy_history=next;puppy_anchor=0;}
-            else {project=cad_project_open(puppy_history+24);}
+            if puppy_refresh(project) {
+                puppy_history=next;puppy_anchor=0;
+                if m_len(sketch) && m_eq(owner,j_string(cad_project_part(project),"id")) {
+                    let index=puppy_workspace_sketch_index(project,sketch);
+                    if index>=0 {puppy_draft_index=index;puppy_draft=1;puppy_sketch=1;puppy_empty=0;puppy_explicit_sketch=1;}
+                }
+            }else {project=cad_project_open(puppy_history+24);}
         }
         if puppy_patterns {puppy_sketch=1;puppy_draft=1;puppy_pattern_selection(0);return puppy_title(project,puppy_pattern_hint(project));}
         if puppy_line_report {
@@ -399,7 +409,7 @@ fn puppy_pick_sketch(x,y) {
     puppy_tool=0;puppy_push(updated);return puppy_title(updated,puppy_draft_hint());
 }
 fn puppy_refresh(project) {
-    puppy_revolve_axis=0;
+    puppy_revolve_axis=0;puppy_explicit_sketch=0;
     puppy_forget_click();puppy_clear_pick();puppy_search_focus(0);
     if puppy_isolated && !m_eq(puppy_isolated_owner+24,j_string(cad_project_item(project),"id")) {puppy_end_isolation();}
     puppy_picking_face=0;
@@ -543,7 +553,8 @@ fn puppy_editor(path,source,project,report) {
                 }else if cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-260 && x<width-148 {
                     puppy_command(12,192);dirty=1;
                 }else if !cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-109 && x<width-12 {
-                    puppy_command(63,0);dirty=1;
+                    if puppy_draft {puppy_command(69,0);}else {puppy_command(63,0);}
+                    dirty=1;
                 }else if !cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-235 && x<width-117 {
                     puppy_command(4,3);dirty=1;
                 }else if !cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-327 && x<width-243 {
@@ -551,14 +562,15 @@ fn puppy_editor(path,source,project,report) {
                 }else if width<800 && y>=42 && y<68 {
                     puppy_compact_bar(0,width,cad_project_open(puppy_history+24),x);dirty=1;
                 }else if y>=42 && y<68 {
+                    let current=cad_project_open(puppy_history+24);
                     if (puppy_draft || !puppy_sketch) && !puppy_empty && x>=width-60 && x<width-12 {puppy_command(74,0);}
                     else if !puppy_draft && !puppy_empty && x>=width-132 && x<width-68 {puppy_command(8,195);}
-                    else if !puppy_draft && cad_project_part(cad_project_open(puppy_history+24)) && x>=568 && x<648 {puppy_command(64,0);}
-                    else if !puppy_draft && width>=900 && x>=656 && x<746 && puppy_feature(project) && puppy_line_button(project) {puppy_command(65,0);}
+                    else if !puppy_draft && cad_project_part(current) && x>=568 && x<648 {puppy_command(64,0);}
+                    else if !puppy_draft && width>=900 && x>=656 && x<746 && puppy_feature(current) && puppy_line_button(current) {puppy_command(65,0);}
                     else if x>=12 && x<64 {puppy_command(29,192);}
                     else if x>=70 && x<122 {puppy_command(28,192);}
                     else if x>=128 && x<180 {puppy_command(22,192);}
-                    else if cad_project_is_studio(project) {
+                    else if cad_project_is_studio(current) {
                         if x>=194 && x<232 {puppy_command(45,0);}
                         else if x>=238 && x<276 {puppy_command(46,0);}
                         else if x>=288 && x<366 {puppy_command(43,0);}
@@ -566,10 +578,10 @@ fn puppy_editor(path,source,project,report) {
                         else if x>=452 && x<549 {puppy_command(19,0);}
                     }
                     else if puppy_draft {
-                        let current=cad_project_open(puppy_history+24);let pattern_x=628;
+                        let pattern_x=628;
                         if puppy_line_button(current) {pattern_x=726;}if puppy_draft_on_face(current) {pattern_x=721;}if puppy_pending_face_index(current)>=0 {pattern_x=799;}
                         if width>=920 && !puppy_revolve_axis && !puppy_curves_page && x>=pattern_x && x<pattern_x+80 {puppy_command(62,0);}
-                        else if !puppy_revolve_axis && !puppy_curves_page && x>=628 && x<718 && puppy_line_button(cad_project_open(puppy_history+24)) {puppy_command(65,0);}
+                        else if !puppy_revolve_axis && !puppy_curves_page && x>=628 && x<718 && puppy_line_button(current) {puppy_command(65,0);}
                         else if puppy_revolve_axis {
                             if x>=194 && x<270 {puppy_command(27,0);}
                             else if x>=278 && x<354 {puppy_command(28,0);}
@@ -581,19 +593,22 @@ fn puppy_editor(path,source,project,report) {
                         else if x>=452 && x<552 {puppy_command(19,0);}
                         else if x>=560 && x<620 {puppy_command(15,0);}
                         else if x>=628 && x<713 {puppy_command(18,0);}
-                        else if x>=721 && x<791 && puppy_pending_face_index(cad_project_open(puppy_history+24))>=0 {puppy_command(25,0);}
+                        else if x>=721 && x<791 && puppy_pending_face_index(current)>=0 {puppy_command(25,0);}
                     }
                     else if x>=194 && x<232 {puppy_command(45,0);}
                     else if x>=238 && x<276 {puppy_command(46,0);}
-                    else if !puppy_empty && x>=288 && x<366 {puppy_command(25,0);}
+                    else if x>=288 && x<372 {
+                        if cad_project_part(current) && puppy_draft_sketch(current) {puppy_command(69,0);}
+                        else if !puppy_empty && x<366 {puppy_command(25,0);}
+                    }
                     else if !puppy_empty && x>=376 && x<444 {puppy_command(8,192);}
-                    else if x>=452 && x<521 && !cad_project_part(cad_project_open(puppy_history+24)) {puppy_command(12,0);}
-                    else if !puppy_empty && x>=width-211 && x<width-140 && m_eq(j_string(cad_project_item(cad_project_open(puppy_history+24)),"type"),"assembly") {puppy_command(13,0);}
-                    else if x>=529 && x<699 && !cad_project_part(cad_project_open(puppy_history+24)) {
-                        let data=j_get(cad_project_item(cad_project_open(puppy_history+24)),"data");
+                    else if x>=452 && x<521 && !cad_project_part(current) {puppy_command(12,0);}
+                    else if !puppy_empty && x>=width-211 && x<width-140 && m_eq(j_string(cad_project_item(current),"type"),"assembly") {puppy_command(13,0);}
+                    else if x>=529 && x<699 && !cad_project_part(current) {
+                        let data=j_get(cad_project_item(current),"data");
                         if puppy_servo(data) && x>=625 {puppy_command(43,0);}else {puppy_command(19,0);}
                     }
-                    else if x>=452 && x<560 && cad_project_part(cad_project_open(puppy_history+24)) {puppy_command(9,0);}
+                    else if x>=452 && x<560 && cad_project_part(current) {puppy_command(9,0);}
                     else if x>=452 {puppy_command(43,0);}
                     dirty=1;
                 }

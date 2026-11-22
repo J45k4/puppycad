@@ -174,6 +174,62 @@ with tempfile.TemporaryDirectory() as tmp:
             for char in text:
                 key({'.':'period','-':'minus',' ':'space','=':'equal','#':'Shift_L+3','+':'Shift_L+equal','*':'Shift_L+8'}.get(char,char))
 
+        # One drawing owns all three workspaces and the sketch history.
+        workspace_path=Path(tmp)/"Workspaces.pcad"
+        workspace_doc=json.loads((root/"rust/fixtures/assembly.pcad").read_bytes())
+        workspace_doc["selectedPath"]=[2]
+        workspace_path.write_text(json.dumps(workspace_doc))
+        app,window=open_app(workspace_path,"Assembly opened",design_tree=True)
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-assembly.png"],check=True)
+
+        def open_workspace_item(query,name):
+            click(window,229,125)
+            for letter in query:
+                key("minus" if letter=="-" else letter)
+            key("Return")
+            key("Down")
+            verify(window,"Selected "+name)
+            key("Return")
+            verify(window,"Opened "+name)
+
+        open_workspace_item("part-base","Base")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-part.png"],check=True)
+        click(window,325,55)
+        verify(window,"Editing Base sketch")
+        key("Shift_L+period")
+        click(window,490,340)
+        verify(window,"Point added")
+        key("Control_L+z")
+        verify(window,"|  Sketch")
+        key("Control_L+y")
+        verify(window,"|  Sketch")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-sketch.png"],check=True)
+        click(window,900,20)
+        verify(window,"Part workspace")
+        key("F12")
+        verify(window,"Editing Base sketch")
+        key("F12")
+        verify(window,"Part workspace")
+        open_workspace_item("assembly-1","Arm assembly")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(workspace_path.read_bytes())
+        assert saved["selectedPath"]==[2] and saved["items"][1:]==workspace_doc["items"][1:]
+        base=saved["items"][0]["data"]["cad"]["nodes"]
+        assert sum(n.get("primitive",{}).get("construction",False) for n in base)==1
+        assert len(base)==len(workspace_doc["items"][0]["data"]["cad"]["nodes"])+1
+        key("Escape")
+        app.wait(3)
+
+        blank=Path(tmp)/"Workspace blank.pcad"
+        app,window=open_app(blank,"Click two rectangle corners",design_tree=True)
+        click(window,900,20)
+        verify(window,"Part workspace")
+        click(window,325,55)
+        verify(window,"Editing Sketch 1")
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)

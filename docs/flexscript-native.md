@@ -12,6 +12,21 @@ assembly, click **Part** or press P to choose a part from the drawing.
 **Insert** or I places an instance. Repeated insertions reference the same
 part and receive distinct instance IDs. Undo removes one insertion at a time.
 
+## Workspaces
+
+- **Assembly** shows occurrences and mates. Select an assembly in the Design
+  tree and choose **Open assembly**. Use **Insert** to place parts and
+  **Mate** to constrain how they move.
+- **Part** shows the solid and its features. Select a part in the tree and
+  choose **Open part**. Use **Edit sketch** to open its current sketch, or
+  select a specific sketch under that part.
+- **Sketch** provides the 2D drawing and dimension tools. Choose **Done
+  sketch** to return to the owning part, even if the sketch has no solid.
+  F12 switches between Part and Sketch. Extrude and Revolve create a feature
+  and return to Part.
+
+Save writes all of the items and their sketches to the same PCAD file.
+
 The shared Flexscript CAD library evaluates the selected part or assembly.
 The native editor draws the resulting
 triangles through Flexscript's OpenGL renderer and uses its native font stack

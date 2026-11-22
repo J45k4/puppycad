@@ -38,6 +38,14 @@ fn puppy_ui_rect(rgb,w,h,x,y,width,height,r,g,b) {
     }
     return 0;
 }
+fn puppy_toolbar_text_width(text) {
+    let shape=tf_shape(puppy_toolbar_font,text,m_len(text),0);
+    if !shape {return 0;}
+    let width=0;let i=0;
+    while i<load64(shape) {width=width+load64(shape+64+i*48+16);i=i+1;}
+    tf_shape_free(shape);
+    return (width+63)/64;
+}
 fn puppy_bar_text(rgb,w,x,baseline,text,right) {
     return puppy_ui_text(rgb,w,76,x,baseline,text,right);
 }
@@ -191,13 +199,22 @@ fn puppy_toolbar_build(w) {
         title_x=title_x+86;
         if title_end<title_x {title_end=title_x;}
     }
-    puppy_bar_text(rgb,w,title_x,25,puppy_document_name(project),title_end);
+    let heading=puppy_workspace_heading(project);
+    let status_edge=w-335;
+    if cad_project_is_studio(project) {status_edge=w-268;}
+    if cad_project_part(project) {status_edge=w-513;}
+    if w>=800 {
+        let space=puppy_limit(status_edge-title_x-96,0,status_edge-title_x);
+        title_end=title_x+puppy_limit(puppy_toolbar_text_width(heading)+4,0,space);
+    }
+    puppy_bar_text(rgb,w,title_x,25,heading,title_end);
     if !cad_project_is_studio(project) && w>=800 {
         puppy_bar_rect(rgb,w,w-327,6,84,28,45,64,67);puppy_bar_text(rgb,w,w-319,25,"New part",w-243);
         puppy_bar_rect(rgb,w,w-235,6,118,28,45,64,67);puppy_bar_text(rgb,w,w-227,25,"New assembly",w-117);
-        if puppy_has_other_item(project) {
+        if puppy_draft || puppy_has_other_item(project) {
+            let label="Next item";if puppy_draft {label="Done sketch";}
             puppy_bar_rect(rgb,w,w-109,6,97,28,45,64,67);
-            puppy_bar_text(rgb,w,w-100,25,"Next item",w-12);
+            puppy_bar_text(rgb,w,w-102,25,label,w-12);
         }
     }else if cad_project_is_studio(project) && w>=800 {
         puppy_bar_rect(rgb,w,w-260,6,112,28,45,64,67);puppy_bar_text(rgb,w,w-252,25,"Import STEP",w-148);
@@ -218,16 +235,15 @@ fn puppy_toolbar_build(w) {
         puppy_compact_bar(rgb,w,project,-1);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
-    let status_edge=w-335;
     if puppy_draft {
-        status_edge=w-428;let label="More tools";if puppy_curves_page==1 {label="Conics";}if puppy_curves_page==2 {label="Sketch tools";}
+        let label="More tools";if puppy_curves_page==1 {label="Conics";}if puppy_curves_page==2 {label="Sketch tools";}
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,label,w-335);
     }
     if !puppy_sketch && !puppy_empty && cad_project_part(project) {
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,"Edges",w-335);
     }
     if cad_project_part(project) {
-        status_edge=w-513;puppy_bar_rect(rgb,w,w-505,6,76,28,45,64,67);
+        puppy_bar_rect(rgb,w,w-505,6,76,28,45,64,67);
         puppy_bar_text(rgb,w,w-497,25,"Loft",w-429);
     }
     if puppy_status {puppy_bar_text(rgb,w,title_end+8,25,puppy_status+24,status_edge);}
@@ -272,8 +288,6 @@ fn puppy_toolbar_build(w) {
     }else if feature {
         puppy_bar_button(rgb,w,194,38,"-");puppy_bar_button(rgb,w,238,38,"+");
         let label=m_cat(j_string(feature,"name"),m_cat(" / ",m_cat(puppy_field(feature),m_cat("   ",m_cat(puppy_display_dimension(project,feature),puppy_property_unit(feature,puppy_property))))));
-        let view="Sketch";if puppy_sketch {view="Solid";}
-        puppy_bar_button(rgb,w,288,78,view);
         puppy_bar_button(rgb,w,376,68,"Export");
         puppy_bar_button(rgb,w,452,108,"Face sketch");
         if puppy_picking_face {puppy_bar_rect(rgb,w,452,66,108,2,143,217,184);}
@@ -281,7 +295,13 @@ fn puppy_toolbar_build(w) {
         if w>=900 && puppy_line_button(project) {puppy_bar_button(rgb,w,656,90,"Dimensions");label_x=754;}
         puppy_bar_text(rgb,w,label_x,60,label,w-140);
     }
-    if !puppy_draft && cad_project_part(project) {puppy_bar_button(rgb,w,568,80,"History");}
+    if !puppy_draft && cad_project_part(project) {
+        if puppy_draft_sketch(project) {
+            let view="Edit sketch";if puppy_sketch {view="Part";}
+            puppy_bar_button(rgb,w,288,84,view);
+        }
+        if feature {puppy_bar_button(rgb,w,568,80,"History");}
+    }
     if !puppy_draft && !puppy_empty {puppy_bar_button(rgb,w,w-132,64,"STEP");}
     if (puppy_draft || !puppy_sketch) && !puppy_empty {puppy_bar_button(rgb,w,w-60,48,"Fit");}
     puppy_ui_upload(rgb,w,76);
@@ -381,6 +401,7 @@ fn puppy_compact_actions(project) {
             puppy_compact_button(rows,"X axis",27,0);puppy_compact_button(rows,"Y axis",28,0);
             puppy_compact_button(rows,"Cancel",37,0);
         }else if puppy_draft {
+            puppy_compact_button(rows,"Done sketch",69,0);
             puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Circle",6,0);
             puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Extrude",8,0);
             puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split ellipse",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
@@ -391,8 +412,11 @@ fn puppy_compact_actions(project) {
             if !puppy_empty {puppy_compact_button(rows,"Solve",25,0);puppy_compact_button(rows,"Mate",13,0);}
             puppy_compact_button(rows,"Choose part",19,0);puppy_compact_button(rows,"Insert",12,0);
         }else {
-            let label="Sketch";if puppy_sketch {label="Solid";}puppy_compact_button(rows,label,25,0);
-            puppy_compact_button(rows,"Face sketch",9,0);
+            if puppy_draft_sketch(project) {
+                let label="Edit sketch";if puppy_sketch {label="Part";}
+                puppy_compact_button(rows,label,69,0);
+            }
+            if solid {puppy_compact_button(rows,"Face sketch",9,0);}
         }
         if !assembly {
             puppy_compact_button(rows,"Loft",38,0);
