@@ -1,5 +1,6 @@
 import "smooth.flex";
 import "construction.flex";
+import "sketch-line-edit.flex";
 import "cad/project-ellipse-split.flex";
 import "cad/projection-author.flex";
 
@@ -141,15 +142,16 @@ fn puppy_tool_name() {
     return "rectangle";
 }
 fn puppy_draft_hint() {
+    if puppy_revolve_axis {
+        if puppy_anchor {return "Click the axis endpoint";}
+        return "Click an axis line, two points or choose X or Y";
+    }
+    if puppy_line_edit_active() && !puppy_revolve_axis {return puppy_line_edit_hint();}
     if puppy_tool==-7 {return "Click a body edge guide to project it";}
     if puppy_tool==-6 {if puppy_anchor {return "Pick the second cut on this ellipse";}return "Pick a cut on an ellipse or elliptic arc";}
     if puppy_tool==-4 {if puppy_anchor {return "Click the new tangent arc endpoint";}return "Pick a curve endpoint to start a tangent arc";}
     if puppy_tool==-5 {if puppy_anchor {return "Pick the curve that should follow or drag a source point";}return "Pick the source curve for Smooth";}
     if puppy_tool==-3 && !puppy_revolve_axis {return "Pick a source to offset or a copy to resize";}
-    if puppy_revolve_axis {
-        if puppy_anchor {return "Click the axis endpoint";}
-        return "Click two axis points or choose X or Y";
-    }
     if puppy_tool==-1 {return "Click to place a sketch point";}
     if puppy_tool==-2 {return "Click to place a construction point";}
     if puppy_tool==3 {
@@ -292,7 +294,12 @@ fn puppy_draft_click(x,y) {
     }
     puppy_mx=load64(p);puppy_my=load64(p+8);
     if puppy_revolve_axis {
-        if puppy_anchor {return puppy_draft_revolve(project,cg_v(puppy_ax,puppy_ay,0),p);}
+        if puppy_anchor {return puppy_revolve_begin(project,cg_v(puppy_ax,puppy_ay,0),p);}
+        let nodes=pc_nodes(cad_project_part(project));let sketch=j_string(puppy_draft_sketch(project),"id");
+        let node=puppy_sketch_hit(nodes,sketch,p);
+        if m_eq(j_string(node,"type"),"sketchLine") {
+            return puppy_revolve_begin(project,pc_uv(j_get(node,"p0")),pc_uv(j_get(node,"p1")));
+        }
         puppy_anchor=1;puppy_ax=puppy_mx;puppy_ay=puppy_my;
         return puppy_title(project,puppy_draft_hint());
     }
@@ -300,6 +307,7 @@ fn puppy_draft_click(x,y) {
     if puppy_tool==-4 || puppy_tool==-5 {return puppy_join_click(project,p);}
     if puppy_tool==-3 {return puppy_offset_pick(project,p);}
     if puppy_tool==-7 {return puppy_use_edges(project,p);}
+    if puppy_line_edit_active() {return puppy_line_edit_click(project,p);}
     if puppy_tool<0 {
         let sketch=puppy_draft_sketch(project);
         if !cad_project_add_primitive(project,j_string(sketch,"id"),puppy_tool_name(),p,0) {return puppy_title(project,cg_error);}
@@ -337,12 +345,6 @@ fn puppy_draft_extrude(project) {
     let sketch=puppy_draft_sketch(project);
     let updated=cad_project_add_extrusion(project,j_string(sketch,"id"),puppy_profile_index,10000000,puppy_operation(project));
     return puppy_finish_feature(project,updated,"Extruded");
-}
-fn puppy_draft_revolve(project,a,b) {
-    let sketch=puppy_draft_sketch(project);
-    let updated=cad_project_add_revolve(project,j_string(sketch,"id"),puppy_profile_index,a,b,360000000,puppy_operation(project));
-    if !updated {puppy_anchor=0;return puppy_title(project,cg_error);}
-    return puppy_finish_feature(project,updated,"Revolved");
 }
 fn puppy_finish_feature(project,updated,status) {
     if !updated {return puppy_title(project,cg_error);}
@@ -398,8 +400,8 @@ fn puppy_draft_key(project,key,mods) {
         puppy_revolve_axis=!puppy_revolve_axis;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());
     }
     if puppy_revolve_axis {
-        if key==27 {return puppy_draft_revolve(project,cg_v(0,0,0),cg_v(1000000,0,0));}
-        if key==28 {return puppy_draft_revolve(project,cg_v(0,0,0),cg_v(0,1000000,0));}
+        if key==27 {return puppy_revolve_begin(project,cg_v(0,0,0),cg_v(1000000,0,0));}
+        if key==28 {return puppy_revolve_begin(project,cg_v(0,0,0),cg_v(0,1000000,0));}
         return 1;
     }
     if key==26 {
@@ -426,7 +428,8 @@ fn puppy_draft_key(project,key,mods) {
         puppy_curves_page=3;puppy_anchor=0;puppy_tool=13;if key==22 {puppy_tool=14;}
         return puppy_title(project,puppy_draft_hint());
     }
-    if key==10 {puppy_curves_page=(puppy_curves_page+1)%4;return puppy_title(project,puppy_draft_hint());}
+    if key==10 {puppy_curves_page=(puppy_curves_page+1)%5;return puppy_title(project,puppy_draft_hint());}
+    if key==20 {return puppy_line_edit_begin(project,mods&3);}
     if (key==8 || key==6) && mods&3 {
         puppy_anchor=0;puppy_curves_page=2;puppy_tool=7;if key==6 {puppy_tool=8;}
         return puppy_title(project,puppy_draft_hint());

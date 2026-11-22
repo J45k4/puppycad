@@ -253,12 +253,12 @@ fn puppy_toolbar_build(w) {
     let part=cad_project_item(project);let feature=puppy_feature(project);
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
-    if puppy_extrusion_open {
+    if puppy_extrusion_open || puppy_revolve_open {
         if puppy_number_text {puppy_number_bar(rgb,w,project);}
         else {
             if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
             if w<800 {puppy_compact_bar(rgb,w,project,-1);}
-            else {puppy_action_bar(puppy_extrusion_actions(),rgb,w,-1);}
+            else {puppy_action_bar(puppy_feature_preview_actions(),rgb,w,-1);}
         }
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
@@ -371,6 +371,7 @@ fn puppy_toolbar_build(w) {
     }
     if puppy_draft {
         let label="More tools";if puppy_curves_page==1 {label="Curves";}if puppy_curves_page==2 {label="Conics";}if puppy_curves_page==3 {label="Profiles";}
+        if puppy_curves_page==4 {label="Edit";}
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,label,w-335);
     }
     if !puppy_sketch && !puppy_empty && cad_project_part(project) {
@@ -498,6 +499,16 @@ fn puppy_profile_buttons(rows) {
     puppy_compact_button(rows,"Slot",22,3);
 }
 fn puppy_curve_bar(project,rgb,w,x) {
+    if puppy_curves_page==4 {
+        if x>=194 && x<279 {return puppy_command(20,0);}
+        if x>=287 && x<372 {return puppy_command(20,3);}
+        if rgb {
+            puppy_bar_button(rgb,w,194,85,"Trim");puppy_bar_button(rgb,w,287,85,"Extend");
+            if puppy_tool==-8 {puppy_bar_rect(rgb,w,194,66,85,2,143,217,184);}
+            if puppy_tool==-9 {puppy_bar_rect(rgb,w,287,66,85,2,143,217,184);}
+        }
+        return 1;
+    }
     if puppy_curves_page==3 {
         let rows=cg_array();puppy_profile_buttons(rows);
         let left=194;let width=puppy_limit((w-68-left-8*(cg_count(rows)-1))/cg_count(rows),1,144);let i=0;
@@ -560,7 +571,7 @@ fn puppy_curve_bar(project,rgb,w,x) {
     return 1;
 }
 fn puppy_compact_actions(project) {
-    if puppy_extrusion_open {return puppy_extrusion_actions();}
+    if puppy_extrusion_open || puppy_revolve_open {return puppy_feature_preview_actions();}
     if puppy_patterns {return puppy_pattern_actions(project);}
     if puppy_line_report {return puppy_line_actions();}
     if puppy_history_rows {return puppy_history_actions(project);}
@@ -598,6 +609,7 @@ fn puppy_compact_actions(project) {
             puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split ellipse",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
             puppy_profile_buttons(rows);
             puppy_compact_button(rows,"Next profile",19,0);puppy_compact_button(rows,"Patterns",62,0);
+            puppy_compact_button(rows,"Trim",20,0);puppy_compact_button(rows,"Extend",20,3);
             if puppy_draft_on_face(project) {
                 puppy_compact_button(rows,puppy_operation(project),18,0);
                 puppy_compact_button(rows,"Use edges",24,3);puppy_compact_button(rows,"Pick edge",24,0);

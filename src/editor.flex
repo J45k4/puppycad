@@ -9,6 +9,7 @@ import "pattern.flex";
 import "step-import.flex";
 import "mate-editor.flex";
 import "extrusion.flex";
+import "revolve.flex";
 
 // History owns immutable document snapshots. Temporary evaluation and drawing
 // allocations belong to the event's arena and are discarded after each event.
@@ -242,6 +243,7 @@ fn puppy_export_shortcut(project,extension) {
 }
 fn puppy_command(key,mods) {
     puppy_forget_click();
+    if puppy_revolve_open {return puppy_revolve_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_extrusion_open {return puppy_extrusion_key(cad_project_open(puppy_history+24),key,mods);}
     if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
     if puppy_plane_chooser {return puppy_plane_command(cad_project_open(puppy_history+24),key,mods);}
@@ -308,6 +310,7 @@ fn puppy_command(key,mods) {
     if key==GUI_KEY_ESCAPE {
         if puppy_draft && puppy_tool==-7 {puppy_tool=0;return puppy_title(cad_project_open(puppy_history+24),"Edge projection cancelled");}
         if puppy_revolve_axis {puppy_revolve_axis=0;puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),"Revolve cancelled");}
+        if puppy_draft && puppy_line_edit_active() {return puppy_line_edit_cancel(cad_project_open(puppy_history+24));}
         if puppy_picking_face {puppy_picking_face=0;return puppy_title(cad_project_open(puppy_history+24),0);}
         if puppy_anchor {puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());}
         if puppy_saved_history==puppy_history || puppy_exit_requested {return 0;}
@@ -535,7 +538,7 @@ fn puppy_editor(path,source,project,report) {
                 dirty=1;
             }
             else if puppy_number_event(event) {dirty=1;}
-            else if puppy_extrusion_event(event) {dirty=1;}
+            else if puppy_feature_preview_event(event) {dirty=1;}
             else if puppy_mate_event(event) {dirty=1;}
             else if puppy_step_event(event) {dirty=1;}
             else if puppy_pattern_event(event) {dirty=1;}
@@ -700,7 +703,7 @@ fn puppy_editor(path,source,project,report) {
     if puppy_reader_offsets {syscall(11,puppy_reader_offsets,(puppy_reader_count+1)*8,0,0,0,0);}
     puppy_distance_cancel();puppy_line_cancel_drag();if puppy_line_report {puppy_drop(puppy_line_report);}
     if puppy_number_text {puppy_number_close();}
-    puppy_extrusion_close();
+    puppy_extrusion_close();puppy_revolve_close();
     puppy_workspace_clear_parent();
     puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
     if puppy_pending_title {puppy_drop(puppy_pending_title);}

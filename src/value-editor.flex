@@ -7,6 +7,7 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_revolve_open {return cg_v(0,puppy_revolve_angle(),"Revolve angle  deg");}
     if puppy_extrusion_open {return cg_v(0,puppy_extrusion_length,"Extrusion depth  mm");}
     if puppy_profile_value_id {
         let node=pc_find(pc_nodes(cad_project_part(project)),puppy_profile_value_id+24);
@@ -153,6 +154,7 @@ fn puppy_number_close() {
 }
 fn puppy_number_apply(project) {
     let text=puppy_number_text+24;
+    if puppy_revolve_open {return puppy_revolve_apply(project);}
     if puppy_profile_value_id {return puppy_profile_apply(project,text);}
     if puppy_sheet_entry {return puppy_sheet_entry_apply(project,text);}
     if puppy_patterns {return puppy_pattern_apply(project,text);}
@@ -228,6 +230,7 @@ fn puppy_number_replace(text,remove_left,remove_right) {
     let next=puppy_snapshot(m_cat(m_slice(old,at),m_cat(text,old+end)));
     puppy_drop(puppy_number_text);puppy_number_text=next;puppy_number_cursor=at+length;
     puppy_number_selected=0;let project=cad_project_open(puppy_history+24);
+    if puppy_revolve_open {return puppy_revolve_preview(project);}
     if puppy_step_path_entry {return puppy_title(project,"Open STEP file   |   Enter a path");}
     if puppy_variable_slot>=0 {return puppy_title(project,puppy_variable_hint(project));}
     return puppy_title(project,"Set value");
@@ -236,7 +239,19 @@ fn puppy_number_event(event) {
     if !puppy_number_text {return 0;}
     let kind=gui_event_kind(event);let key=gui_event_code(event);
     if kind==GUI_CLOSE || kind==GUI_QUIT {puppy_number_close();return 0;}
-    if kind==GUI_TEXT {return puppy_number_replace(gui_event_text(event),0,0);}
+    if puppy_revolve_open && puppy_extrusion_view_event(event) {return 1;}
+    if kind==GUI_TEXT {
+        let text=gui_event_text(event);
+        if puppy_revolve_open {
+            let i=0;
+            while load8(text+i) {
+                let c=load8(text+i);
+                if (c<48 || c>57) && c!=46 && c!=43 && c!=45 {return 1;}
+                i=i+1;
+            }
+        }
+        return puppy_number_replace(text,0,0);
+    }
     if kind==GUI_IME {
         let data=gui_ime_data(key);
         if data && load64(data+64) && !load64(data+80) {puppy_number_replace(load64(data+96),0,0);}
@@ -251,6 +266,7 @@ fn puppy_number_event(event) {
         if gui_event_button(event)==1 && y>=42 && y<68 {
             if x>=w-150 && x<w-86 {return puppy_number_apply(cad_project_open(puppy_history+24));}
             if x>=w-78 && x<w-8 {
+                if puppy_revolve_open {return puppy_revolve_key(cad_project_open(puppy_history+24),GUI_KEY_ESCAPE,0);}
                 puppy_number_close();let project=cad_project_open(puppy_history+24);
                 if puppy_extrusion_open {return puppy_extrusion_status(project,0);}
                 return puppy_title(project,"Edit cancelled");
@@ -259,6 +275,9 @@ fn puppy_number_event(event) {
         return 1;
     }
     if kind!=GUI_KEY_DOWN {return kind!=GUI_RESIZE && kind!=GUI_EXPOSE;}
+    if puppy_revolve_open && (key==GUI_KEY_ESCAPE || ((key==9 || key==18) && !(gui_event_modifiers(event)&0x3c3))) {
+        return puppy_revolve_key(cad_project_open(puppy_history+24),key,0);
+    }
     let n=m_len(puppy_number_text+24);puppy_toolbar_dirty=1;
     if gui_event_modifiers(event)&192 {
         if key==4 {puppy_number_selected=1;puppy_number_cursor=n;}

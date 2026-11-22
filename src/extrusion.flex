@@ -165,10 +165,14 @@ fn puppy_extrusion_key(project,key,mods) {
     }else {return 1;}
     puppy_extrusion_picking=0;return puppy_extrusion_draw_result(project);
 }
-fn puppy_extrusion_event(event) {
-    if !puppy_extrusion_open {return 0;}
+fn puppy_feature_preview_actions() {
+    if puppy_revolve_open {return puppy_revolve_actions();}
+    return puppy_extrusion_actions();
+}
+fn puppy_feature_preview_event(event) {
+    if !puppy_extrusion_open && !puppy_revolve_open {return 0;}
     let kind=gui_event_kind(event);
-    if kind==GUI_CLOSE || kind==GUI_QUIT {puppy_extrusion_close();return 0;}
+    if kind==GUI_CLOSE || kind==GUI_QUIT {puppy_extrusion_close();puppy_revolve_close();return 0;}
     if puppy_extrusion_view_event(event) {return 1;}
     if kind==GUI_KEY_DOWN {return puppy_command(gui_event_code(event),gui_event_modifiers(event));}
     if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
@@ -177,7 +181,7 @@ fn puppy_extrusion_event(event) {
         if y>=42 && y<68 {
             let width=gui_width(load64(puppy_device));
             if width<800 {return puppy_compact_bar(0,width,project,x);}
-            return puppy_action_bar(puppy_extrusion_actions(),0,width,x);
+            return puppy_action_bar(puppy_feature_preview_actions(),0,width,x);
         }
         if y>=76 && puppy_extrusion_picking {
             let stage=cad_project_open(puppy_extrusion_target_stage+24);

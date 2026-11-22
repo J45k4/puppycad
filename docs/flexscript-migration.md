@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`cecfa673d5a7dbc5a909be0fadf6b37002145bd7` includes the shared library and
+`b0ece8c3369dc708d07ffac5fcc61dbf57a90672` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -230,6 +230,17 @@ library. A headless window test drew a profile, rejected an axis crossing it,
 picked an oblique axis, saved the new feature, reopened it and exported its
 3MF. Another changed an existing sweep from 360 to 95.125 degrees, undid
 and redid the change, and checked the saved graph and the reopened export.
+The native preview now chooses a sweep and Boolean operation before Apply.
+It accepts a sketch line, two picked points or a sketch axis. In the
+headless test, changing a rejected full-turn cut to 15° produces an editable
+revolve. After reopening, its 123.4421 mm³ solid matches Rust's 3MF.
+
+Native straight-line Trim and Extend use the shared sketch graph editor.
+The window test removes the clicked interval between two boundaries,
+preserves the surviving endpoint identities through save and undo, and
+extends one fragment back to the nearest finite boundary. The CAD tests
+cover projected boundaries and reject edits that would invalidate a
+dependent solid.
 
 The graph suite compares directed axes, axis-touching profiles, partial and
 full turns, rectangular and round holes, mirrored face sketches, joins and
@@ -523,6 +534,21 @@ drill files. The headless browser verified that one receipt blocks
 promotion and that two passing receipts unlock the release ZIP. A board
 with a deleted route failed DRC, withheld fabrication files and left the
 previously promoted release available to authorized readers.
+
+The shared continuity evaluator follows every declared terminal path
+through physical copper, mating contacts and harness conductors. The
+original two sensor fixtures and eight trace variants match the previous
+native evaluator byte for byte. Biscuit's checked VM produces the same
+three-wire report through `/biscuit/runtime/pcad-trace.flex`.
+
+Biscuit's `native-project-checks-4` profile includes a numbered product BOM,
+the continuity paths and the authored-pose harness report in the frozen
+release. The three-wire drawing set adds one schedule for the three cuts
+and two pinouts with their viewing directions and mating identities.
+Unplugging a connector or invalidating a termination review fails the
+private build even though both board checks pass. The headless release
+test checks the frozen source digest and the additional continuity and
+manufacturing requirements before promoting the two-board package.
 
 The native object tree browses bodies, nested occurrences and driving fields.
 The window regression searched for `right/upper` across two copies of one
@@ -833,10 +859,10 @@ CAD graph, two frozen builds produce byte-identical STLs, and a saved
 polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
-Remaining standalone UI work also includes additional sketch and feature authoring and
-inspectors for additional design records. Include its `docs/pcad-electrical.md` workflows
-for drawings, board exchange and release artifacts when
-checking product parity.
+Remaining standalone work includes sketch and feature authoring, additional
+design inspectors, circuit release checks and SPICE export, sampled harness
+motion, schematic sheets and release tables. Compare these paths against
+Biscuit's `docs/pcad-electrical.md` and its original release fixtures.
 
 ## Later milestone: WASM editor in Biscuit
 

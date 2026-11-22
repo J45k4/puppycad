@@ -952,6 +952,52 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Edit a straight segment with the sketch toolbar and persist both operations.
+        line_edit_path=Path(tmp)/"Trim and extend.pcad"
+        line_edit_doc=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        line_edit_graph=line_edit_doc["items"][0]["data"]["cad"]
+        line_edit_graph["nodes"]=line_edit_graph["nodes"][:4]
+        for index,(a,b) in enumerate([((-40,0),(40,0)),((-20,-10),(-20,10)),((20,-10),(20,10))],1):
+            line_edit_graph["nodes"].append({"id":f"native-entity-{index}","type":"sketchLine",
+                "sketchId":"native-sketch-1","p0":dict(zip(("x","y"),a)),"p1":dict(zip(("x","y"),b))})
+        line_edit_path.write_text(json.dumps(line_edit_doc))
+
+        def saved_line_endpoints():
+            nodes=json.loads(line_edit_path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+            return {n["id"]:tuple((n[p]["x"],n[p]["y"]) for p in ("p0","p1"))
+                    for n in nodes if n["type"]=="sketchLine"}
+
+        original_lines=saved_line_endpoints()
+        trimmed_lines=original_lines | {"native-entity-1":((-40,0),(-20,0)),"native-entity-4":((20,0),(40,0))}
+        app,window=open_app(line_edit_path,"Click two rectangle corners")
+        for _ in range(4):
+            click(window,580,20)  # More tools → Curves → Conics → Profiles → Edit
+        click(window,235,55)
+        verify(window,"Click the line segment to trim")
+        click(window,480,358)
+        verify(window,"Line trimmed")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"sketch-trim-toolbar.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_line_endpoints()==trimmed_lines
+        for stroke,expected in [("Control_L+z",original_lines),("Control_L+y",trimmed_lines)]:
+            key(stroke)
+            key("Control_L+s")
+            verify(window,"Saved")
+            assert saved_line_endpoints()==expected
+        click(window,330,55)
+        verify(window,"Click a line near the end to extend")
+        click(window,391,358)
+        verify(window,"Line extended")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert saved_line_endpoints()==trimmed_lines | {"native-entity-1":((-40,0),(20,0))}
+        key("Escape")
+        verify(window,"Line edit cancelled")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
@@ -3603,6 +3649,9 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,520,330)
         click(window,580,365)
         verify(window,'Sketch edited')
+        key('Control_L+s')
+        verify(window,'Saved')
+        before_revolve=path.read_bytes()
         click(window,45,21)
         verify(window,'choose X or Y')
         click(window,550,280)
@@ -3610,12 +3659,36 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,'crosses the revolve axis')
         key('Escape')
         verify(window,'Revolve cancelled')
+        assert path.read_bytes()==before_revolve
         key('8')
         click(window,490,398)
         verify(window,'Click the axis endpoint')
         click(window,470,318)
+        verify(window,'Revolve preview / New body / 360 deg')
+        type_value('361')
+        verify(window,'Enter a positive angle up to 360 degrees')
+        key('Return')
+        verify(window,'Enter a positive angle up to 360 degrees')
+        assert path.read_bytes()==before_revolve
+        key('Control_L+a')
+        type_value('95.125')
+        verify(window,'Revolve preview / New body / 95.125 deg')
+        key('f')
+        verify(window,'95.125 deg / Flipped')
+        preview=output_dir/'revolve-preview.png'
+        subprocess.run(['magick','import','-window',hex(window),preview],check=True)
+        from PIL import Image
+        with Image.open(preview) as image:
+            area=image.convert('RGB').crop((0,76,image.width,image.height))
+            painted=sum(n for n,(r,g,b) in area.getcolors(area.width*area.height) if b>g+12 and g>r+35)
+            assert painted>1000
+        key('Return')
         verify(window,'Revolved')
-        verify(window,'angle 360 deg')
+        verify(window,'angle 95.125 deg')
+        key('Control_L+z')
+        verify(window,'Sketch 1')
+        key('Control_L+y')
+        verify(window,'angle 95.125 deg')
         key('Control_L+s')
         verify(window,'Saved')
         key('Escape')
@@ -3623,13 +3696,73 @@ with tempfile.TemporaryDirectory() as tmp:
         authored=json.loads(path.read_bytes())['items'][0]['data']
         feature=next(n for n in authored['cad']['nodes'] if n['type']=='revolve')
         assert feature['id'] in authored['cad']['rootNodeIds'] and authored['tree']['orderedNodeIds'][-1]==feature['id']
-        assert feature['axis']=={'a':{'x':2.5,'y':-10},'b':{'x':-2.5,'y':10}}
+        assert feature['axis']=={'a':{'x':-2.5,'y':10},'b':{'x':2.5,'y':-10}}
+        assert feature['angle']==95.125
         app,window=open_app(path)
         key('Control_L+Alt_L+e')
         verify(window,'Exported')
         ref=Path(tmp)/'reference-authored-revolve.3mf'
         subprocess.run([root/'rust/target/debug/puppycad','--export',path,ref],check=True)
         compare_solid_packages(path.with_suffix('.3mf'),ref)
+        key('Escape')
+        app.wait(3)
+
+        # A full-turn cut consumes the block. Author a valid partial cut directly.
+        path=Path(tmp)/'Partial revolve cut.pcad'
+        drawing=revolve_document()
+        part=drawing['items'][0]['data']
+        graph=part['cad']
+        nodes={node['id']:node for node in graph['nodes']}
+        nodes['native-sketch-2']['targetId']='plane-top'
+        nodes['native-entity-1'].update(p0={'x':12,'y':2},p1={'x':17,'y':8})
+        nodes['native-extrude-1']['depth']=8
+        nodes['native-entity-1-2'].update(p0={'x':8,'y':0},p1={'x':24,'y':10})
+        graph['nodes'].remove(nodes['native-revolve-1'])
+        graph['rootNodeIds'].remove('native-revolve-1')
+        part['tree']['orderedNodeIds'].remove('native-revolve-1')
+        graph['nodes'].append(dict(id='revolve-axis',type='sketchLine',sketchId='native-sketch-2',construction=True,
+                                   p0={'x':0,'y':0},p1={'x':0,'y':6}))
+        path.write_text(json.dumps(drawing))
+        original=path.read_bytes()
+        app,window=open_app(path)
+        key('F12')
+        verify(window,'Editing Sketch 1')
+        key('Tab')
+        verify(window,'Sketch 2')
+        key('8')
+        key('y')
+        verify(window,'Revolve preview / New body / 360 deg')
+        key('Escape')
+        verify(window,'Revolve cancelled')
+        assert path.read_bytes()==original
+        key('8')
+        click(window,480,346)  # Pick the construction line as the axis.
+        verify(window,'Revolve preview / New body / 360 deg')
+        key('o')
+        verify(window,'Revolve preview / Cut / 360 deg / Boolean result is empty')
+        key('f')
+        verify(window,'360 deg / Flipped / Boolean result is empty')
+        key('a')
+        type_value('15')
+        verify(window,'Revolve preview / Cut / 15 deg / Flipped')
+        assert path.read_bytes()==original
+        click(window,840,55)
+        verify(window,'Revolved')
+        key('Control_L+s')
+        verify(window,'Saved')
+        key('Escape')
+        app.wait(3)
+        saved=json.loads(path.read_bytes())
+        feature=next(node for node in saved['items'][0]['data']['cad']['nodes'] if node['type']=='revolve')
+        assert (feature['sketchId'],feature['angle'],feature['operation'])==('native-sketch-2',15,'cut')
+        assert feature['axis']=={'a':{'x':0,'y':6},'b':{'x':0,'y':0}}
+        app,window=open_app(path)
+        key('Control_L+Alt_L+e')
+        verify(window,'Exported')
+        ref=Path(tmp)/'reference-partial-revolve-cut.3mf'
+        subprocess.run([root/'rust/target/debug/puppycad','--export',path,ref],check=True)
+        compare_solid_packages(path.with_suffix('.3mf'),ref)
+        assert math.isclose(package_geometry(ref)[1][0][1][1],123.4421,abs_tol=.001)
         key('Escape')
         app.wait(3)
 

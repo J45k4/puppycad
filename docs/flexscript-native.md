@@ -313,13 +313,15 @@ setting its length to 125.125 mm leaves the start at (−50, 20) and the end
 at (75.125, 20). The line retains two degrees of freedom for translation.
 A drag that holds the opposite endpoint therefore leaves this line in place.
 
-To revolve the selected profile, choose **Revolve** or press **8**. Pick two
-points in the sketch to define a directed axis, or choose **X axis** or **Y axis**
-to use a sketch axis through the origin. The profile may touch the axis along
-an edge and must stay on one side of it. Escape cancels the axis selection.
-The new solid starts at 360 degrees. Select its angle and press F2 to enter a
-partial sweep, then save the drawing. On a supporting face, choose **join**,
-**cut** or **newBody** before starting the revolve.
+To revolve the selected profile, choose **Revolve** or press **8**. Pick a
+sketch line, pick two points, or choose **X axis** or **Y axis**. The profile
+may touch the axis along an edge and must stay on one side of it.
+
+The preview starts at 360 degrees. Type the sweep or choose **Angle** (A)
+to edit it. Use **Flip axis** (F) to reverse the sweep. When an earlier solid
+is available, **Operation** (O) cycles through **New body**, **Cut** and
+**Join**. **Apply** (Enter) adds one feature, and **Cancel** (Escape) returns
+to the sketch. Select a saved revolve and press F2 to edit its angle.
 
 Choose **Loft** or press **9** to connect two closed profiles on different
 sketches. The picker highlights the current profile. Use **Next sketch**
@@ -386,6 +388,11 @@ distinct points on an ellipse’s rim. To split an existing elliptic arc,
 click once inside its sweep. Each split is one undo step. After saving
 and reopening, editing the width, height or rotation of any piece in
 **Dimensions** (F8) still updates the whole ellipse.
+
+Choose **More tools → Edit → Trim** (Q), then click the interval of a straight
+line you want to remove. **Extend** (Shift+Q) lengthens the end nearest your
+click to the first straight boundary it reaches. Projected straight edges can
+serve as boundaries and continue to follow their source. Each edit can be undone.
 
 In **More tools**, choose **Tangent** (Shift+J), click a free line, circular
 arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**
