@@ -1,3 +1,4 @@
+import "design-tree.flex";
 // The panel indexes evaluated occurrences by their full ID. Identically named
 // copies can be selected independently without modifying the document.
 global puppy_catalog=0;
@@ -30,7 +31,7 @@ fn puppy_search_focus(active) {
     return 1;
 }
 fn puppy_objects_toggle() {
-    puppy_tree_open=!puppy_tree_open;
+    puppy_design_focus=0;puppy_search_focus(0);puppy_query_set("");puppy_tree_open=!puppy_tree_open;
     if !puppy_tree_open {puppy_search_focus(0);}
     puppy_tree_dirty=1;return 1;
 }
@@ -55,7 +56,7 @@ fn puppy_query() {if puppy_search {return puppy_search+24;}return "";}
 fn puppy_query_set(text) {
     let next=0;if m_len(text) {next=puppy_snapshot(text);}
     if puppy_search {puppy_drop(puppy_search);}puppy_search=next;
-    puppy_tree_scroll=0;puppy_tree_dirty=1;return 1;
+    puppy_tree_scroll=0;puppy_design_scroll=0;puppy_tree_dirty=1;return 1;
 }
 fn puppy_panel_group(rows,children,bit,label) {
     if !cg_count(children) {return 0;}
@@ -324,16 +325,23 @@ fn puppy_panel_build(w,h) {
     puppy_ui_upload(rgb,w,h);puppy_tree_width=w;puppy_tree_height=h;puppy_tree_dirty=0;return 1;
 }
 fn puppy_objects_draw(w,h) {
-    if !puppy_history_rows && (!puppy_tree_open || puppy_sketch || puppy_empty || !puppy_catalog) {return 1;}
+    let design=puppy_design_available();
+    if !design && !puppy_history_rows && (!puppy_tree_open || puppy_sketch || puppy_empty || !puppy_catalog) {return 1;}
     let window=load64(puppy_device);let width=puppy_objects_width();let height=gui_height(window)-76;
+    if design {width=puppy_design_width();if !puppy_design_open {width=85;height=28;}}
     if height<=0 || height>16384 {return 1;}
     if !puppy_tree_texture {
         let tex=m_take(8);store64(tex,0);render_gl(puppy_device,"glGenTextures",1,tex,0,0,0,0);
         puppy_tree_texture=render_track(puppy_device,4,gui__u32(tex));if !puppy_tree_texture {return 0;}
     }
     render_gl(puppy_device,"glBindTexture",0x0de1,puppy_tree_texture,0,0,0,0);
-    if puppy_tree_dirty || puppy_tree_width!=width || puppy_tree_height!=height {if puppy_history_rows {puppy_history_panel(width,height);}else {puppy_panel_build(width,height);}}
-    render_gl(puppy_device,"glViewport",0,0,width*w/gui_width(window),h-76*h/gui_height(window),0,0);
+    if puppy_tree_dirty || puppy_tree_width!=width || puppy_tree_height!=height {if design {
+            if puppy_design_open {puppy_design_panel(width,height);}else {
+                let rgb=m_take(width*height*4);puppy_ui_rect(rgb,width,height,0,0,width,height,42,61,64);
+                puppy_ui_text(rgb,width,height,10,19,"Design  ›",width-3);puppy_ui_upload(rgb,width,height);
+            }puppy_tree_width=width;puppy_tree_height=height;puppy_tree_dirty=0;
+        }else if puppy_history_rows {puppy_history_panel(width,height);}else {puppy_panel_build(width,height);}}
+    render_gl(puppy_device,"glViewport",0,h-(76+height)*h/gui_height(window),width*w/gui_width(window),height*h/gui_height(window),0,0);
     return render_draw(puppy_device,puppy_toolbar_vao,4,0,3);
 }
 fn puppy_panel_click(x,y) {
@@ -400,6 +408,22 @@ fn puppy_panel_click(x,y) {
     puppy_select_entry(value);return puppy_title(project,m_cat("Selected ",load64(row+8)));
 }
 fn puppy_objects_event(event) {
+    if puppy_design_available() {
+        let kind=gui_event_kind(event);let x=puppy_pointer_x;let y=puppy_pointer_y-76;
+        let inside=x>=0 && x<puppy_design_width() && y>=0;
+        if !puppy_design_open {inside=x>=0 && x<85 && y>=0 && y<28;}
+        if kind==GUI_MOUSE_DOWN && !puppy_button {
+            if inside {
+                if gui_event_button(event)==1 {if puppy_design_open {puppy_design_click(x,y);}else {puppy_design_toggle();}}
+                return 1;
+            }puppy_design_focus=0;puppy_search_focus(0);
+        }
+        if inside && kind==GUI_WHEEL && puppy_design_open {puppy_design_scroll=puppy_design_scroll-gui_event_dy(event)*3;puppy_tree_dirty=1;return 1;}
+        if kind==GUI_KEY_DOWN && puppy_design_focus && !puppy_search_active && !(gui_event_modifiers(event)&0x3c3) {
+            let key=gui_event_code(event);if key==40 || (key>=79 && key<=82) {return puppy_design_navigation(key);}
+        }
+        return puppy_search_event(event);
+    }
     if !puppy_tree_open || puppy_sketch || puppy_empty || !puppy_catalog {puppy_search_focus(0);return 0;}
     let kind=gui_event_kind(event);
     let inside=puppy_pointer_x>=0 && puppy_pointer_x<puppy_objects_width() && puppy_pointer_y>=76;
@@ -420,7 +444,11 @@ fn puppy_objects_event(event) {
             return puppy_copy_choose(project,copies,puppy_copy_index+step);
         }
     }
-    if !puppy_search_active {return 0;}
+    return puppy_search_event(event);
+}
+fn puppy_search_event(event) {
+    if !puppy_search_active {return 0;}let kind=gui_event_kind(event);
+    if kind==GUI_FOCUS && !gui_event_code(event) {puppy_search_focus(0);return 0;}
     if kind==GUI_TEXT {
         let text=m_cat(puppy_query(),gui_event_text(event));if m_len(text)<=120 {puppy_query_set(text);}return 1;
     }
@@ -433,6 +461,7 @@ fn puppy_objects_event(event) {
     }
     if kind==GUI_KEY_DOWN {
         let key=gui_event_code(event);
+        if key==60 && puppy_design_available() {return puppy_design_toggle();}
         if key==GUI_KEY_ESCAPE || key==40 {return puppy_search_focus(0);}
         if key==42 {
             let text=puppy_query();let n=m_len(text);

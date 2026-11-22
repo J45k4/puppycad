@@ -61,7 +61,9 @@ fn puppy_prepare_exports(project,path,fresh) {
     let extension=path+dot;let format=m_slice(extension,length-dot);k=1;
     while k<length-dot {let c=load8(format+k);if c>=65 && c<=90 {store8(format+k,c+32);}k=k+1;}
     let bodies=0;let instance=0;
-    if m_eq(format,".3mf") || m_eq(format,".step") || m_eq(format,".stp") {
+    if m_eq(format,".pdf") {
+        let file=cad_drawing_pdf(project,"Current drawing");if !file {return 0;}bodies=cg_array();cg_push(bodies,file);
+    }else if m_eq(format,".3mf") || m_eq(format,".step") || m_eq(format,".stp") {
         let file=0;
         if m_eq(format,".3mf") {file=cad_project_3mf(project);}else {file=cad_project_step(project);}
         if !file {return 0;}bodies=cg_array();if !cg_push(bodies,file) {return 0;}
@@ -71,7 +73,7 @@ fn puppy_prepare_exports(project,path,fresh) {
         let item=cad_project_item(project);
         if cad_project_is_studio(project) && j_get(project,"assembly") {instance=pc_first(j_get(mesh,"parts"));}
         if m_eq(j_string(item,"type"),"assembly") {instance=pc_first(j_get(j_get(item,"data"),"instances"));}
-    }else {return cg_fail("Select a .stl, .3mf, .step or .stp output");}
+    }else {return cg_fail("Select a .stl, .3mf, .step, .stp or .pdf output");}
     if !cg_count(bodies) {return cg_fail("No bodies to export");}
     let base=m_slice(path,dot);
     let files=m_take(8+cg_count(bodies)*24);store64(files,cg_count(bodies));

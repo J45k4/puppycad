@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`b28d6318b7a1650abf58524bd5f5eb1677505026` includes the shared library and
+`dd050f2c266bc30a442cd3fec0b747fe2e03a38f` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -666,6 +666,22 @@ private display capture is `workdir/flexscript/step-assembly-preview.png`.
 Biscuit's checked VM matches the reference PCAD for two occurrences of one
 nested L bracket. Two frozen builds produce byte-identical 3,000 mm³ STLs.
 Open CASCADE reads the native STEP re-export as two valid 1,500 mm³ solids.
+
+The native Design sidebar opens for blank sketches and evaluated solids.
+The headless window test selects a rectangle in the sketch tree, opens the
+extrusion’s history, and finds a saved drawing sheet in the sensor assembly.
+The same test opens the second of two parts with identical sketch IDs and
+verifies that editing its outline changes only that part. The separate
+Objects panel still supports occurrence picking and isolation.
+
+The shared drawing renderer exports the standalone sensor fixture’s four A4
+sheets, including the projected dimensions, section, enlarged hinge detail
+and exploded parts list. The window exports the complete PDF from the
+selected sheet. The checked VM measures a 24.00 mm block. The frozen worker
+produces a PDF alongside STEP or STL and discards exports for duplicate
+sheet IDs. Two independent build jobs downloaded byte-identical PDFs with
+the frozen source digest in the footer. Earlier build artifacts remain
+retrievable under their recorded profiles.
 
 Remaining standalone UI work also includes additional sketch and feature authoring and
 inspectors for additional design records. Include its `docs/pcad-electrical.md` workflows

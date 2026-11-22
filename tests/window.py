@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as tmp:
         def title(window):
             return subprocess.run(['xprop', '-id', hex(window), '_NET_WM_NAME'], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
 
-        def open_app(path, ready="selects a dimension"):
+        def open_app(path, ready="selects a dimension", *, design_tree=False):
             if path is None:
                 process = subprocess.Popen([root/"run.sh"], cwd=tmp)
             else:
@@ -83,6 +83,8 @@ with tempfile.TemporaryDirectory() as tmp:
                         xlib.XSetInputFocus(connection, window, 2, 0)
                         xlib.XSync(connection, 0)
                         time.sleep(0.15)
+                        if not design_tree:
+                            key("F3")  # Exercise unobstructed viewport gestures in the existing cases.
                         return (process, window)
                 if process.poll() is not None:
                     raise RuntimeError('Editor exited during startup')
@@ -171,6 +173,90 @@ with tempfile.TemporaryDirectory() as tmp:
         def type_value(text):
             for char in text:
                 key({'.':'period','-':'minus',' ':'space','=':'equal','#':'Shift_L+3','+':'Shift_L+equal','*':'Shift_L+8'}.get(char,char))
+
+        # The first launch shows the authored tree before the sketch has a solid.
+        path=Path(tmp)/"Design tree.pcad"
+        app,window=open_app(path,"Click two rectangle corners",design_tree=True)
+        click(window,64,212)  # Sketch 1
+        verify(window,"Selected Sketch 1")
+        click(window,74,615)
+        verify(window,"Editing Sketch 1")
+        click(window,400,398)
+        click(window,560,318)
+        click(window,26,211)  # Expand the sketch.
+        click(window,110,238)
+        verify(window,"Selected Corner rectangle")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"design-sketch-tree.png"],check=True)
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,55,125)
+        for letter in "extrude":
+            key(letter)
+        key("Return")
+        click(window,75,185)
+        verify(window,"Selected Extrusion 1")
+        click(window,70,615)
+        verify(window,"Extrusion 1   active")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+
+        # Two parts deliberately share their local sketch and entity IDs.
+        # Search can reach the other part directly and editing must stay in that part.
+        twins=Path(tmp)/"Two parts.pcad"
+        document=json.loads(path.read_bytes())
+        second=json.loads(json.dumps(document["items"][0]))
+        second.update(id="second",name="Cover")
+        for n in second["data"]["cad"]["nodes"]:
+            if n["type"]=="sketch":
+                n["name"]="Cover outline"
+        document["items"].append(second)
+        twins.write_text(json.dumps(document))
+        app,window=open_app(twins,design_tree=True)
+        click(window,55,125)
+        for letter in "outline":
+            key(letter)
+        key("Return")
+        key("Down")
+        verify(window,"Selected Cover")
+        key("Right")
+        verify(window,"Selected Cover outline")
+        key("Return")
+        verify(window,"Editing Cover outline")
+        key("period")
+        click(window,490,345)
+        verify(window,"Point added")
+        key("Control_L+s")
+        verify(window,"Saved")
+        edited=json.loads(twins.read_bytes())
+        assert edited["selectedPath"]==[1] and edited["items"][0]==document["items"][0]
+        assert len(edited["items"][1]["data"]["cad"]["nodes"])==len(second["data"]["cad"]["nodes"])+1
+        key("Escape")
+        app.wait(3)
+
+        sheets=Path(tmp)/"Sensor sheets.pcad"
+        shutil.copy(root/"tests/fixtures/sensor-unit.pcad",sheets)
+        app,window=open_app(sheets,"PCAD design opened",design_tree=True)
+        click(window,26,185)  # Expand the first part to expose its feature and datums.
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"design-tree.png"],check=True)
+        click(window,53,125)
+        for letter in "enclosure-plan":
+            key("minus" if letter=="-" else letter)
+        key("Return")
+        click(window,80,185)
+        verify(window,"Selected Sensor enclosure base")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"design-drawing-tree.png"],check=True)
+        click(window,72,615)
+        verify(window,"Exported")
+        assert b"/Count 4" in sheets.with_suffix(".pdf").read_bytes()
+        key("Escape")
+        app.wait(3)
 
         app,window=open_app(None,"Click two rectangle corners")
         key("Control_L+s")

@@ -1,6 +1,7 @@
 import "cad/sketch-dimension.flex";
 import "cad/threemf.flex";
 import "cad/step.flex";
+import "cad/drawings.flex";
 import "cad/author.flex";
 import "cad/project-access.flex";
 import "cad/studio-edit.flex";

@@ -17,6 +17,29 @@ The native editor draws the resulting
 triangles through Flexscript's OpenGL renderer and uses its native font stack
 for the toolbar.
 
+## Design tree
+
+The **Design** sidebar opens with the file, including a new empty sketch.
+Click a disclosure triangle to expand a part, sketch or group. Search by
+name, type or ID to reveal matching records and their parents. Click a
+row to see its ID and available action. With the tree focused, Up and Down
+select rows, Left and Right navigate branches, and Enter opens the selected
+action. Collapse the panel with **‹** or
+F3 and reopen it with **Design ›** or F3.
+
+In a v4 part, expand a sketch to select its geometry or inspect its
+constraints and dimensions. **Edit sketch** opens that sketch in its
+owning part. Select a solid feature and choose **Feature history** to
+inspect its rebuild state. **Open item** switches directly to another
+part or assembly. In an assembly, selecting an occurrence highlights it.
+
+In a standalone Biscuit file, expand **Parts**, **Features**, **Assembly**,
+**Drawing sheets** or **Electrical** to inspect the saved design. Select
+a sheet and choose **Export drawing sheets** (Ctrl+P) to export the complete
+set beside the PCAD file. A repeated export uses the next available name.
+The CLI also accepts `--export INPUT.pcad OUTPUT.pdf`. The PDF resolves
+dimensions and callouts from the current model.
+
 ## Finding a part in the drawing
 
 Click **Objects** or press T in the solid viewport. Search for a body name, an

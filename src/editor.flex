@@ -190,8 +190,11 @@ fn puppy_next_item(project) {
         row=load64(row+24);index=index+1;
     }
     if next<0 {next=first;}
+    if !puppy_open_item(project,next) {return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");}return 1;
+}
+fn puppy_open_item(project,next) {
     let selection=j_array();j_add(selection,0,j_number(next));cg_j_set(project,"selectedPath",selection);
-    if !puppy_refresh(project) {return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");}
+    if !puppy_refresh(project) {return 0;}
     puppy_selected=0;puppy_property=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_part_choice=0;puppy_sketch=puppy_draft;
     puppy_push(project);return puppy_title(project,"Item opened");
 }
@@ -216,6 +219,7 @@ fn puppy_add_item(project,kind) {
 }
 fn puppy_command(key,mods) {
     puppy_forget_click();
+    if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
     if puppy_join_drag {
         if key==GUI_KEY_ESCAPE {puppy_join_end_drag();return puppy_title(cad_project_open(puppy_history+24),"Smooth drag cancelled");}return 1;
     }
@@ -305,10 +309,11 @@ fn puppy_command(key,mods) {
     if !puppy_draft && key==25 && !(mods&0x3c0) && cad_project_part(project) {
         if !puppy_sketch && !j_get(puppy_feature(project),"sketchId") {return puppy_title(project,"Select a sketch-based feature");}
         puppy_sketch=!puppy_sketch;return puppy_title(project,0);}
-    if (mods&192) && key==8 {
+    if (mods&192) && (key==8 || (key==19 && cad_project_is_studio(project))) {
         let base=puppy_path;let n=m_len(base);
         if n>=5 && m_eq(base+n-5,".pcad") {base=m_slice(base,n-5);}
         let extension=".stl";if mods&768 {extension=".3mf";}else if mods&3 {extension=".step";}
+        if key==19 {extension=".pdf";}
         let out=puppy_export(project,m_cat(base,extension),1);
         if !out {return puppy_title(project,cg_error);}
         return puppy_title(project,m_cat("Exported ",out));
@@ -476,12 +481,13 @@ fn puppy_editor(path,source,project,report) {
             else if puppy_mate_event(event) {dirty=1;}
             else if puppy_step_event(event) {dirty=1;}
             else if puppy_pattern_event(event) {dirty=1;}
+            else if puppy_design_available() && puppy_objects_event(event) {dirty=1;}
             else if puppy_join_event(event) {dirty=1;}
             else if puppy_line_event(event) {dirty=1;}
             else if puppy_context_event(event) {dirty=1;}
             else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 && !puppy_button && puppy_cube_click(puppy_pointer_x,puppy_pointer_y) {
                 puppy_search_focus(0);puppy_forget_click();dirty=1;
-            }else if !puppy_history_rows && puppy_objects_event(event) {dirty=1;}
+            }else if !puppy_design_available() && !puppy_history_rows && puppy_objects_event(event) {dirty=1;}
             else if kind==GUI_QUIT || kind==GUI_CLOSE {running=puppy_command(GUI_KEY_ESCAPE,0);dirty=1;}
             else if kind==GUI_KEY_DOWN {running=puppy_command(gui_event_code(event),gui_event_modifiers(event));dirty=1;}
             else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {

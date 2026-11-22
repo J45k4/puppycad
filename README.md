@@ -25,6 +25,10 @@ workdir/flexscript/puppycad --export rust/fixtures/extruded-rectangle.pcad /tmp/
 
 Run `./build.sh test` for the model regressions and the headless Xvfb window suite.
 
+The **Design** sidebar shows the parts, sketches and features in the open
+file. Expand a sketch to select its geometry, or select a feature to open
+its history. F3 collapses or reopens the tree.
+
 The [editor guide](docs/flexscript-native.md) covers controls, file formats,
 and headless tests. The [migration plan](docs/flexscript-migration.md)
 tracks CAD parity and the Biscuit integration.

@@ -441,6 +441,11 @@ fn puppy_draw_draft() {
         let path=cg_at(paths,i);let points=load64(path);let mode=3;
         if load64(path+8) {mode=2;}else if cg_count(points)==1 {mode=0;}
         let entity=load64(path+16);let highlight=selected && m_eq(j_string(entity,"id"),selected);
+        if puppy_design_entity && puppy_design_open && puppy_design_available() {
+            let part=cad_project_part(project);let parent=puppy_design_key("part",j_string(part,"id"));
+            let sk=puppy_design_key("sketch",id);let key=puppy_design_key("geometry",j_string(entity,"id"));
+            if m_eq(puppy_design_entity+24,m_cat(parent,m_cat("/",m_cat(sk,m_cat("/",key))))) {highlight=1;}
+        }
         if offset && po_target(offset,j_string(entity,"id")) {highlight=1;}
         if pattern && puppy_pattern_contains(pattern,j_string(entity,"id")) {highlight=1;}
         let src=pc_first(sources);while src {if m_eq(j_value(src),j_string(entity,"id")) {highlight=1;}src=load64(src+24);}
