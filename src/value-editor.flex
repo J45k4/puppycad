@@ -297,7 +297,6 @@ fn puppy_number_event(event) {
     if kind==GUI_MOUSE_DOWN {
         let w=gui_width(load64(puppy_device));let x=gui_event_x(event);let y=gui_event_y(event);
         if gui_event_button(event)!=1 {return 1;}
-        if puppy_breadcrumb_target(x,y) {return puppy_breadcrumb_click(cad_project_open(puppy_history+24),x,y);}
         if y>=42 && y<68 {
             if x>=w-150 && x<w-86 {return puppy_number_apply(cad_project_open(puppy_history+24));}
             if x>=w-78 && x<w-8 {
@@ -349,12 +348,8 @@ fn puppy_number_bar(rgb,w,project,breadcrumbs) {
     let field=puppy_active_field(project);if !field {return 0;}
     let label=load64(field+16);
     if puppy_status && !m_eq(puppy_status+24,"Set value") {label=puppy_status+24;}
-    let x=12;let part=cad_project_part(project);
-    if breadcrumbs && part && (puppy_sketch || puppy_workspace_parent(project,part)) {
-        let path_edge=puppy_limit(w-20-puppy_toolbar_text_width(label),w/2,w-8);
-        x=puppy_toolbar_breadcrumbs(project,rgb,w,x,path_edge)+8;
-    }
-    puppy_bar_text(rgb,w,x,25,label,w-8);
+    if breadcrumbs {puppy_toolbar_workspace_status(rgb,w,project,label);}
+    else {puppy_bar_text(rgb,w,12,25,label,w-8);}
     let end=w-158;puppy_bar_rect(rgb,w,12,42,end-12,26,20,30,34);
     let text=puppy_number_text+24;
     if puppy_number_selected {puppy_bar_rect(rgb,w,17,44,puppy_limit(m_len(text)*10+6,0,end-17),22,54,85,82);}

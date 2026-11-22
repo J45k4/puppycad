@@ -45,6 +45,10 @@ fn puppy_pattern_begin(project) {
     puppy_patterns=1;puppy_anchor=0;puppy_pattern_index=0;puppy_pattern_slot=0;puppy_pattern_center=0;
     puppy_pattern_selection(0);puppy_bar_page=0;return puppy_title(project,puppy_pattern_hint(project));
 }
+fn puppy_pattern_end() {
+    puppy_pattern_clear_preview();puppy_pattern_drag=0;puppy_pattern_center=0;
+    puppy_pattern_selection(0);puppy_patterns=0;puppy_bar_page=0;
+}
 fn puppy_pattern_actions(project) {
     let rows=cg_array();if !puppy_pattern_center {
         if puppy_pattern_sources {
@@ -91,7 +95,7 @@ fn puppy_pattern_apply(project,text) {
 }
 fn puppy_pattern_key(project,key) {
     if key==GUI_KEY_ESCAPE {
-        if puppy_pattern_center {puppy_pattern_center=0;}else {puppy_patterns=0;puppy_pattern_selection(0);return puppy_title(project,puppy_draft_hint());}
+        if puppy_pattern_center {puppy_pattern_center=0;}else {puppy_pattern_end();return puppy_title(project,puppy_draft_hint());}
     }else if key==74 {puppy_fit_sketch(project,0);}
     else if (key==10 || key==6) && puppy_pattern_sources {
         let settings=j_object();let kind="linearPattern";if key==6 {kind="circularPattern";}

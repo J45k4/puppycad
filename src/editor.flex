@@ -582,18 +582,24 @@ fn puppy_editor(path,source,project,report) {
     while running {
         while running && gui_poll(event) {
             let kind=gui_event_kind(event);let scratch=m_mark();
+            let breadcrumb=0;
             if kind==GUI_KEY_DOWN || kind==GUI_KEY_UP {puppy_pattern_mods=gui_event_modifiers(event);}
             if kind==GUI_FOCUS && !gui_event_code(event) {puppy_pattern_mods=0;}
             if kind==GUI_MOUSE_MOVE || kind==GUI_MOUSE_DOWN {
                 let x=gui_event_x(event);let y=gui_event_y(event);
-                if puppy_breadcrumb_target(x,y)!=puppy_breadcrumb_target(puppy_pointer_x,puppy_pointer_y) {
+                let target=puppy_breadcrumb_target(x,y);
+                if target!=puppy_breadcrumb_target(puppy_pointer_x,puppy_pointer_y) {
                     puppy_toolbar_dirty=1;dirty=1;
                 }
+                if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {breadcrumb=target;}
                 puppy_pointer_x=x;puppy_pointer_y=y;
             }
             if puppy_reader_report {
                 let result=puppy_reader_event(event);running=result!=0;
                 if result==2 {dirty=1;}
+            }
+            else if breadcrumb {
+                puppy_breadcrumb_navigate(cad_project_open(puppy_history+24),breadcrumb);dirty=1;
             }
             else if puppy_construction_ids && kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
                 let x=gui_event_x(event);let y=gui_event_y(event);let current=cad_project_open(puppy_history+24);
@@ -654,7 +660,6 @@ fn puppy_editor(path,source,project,report) {
                     }
                     dirty=1;
                 }
-                else if puppy_breadcrumb_click(current,x,y) {dirty=1;}
                 else if !compact && y>=6 && y<34 && x>=width-505 && x<width-429 && pc_nodes(cad_project_part(current)) {
                     puppy_command(38,0);dirty=1;
                 }

@@ -356,7 +356,6 @@ fn puppy_line_event(event) {
     let x=gui_event_x(event);let y=gui_event_y(event);let project=cad_project_open(puppy_history+24);
     if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
         let w=gui_width(load64(puppy_device));
-        if puppy_breadcrumb_click(project,x,y) {return 1;}
         if y>=7 && y<33 && x>=puppy_direction_button_left(w) && x<w-12 && puppy_direction_available() {return puppy_direction_command(project,15);}
         if y>=42 && y<68 {
             if w<800 {puppy_compact_bar(0,w,project,x);}else {puppy_action_bar(puppy_line_actions(),0,w,x);}

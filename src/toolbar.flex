@@ -267,6 +267,14 @@ fn puppy_toolbar_breadcrumbs(project,rgb,w,x,right) {
     puppy_bar_text(rgb,w,x,25,heading,end);
     return end;
 }
+fn puppy_toolbar_workspace_status(rgb,w,project,label) {
+    let x=12;let part=cad_project_part(project);
+    if part && (puppy_sketch || puppy_workspace_parent(project,part)) {
+        let path_edge=puppy_limit(w-20-puppy_toolbar_text_width(label),w/2,w-8);
+        x=puppy_toolbar_breadcrumbs(project,rgb,w,x,path_edge)+8;
+    }
+    return puppy_bar_text(rgb,w,x,25,label,w-8);
+}
 fn puppy_toolbar_build(w) {
     puppy_breadcrumb_assembly_right=0;puppy_breadcrumb_part_right=0;
     if puppy_reader_report {
@@ -278,9 +286,10 @@ fn puppy_toolbar_build(w) {
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
     if puppy_extrusion_open || puppy_revolve_open || puppy_shell_open {
-        if puppy_number_text {puppy_number_bar(rgb,w,project,0);}
+        if puppy_number_text {puppy_number_bar(rgb,w,project,1);}
         else {
-            if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
+            let label="";if puppy_status {label=puppy_status+24;}
+            puppy_toolbar_workspace_status(rgb,w,project,label);
             if w<800 {puppy_compact_bar(rgb,w,project,-1);}
             else {puppy_action_bar(puppy_feature_preview_actions(),rgb,w,-1);}
         }
@@ -342,7 +351,8 @@ fn puppy_toolbar_build(w) {
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     if puppy_patterns {
-        let label=puppy_pattern_hint(project);if puppy_status {label=puppy_status+24;}puppy_bar_text(rgb,w,12,25,label,w-12);
+        let label=puppy_pattern_hint(project);if puppy_status {label=puppy_status+24;}
+        puppy_toolbar_workspace_status(rgb,w,project,label);
         if w<800 {puppy_compact_bar(rgb,w,project,-1);}else {puppy_action_bar(puppy_pattern_actions(project),rgb,w,-1);}
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
@@ -503,11 +513,14 @@ fn puppy_breadcrumb_target(x,y) {
     if puppy_sketch && x>=puppy_breadcrumb_part_left && x<puppy_breadcrumb_part_right {return 2;}
     return 0;
 }
-fn puppy_breadcrumb_click(project,x,y) {
-    let target=puppy_breadcrumb_target(x,y);
-    if !target {return 0;}
+fn puppy_breadcrumb_navigate(project,target) {
+    puppy_forget_click();puppy_design_menu_close();puppy_menu_rows=0;
+    puppy_search_focus(0);puppy_design_focus=0;
     if puppy_number_text {puppy_number_close();}
     if puppy_line_report {puppy_line_end();}
+    if puppy_patterns {puppy_pattern_end();}
+    if puppy_extrusion_open {puppy_extrusion_close();}
+    if puppy_revolve_open {puppy_revolve_close();}
     if target==1 {return puppy_workspace_return_to_assembly(project);}
     return puppy_workspace_return_to_part(project);
 }
