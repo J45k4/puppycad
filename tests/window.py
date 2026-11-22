@@ -55,6 +55,7 @@ with tempfile.TemporaryDirectory() as tmp:
         xlib.XQueryTree.argtypes = [pointer, XID, C.POINTER(XID), C.POINTER(XID), C.POINTER(C.POINTER(XID)), C.POINTER(C.c_uint)]
         xlib.XFree.argtypes = [pointer]
         xlib.XSetInputFocus.argtypes = [pointer, XID, integer, XID]
+        xlib.XResizeWindow.argtypes = [pointer, XID, C.c_uint, C.c_uint]
         xlib.XStringToKeysym.argtypes = [C.c_char_p]
         xlib.XStringToKeysym.restype = XID
         xlib.XKeysymToKeycode.argtypes = [pointer, XID]
@@ -174,8 +175,8 @@ with tempfile.TemporaryDirectory() as tmp:
             for char in text:
                 key({'.':'period','-':'minus',' ':'space','=':'equal','#':'Shift_L+3','+':'Shift_L+equal','*':'Shift_L+8'}.get(char,char))
 
-        def breadcrumb_links(window, name):
-            """Locate visible breadcrumb links independently of label widths."""
+        def breadcrumb_frame(window, name):
+            """Capture the toolbar and locate its visible breadcrumb links."""
             from PIL import Image
 
             output=output_dir/name
@@ -190,7 +191,10 @@ with tempfile.TemporaryDirectory() as tmp:
                     spans[-1][1]=x
                 else:
                     spans.append([x,x])
-            return [(left+right)//2 for left,right in spans if right-left>=6]
+            return rgb, [(left,right) for left,right in spans if right-left>=6]
+
+        def breadcrumb_links(window, name):
+            return [(left+right)//2 for left,right in breadcrumb_frame(window,name)[1]]
 
         # One drawing owns all three workspaces and the sketch history.
         workspace_path=Path(tmp)/"Workspaces.pcad"
@@ -221,11 +225,21 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"|  Sketch")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"workspace-sketch.png"],check=True)
         key("F3")  # Breadcrumb navigation also works with the sidebar hidden.
-        assembly_link,part_link=breadcrumb_links(window,"workspace-nested-sketch-breadcrumbs.png")
+        wide,wide_links=breadcrumb_frame(window,"workspace-nested-sketch-breadcrumbs.png")
+        assembly_link,part_link=[(left+right)//2 for left,right in wide_links]
         assert assembly_link<part_link
         click(window,part_link,20)
         verify(window,"Part workspace")
         assert "  |  Base  |  Solid" in title(window)
+        click(window,43,92)
+        click(window,229,125)
+        for letter in "part-arm":
+            key("minus" if letter=="-" else letter)
+        key("Return")
+        click(window,85,160)
+        verify(window,"Opened Arm")
+        assert "  |  Arm  |  Solid" in title(window)
+        key("F3")  # Arm is another part in the same assembly.
         assembly_link,=breadcrumb_links(window,"workspace-nested-part-breadcrumbs.png")
         click(window,assembly_link,20)
         verify(window,"Opened Arm assembly")
@@ -244,10 +258,53 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,325,55)
         verify(window,"Editing Base sketch")
         key("F3")
+        xlib.XResizeWindow(connection,window,812,640)
+        xlib.XSync(connection,0)
+        time.sleep(.22)
+        narrow,narrow_links=breadcrumb_frame(window,"workspace-narrow-sketch-breadcrumbs.png")
+        assert narrow.size==(812,640) and len(narrow_links)==2
+        from PIL import Image, ImageChops
+
+        # Compare the current Sketch word with its wide rendering, aligned to
+        # the end of the Part link. The sketch name can be omitted at this width.
+        wide_left=wide_links[-1][1]+1
+        fill=wide.getpixel((0,8))
+        wide_right=next(x for x in range(wide_left,wide.width) if wide.getpixel((x,8))!=fill)
+        wide_caption=wide.crop((wide_left,8,wide_right,29))
+        ink=ImageChops.difference(wide_caption,Image.new("RGB",wide_caption.size,fill))
+        words=[]
+        for x in range(ink.width):
+            if ink.crop((x,0,x+1,ink.height)).getbbox():
+                if words and x<=words[-1][1]+3:
+                    words[-1][1]=x
+                else:
+                    words.append([x,x])
+        assert len(words)>=3, "Expected the separator, Sketch and its name in the wide breadcrumb"
+        sketch_start,sketch_end=words[1]
+        narrow_left=narrow_links[-1][1]+1
+        narrow_caption=narrow.crop((narrow_left+sketch_start,8,narrow_left+sketch_end+1,29))
+        wide_sketch=wide_caption.crop((sketch_start,0,sketch_end+1,wide_caption.height))
+        assert ImageChops.difference(wide_sketch,narrow_caption).getbbox() is None, \
+            "The current Sketch label should remain intact near the toolbar breakpoint"
+
+        part_link=sum(narrow_links[-1])//2
+        xlib.XWarpPointer(connection,0,window,0,0,0,0,part_link,20)
+        xlib.XSync(connection,0)
+        time.sleep(.15)
+        hover,_=breadcrumb_frame(window,"workspace-narrow-breadcrumb-hover.png")
+        assert hover.getpixel((part_link,8))==(45,64,67), "The Part breadcrumb should highlight on hover"
+        click(window,part_link,20)
+        verify(window,"Part workspace")
+        assert "  |  Base  |  Solid" in title(window)
+        click(window,325,55)
+        verify(window,"Editing Base sketch")
         assembly_link,part_link=breadcrumb_links(window,Path(tmp)/"nested-sketch-revisited.png")
         click(window,assembly_link,20)  # Skip Part and go straight to the original assembly.
         verify(window,"Opened Arm assembly")
         assert "  |  Arm assembly  |  Assembly" in title(window)
+        xlib.XResizeWindow(connection,window,960,640)
+        xlib.XSync(connection,0)
+        time.sleep(.22)
         key("Control_L+s")
         verify(window,"Saved")
         assert json.loads(workspace_path.read_bytes())["selectedPath"]==[3]
@@ -309,7 +366,6 @@ with tempfile.TemporaryDirectory() as tmp:
         for x in (293,457):
             assert toolbar.getpixel((x,62))==(143,217,184)
 
-        xlib.XResizeWindow.argtypes = [pointer, XID, C.c_uint, C.c_uint]
         xlib.XResizeWindow(connection,window,420,460)
         xlib.XSync(connection,0)
         time.sleep(.22)

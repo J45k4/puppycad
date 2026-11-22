@@ -209,7 +209,7 @@ fn puppy_open_item(project,next) {
     let selection=j_array();j_add(selection,0,j_number(next));cg_j_set(project,"selectedPath",selection);
     let previous=puppy_draft_index;puppy_draft_index=0;
     if !puppy_refresh(project) {puppy_draft_index=previous;return 0;}
-    if previous_item!=cad_project_item(project) {puppy_workspace_track_parent(previous_item,cad_project_part(project));}
+    if previous_item!=cad_project_item(project) {puppy_workspace_track_parent(project,previous_item,cad_project_part(project));}
     puppy_selected=0;puppy_property=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_part_choice=0;puppy_sketch=puppy_draft;
     puppy_push(project);return puppy_title(project,"Item opened");
 }
@@ -518,7 +518,11 @@ fn puppy_editor(path,source,project,report) {
             if kind==GUI_KEY_DOWN || kind==GUI_KEY_UP {puppy_pattern_mods=gui_event_modifiers(event);}
             if kind==GUI_FOCUS && !gui_event_code(event) {puppy_pattern_mods=0;}
             if kind==GUI_MOUSE_MOVE || kind==GUI_MOUSE_DOWN {
-                puppy_pointer_x=gui_event_x(event);puppy_pointer_y=gui_event_y(event);
+                let x=gui_event_x(event);let y=gui_event_y(event);
+                if puppy_breadcrumb_target(x,y)!=puppy_breadcrumb_target(puppy_pointer_x,puppy_pointer_y) {
+                    puppy_toolbar_dirty=1;dirty=1;
+                }
+                puppy_pointer_x=x;puppy_pointer_y=y;
             }
             if puppy_reader_report {
                 let result=puppy_reader_event(event);running=result!=0;
