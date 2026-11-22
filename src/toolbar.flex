@@ -629,7 +629,6 @@ fn puppy_compact_actions(project) {
     let solid=!puppy_sketch && !puppy_empty;let assembly=m_eq(j_string(cad_project_item(project),"type"),"assembly");
     puppy_compact_button(rows,"Undo",29,192);puppy_compact_button(rows,"Redo",28,192);
     puppy_compact_button(rows,"Save",22,192);
-    if studio && pc_first(j_get(project,"nodes")) {puppy_compact_button(rows,"History",64,0);}
     if studio || (!puppy_draft && !puppy_empty) {
         let editable=0;if studio {editable=puppy_studio_field(project);}
         else if assembly {editable=puppy_servo(j_get(cad_project_item(project),"data"));}
@@ -689,6 +688,7 @@ fn puppy_compact_actions(project) {
     }
     if cad_project_part(project) {puppy_compact_button(rows,"History",64,0);puppy_compact_button(rows,"Dimensions",65,0);}
     if puppy_active_field(project) {puppy_compact_button(rows,"Set value",59,0);}
+    if studio && pc_first(j_get(project,"nodes")) {puppy_compact_button(rows,"History",64,0);}
     return rows;
 }
 fn puppy_compact_bar(rgb,w,project,click) {

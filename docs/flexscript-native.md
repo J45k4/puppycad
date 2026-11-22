@@ -415,7 +415,8 @@ before exporting. Rolling back before the first feature leaves an empty
 viewport. Reopen History to move the rollback position forward.
 
 For Biscuit standalone schema-1 files, open **History** (F7), or right-click
-a feature or part in Design and choose **Feature history**. Select a modifier
+a feature or part in Design and choose **Feature history**. In a narrow
+window, **History** is on the last toolbar page. Select a modifier
 and use **Suppress** or **Restore** (S) to preview the change. **Move earlier**
 and **Move later** (Up and Down) preview an adjacent reorder. Press **Apply**
 (Enter) to add the edit to Undo history, or **Cancel** (Escape) to return to

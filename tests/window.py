@@ -1879,6 +1879,15 @@ with tempfile.TemporaryDirectory() as tmp:
         history_export("reopened",1146)
         key("Escape")
         verify(window,"Feature history closed")
+        xlib.XResizeWindow(connection,window,420,460)
+        xlib.XSync(connection,0)
+        time.sleep(.22)
+        click(window,20,55)  # Wrap to the final toolbar page.
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"standalone-history-compact.png"],check=True)
+        click(window,206,55)
+        verify(window,"4 / 4   finish   active")
+        key("Escape")
+        verify(window,"Feature history closed")
         key("Escape")
         app.wait(3)
 
