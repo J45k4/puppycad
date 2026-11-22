@@ -307,6 +307,9 @@ fn puppy_command(key,mods) {
     }
     if puppy_history_rows {
         if !(mods&0x3c0) {return puppy_history_key(cad_project_open(puppy_history+24),key);}
+        if puppy_history_recovery && (mods&192) && (key==22 || key==8) {
+            return puppy_title(cad_project_open(puppy_history+24),"Apply a repair before saving or exporting");
+        }
         if puppy_history_preview && (key==29 || key==28) {return 1;}
         if !(mods&192) || (key!=29 && key!=28 && key!=22 && key!=8) {return 1;}
     }
@@ -367,11 +370,11 @@ fn puppy_command(key,mods) {
         if key==17 {return puppy_add_item(project,"part");}
         if key==4 {return puppy_add_item(project,"assembly");}
     }
-    if key==22 && mods&3 && !(mods&0x3c0) && cad_project_part(project) && !puppy_draft {
+    if key==22 && mods&3 && !(mods&0x3c0) && pc_nodes(cad_project_part(project)) && !puppy_draft {
         return puppy_start_plane_chooser(project);
     }
     if key==69 && !(mods&0x3c3) {return puppy_workspace_switch(project);}
-    if key==9 && !(mods&0x3c0) && cad_project_part(project) && !puppy_draft {
+    if key==9 && !(mods&0x3c0) && pc_nodes(cad_project_part(project)) && !puppy_draft {
         puppy_sketch=0;puppy_picking_face=!puppy_picking_face;
         if puppy_picking_face {return puppy_title(project,"Click a face for the new sketch");}
         return puppy_title(project,0);
@@ -404,7 +407,7 @@ fn puppy_command(key,mods) {
             keep_part=keep_part && m_eq(owner,j_string(next_part,"id"))
                 && !m_eq(j_encode(j_get(puppy_part_tree(part),"sketchVisibility")),
                          j_encode(j_get(puppy_part_tree(next_part),"sketchVisibility")));
-            if puppy_refresh(project) {
+            if puppy_refresh(project) || puppy_history_try_recovery(project,cg_error) {
                 puppy_history=next;puppy_anchor=0;
                 let next_item=cad_project_item(project);
                 if !m_eq(j_string(previous_item,"id"),j_string(next_item,"id")) {
@@ -523,6 +526,7 @@ fn puppy_refresh(project) {
     let error=j_get(mesh,"error");
     if !error {
         if !puppy_upload(project,mesh) {return 0;}puppy_empty=0;
+        puppy_history_recovery=0;
         if puppy_pending_face(project) {puppy_sketch=1;puppy_draft=1;return 1;}
         if puppy_draft || !cad_project_part(project) {puppy_sketch=0;puppy_property=0;}puppy_draft=0;return 1;
     }
@@ -547,8 +551,10 @@ fn puppy_editor(path,source,project,report) {
             let why=cg_error;if !why {why=gui_error;}if !why {why="Cannot display drawing";}
             let status=puppy_error(why);puppy_view_close();return status;
         }
-        let message=puppy_snapshot(cg_error);m_reset(mark);cg_j_text(report,"readOnly",m_slice(message+24,load64(message+16)));
-        puppy_drop(message);mark=m_mark();
+        if !puppy_history_try_recovery(project,cg_error) {
+            let message=puppy_snapshot(cg_error);m_reset(mark);cg_j_text(report,"readOnly",m_slice(message+24,load64(message+16)));
+            puppy_drop(message);mark=m_mark();
+        }
     }
     if j_get(report,"readOnly") {
         if !puppy_reader_begin(report,source) {puppy_view_close();return puppy_error(gui_error);}
@@ -557,7 +563,7 @@ fn puppy_editor(path,source,project,report) {
     puppy_projection_save_needed=normalized && !puppy_reader_report;
     if !source || puppy_projection_save_needed {source=j_encode(project);}
     puppy_history=puppy_history_snapshot(source);puppy_root=puppy_history;puppy_saved_history=puppy_history;
-    if !puppy_reader_report {
+    if !puppy_reader_report && !puppy_history_recovery {
         if puppy_step_input {puppy_step_begin(project);}
         else if cad_project_is_studio(project) {puppy_title(project,"PCAD design opened");}
         else if puppy_draft {puppy_title(project,puppy_draft_hint());}
@@ -620,7 +626,7 @@ fn puppy_editor(path,source,project,report) {
                 }
                 if puppy_history_rows {
                     let current=cad_project_open(puppy_history+24);
-                    if y>=42 && y<68 {puppy_compact_bar(0,width,current,x);}
+                    if y>=42 && y<68 {running=puppy_compact_bar(0,width,current,x);}
                     else if x<puppy_objects_width() && y>=76 {puppy_history_click(current,y);}
                     dirty=1;
                 }

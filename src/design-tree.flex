@@ -95,6 +95,14 @@ fn puppy_design_node(rows,parent,node,nodes,used) {
     return row;
 }
 fn puppy_design_part(rows,parent,part) {
+    if pc_legacy_solid_part(part) {
+        let data=j_get(part,"data");let step=pc_first(pc_legacy_solid_steps(data));
+        while step {
+            puppy_design_row(rows,parent,"legacy-step",step,pc_legacy_step_name(data,step),0);
+            step=load64(step+24);
+        }
+        return 1;
+    }
     let nodes=pc_nodes(part);let ordered=j_get(j_get(j_get(part,"data"),"tree"),"orderedNodeIds");
     let n=pc_first(nodes);let planes=0;let used=j_object();let sketch_uses=puppy_part_used_sketches(part);
     while n {
@@ -211,7 +219,7 @@ fn puppy_design_action(row) {
     if m_eq(kind,"assembly") {return "Open assembly";}
     if m_eq(kind,"sheet") {return "Open sheet";}
     if m_eq(kind,"add-sheet") {return "Create sheet";}
-    if m_eq(kind,"feature") || m_eq(kind,"definition") {return "Feature history";}
+    if m_eq(kind,"feature") || m_eq(kind,"definition") || m_eq(kind,"legacy-step") {return "Feature history";}
     if puppy_connector_row(row) {return "Edit connector";}
     if puppy_replace_row(row) {return "Replace part";}
     if m_eq(kind,j_string(node,"type")) && pc_model_feature(node) && m_eq(j_string(puppy_design_owner(row),"type"),"part") {return "Feature history";}

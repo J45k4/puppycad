@@ -27,8 +27,8 @@ fn puppy_direction_has_curves(project,circular,minimum) {
     return 0;
 }
 fn puppy_direction_has_tangent(project) {
-    let minimum=2;if puppy_direction_lines() {minimum=1;}
-    return puppy_direction_has_curves(project,1,minimum);
+    if puppy_direction_lines() {return puppy_direction_has_curves(project,0,1);}
+    return puppy_direction_has_curves(project,1,2);
 }
 fn puppy_direction_available() {
     if !puppy_line_report || puppy_direction_mode || puppy_symmetry_mode || puppy_distance_picking || puppy_line_drag {return 0;}
@@ -57,7 +57,7 @@ fn puppy_direction_hint() {
         return "Pick the outer curve for Internal tangent";
     }
     let entity="line for ";if puppy_direction_mode>=5 {entity="curve for ";}
-    if puppy_direction_mode==6 && puppy_direction_lines() {entity="line or circular curve for ";}
+    if puppy_direction_mode==6 && puppy_direction_lines() {entity="line or curve for ";}
     return m_cat(pick,m_cat(entity,puppy_direction_name()));
 }
 fn puppy_direction_actions(buttons) {
@@ -67,7 +67,7 @@ fn puppy_direction_actions(buttons) {
     let project=cad_project_open(puppy_history+24);
     if puppy_direction_has_curves(project,0,2) {puppy_compact_button(buttons,"Concentric",6,0);}
     let circular_pair=puppy_direction_has_curves(project,1,2);
-    if circular_pair || (puppy_direction_lines() && puppy_direction_has_curves(project,1,1)) {puppy_compact_button(buttons,"Tangent",23,0);}
+    if circular_pair || (puppy_direction_lines() && puppy_direction_has_curves(project,0,1)) {puppy_compact_button(buttons,"Tangent",23,0);}
     if circular_pair {puppy_compact_button(buttons,"Internal tangent",12,0);}
     puppy_compact_button(buttons,"Cancel",GUI_KEY_ESCAPE,0);return buttons;
 }
@@ -89,7 +89,8 @@ fn puppy_direction_pick(project,x,y) {
     if center {
         let hit=puppy_sketch_hit(nodes,sk,point);
         if puppy_direction_mode==5 {picked=pc_concentric_curve(nodes,sk,j_string(hit,"id"));}
-        else if pct_circular(hit) || (puppy_direction_mode==6 && pct_line(hit)) {picked=hit;}
+        else if puppy_direction_mode==6 && (pct_line(hit) || pct_line_curve(hit)) {picked=hit;}
+        else if puppy_direction_mode==7 && pct_circular(hit) {picked=hit;}
     }else {picked=puppy_mirror_hit(nodes,sk,point,1);}
     if !picked {return puppy_title(project,puppy_direction_hint());}
     let id=j_string(picked,"id");

@@ -1,4 +1,5 @@
 import "cad/studio-history.flex";
+import "cad/project-legacy-edit.flex";
 
 // Rows contain saved feature IDs and the evaluator's status for this rebuild.
 global puppy_history_rows=0;
@@ -8,6 +9,8 @@ global puppy_history_part=0;
 global puppy_history_preview=0;
 global puppy_history_proposal=0;
 global puppy_history_delta=0;
+global puppy_history_recovery=0;
+global puppy_history_legacy_index=0;
 fn puppy_history_diagnostic(rows) {
     if puppy_history_problem {puppy_drop(puppy_history_problem);puppy_history_problem=0;}
     let row=pc_first(rows);
@@ -28,7 +31,7 @@ fn puppy_history_clear_preview() {
 fn puppy_history_close() {
     if puppy_history_rows {puppy_drop(puppy_history_rows);puppy_history_rows=0;}
     if puppy_history_part {puppy_drop(puppy_history_part);puppy_history_part=0;}
-    puppy_history_clear_preview();puppy_tree_dirty=1;return 1;
+    puppy_history_recovery=0;puppy_history_clear_preview();puppy_tree_dirty=1;return 1;
 }
 fn puppy_history_set_rows(rows) {
     if puppy_history_rows {puppy_drop(puppy_history_rows);}
@@ -39,6 +42,15 @@ fn puppy_history_feature(rows) {
     while row && i<puppy_history_index {row=load64(row+24);i=i+1;}
     return row;
 }
+fn puppy_history_legacy_field(project) {
+    if !puppy_history_rows || !pc_legacy_solid_part(cad_project_part(project)) {return 0;}
+    let row=puppy_history_feature(j_parse(puppy_history_rows+24));
+    let fields=cad_project_legacy_step_fields(project,j_string(row,"id"));
+    let count=cg_j_count(fields);if !count {return 0;}
+    puppy_history_legacy_index=puppy_history_legacy_index%count;
+    let field=sr_arg(fields,puppy_history_legacy_index);
+    return cg_v(field,pc_legacy_number(field,"value",0),j_string(field,"label"));
+}
 fn puppy_history_select(project,rows) {
     let count=cg_j_count(rows);
     if !count {puppy_history_close();return puppy_title(project,"This part has no solid features");}
@@ -48,6 +60,8 @@ fn puppy_history_select(project,rows) {
     let state=j_string(row,"state");if m_eq(state,"rolledBack") {state="rolled back";}
     let text=m_cat(m_int(puppy_history_index+1),m_cat(" / ",m_int(count)));
     text=m_cat(text,m_cat("   ",m_cat(label,m_cat("   ",state))));
+    let field=puppy_history_legacy_field(project);
+    if field {text=m_cat(text,m_cat("   ",m_cat(load64(field+16),m_cat("  ",puppy_display_number(load64(field+8))))));}
     if j_get(row,"message") {text=m_cat(text,m_cat("   ",j_string(row,"message")));}
     return puppy_title(project,text);
 }
@@ -57,7 +71,7 @@ fn puppy_history_begin_at(project,id,part) {
     let rows=j_get(history,"features");
     if !rows {return puppy_title(project,cg_error);}
     if !pc_first(rows) {return puppy_title(project,"This part has no solid features");}
-    puppy_history_close();puppy_search_focus(0);puppy_picking_face=0;puppy_history_index=0;
+    puppy_history_close();puppy_search_focus(0);puppy_picking_face=0;puppy_history_index=0;puppy_history_legacy_index=0;
     if studio {
         let first=pc_first(j_get(project,"parts"));
         if !part && first && !load64(first+24) {part=first;}
@@ -84,12 +98,36 @@ fn puppy_history_begin(project) {
 }
 fn puppy_history_has_earlier(project,feature) {
     if !puppy_history_part {return 0;}
+    if puppy_history_recovery && m_eq(j_string(feature,"state"),"error") {return 1;}
     let id=j_string(feature,"id");let earlier=pc_first(cad_studio_earlier_features(project,puppy_history_part+24));
     while earlier {
         if m_eq(j_value(earlier),id) {return 1;}
         earlier=load64(earlier+24);
     }
     return 0;
+}
+// Inspect only a known final modifier named by the evaluator. A previous
+// state and the repaired full graph must independently produce closed solids.
+fn puppy_history_try_recovery(project,reason) {
+    if !reason || !cad_project_is_studio(project) {return 0;}
+    let history=cad_studio_feature_history(project);let rows=j_get(history,"features");
+    let part=pc_first(j_get(project,"parts"));
+    while rows && part {
+        let id=j_string(part,"node");let row=pc_find(rows,id);let source=j_string(row,"source");
+        let prefix=m_cat("Feature ",m_cat(id,": "));let size=m_len(prefix);
+        if m_len(source) && m_eq(j_string(row,"state"),"active") && m_len(reason)>size && m_eq(m_slice(reason,size),prefix) {
+            let earlier=cad_studio_preview_feature(project,j_string(part,"id"),source);
+            if j_value(j_get(earlier,"closed")) && cad_studio_suppress_feature(project,id,1) {
+                puppy_history_begin_at(project,id,part);
+                rows=j_parse(puppy_history_rows+24);row=pc_find(rows,id);
+                cg_j_text(row,"state","error");cg_j_text(row,"message",reason+size);
+                puppy_history_set_rows(rows);puppy_history_recovery=1;puppy_empty=1;
+                return puppy_history_select(project,rows);
+            }
+        }
+        part=load64(part+24);
+    }
+    cg_error=reason;return 0;
 }
 fn puppy_history_actions(project) {
     let rows=cg_array();
@@ -99,6 +137,20 @@ fn puppy_history_actions(project) {
     }
     puppy_compact_button(rows,"Previous",80,0);puppy_compact_button(rows,"Next",79,0);
     let feature=puppy_history_feature(j_parse(puppy_history_rows+24));
+    if pc_legacy_solid_part(cad_project_part(project)) {
+        puppy_compact_button(rows,"Set value",59,0);puppy_compact_button(rows,"Next field",43,0);
+        let operation="Join";
+        let saved=j_string(feature,"operation");
+        if m_eq(saved,"cut") {operation="Cut";}else if m_eq(saved,"intersect") {operation="Intersect";}
+        puppy_compact_button(rows,operation,18,0);
+        if m_eq(j_string(feature,"type"),"extrusion") {
+            let data=j_get(cad_project_part(project),"data");let step=pc_find(pc_legacy_solid_steps(data),j_string(feature,"id"));
+            let extent="Blind";if m_eq(j_string(step,"endCondition"),"through-all") {extent="Through all";}
+            puppy_compact_button(rows,extent,8,0);
+        }
+        puppy_compact_button(rows,"Move earlier",82,0);puppy_compact_button(rows,"Move later",81,0);
+        puppy_compact_button(rows,"Done",GUI_KEY_ESCAPE,0);return rows;
+    }
     if cad_project_is_studio(project) {
         if j_get(feature,"source") {
             let toggle="Suppress";if m_eq(j_string(feature,"state"),"suppressed") {toggle="Restore";}
@@ -106,7 +158,8 @@ fn puppy_history_actions(project) {
         }
         puppy_compact_button(rows,"Move earlier",82,0);puppy_compact_button(rows,"Move later",81,0);
         if puppy_history_has_earlier(project,feature) {puppy_compact_button(rows,"Preview earlier",4,0);}
-        puppy_compact_button(rows,"Done",GUI_KEY_ESCAPE,0);return rows;
+        let finish="Done";if puppy_history_recovery {finish="Close file";}
+        puppy_compact_button(rows,finish,GUI_KEY_ESCAPE,0);return rows;
     }
     let node=pc_find(pc_nodes(cad_project_part(project)),j_string(feature,"id"));let toggle="Suppress";
     if j_value(j_get(node,"suppressed")) {toggle="Unsuppress";}
@@ -120,6 +173,9 @@ fn puppy_history_studio_preview(project,row,key) {
     let id=j_string(row,"id");let proposal=0;let delta=0;let mesh=0;let status="";
     if key==4 {
         if !puppy_history_part {return puppy_title(project,"Open History from a part to preview its earlier states");}
+        if puppy_history_recovery && m_eq(j_string(row,"state"),"error") {
+            id=j_string(row,"source");row=pc_find(j_parse(puppy_history_rows+24),id);
+        }
         mesh=cad_studio_preview_feature(project,puppy_history_part+24,id);
         status=m_cat("Earlier preview / ",j_string(row,"name"));
     }else {
@@ -140,13 +196,14 @@ fn puppy_history_studio_preview(project,row,key) {
         let error=cg_error;if !error {error=gui_error;}
         return puppy_title(project,error);
     }
-    puppy_clear_pick();puppy_history_preview=1;puppy_history_delta=delta;puppy_bar_page=0;
+    puppy_empty=0;puppy_clear_pick();puppy_history_preview=1;puppy_history_delta=delta;puppy_bar_page=0;
     if proposal {puppy_history_proposal=puppy_snapshot(j_encode(proposal));}
     return puppy_title(project,status);
 }
 fn puppy_history_finish_preview(project,key) {
     if key==GUI_KEY_ESCAPE || key==64 {
-        if !puppy_refresh(project) {return puppy_title(project,cg_error);}
+        if puppy_history_recovery {puppy_empty=1;}
+        else if !puppy_refresh(project) {return puppy_title(project,cg_error);}
         puppy_history_clear_preview();return puppy_title(project,"Feature preview cancelled");
     }
     if key!=40 || !puppy_history_proposal {return 1;}
@@ -155,14 +212,38 @@ fn puppy_history_finish_preview(project,key) {
     puppy_push(updated);puppy_history_index=puppy_history_index+puppy_history_delta;
     puppy_history_clear_preview();return puppy_history_select(updated,j_parse(puppy_history_rows+24));
 }
+fn puppy_history_legacy_key(project,row,key) {
+    let id=j_string(row,"id");
+    if key==59 {let field=puppy_history_legacy_field(project);if field {return puppy_number_open(project,field);}return 1;}
+    if key==43 {puppy_history_legacy_index=puppy_history_legacy_index+1;return puppy_history_select(project,j_parse(puppy_history_rows+24));}
+    let updated=0;let shift=0;
+    if key==82 || key==81 {
+        shift=1;if key==82 {shift=-1;}
+        updated=cad_project_move_legacy_step(project,id,shift);
+    }else if key==18 {
+        let operation=j_string(row,"operation");let next="join";
+        if m_eq(operation,"join") {next="cut";}else if m_eq(operation,"cut") {next="intersect";}
+        updated=cad_project_edit_legacy_step(project,id,"operation",j_text(next));
+    }else if key==8 && m_eq(j_string(row,"type"),"extrusion") {
+        let data=j_get(cad_project_part(project),"data");let step=pc_find(pc_legacy_solid_steps(data),id);
+        let next="through-all";if m_eq(j_string(step,"endCondition"),"through-all") {next="blind";}
+        updated=cad_project_edit_legacy_step(project,id,"endCondition",j_text(next));
+    }else {return 1;}
+    if !updated || !puppy_refresh(updated) {return puppy_title(project,cg_error);}
+    puppy_push(updated);puppy_history_index=puppy_history_index+shift;
+    return puppy_history_select(updated,j_parse(puppy_history_rows+24));
+}
 fn puppy_history_key(project,key) {
     if puppy_history_preview {return puppy_history_finish_preview(project,key);}
+    if puppy_history_recovery && (key==GUI_KEY_ESCAPE || key==64) {return key==64;}
     if key==GUI_KEY_ESCAPE || key==64 {puppy_history_close();if puppy_history_problem {return puppy_title(project,puppy_history_problem+24);}return puppy_title(project,"Feature history closed");}
     let rows=j_parse(puppy_history_rows+24);let count=cg_j_count(rows);
     if key==80 || key==79 {
         if key==80 {puppy_history_index=puppy_history_index-1;}else {puppy_history_index=puppy_history_index+1;}
+        puppy_history_legacy_index=0;
         return puppy_history_select(project,rows);
     }
+    if pc_legacy_solid_part(cad_project_part(project)) {return puppy_history_legacy_key(project,puppy_history_feature(rows),key);}
     if cad_project_is_studio(project) {
         if key==4 || key==22 || key==81 || key==82 {return puppy_history_studio_preview(project,puppy_history_feature(rows),key);}
         return 1;
@@ -221,6 +302,6 @@ fn puppy_history_click(project,y) {
     if puppy_history_preview {return 1;}
     let rows=j_parse(puppy_history_rows+24);let count=cg_j_count(rows);
     let index=puppy_history_offset(count,gui_height(load64(puppy_device))-76)+(y-82)/32;
-    if y>=82 && index<count {puppy_history_index=index;return puppy_history_select(project,rows);}
+    if y>=82 && index<count {puppy_history_index=index;puppy_history_legacy_index=0;return puppy_history_select(project,rows);}
     return 1;
 }

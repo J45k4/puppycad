@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`c26c9c8ae340baa76ed737c52bdd2e9838a9ce89` includes the shared library and
+`d75dfbe834dd43540bc3ac44db21a0bc839206c2` includes the shared library and
 the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
 VM verified all 45 historical CAD and runtime import paths against the
 archived catalog and VM. The v10 artifact lineage, the v11 worker and
@@ -117,6 +117,23 @@ its signed sweep. The headless editor changes the tangent circle's diameter
 from 20 to 24 mm, reopens, extrudes and matches Rust's 3MF. The checked VM
 and two v11 frozen jobs match the native STL bytes.
 
+Line tangency also supports ellipses and elliptic arcs. The native test
+changes the width from 40 to 48 mm and the rotation from 30° to 45°, then
+undoes, redoes, reopens and extrudes. Rust verifies the resulting 3MF.
+
+The shared SDK evaluates original TypeScript PartBuilder v4 files in their
+`features` and `solidSteps` representation. Six reference fixtures cover a
+translated intersection, face sockets before and after a source translation,
+a transverse through-all cut, taper with a revolve, and a partial revolve.
+In the editor, **History** changes a legacy intersection's depth and X
+translation and rejects a disjoint edit and a dependency-breaking reorder.
+The saved file retains its original format and sketch references. The
+reopened 720 mm³ export matches TypeScript. The checked VM reconstructs the
+edited source and two v11 workers emit the same STL bytes. The authenticated
+Files and frozen download flows preserve all six original source revisions
+and their checked artifact hashes. Legacy sketch editing, lofts and several
+finishes still need support.
+
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the
 selected part while leaving its saved output intact. With the original
@@ -124,6 +141,11 @@ Biscuit history fixture, the native editor and the current and archived
 checked VMs agree on the 1,146 mm³ active part and the 1,200 mm³ suppressed
 part. Two frozen v11 jobs retained their matching artifacts after restart.
 The GUI regression also checks earlier-state previews in a two-part file.
+When a known final modifier fails, the native editor can enter History if
+both an earlier state and suppression produce a closed body. The GUI checks
+that preview and Cancel preserve the source bytes, save and export stay
+blocked until Apply, and Undo can return to the failed state. The checked
+worker rejects the original invalid model and exports the repaired body.
 
 The pinned compiler and verifier scanner share a 4,096-function source
 limit. PuppyCAD and the assembled Biscuit portal build through the direct
@@ -414,12 +436,18 @@ original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
 within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with holes or concave traced boundaries still need clipping support.
+with holes still need selector and clipping support.
 For a closed convex loop of straight segments, TypeScript's edge ordinals
 and vertical aliases match native geometry with shuffled and reversed
 segments. The edited square's closed 3,960 mm³ STL also matches the checked
 VM and two frozen builds. Face attachments are covered for the documented
 aligned cases. See `workdir/flexscript/rotated-chamfer.png`.
+
+A saved selector on an eligible convex edge of a concave straight-line
+profile uses a bounded solid subtraction. A deep bevel can cross the notch
+without filling it. The native edit yields a closed 2,750 mm³ STL. The
+checked VM and two v11 frozen jobs match it byte for byte. The test also
+checks that ineligible inset and re-entrant edges fail without an STL.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.

@@ -1776,6 +1776,62 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Edit the original TypeScript PartBuilder records through native History.
+        legacy_path=Path(tmp)/"Legacy PartBuilder.pcad"
+        initial=(root/"tests/fixtures/legacy-partbuilder.pcad").read_bytes()
+        legacy_path.write_bytes(initial)
+        app,window=open_app(legacy_path,design_tree=True)
+        click(window,89,212)  # The second solid step in Design.
+        key("Return")
+        verify(window,"2 / 2   Intersect window   active   Depth  mm  8")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-partbuilder-history.png"],check=True)
+
+        def legacy_number(text):
+            key("F2")
+            verify(window,"Set value")
+            key("Control_L+a")
+            type_value(text)
+            key("Return")
+
+        legacy_number("6")
+        verify(window,"Depth  mm  6")
+        key("Tab")
+        verify(window,"Top scale  1")
+        key("Tab")
+        verify(window,"Translate X  mm  8")
+        legacy_number("240")
+        verify(window,"Legacy solid operations produced an empty part")
+        key("Escape")
+        assert legacy_path.read_bytes()==initial
+        legacy_number("6")
+        verify(window,"Translate X  mm  6")
+        key("Up")
+        verify(window,"The first legacy solid operation must join")
+        key("Control_L+z")
+        verify(window,"Translate X  mm  8")
+        key("Control_L+y")
+        verify(window,"Translate X  mm  6")
+        key("Control_L+s")
+        verify(window,"Saved")
+        expected=json.loads(initial)
+        expected["revision"]+=1
+        data=expected["items"][0]["data"]
+        data["solidSteps"][1]["translation"]["x"]=6
+        data["features"][-1]["depth"]=6
+        assert json.loads(legacy_path.read_bytes())==expected
+        shutil.copyfile(legacy_path,output_dir/"legacy-partbuilder-edited.pcad")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(legacy_path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        assert triangulation(legacy_path.with_suffix(".stl"))==([(0,10),(-6,6),(2,8)],720)
+        shutil.copyfile(legacy_path.with_suffix(".stl"),output_dir/"legacy-partbuilder-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -1912,6 +1968,88 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Feature history closed")
         key("Escape")
         app.wait(3)
+
+        damaged=Path(tmp)/"Recover standalone feature.pcad"
+        broken={**history_doc,"nodes":[*history_doc["nodes"][:-1],
+                                       {**history_doc["nodes"][-1],"position":[501,0,0]}]}
+        source=(json.dumps(broken,indent=2)+"\n").encode()
+        damaged.write_bytes(source)
+        app,window=open_app(damaged,"finish   error",design_tree=True)
+        verify(window,"CAD dimensions and coordinates must be within +/-500 mm")
+        key("Control_L+s")
+        verify(window,"Apply a repair before saving or exporting")
+        key("Control_L+e")
+        verify(window,"Apply a repair before saving or exporting")
+        mesh=damaged.with_suffix(".stl")
+        assert damaged.read_bytes()==source and not mesh.exists()
+        click(window,650,54)  # Preview earlier directly from the failed row.
+        verify(window,"Earlier preview / cut")
+        capture(window,"standalone-history-recovery-earlier.png",False,surface=(124,163,136))
+        key("Return")
+        verify(window,"Earlier preview / cut")
+        key("Control_L+Alt_L+e")
+        verify(window,"Apply a repair before saving or exporting")
+        assert damaged.read_bytes()==source and not damaged.with_suffix(".3mf").exists()
+        key("Escape")
+        verify(window,"Feature preview cancelled")
+        click(window,75,180)  # Re-select the failed row.
+        verify(window,"finish   error")
+        key("s")
+        verify(window,"Suppress preview / finish")
+        key("Control_L+s")
+        verify(window,"Apply a repair before saving or exporting")
+        assert damaged.read_bytes()==source
+        key("Escape")
+        verify(window,"Feature preview cancelled")
+        key("s")
+        verify(window,"Suppress preview / finish")
+        key("Return")
+        verify(window,"finish   suppressed")
+        key("Control_L+z")
+        verify(window,"finish   error")
+        key("Control_L+s")
+        verify(window,"Apply a repair before saving or exporting")
+        assert damaged.read_bytes()==source
+        key("Control_L+y")
+        verify(window,"finish   suppressed")
+        key("Control_L+s")
+        verify(window,"Saved")
+        repaired={**broken,"nodes":[*broken["nodes"][:-1],{**broken["nodes"][-1],"suppressed":True}]}
+        assert json.loads(damaged.read_bytes())==repaired
+        key("Control_L+e")
+        verify(window,"Exported")
+        assert triangulation(mesh)==([(0,20),(0,10),(0,6)],1146)
+        shutil.copyfile(damaged,output_dir/"standalone-history-repaired.pcad")
+        shutil.copyfile(mesh,output_dir/"standalone-history-repaired.stl")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(damaged,"PCAD design opened",design_tree=True)
+        key("Escape")
+        app.wait(3)
+
+        # Both a recognized but unrepairable graph and a graph containing an
+        # unknown record still get the byte-preserving source reader.
+        for name, doc, reason in (
+            ("Missing input",{**broken,"nodes":[*broken["nodes"][:-1],
+                                                {**broken["nodes"][-1],"source":"missing-stock"}]},"missing-stock"),
+            ("Future feature",{**broken,"nodes":[*broken["nodes"],{"id":"future","type":"futureBlend"}]},
+             "Unsupported standalone feature: futureBlend"),
+        ):
+            path=Path(tmp)/(name+".pcad")
+            original=(json.dumps(doc,indent=2)+"\n").encode()
+            path.write_bytes(original)
+            app,window=open_app(path,"Read-only  |  File source",design_tree=True)
+            verify(window,reason)
+            key("F7")
+            key("s")
+            key("Control_L+s")
+            key("Control_L+e")
+            verify(window,"Read-only  |  File source")
+            assert path.read_bytes()==original and not path.with_suffix(".stl").exists()
+            key("Escape")
+            app.wait(3)
 
         sheets=Path(tmp)/"Sensor sheets.pcad"
         shutil.copy(root/"tests/fixtures/sensor-unit.pcad",sheets)
@@ -2864,9 +3002,9 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,890,20)
         verify(window,"Choose a relation")
         click(window,46,54)
-        verify(window,"Pick the source line or circular curve for Tangent")
+        verify(window,"Pick the source line or curve for Tangent")
         click(window,480,616)
-        verify(window,"Pick the follower line or circular curve for Tangent")
+        verify(window,"Pick the follower line or curve for Tangent")
         click(window,652,272)
         verify(window,"Tangent updated")
         key("F2")
@@ -2906,6 +3044,94 @@ with tempfile.TemporaryDirectory() as tmp:
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         assert bounds==[(-12.0,12.0),(0.0,24.0),(0.0,10.0)] and math.isclose(volume,46080*math.sin(math.tau/64),rel_tol=1e-6)
+        key("Escape")
+        app.wait(3)
+
+        # A rotated ellipse follows a fixed tangent line through axis and rotation edits.
+        path=Path(tmp)/"Line tangent ellipse.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        item=document["items"][0]
+        item["name"]="Line tangent ellipse"
+        graph=item["data"]["cad"]
+        sketch=graph["nodes"][3]
+        sk=sketch["id"]
+        guide,roller="guide-line","roller-ellipse"
+        left,right=dict(x=-40,y=0),dict(x=40,y=0)
+        oval=dict(id=roller,type="ellipse",center=dict(x=0,y=30),width=40,height=20,rotation=30,segments=128)
+        graph["nodes"]=graph["nodes"][:4]+[
+            dict(id=guide,type="sketchLine",sketchId=sk,p0=left,p1=right,construction=True),
+            dict(id=roller,type="sketchPrimitive",sketchId=sk,primitive=oval),
+        ]
+        sketch["relations"]=[
+            dict(id="guide-start",type="fixed",anchor=dict(entityId=guide,point="p0"),position=left),
+            dict(id="guide-end",type="fixed",anchor=dict(entityId=guide,point="p1"),position=right),
+            *(dict(id=f"roller-{field}",type=field,entityId=roller,value=oval[field]) for field in ("width","height","rotation")),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"guide-line   80 mm   DOF 2")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,46,54)
+        verify(window,"Pick the source line or curve for Tangent")
+        click(window,480,604)
+        verify(window,"Pick the follower line or curve for Tangent")
+        click(window,677,148)
+        verify(window,"Tangent updated")
+
+        def edit_ellipse_tangent_dimension(text):
+            key("F2")
+            verify(window,"Set value")
+            key("Control_L+a")
+            type_value(text)
+            key("Return")
+            verify(window,"Edited")
+
+        def saved_ellipse_tangent(rotation):
+            key("Control_L+s")
+            verify(window,"Saved")
+            saved={node["id"]:node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+            link_id=f"native-external-tangent-{guide}-{roller}"
+            assert saved[guide]==graph["nodes"][4]
+            assert saved[sk]["relations"][-1]==dict(id=link_id,type="tangent",a=guide,b=roller)
+            primitive=saved[roller]["primitive"]
+            assert primitive["width"]==48 and primitive["height"]==20 and primitive["rotation"]==rotation
+            angle=math.radians(rotation)
+            assert primitive["center"]["x"]==0 and math.isclose(primitive["center"]["y"],math.hypot(24*math.sin(angle),10*math.cos(angle)),abs_tol=0.000002)
+
+        edit_ellipse_tangent_dimension("48 mm")
+        saved_ellipse_tangent(30)
+        key("Tab")
+        verify(window,"roller-ellipse   Height 20 mm   DOF 1")
+        key("Tab")
+        verify(window,"roller-ellipse   Rotation 30 deg   DOF 1")
+        edit_ellipse_tangent_dimension("45 deg")
+        key("Control_L+z")
+        verify(window,"roller-ellipse   Rotation 30 deg   DOF 1")
+        key("Control_L+y")
+        verify(window,"roller-ellipse   Rotation 45 deg   DOF 1")
+        saved_ellipse_tangent(45)
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"ellipse-tangent.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"guide-line   80 mm   DOF 1")
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"ellipse-tangent-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        assert bounds[2]==(0.0,10.0) and math.isclose(volume,153600*math.sin(math.tau/128),rel_tol=1e-6)
         key("Escape")
         app.wait(3)
 
@@ -6532,6 +6758,63 @@ with tempfile.TemporaryDirectory() as tmp:
         for expected in ((20,0,6),(20,20,6),(19,0,10),(19,20,10)):
             assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
         shutil.copyfile(stl,output_dir/"line-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A bevel on the outer rim of an L profile preserves both sides of the notch.
+        path=Path(tmp)/"Concave chamfer.pcad"
+        document=json.loads((libs/"cad/tests/fixtures/typescript-concave-chamfers.pcad").read_bytes())
+        document["items"]=[next(item for item in document["items"] if item["id"]=="outer-top-rim")]
+        nodes=document["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(node for node in nodes if node["type"]=="chamfer")
+        bevel["notes"]={"keep":"saved L-profile selector"}
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"concave-chamfer-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Line bevel  d1 2 mm")
+        key("F2")
+        type_value("4")
+        key("Return")
+        verify(window,"Line bevel  d1 4 mm")
+        key("Tab")
+        verify(window,"Line bevel  d2 3 mm")
+        key("F2")
+        type_value("1")
+        key("Return")
+        verify(window,"Line bevel  d2 1 mm")
+        key("Control_L+z")
+        verify(window,"Line bevel  d2 3 mm")
+        key("Control_L+y")
+        verify(window,"Line bevel  d2 1 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assert saved["items"][0]["data"]["cad"]["nodes"]==[
+            dict(node,d1=4,d2=1) if node is bevel else node for node in nodes
+        ]
+        shutil.copyfile(path,output_dir/"concave-chamfer-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Line bevel  d1 4 mm")
+        key("5")
+        verify(window,"Left view")
+        click(window,735,451)
+        for stroke in ("Up","Up","Left","Left"):
+            key(stroke)
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"concave-chamfer.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(0,20),(0,20),(0,10)] and math.isclose(volume,2750,abs_tol=.001),(bounds,volume)
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        for expected in ((0,0,6),(0,20,6),(1,0,10),(1,20,10),(9,9,0),(9,9,10)):
+            assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
+        shutil.copyfile(stl,output_dir/"concave-chamfer.stl")
         key("Escape")
         app.wait(3)
 

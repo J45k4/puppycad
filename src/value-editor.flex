@@ -40,6 +40,7 @@ fn puppy_active_field(project) {
         }
         return cg_v(row,pc_pose_number(j_get(row,"length")),m_cat(j_string(row,"id")," / Length  mm"));
     }
+    if puppy_history_rows && pc_legacy_solid_part(cad_project_part(project)) {return puppy_history_legacy_field(project);}
     if puppy_draft || puppy_empty {return 0;}
     if cad_project_is_studio(project) {
         let field=puppy_studio_field(project);if !field {return 0;}
@@ -81,7 +82,11 @@ fn puppy_write_field(project,field,value) {
         updated=cad_project_set_line_length(project,j_string(puppy_draft_sketch(project),"id"),j_string(target,"id"),value);
         return puppy_line_update(project,updated);
     }
-    if puppy_connector_slot>=0 {
+    if puppy_history_rows && pc_legacy_solid_part(cad_project_part(project)) {
+        let row=puppy_history_feature(j_parse(puppy_history_rows+24));
+        updated=cad_project_edit_legacy_step(project,j_string(row,"id"),j_string(target,"id"),cg_json_number(value));
+        if !updated || !puppy_refresh(updated) {return 0;}
+    }else if puppy_connector_slot>=0 {
         let slot=puppy_connector_slot;
         updated=cad_project_set_connector_component(project,j_string(target,"instanceId"),j_string(target,"id"),
                                                     puppy_connector_group(slot),puppy_placement_axis(slot),value);
@@ -211,8 +216,14 @@ fn puppy_number_apply(project) {
     if load8(digits)==46 {digits=digits+1;}
     if load8(digits)<48 || load8(digits)>57 {return puppy_title(project,"Enter a signed decimal number");}
     if load8(text)==43 {text=text+1;}
-    cg_begin();let value=cg_number(j_new(6,text));
-    if cg_error {return puppy_title(project,"Enter a decimal from -500 to 500 with up to six places");}
+    let limit=500;
+    let history_field=puppy_history_legacy_field(project);
+    if history_field && m_eq(j_string(load64(history_field),"id"),"segments") {limit=1024;}
+    cg_begin();let value=cg_number_bounded(j_new(6,text),limit);
+    if cg_error {
+        if limit==1024 {return puppy_title(project,"Enter a whole number of segments from 8 to 1024");}
+        return puppy_title(project,"Enter a decimal from -500 to 500 with up to six places");
+    }
     if puppy_shell_open {return puppy_shell_set_thickness(project,value);}
     if puppy_extrusion_open {return puppy_extrusion_set_depth(project,value);}
     let field=puppy_active_field(project);
@@ -224,6 +235,9 @@ fn puppy_number_apply(project) {
         return puppy_title(cad_project_open(puppy_history+24),error);
     }
     let updated=cad_project_open(puppy_history+24);let message="Edited";
+    if history_field {
+        puppy_number_close();return puppy_history_select(updated,j_parse(puppy_history_rows+24));
+    }
     if puppy_placement_slot>=0 {
         let solved=puppy_active_field(updated);
         if solved && load64(solved+8)!=value {message=m_cat("Mate solved to ",puppy_display_number(load64(solved+8)));}

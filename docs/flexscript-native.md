@@ -244,12 +244,12 @@ or permitted drag on either center moves both. Each curve keeps its own
 size and orientation.
 
 Choose **Tangent** for two circles or circular arcs that touch externally.
-It also works between one straight line and a circle or circular arc. Pick
-the source first, then the follower. The straight line can be extended
-mathematically to reach the contact point. A finite arc must include the
-contact point within its sweep. For **Internal tangent**, pick the outer
-curve first and the inner curve second. Changing a driving radius rebuilds
-the contact while keeping the relation.
+It also works between a straight line and a circle, ellipse, circular arc or
+elliptic arc. Pick the source first, then the follower. Contact may fall on
+the extension of the straight line. An arc must include the contact point
+within its sweep. For **Internal tangent**, pick the outer circular curve
+first and the inner curve second. A driving dimension rebuilds the contact
+while keeping the relation.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -392,8 +392,9 @@ Press F2 to edit `d1`, or press Tab to select `d2` first. **Objects** lists
 both fields under **Driving fields**. Enter millimetres. Entering zero for
 `d2` makes it follow `d1`. The feature keeps its original extrusion-edge
 reference. Supported selectors include a single corner or rotated rectangle,
-regular polygon, circle, ellipse, capsule or one closed convex loop of
-straight sketch lines extruded blind from a reference plane.
+regular polygon, circle, ellipse, capsule or one closed loop of straight
+sketch lines extruded blind from a reference plane. On a concave loop,
+the saved selector must identify an eligible convex edge.
 For face-attached blind joined extrusions, the parent face must resolve to
 the same host face in both editors. Saved fixtures cover a top cap, a
 mirrored bottom cap and an aligned side face.
@@ -414,6 +415,14 @@ can still display independent bodies. Repair or suppress the failed feature
 before exporting. Rolling back before the first feature leaves an empty
 viewport. Reopen History to move the rollback position forward.
 
+To edit a supported TypeScript PartBuilder file, select a solid step in
+Design and open **Feature history**. Tab cycles through the available
+dimensions and translations. **Set value** (F2) edits the selected value.
+The operation and extent buttons change the Boolean or choose between
+blind and through-all extrusion. Up and Down move a step one slot. Each
+accepted edit keeps the document's original sketch and solid-step records
+and can be undone. Sketch editing in this file representation is pending.
+
 For Biscuit standalone schema-1 files, open **History** (F7), or right-click
 a feature or part in Design and choose **Feature history**. In a narrow
 window, **History** is on the last toolbar page. Select a modifier
@@ -424,6 +433,12 @@ the applied feature state. Dependency errors leave the authored order in place.
 Open History from a part to preview an earlier feature on that part’s main
 body (A). Earlier previews close with Escape and never change the part’s output
 feature. Saving and exporting during a preview use the applied document.
+
+If a standalone part’s final modifier fails and its previous body and
+suppression both evaluate to closed solids, the file opens directly in History
+with the failed feature selected. Preview the earlier body or stage suppression,
+then press **Apply** to repair the file. Saving and exporting stay unavailable
+until a repair is applied. Unsupported records still open in the source reader.
 
 The **Profiles** toolbar provides these placement modes.
 
