@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`12f32bd556857bc6229f95342f11a59d0b6fb3c9` includes the shared library and
+`3b0c814e4dce8fb6787f5532d4a887a6bed462b3` includes the shared library and
 the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
 VM verified all 45 historical CAD and runtime import paths against the
 archived catalog and VM. The v10 artifact lineage, the v11 worker and
@@ -447,7 +447,7 @@ original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
 within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with several holes or traced interior boundaries still need selector support.
+with traced interior boundaries still need selector support.
 For a closed convex loop of straight segments, TypeScript's edge ordinals
 and vertical aliases match native geometry with shuffled and reversed
 segments. The edited square's closed 3,960 mm³ STL also matches the checked
@@ -460,12 +460,13 @@ without filling it. The native edit yields a closed 2,750 mm³ STL. The
 checked VM and two v11 frozen jobs match it byte for byte. The test also
 checks that ineligible inset and re-entrant edges fail without an STL.
 
-One primitive aperture can retain its saved edge numbering for inner rims
-and outer bevels. Seven TypeScript exports agree with native manufacturing
-vertices and sampled surfaces. The headless test edits both rim setbacks,
-preserves the selector and reopens the closed 3,484.173 mm³ result. The
-checked VM and two frozen builds match the native STL. Re-entrant and
-out-of-range selectors fail without an export.
+Primitive apertures retain their saved edge numbering for inner rims and
+outer bevels. The headless tests edit both rim setbacks, preserve the
+selectors and reopen closed 3,484.173 mm³ and 3,437.651 mm³ results. The
+second test targets the rotated rectangular hole after a circular hole.
+Eight TypeScript exports with both holes agree with the native sampled
+surfaces within 0.000015 mm. The checked VM and two frozen builds match
+the edited STL. Re-entrant and out-of-range selectors fail without an export.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.

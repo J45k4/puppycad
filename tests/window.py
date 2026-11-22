@@ -6961,59 +6961,66 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
-        # The saved clockwise aperture rim keeps its facet and two decimal setbacks.
-        path=Path(tmp)/"Aperture chamfer.pcad"
-        document=json.loads((libs/"cad/tests/fixtures/typescript-hole-chamfers.pcad").read_bytes())
-        document["items"]=[next(item for item in document["items"] if item["id"]=="circular-aperture-rim")]
-        nodes=document["items"][0]["data"]["cad"]["nodes"]
-        bevel=next(node for node in nodes if node["type"]=="chamfer")
-        bevel["notes"]={"keep":"saved clockwise aperture selector"}
-        path.write_text(json.dumps(document))
-        shutil.copyfile(path,output_dir/"hole-chamfer-input.pcad")
-        app,window=open_app(path,design_tree=True)
-        click(window,101,264)
-        for field,previous,value in (("d1","0.5","0.75"),("d2","1.25","1.1")):
-            if field=="d2":
-                key("Tab")
-            verify(window,f"Line bevel  {field} {previous} mm")
-            key("F2")
-            type_value(value)
-            key("Return")
-            verify(window,f"Line bevel  {field} {value} mm")
-        key("Control_L+z")
-        verify(window,"Line bevel  d2 1.25 mm")
-        key("Control_L+y")
-        verify(window,"Line bevel  d2 1.1 mm")
-        key("Control_L+s")
-        verify(window,"Saved")
-        saved=json.loads(path.read_bytes())
-        assert saved["items"][0]["data"]["cad"]["nodes"]==[
-            dict(node,d1=0.75,d2=1.1) if node is bevel else node for node in nodes
-        ]
-        shutil.copyfile(path,output_dir/"hole-chamfer-edited.pcad")
-        key("Escape")
-        app.wait(3)
-        app,window=open_app(path,design_tree=True)
-        click(window,101,264)
-        verify(window,"Line bevel  d1 0.75 mm")
-        key("3")
-        verify(window,"Top view")
-        click(window,735,451)
-        for stroke in ("Down","Down","Down","Left","Left"):
-            key(stroke)
-        subprocess.run(["magick","import","-window",hex(window),output_dir/"hole-chamfer.png"],check=True)
-        key("Control_L+e")
-        verify(window,"Exported")
-        stl=path.with_suffix(".stl")
-        bounds,volume=triangulation(stl)
-        assert bounds==[(0,20),(0,20),(0,10)] and math.isclose(volume,3484.173166,abs_tol=.003),(bounds,volume)
-        from struct import iter_unpack
-        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
-        for expected in ((5.847759,9.234633,9.25),(5.414214,8.585786,9.25),(14.363906,20,10),(0,20,1.856942)):
-            assert any(math.dist(vertex,expected)<.0001 for vertex in vertices),expected
-        shutil.copyfile(stl,output_dir/"hole-chamfer.stl")
-        key("Escape")
-        app.wait(3)
+        # The saved clockwise rim keeps its facet with one or several apertures.
+        aperture_cases=(
+            ("typescript-hole-chamfers.pcad","circular-aperture-rim","hole-chamfer",3484.173166,
+             ((5.847759,9.234633,9.25),(5.414214,8.585786,9.25),(14.363906,20,10),(0,20,1.856942))),
+            ("typescript-multiple-apertures.pcad","mixed-direct-apertures","multiple-aperture-chamfer",3437.651029,
+             ((10.427106,14.400705,9.25),(6.745087,12.837780,9.25),(20,17.269161,10),(20,20,8.286079))),
+        )
+        for fixture,item_id,artifact,expected_volume,expected_vertices in aperture_cases:
+            path=Path(tmp)/f"{artifact}.pcad"
+            document=json.loads((libs/"cad/tests/fixtures"/fixture).read_bytes())
+            document["items"]=[next(item for item in document["items"] if item["id"]==item_id)]
+            nodes=document["items"][0]["data"]["cad"]["nodes"]
+            bevel=next(node for node in nodes if node["type"]=="chamfer")
+            bevel["notes"]={"keep":"saved clockwise aperture selector"}
+            path.write_text(json.dumps(document))
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            app,window=open_app(path,design_tree=True)
+            click(window,101,264)
+            for field,previous,value in (("d1","0.5","0.75"),("d2","1.25","1.1")):
+                if field=="d2":
+                    key("Tab")
+                verify(window,f"Line bevel  {field} {previous} mm")
+                key("F2")
+                type_value(value)
+                key("Return")
+                verify(window,f"Line bevel  {field} {value} mm")
+            key("Control_L+z")
+            verify(window,"Line bevel  d2 1.25 mm")
+            key("Control_L+y")
+            verify(window,"Line bevel  d2 1.1 mm")
+            key("Control_L+s")
+            verify(window,"Saved")
+            saved=json.loads(path.read_bytes())
+            assert saved["items"][0]["data"]["cad"]["nodes"]==[
+                dict(node,d1=0.75,d2=1.1) if node is bevel else node for node in nodes
+            ]
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path,design_tree=True)
+            click(window,101,264)
+            verify(window,"Line bevel  d1 0.75 mm")
+            key("3")
+            verify(window,"Top view")
+            click(window,735,451)
+            for stroke in ("Down","Down","Down","Left","Left"):
+                key(stroke)
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            bounds,volume=triangulation(stl)
+            assert bounds==[(0,20),(0,20),(0,10)] and math.isclose(volume,expected_volume,abs_tol=.003),(bounds,volume)
+            from struct import iter_unpack
+            vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+            for expected in expected_vertices:
+                assert any(math.dist(vertex,expected)<.0001 for vertex in vertices),expected
+            shutil.copyfile(stl,output_dir/f"{artifact}.stl")
+            key("Escape")
+            app.wait(3)
 
         # Replacing a part keeps the occurrence and its two mate endpoints.
         path=Path(tmp)/"Replace occurrence.pcad"
