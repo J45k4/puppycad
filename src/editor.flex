@@ -293,7 +293,8 @@ fn puppy_command(key,mods) {
         if !(mods&0x3c0) {return puppy_pattern_key(cad_project_open(puppy_history+24),key);}
         if !(mods&192) || (key!=29 && key!=28 && key!=22 && key!=8) {return 1;}
     }else if key==62 && !(mods&0x3c0) && puppy_draft && !puppy_line_report && !puppy_loft_open && !puppy_revolve_axis {
-        return puppy_pattern_begin(cad_project_open(puppy_history+24));
+        let project=cad_project_open(puppy_history+24);
+        if !pc_legacy_solid_part(cad_project_part(project)) {return puppy_pattern_begin(project);}
     }
     if key==12 && mods&192 && !puppy_line_report && !puppy_loft_open && !puppy_history_rows && !puppy_edge_kind {
         return puppy_step_prompt(cad_project_open(puppy_history+24));
@@ -321,10 +322,11 @@ fn puppy_command(key,mods) {
     if puppy_loft_open {return puppy_loft_key(cad_project_open(puppy_history+24),key,mods);}
     if key==11 && !(mods&0x3c0) && !puppy_sketch && !puppy_empty {
         let project=cad_project_open(puppy_history+24);
-        if cad_project_part(project) {return puppy_edge_begin(project,mods&3);}
+        if pc_nodes(cad_project_part(project)) {return puppy_edge_begin(project,mods&3);}
     }
     if key==38 && !(mods&0x3c0) {
-        let project=cad_project_open(puppy_history+24);if cad_project_part(project) {return puppy_loft_begin(project);}
+        let project=cad_project_open(puppy_history+24);let part=cad_project_part(project);
+        if part && !pc_legacy_solid_part(part) {return puppy_loft_begin(project);}
     }
     if puppy_button {
         puppy_view_end(0);if key==GUI_KEY_ESCAPE {return 1;}
@@ -426,7 +428,7 @@ fn puppy_command(key,mods) {
         }
         if puppy_patterns {puppy_sketch=1;puppy_draft=1;puppy_pattern_selection(0);return puppy_title(project,puppy_pattern_hint(project));}
         if puppy_line_report {
-            puppy_symmetry_end();puppy_distance_cancel();let report=cad_project_line_sketch(project,j_string(puppy_draft_sketch(project),"id"));
+            puppy_symmetry_end();puppy_distance_cancel();let report=puppy_line_read(project,j_string(puppy_draft_sketch(project),"id"));
             if !report {return puppy_line_close(project);}puppy_line_cache(report);return puppy_title(project,puppy_line_label());
         }
         if puppy_history_rows {return puppy_history_select(project,j_parse(puppy_history_rows+24));}
@@ -513,11 +515,15 @@ fn puppy_refresh(project) {
         puppy_end_isolation();puppy_empty=1;puppy_sketch=0;puppy_draft=0;return 1;
     }
     let mesh=0;
-    if cad_project_part(project) {
+    let part=cad_project_part(project);
+    if part {
         let preview=cad_project_feature_history(project);
         if j_get(preview,"error") {return 0;}
         let rows=j_get(preview,"features");mesh=j_get(preview,"mesh");puppy_history_diagnostic(rows);
         if puppy_history_rows {puppy_history_set_rows(rows);}
+        if !mesh && pc_legacy_sketch_only(part) {
+            puppy_end_isolation();puppy_empty=0;puppy_sketch=1;puppy_draft=1;return 1;
+        }
         if !mesh && pc_first(rows) {
             puppy_end_isolation();puppy_empty=1;puppy_sketch=0;puppy_draft=0;return 1;
         }
@@ -638,7 +644,7 @@ fn puppy_editor(path,source,project,report) {
                     }else if y>=76 {puppy_edge_pick(current,x,y);}
                     dirty=1;
                 }
-                else if !puppy_sketch && !puppy_empty && !compact && y>=6 && y<34 && x>=width-420 && x<width-335 && cad_project_part(current) {
+                else if !puppy_sketch && !puppy_empty && !compact && y>=6 && y<34 && x>=width-420 && x<width-335 && pc_nodes(cad_project_part(current)) {
                     puppy_command(11,0);dirty=1;
                 }
                 else if puppy_loft_open {
@@ -649,7 +655,7 @@ fn puppy_editor(path,source,project,report) {
                     dirty=1;
                 }
                 else if puppy_breadcrumb_click(current,x,y) {dirty=1;}
-                else if !compact && y>=6 && y<34 && x>=width-505 && x<width-429 && cad_project_part(current) {
+                else if !compact && y>=6 && y<34 && x>=width-505 && x<width-429 && pc_nodes(cad_project_part(current)) {
                     puppy_command(38,0);dirty=1;
                 }
                 else if puppy_isolated && x>=12 && x<98 && y>=6 && y<37 {puppy_command(68,0);dirty=1;}

@@ -83,7 +83,7 @@ fn puppy_operation(project) {
     return "newBody";
 }
 fn puppy_draft_sketch(project) {
-    let row=pc_first(pc_nodes(cad_project_part(project)));let first=0;let index=0;
+    let row=pc_first(puppy_workspace_sketch_records(project));let first=0;let index=0;
     while row {
         if m_eq(j_string(row,"type"),"sketch") {
             if !first {first=row;}if index==puppy_draft_index {return row;}index=index+1;
@@ -94,7 +94,8 @@ fn puppy_draft_sketch(project) {
 }
 fn puppy_fit_sketch(project,only_outside) {
     let sketch=puppy_draft_sketch(project);
-    let paths=cad_sketch_paths(pc_nodes(cad_project_part(project)),j_string(sketch,"id"));if !paths {return 0;}
+    let id=j_string(sketch,"id");let model=puppy_sketch_model(project,id);if !model {return 0;}
+    let paths=cad_sketch_paths(pc_nodes(cad_project_part(model)),id);if !paths {return 0;}
     if !puppy_reader_report && puppy_draft_on_face(project) {
         let guides=cad_project_sketch_face_loops(project,sketch);let i=0;
         while i<cg_count(guides) {cg_push(paths,cg_v(cg_at(guides,i),1,0));i=i+1;}
@@ -325,9 +326,7 @@ fn puppy_draft_click(x,y) {
     if puppy_tool==-7 {return puppy_use_edges(project,p);}
     if puppy_line_edit_active() {return puppy_line_edit_click(project,p);}
     if puppy_tool<0 {
-        let sketch=puppy_draft_sketch(project);
-        if !cad_project_add_primitive(project,j_string(sketch,"id"),puppy_tool_name(),p,0) {return puppy_title(project,cg_error);}
-        puppy_push(project);return puppy_title(project,"Point added");
+        return puppy_draft_add_primitive(project,p,0,"Point added");
     }
     if puppy_tool>=3 {
         if puppy_anchor>=4096 {return puppy_title(project,"Finish the curve before adding more points");}
@@ -351,11 +350,13 @@ fn puppy_draft_click(x,y) {
         if puppy_tool==1 {return puppy_title(project,"Click the rim");}
         return puppy_title(project,"Click the opposite corner");
     }
-    let sketch=puppy_draft_sketch(project);
-    if !cad_project_add_primitive(project,j_string(sketch,"id"),puppy_tool_name(),cg_v(puppy_ax,puppy_ay,0),p) {
-        return puppy_title(project,cg_error);
-    }
-    puppy_anchor=0;puppy_push(project);return puppy_title(project,"Sketch edited");
+    return puppy_draft_add_primitive(project,cg_v(puppy_ax,puppy_ay,0),p,"Sketch edited");
+}
+fn puppy_draft_add_primitive(project,a,b,status) {
+    let id=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,id);
+    if !model || !cad_project_add_primitive(model,id,puppy_tool_name(),a,b) {return puppy_title(project,cg_error);}
+    let updated=puppy_sketch_result(project,id,model);if !updated {return puppy_title(project,cg_error);}
+    puppy_anchor=0;puppy_push(updated);return puppy_title(updated,status);
 }
 fn puppy_draft_extrude(project) {
     let sketch=puppy_draft_sketch(project);
@@ -412,6 +413,9 @@ fn puppy_loft_key(project,key,mods) {
     return puppy_finish_feature(project,updated,"Loft created");
 }
 fn puppy_draft_key(project,key,mods) {
+    if pc_legacy_solid_part(cad_project_part(project)) {
+        if key!=55 && key!=74 && (mods&3 || (key!=21 && key!=6 && key!=15)) {return 1;}
+    }
     if key==37 {
         puppy_revolve_axis=!puppy_revolve_axis;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());
     }
@@ -518,11 +522,12 @@ fn puppy_draw_draft() {
     if !w || !h {return 1;}
     let source=puppy_history;if puppy_line_preview {source=puppy_line_preview;}if puppy_pattern_preview {source=puppy_pattern_preview;}if puppy_join_preview_doc {source=puppy_join_preview_doc;}
     let project=cad_project_open(source+24);let sketch=puppy_draft_sketch(project);let id=j_string(sketch,"id");
-    let nodes=pc_nodes(cad_project_part(project));let snap=0;
+    let model=puppy_sketch_model(project,id);if !model {return 0;}
+    let nodes=pc_nodes(cad_project_part(model));let snap=0;
     if !puppy_revolve_axis && puppy_tool>=0 && puppy_tool<3 && puppy_anchor && (puppy_ax!=puppy_mx || puppy_ay!=puppy_my) {
         let end=cg_v(puppy_mx,puppy_my,0);
         if puppy_tool==2 {snap=puppy_projected_snap(nodes,sketch,end);if snap {end=snap;}}
-        cad_project_add_primitive(project,id,puppy_tool_name(),cg_v(puppy_ax,puppy_ay,0),end);cg_begin();
+        cad_project_add_primitive(model,id,puppy_tool_name(),cg_v(puppy_ax,puppy_ay,0),end);cg_begin();
     }
     let paths=cad_sketch_paths(nodes,id);
     if !paths {return 0;}
@@ -661,7 +666,7 @@ fn puppy_draw_draft() {
     let distance=puppy_distance_row();
     let first=puppy_distance_first;if puppy_symmetry_mode {first=puppy_symmetry_anchor;}
     if first {
-        let anchor=pc_saved_anchor(pc_nodes(cad_project_part(project)),id,j_parse(first+24));
+        let anchor=pc_saved_anchor(nodes,id,j_parse(first+24));
         if anchor {
             let pick=cg_array();cg_push(pick,pc_uv(anchor));render_gl(puppy_device,"glUniform1i",color,2,0,0,0,0);
             render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);puppy_draft_path(pick,0,w,h);render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);

@@ -205,6 +205,7 @@ fn puppy_bar_breadcrumb(rgb,w,x,right,label,pad) {
 fn puppy_workspace_toolbar_compact(project,w) {
     if w<800 {return 1;}
     let part=cad_project_part(project);if !part {return 0;}
+    if puppy_draft && pc_legacy_solid_part(part) {return 1;}
     let assembly=puppy_workspace_parent(project,part);
     if !assembly && !puppy_sketch {return 0;}
     // Use the compact row when the toolbar controls crowd out the ancestor links.
@@ -421,10 +422,10 @@ fn puppy_toolbar_build(w) {
         if puppy_curves_page==4 {label="Edit";}
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,label,w-335);
     }
-    if !puppy_sketch && !puppy_empty && cad_project_part(project) {
+    if !puppy_sketch && !puppy_empty && pc_nodes(cad_project_part(project)) {
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,"Edges",w-335);
     }
-    if cad_project_part(project) {
+    if pc_nodes(cad_project_part(project)) {
         puppy_bar_rect(rgb,w,w-505,6,76,28,45,64,67);
         puppy_bar_text(rgb,w,w-497,25,"Loft",w-429);
     }
@@ -487,7 +488,10 @@ fn puppy_toolbar_build(w) {
         }
         if feature {puppy_bar_button(rgb,w,568,80,"History");}
     }
-    if pc_legacy_solid_part(cad_project_part(project)) {puppy_bar_button(rgb,w,568,80,"History");}
+    if pc_legacy_solid_part(cad_project_part(project)) {
+        if puppy_draft_sketch(project) {puppy_bar_sketch(rgb,w,288,84,"Sketch");}
+        if !puppy_empty {puppy_bar_button(rgb,w,568,80,"History");}
+    }
     if !puppy_draft && !puppy_empty {puppy_bar_button(rgb,w,w-132,64,"STEP");}
     if puppy_draft || puppy_camera_available() {puppy_bar_button(rgb,w,w-60,48,"Fit");}
     puppy_ui_upload(rgb,w,76);
@@ -629,6 +633,7 @@ fn puppy_compact_actions(project) {
     if puppy_loft_open {return puppy_loft_actions();}
     let rows=cg_array();let studio=cad_project_is_studio(project);
     let solid=!puppy_sketch && !puppy_empty;let assembly=m_eq(j_string(cad_project_item(project),"type"),"assembly");
+    let legacy=pc_legacy_solid_part(cad_project_part(project));
     puppy_compact_button(rows,"Undo",29,192);puppy_compact_button(rows,"Redo",28,192);
     puppy_compact_button(rows,"Save",22,192);
     if studio || (!puppy_draft && !puppy_empty) {
@@ -642,6 +647,13 @@ fn puppy_compact_actions(project) {
         puppy_compact_button(rows,"Export STL",8,192);puppy_compact_button(rows,"Export 3MF",8,960);
         puppy_compact_button(rows,"Export STEP",8,195);
         if studio {puppy_compact_button(rows,"Import STEP",12,192);}
+    }
+    if legacy && puppy_draft {
+        puppy_compact_button(rows,"Done sketch",69,0);puppy_compact_button(rows,"Dimensions",65,0);
+        puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Circle",6,0);
+        puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Point",55,0);
+        puppy_compact_button(rows,"Construction point",55,3);puppy_compact_button(rows,"Fit",74,0);
+        return rows;
     }
     if studio {
         if puppy_pick_id && j_get(project,"assembly") {
@@ -668,12 +680,12 @@ fn puppy_compact_actions(project) {
         }else if assembly {
             if !puppy_empty {puppy_compact_button(rows,"Solve",25,0);puppy_compact_button(rows,"Mate",13,0);}
             puppy_compact_button(rows,"Choose part",19,0);puppy_compact_button(rows,"Insert",12,0);
-        }else if pc_nodes(cad_project_part(project)) {
+        }else if pc_nodes(cad_project_part(project)) || legacy {
             if puppy_draft_sketch(project) {
                 let label="Edit sketch";if puppy_sketch {label="Part";}
                 puppy_compact_button(rows,label,69,0);
             }
-            puppy_compact_button(rows,"New sketch",22,3);
+            if !legacy {puppy_compact_button(rows,"New sketch",22,3);}
             if m_eq(j_string(puppy_feature(project),"type"),"extrude") {puppy_compact_button(rows,"Extrusion options",61,0);}
         }
         if !assembly && pc_nodes(cad_project_part(project)) {

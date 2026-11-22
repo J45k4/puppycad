@@ -1,3 +1,5 @@
+import "cad/project-legacy-sketch.flex";
+
 global puppy_explicit_sketch=0;
 global puppy_plane_chooser=0;
 global puppy_support_sketch=0;
@@ -63,8 +65,25 @@ fn puppy_workspace_heading(project,compact) {
     return m_cat("Part / ",name);
 }
 
+fn puppy_workspace_sketch_records(project) {
+    let part=cad_project_part(project);
+    if pc_legacy_solid_part(part) {return j_get(j_get(part,"data"),"features");}
+    return pc_nodes(part);
+}
+
+fn puppy_sketch_model(project,id) {
+    if pc_legacy_solid_part(cad_project_part(project)) {return cad_project_legacy_sketch_view(project,id);}
+    return project;
+}
+
+fn puppy_sketch_result(project,id,model) {
+    if !model {return 0;}
+    if pc_legacy_solid_part(cad_project_part(project)) {return cad_project_apply_legacy_sketch(project,id,model);}
+    return model;
+}
+
 fn puppy_workspace_sketch_index(project,id) {
-    let node=pc_first(pc_nodes(cad_project_part(project)));let index=0;
+    let node=pc_first(puppy_workspace_sketch_records(project));let index=0;
     while node {
         if m_eq(j_string(node,"type"),"sketch") {
             if m_eq(j_string(node,"id"),id) {return index;}
@@ -78,6 +97,7 @@ fn puppy_workspace_sketch_index(project,id) {
 fn puppy_workspace_edit_sketch(project,id) {
     let index=puppy_workspace_sketch_index(project,id);
     if index<0 {return puppy_title(project,"Select a sketch in the Design tree");}
+    if !puppy_sketch_model(project,id) {return puppy_title(project,cg_error);}
     puppy_end_isolation();puppy_clear_pick();puppy_search_focus(0);puppy_design_focus=0;
     puppy_picking_face=0;puppy_revolve_axis=0;puppy_anchor=0;
     puppy_tool=0;puppy_curves_page=0;puppy_draft_index=index;puppy_profile_index=1;puppy_face_operation=0;

@@ -17,7 +17,8 @@ fn puppy_direction_has_lines() {
     let first=puppy_direction_lines();return first && load64(first+24);
 }
 fn puppy_direction_has_curves(project,circular,minimum) {
-    let nodes=pc_nodes(cad_project_part(project));let sk=j_string(puppy_draft_sketch(project),"id");
+    let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
+    let nodes=pc_nodes(cad_project_part(model));
     let row=pc_first(nodes);let count=0;
     while row {
         if m_eq(j_string(row,"sketchId"),sk) && (!circular || pct_circular(row)) && pc_concentric_curve(nodes,sk,j_string(row,"id")) {
@@ -36,7 +37,8 @@ fn puppy_direction_has_curve_anchor(project,on_curve) {
     let line=pc_first(j_get(report,"lines"));let point=pc_first(j_get(report,"points"));
     if line {return point || load64(line+24);}
     if !point || !load64(point+24) {return 0;}
-    let nodes=pc_nodes(cad_project_part(project));
+    let model=puppy_sketch_model(project,j_string(puppy_draft_sketch(project),"id"));
+    let nodes=pc_nodes(cad_project_part(model));
     while point {
         let row=pc_find(nodes,j_string(point,"id"));
         if (on_curve && pc_point_on_curve_kind(row)) || (!on_curve && pc_midpoint_kind(row)) {return 1;}
@@ -72,7 +74,7 @@ fn puppy_direction_hint() {
     }
     if puppy_direction_mode==9 {
         if puppy_direction_source {return "Pick the follower anchor for Point on curve";}
-        return "Pick the source line or circle for Point on curve";
+        return "Pick the source line, circle or circular arc for Point on curve";
     }
     let pick="Pick the source ";if puppy_direction_source {pick="Pick the follower ";}
     if puppy_direction_mode==7 {
@@ -109,7 +111,7 @@ fn puppy_direction_command(project,key) {
     if mode {puppy_direction_end();puppy_bar_page=0;puppy_direction_mode=mode;}
     return puppy_title(project,puppy_direction_hint());
 }
-fn puppy_direction_pick_curve_anchor(project,nodes,sk,point) {
+fn puppy_direction_pick_curve_anchor(project,model,nodes,sk,point) {
     let on_curve=puppy_direction_mode==9;
     if !puppy_direction_source {
         let curve=puppy_sketch_hit(nodes,sk,point);
@@ -123,16 +125,18 @@ fn puppy_direction_pick_curve_anchor(project,nodes,sk,point) {
     if m_eq(j_string(anchor,"entityId"),source) {return puppy_title(project,"Pick an anchor on a different entity");}
     let updated=0;let label="Midpoint updated";
     if on_curve {
-        updated=cad_project_toggle_point_on_curve(project,sk,source,anchor);label="Point on curve updated";
-    }else {updated=cad_project_toggle_midpoint(project,sk,source,anchor);}
-    if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+        updated=cad_project_toggle_point_on_curve(model,sk,source,anchor);label="Point on curve updated";
+    }else {updated=cad_project_toggle_midpoint(model,sk,source,anchor);}
+    updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}
     return puppy_title(updated,label);
 }
 fn puppy_direction_pick(project,x,y) {
     if puppy_direction_mode==1 {return 1;}
-    let sk=j_string(puppy_draft_sketch(project),"id");let nodes=pc_nodes(cad_project_part(project));
+    let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
+    if !model {return puppy_title(project,cg_error);}
+    let nodes=pc_nodes(cad_project_part(model));
     let point=puppy_draft_point(x,y);let center=puppy_direction_mode>=5;let picked=0;
-    if puppy_direction_mode>=8 {return puppy_direction_pick_curve_anchor(project,nodes,sk,point);}
+    if puppy_direction_mode>=8 {return puppy_direction_pick_curve_anchor(project,model,nodes,sk,point);}
     if center {
         let hit=puppy_sketch_hit(nodes,sk,point);
         if puppy_direction_mode==5 {picked=pc_concentric_curve(nodes,sk,j_string(hit,"id"));}
@@ -147,12 +151,12 @@ fn puppy_direction_pick(project,x,y) {
     // Refreshing the report releases the picker snapshot before history is written.
     let source=m_slice(puppy_direction_source+24,load64(puppy_direction_source+16));
     let updated=0;
-    if puppy_direction_mode==7 {updated=cad_project_toggle_circular_tangent(project,sk,source,id,1);}
-    else if puppy_direction_mode==6 {updated=cad_project_toggle_curve_tangent(project,sk,source,id);}
-    else if center {updated=cad_project_toggle_concentric(project,sk,source,id);}
-    else if puppy_direction_mode==4 {updated=cad_project_toggle_equal_lines(project,sk,source,id);}
-    else {updated=cad_project_toggle_line_direction(project,sk,source,id,kind);}
-    if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+    if puppy_direction_mode==7 {updated=cad_project_toggle_circular_tangent(model,sk,source,id,1);}
+    else if puppy_direction_mode==6 {updated=cad_project_toggle_curve_tangent(model,sk,source,id);}
+    else if center {updated=cad_project_toggle_concentric(model,sk,source,id);}
+    else if puppy_direction_mode==4 {updated=cad_project_toggle_equal_lines(model,sk,source,id);}
+    else {updated=cad_project_toggle_line_direction(model,sk,source,id,kind);}
+    updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}
     let report=j_parse(puppy_line_report+24);let rows=j_get(report,"lines");let i=0;
     if !pct_line(picked) {i=cg_j_count(rows);rows=j_get(report,"radial");}
     let row=pc_first(rows);

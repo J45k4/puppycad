@@ -1944,6 +1944,74 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Edit a TypeScript PartBuilder sketch and rebuild its original extrusion.
+        path=Path(tmp)/"Legacy editable sketch.pcad"
+        initial=(libs/"cad/tests/fixtures/legacy-typescript-editable-sketch.pcad").read_bytes()
+        path.write_bytes(initial)
+        shutil.copyfile(path,output_dir/"legacy-sketch-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,94,212)
+        verify(window,"Editing Editable profile")
+        capture(window,"legacy-sketch-open.png",sketch=True)
+        key("F8")
+        verify(window,"plate/sketch/0/0   20 mm   DOF")
+        legacy_number("4")
+        verify(window,"Sketch edit changes a profile used by plate")
+        key("Escape")
+        assert path.read_bytes()==initial
+        legacy_number("24")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"plate/sketch/0/0   20 mm   DOF")
+        key("Control_L+y")
+        verify(window,"plate/sketch/0/0   24 mm   DOF")
+        key("Control_L+s")
+        verify(window,"Saved")
+        original=json.loads(initial)["items"][0]["data"]
+        saved=json.loads(path.read_bytes())["items"][0]["data"]
+        before,sketch=original["features"][0],saved["features"][0]
+        assert "cad" not in saved and original["solidSteps"]==saved["solidSteps"]
+        assert saved["features"][1:]==original["features"][1:] and sketch["target"]==before["target"]
+        assert [row["id"] for row in sketch["entities"]]==[row["id"] for row in before["entities"]]
+        assert sketch["relations"]==[dict(row,value=24) if row["id"]=="width-drive" else row for row in before["relations"]]
+        assert sketch["profiles"]==before["profiles"] and sketch["loops"]==before["loops"]
+        assert math.isclose(max(point["x"] for point in sketch["vertices"]),14,abs_tol=.000002)
+        shutil.copyfile(path,output_dir/"legacy-sketch-edited.pcad")
+        part_link,=breadcrumb_links(window,"legacy-sketch-edited.png")
+        click(window,part_link,20)
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl");bounds,volume=triangulation(stl)
+        assert bounds==[(-10,14),(-6,6),(0,8)] and math.isclose(volume,2206.03304,abs_tol=.002),(bounds,volume)
+        shutil.copyfile(stl,output_dir/"legacy-sketch-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A PartBuilder sketch without any solid can open and save its own editing state.
+        path=Path(tmp)/"Legacy sketch only.pcad"
+        initial=(libs/"cad/tests/fixtures/legacy-typescript-sketch-only.pcad").read_bytes()
+        path.write_bytes(initial)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("Shift_L+period")
+        verify(window,"Click to place a construction point")
+        click(window,635,411)
+        verify(window,"Point added")
+        key("Control_L+s")
+        verify(window,"Saved")
+        original=json.loads(initial)["items"][0]["data"]
+        saved=json.loads(path.read_bytes())["items"][0]["data"]
+        before,sketch=original["features"][0],saved["features"][0]
+        assert "cad" not in saved and len(saved["features"])==1
+        assert sketch["profiles"]==before["profiles"] and sketch["entities"][:-1]==before["entities"]
+        added=sketch["entities"][-1]
+        assert added["id"]=="native-entity-1" and added["type"]=="point" and added["construction"] is True
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -3336,7 +3404,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,890,20)
         verify(window,"Choose a relation")
         click(window,185,54)
-        verify(window,"Pick the source line or circle for Point on curve")
+        verify(window,"Pick the source line, circle or circular arc for Point on curve")
         click(window,190,358)
         verify(window,"Pick the follower anchor for Point on curve")
         click(window,138,244)
@@ -3399,6 +3467,58 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Control_L+Alt_L+e")
         verify(window,"Exported")
         reference=path.with_name("Point on circle reference.3mf")
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        key("Escape")
+        app.wait(3)
+
+        # A circular contact clamps to the end of a shortened clockwise arc.
+        path=Path(tmp)/"Point on arc.pcad"
+        path.write_bytes((libs/"cad/tests/fixtures/point-on-arc.pcad").read_bytes())
+        shutil.copyfile(path,output_dir/"point-on-arc-input.pcad")
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"sweep-guide   Radius 20 mm")
+        key("F2")
+        verify(window,"Set value")
+        type_value("25 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Tab")
+        verify(window,"sweep-guide   Sweep -90 deg")
+        key("F2")
+        verify(window,"Set value")
+        type_value("-30 deg")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"sweep-guide   Sweep -90 deg")
+        key("Control_L+y")
+        verify(window,"sweep-guide   Sweep -30 deg")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"point-on-arc.png"],check=True)
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        nodes={node["id"]:node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+        relation=next(rel for rel in nodes["native-sketch-1"]["relations"] if rel["id"]=="probe-on-sweep-from-web")
+        assert relation==dict(id="probe-on-sweep-from-web",type="pointOnCurve",a=dict(entityId="probe",point="center"),b="sweep-guide")
+        assert nodes["probe"]["primitive"]["center"]==dict(x=21.650635,y=-12.5)
+        shutil.copyfile(path,output_dir/"point-on-arc-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(40,50),(-5,5),(0,10)] and math.isclose(volume,784.1372615,abs_tol=.008),(bounds,volume)
+        shutil.copyfile(stl,output_dir/"point-on-arc-edited.stl")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=path.with_name("Point on arc reference.3mf")
         subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         key("Escape")
@@ -7088,36 +7208,39 @@ with tempfile.TemporaryDirectory() as tmp:
 
         # The saved clockwise rim keeps its facet with one or several apertures.
         aperture_cases=(
-            ("typescript-hole-chamfers.pcad","circular-aperture-rim","hole-chamfer",3484.173166,
+            ("typescript-hole-chamfers.pcad","circular-aperture-rim","hole-chamfer",264,[(0,20),(0,20),(0,10)],3484.173166,
              ((5.847759,9.234633,9.25),(5.414214,8.585786,9.25),(14.363906,20,10),(0,20,1.856942))),
-            ("typescript-multiple-apertures.pcad","mixed-direct-apertures","multiple-aperture-chamfer",3437.651029,
+            ("typescript-multiple-apertures.pcad","mixed-direct-apertures","multiple-aperture-chamfer",264,[(0,20),(0,20),(0,10)],3437.651029,
              ((10.427106,14.400705,9.25),(6.745087,12.837780,9.25),(20,17.269161,10),(20,20,8.286079))),
-            ("typescript-traced-apertures.pcad","mixed-traced-apertures","traced-aperture-chamfer",2169.047976,
+            ("typescript-traced-apertures.pcad","mixed-traced-apertures","traced-aperture-chamfer",264,[(0,20),(0,20),(0,10)],2169.047976,
              ((6.5,14.1,9.25),(7.25,17.6,9.25),(6.639314,20,10),(20,20,1.092652))),
+            ("typescript-pierced-support-chamfers.pcad","pierced-aperture-side","pierced-support-chamfer",316,[(0,30),(0,24),(0,6)],3889.030757,
+             ((22,13.25,1),(22,12.5,2.1),(18,12.5,2.1),(18,13.25,1))),
         )
-        for fixture,item_id,artifact,expected_volume,expected_vertices in aperture_cases:
+        for fixture,item_id,artifact,row_y,expected_bounds,expected_volume,expected_vertices in aperture_cases:
             path=Path(tmp)/f"{artifact}.pcad"
             document=json.loads((libs/"cad/tests/fixtures"/fixture).read_bytes())
             document["items"]=[next(item for item in document["items"] if item["id"]==item_id)]
             nodes=document["items"][0]["data"]["cad"]["nodes"]
             bevel=next(node for node in nodes if node["type"]=="chamfer")
+            name=bevel["name"]
             bevel["notes"]={"keep":"saved clockwise aperture selector"}
             path.write_text(json.dumps(document))
             shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
             app,window=open_app(path,design_tree=True)
-            click(window,101,264)
+            click(window,101,row_y)
             for field,previous,value in (("d1","0.5","0.75"),("d2","1.25","1.1")):
                 if field=="d2":
                     key("Tab")
-                verify(window,f"Line bevel  {field} {previous} mm")
+                verify(window,f"{name}  {field} {previous} mm")
                 key("F2")
                 type_value(value)
                 key("Return")
-                verify(window,f"Line bevel  {field} {value} mm")
+                verify(window,f"{name}  {field} {value} mm")
             key("Control_L+z")
-            verify(window,"Line bevel  d2 1.25 mm")
+            verify(window,f"{name}  d2 1.25 mm")
             key("Control_L+y")
-            verify(window,"Line bevel  d2 1.1 mm")
+            verify(window,f"{name}  d2 1.1 mm")
             key("Control_L+s")
             verify(window,"Saved")
             saved=json.loads(path.read_bytes())
@@ -7128,8 +7251,8 @@ with tempfile.TemporaryDirectory() as tmp:
             key("Escape")
             app.wait(3)
             app,window=open_app(path,design_tree=True)
-            click(window,101,264)
-            verify(window,"Line bevel  d1 0.75 mm")
+            click(window,101,row_y)
+            verify(window,f"{name}  d1 0.75 mm")
             key("3")
             verify(window,"Top view")
             click(window,735,451)
@@ -7140,7 +7263,7 @@ with tempfile.TemporaryDirectory() as tmp:
             verify(window,"Exported")
             stl=path.with_suffix(".stl")
             bounds,volume=triangulation(stl)
-            assert bounds==[(0,20),(0,20),(0,10)] and math.isclose(volume,expected_volume,abs_tol=.003),(bounds,volume)
+            assert bounds==expected_bounds and math.isclose(volume,expected_volume,abs_tol=.003),(bounds,volume)
             from struct import iter_unpack
             vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
             for expected in expected_vertices:

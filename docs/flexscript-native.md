@@ -256,9 +256,9 @@ a point, line endpoint or supported shape center. Changing a source dimension
 moves the follower. On an arc, the midpoint lies halfway through the signed
 sweep. Pick the same source and follower again to remove the relation.
 
-Choose **Point on curve** in **Relations**, then click a straight line or
-circle and the follower anchor. The anchor can slide along the curve. When
-the anchor is dragged beyond a line, it stops at the nearest endpoint.
+Choose **Point on curve** in **Relations**, then click a straight line,
+circle or circular arc and the follower anchor. The anchor can slide along
+the curve. A drag beyond a finite line or arc stops at the nearest endpoint.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -404,11 +404,11 @@ reference. Supported selectors include a single corner or rotated rectangle,
 regular polygon, circle, ellipse, capsule or one closed loop of straight
 sketch lines extruded blind from a reference plane. On a concave loop,
 the saved selector must identify an eligible convex edge.
-For one supported circular or rectangular aperture, the saved selector can
-identify either an outer edge or an aperture rim.
+With primitive or straight-line apertures, the saved selector can identify
+an outer edge or an aperture rim.
 For face-attached blind joined extrusions, the parent face must resolve to
-the same host face in both editors. Saved fixtures cover a top cap, a
-mirrored bottom cap and an aligned side face.
+the same host face in both editors. Saved fixtures cover top caps, mirrored
+bottom caps and aligned sides, including the inside wall of a through hole.
 
 Open **History** or press **F7** to inspect a v4 part’s solid features.
 Click a row or use Left and Right to select it. **Suppress** (S) toggles
@@ -435,7 +435,14 @@ height or segment count. For its shell, edit the wall thickness. For a saved
 profile finish, edit the chamfer distance, fillet radius or fillet segment
 count. Up and Down move a step one slot. Each
 accepted edit keeps the document's original sketch and solid-step records
-and can be undone. Sketch editing in this file representation is pending.
+and can be undone.
+
+Click a PartBuilder sketch in Design to edit it. **Dimensions** (F8)
+opens the saved dimensions and relations for supported lines, circles and
+points. The sketch toolbar also adds lines, circles, rectangles and points,
+including in files without a solid. The editor saves the original records
+and sketch IDs. An edit that would move an extrusion to a different profile
+is rejected before it enters Undo history.
 
 For Biscuit standalone schema-1 files, open **History** (F7), or right-click
 a feature or part in Design and choose **Feature history**. In a narrow

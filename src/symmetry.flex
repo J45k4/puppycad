@@ -48,8 +48,9 @@ fn puppy_mirror_hit(nodes,sk,point,only_lines) {
     }return hit;
 }
 fn puppy_symmetry_pick(project,x,y) {
-    let point=puppy_draft_point(x,y);let nodes=pc_nodes(cad_project_part(project));
     let sk=j_string(puppy_draft_sketch(project),"id");let updated=0;let label="Mirror copy added";
+    let model=puppy_sketch_model(project,sk);if !model {return puppy_title(project,cg_error);}
+    let point=puppy_draft_point(x,y);let nodes=pc_nodes(cad_project_part(model));
     if !puppy_symmetry_axis {
         let axis=puppy_mirror_hit(nodes,sk,point,1);
         if axis {puppy_symmetry_axis=puppy_snapshot(j_string(axis,"id"));}
@@ -58,14 +59,14 @@ fn puppy_symmetry_pick(project,x,y) {
     if puppy_symmetry_mode==1 {
         let source=puppy_mirror_hit(nodes,sk,point,0);
         if !source {return puppy_title(project,puppy_symmetry_hint());}
-        updated=cad_project_mirror_entity(project,sk,j_string(source,"id"),puppy_symmetry_axis+24);
+        updated=cad_project_mirror_entity(model,sk,j_string(source,"id"),puppy_symmetry_axis+24);
     }else {
         let anchor=puppy_distance_hit(point);if !anchor {return puppy_title(project,puppy_symmetry_hint());}
         if m_eq(j_string(anchor,"entityId"),puppy_symmetry_axis+24) {return puppy_title(project,"Choose an anchor on a different entity");}
         if !puppy_symmetry_anchor {puppy_symmetry_anchor=puppy_snapshot(j_encode(anchor));return puppy_title(project,puppy_symmetry_hint());}
-        updated=cad_project_toggle_point_symmetry(project,sk,j_parse(puppy_symmetry_anchor+24),anchor,puppy_symmetry_axis+24);
+        updated=cad_project_toggle_point_symmetry(model,sk,j_parse(puppy_symmetry_anchor+24),anchor,puppy_symmetry_axis+24);
         label="Point symmetry updated";
     }
-    if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+    updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}
     puppy_symmetry_end();return puppy_title(updated,label);
 }

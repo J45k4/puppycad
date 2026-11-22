@@ -71,8 +71,12 @@ fn puppy_line_cache(report) {
     if puppy_line_report {puppy_drop(puppy_line_report);}puppy_line_report=puppy_snapshot(j_encode(report));
     puppy_sketch=1;puppy_draft=1;puppy_anchor=0;puppy_revolve_axis=0;return 1;
 }
+fn puppy_line_read(project,id) {
+    let model=puppy_sketch_model(project,id);if !model {return 0;}
+    return cad_project_line_sketch(model,id);
+}
 fn puppy_line_choose(project,next) {
-    let nodes=pc_nodes(cad_project_part(project));let row=pc_first(nodes);let sketches=cg_array();
+    let row=pc_first(puppy_workspace_sketch_records(project));let sketches=cg_array();
     while row {if m_eq(j_string(row,"type"),"sketch") {cg_push(sketches,row);}row=load64(row+24);}
     let count=cg_count(sketches);let i=0;let start=puppy_draft_index;
     if !puppy_draft {
@@ -83,7 +87,7 @@ fn puppy_line_choose(project,next) {
     }
     while i<count {
         let index=(start+next+i)%count;let sketch=cg_at(sketches,index);
-        let report=cad_project_line_sketch(project,j_string(sketch,"id"));
+        let report=puppy_line_read(project,j_string(sketch,"id"));
         if report {
             if !puppy_line_report {puppy_line_was_draft=puppy_draft;puppy_line_was_sketch=puppy_sketch;puppy_line_old_sketch=puppy_draft_index;}
             puppy_line_cache(report);puppy_draft_index=index;puppy_line_index=0;puppy_distance_index=-1;if !puppy_line_row() {puppy_distance_index=0;}puppy_bar_page=0;
@@ -105,15 +109,21 @@ fn puppy_line_end() {
 fn puppy_line_close(project) {
     puppy_line_end();
     puppy_draft_index=puppy_line_old_sketch;puppy_draft=puppy_line_was_draft;puppy_sketch=puppy_line_was_sketch;
-    puppy_refresh(project);return puppy_title(project,"Line editing closed");
+    if !puppy_refresh(project) {return puppy_title(project,cg_error);}
+    if puppy_line_was_draft && pc_legacy_solid_part(cad_project_part(project)) {
+        puppy_draft=1;puppy_sketch=1;puppy_empty=0;puppy_explicit_sketch=1;
+    }
+    return puppy_title(project,"Line editing closed");
 }
 fn puppy_line_update(project,updated) {
     if !updated {return 0;}
-    let sketch=puppy_draft_sketch(updated);
-    let report=cad_project_line_sketch(updated,j_string(sketch,"id"));if !report {return 0;}
+    let id=j_string(puppy_draft_sketch(project),"id");
+    if !pc_legacy_solid_part(cad_project_part(updated)) {updated=puppy_sketch_result(project,id,updated);}
+    if !updated {return 0;}
+    let report=puppy_line_read(updated,id);if !report {return 0;}
     puppy_line_cache(report);
     if !m_eq(j_encode(project),j_encode(updated)) {puppy_push(updated);}
-    return 1;
+    return updated;
 }
 fn puppy_line_actions() {
     let buttons=cg_array();
@@ -201,8 +211,10 @@ fn puppy_distance_pick(project,x,y) {
     let anchor=puppy_distance_hit(puppy_draft_point(x,y));if !anchor {return puppy_distance_hint(project);}
     if !puppy_distance_first {puppy_distance_first=puppy_snapshot(j_encode(anchor));return puppy_distance_hint(project);}
     let axis="";if puppy_distance_axis==1 {axis="x";}if puppy_distance_axis==2 {axis="y";}
-    let updated=cad_project_add_point_distance(project,j_string(puppy_draft_sketch(project),"id"),j_parse(puppy_distance_first+24),anchor,axis,puppy_distance_reference);
-    if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+    let id=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,id);
+    if !model {return puppy_title(project,cg_error);}
+    let updated=puppy_line_update(project,cad_project_add_point_distance(model,id,j_parse(puppy_distance_first+24),anchor,axis,puppy_distance_reference));
+    if !updated {return puppy_title(project,cg_error);}
     puppy_distance_cancel();puppy_distance_index=cg_j_count(j_get(j_parse(puppy_line_report+24),"distances"))-1;return puppy_title(updated,puppy_line_label());
 }
 fn puppy_line_command(project,key) {
@@ -236,23 +248,26 @@ fn puppy_line_command(project,key) {
     if !distance && po_kind(circle) && (key==21 || key==76) {return 1;}
     if !distance && j_get(circle,"field") && (key==21 || key==76) {
         let id=j_string(circle,"id");let field=j_string(circle,"field");let sketch=j_string(puppy_draft_sketch(project),"id");let updated=0;
-        if key==21 {updated=cad_project_toggle_curve_reference(project,sketch,id,field);}
-        else {updated=cad_project_remove_curve_dimension(project,sketch,id,field);}
-        if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+        let model=puppy_sketch_model(project,sketch);if !model {return puppy_title(project,cg_error);}
+        if key==21 {updated=cad_project_toggle_curve_reference(model,sketch,id,field);}
+        else {updated=cad_project_remove_curve_dimension(model,sketch,id,field);}
+        updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}
         return puppy_title(updated,puppy_line_label());
     }
-    if key==76 && distance {
-        let updated=cad_project_remove_point_distance(project,j_string(puppy_draft_sketch(project),"id"),j_string(distance,"id"));
-        if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}return puppy_title(updated,puppy_line_label());
-    }
-    if key==21 && distance {
-        let updated=cad_project_toggle_distance_reference(project,j_string(puppy_draft_sketch(project),"id"),j_string(distance,"id"));
-        if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}return puppy_title(updated,puppy_line_label());
+    if (key==76 || key==21) && distance {
+        let id=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,id);
+        if !model {return puppy_title(project,cg_error);}
+        let updated=0;
+        if key==76 {updated=cad_project_remove_point_distance(model,id,j_string(distance,"id"));}
+        else {updated=cad_project_toggle_distance_reference(model,id,j_string(distance,"id"));}
+        updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}
+        return puppy_title(updated,puppy_line_label());
     }
     if key==59 {
         if distance && j_value(j_get(distance,"reference")) {return puppy_title(project,"Reference distance is measured");}
         if !distance && j_value(j_get(circle,"reference")) {
-            let node=pc_find(pc_nodes(cad_project_part(project)),j_string(circle,"id"));
+            let model=puppy_sketch_model(project,j_string(puppy_draft_sketch(project),"id"));
+            let node=pc_find(pc_nodes(cad_project_part(model)),j_string(circle,"id"));
             if pc_axis_field(j_string(circle,"field")) {return puppy_title(project,"Reference ellipse dimension is measured");}
             if pc_finite_arc(node) {return puppy_title(project,"Reference arc dimension is measured");}
             return puppy_title(project,"Reference circle dimension is measured");
@@ -294,13 +309,14 @@ fn puppy_line_down(project,x,y) {
         i=i+1;row=load64(row+24);
     }
     let report=j_parse(puppy_line_report+24);let dim=pc_first(j_get(report,"radial"));i=cg_j_count(rows);
+    let nodes=0;if dim && !endpoint {nodes=pc_nodes(cad_project_part(puppy_sketch_model(project,j_string(puppy_draft_sketch(project),"id"))));}
     while dim && !endpoint {
         if m_eq(j_string(dim,"field"),"diameter") {
             let center=pc_find(j_get(report,"points"),j_string(dim,"id"));
             let d=cg_abs(pc_line_span(point,pc_uv(j_get(center,"center")))-pc_pose_number(j_get(center,"radius")));
             if d<best {best=d;selected=i;}
         }else {
-            let node=pc_find(pc_nodes(cad_project_part(project)),j_string(dim,"id"));
+            let node=pc_find(nodes,j_string(dim,"id"));
             let field=j_string(dim,"field");let closed=(pc_curve_axes(node) && !pc_finite_arc(node) && m_eq(field,"width")) || (pc_polygon_entity(node) && m_eq(field,"radius"));
             if closed || pc_finite_arc(node) && (m_eq(field,"radius") || !pc_circular_arc(node) && m_eq(field,"arcSweep")) {
                 let path=0;if closed {path=pc_primitive_loop(node);}else {path=pc_arc_path(node);}
@@ -323,13 +339,15 @@ fn puppy_line_move(project,x,y) {
     if puppy_line_preview {puppy_drop(puppy_line_preview);puppy_line_preview=0;}
     if x==puppy_line_down_x && y==puppy_line_down_y {return puppy_title(project,puppy_line_label());}
     let sketch=j_string(puppy_draft_sketch(project),"id");let at=pc_json_point(puppy_draft_point(x,y));
+    let model=puppy_sketch_model(project,sketch);if !model {return puppy_title(project,cg_error);}
     let updated=0;let status="Dragging endpoint";
     if puppy_drag_point_id {
-        updated=cad_project_move_point(project,sketch,puppy_drag_point_id+24,at);status="Dragging sketch point";
+        updated=cad_project_move_point(model,sketch,puppy_drag_point_id+24,at);status="Dragging sketch point";
     }else {
         let end="p0";if puppy_line_drag==2 {end="p1";}
-        updated=cad_project_move_line_endpoint(project,sketch,j_string(puppy_line_row(),"id"),end,at);
+        updated=cad_project_move_line_endpoint(model,sketch,j_string(puppy_line_row(),"id"),end,at);
     }
+    updated=puppy_sketch_result(project,sketch,updated);
     if !updated {return puppy_title(project,cg_error);}
     puppy_line_preview=puppy_snapshot(j_encode(updated));return puppy_title(project,status);
 }
@@ -354,7 +372,8 @@ fn puppy_line_event(event) {
         puppy_line_move(project,x,y);
         if puppy_line_preview {
             let updated=cad_project_open(puppy_line_preview+24);
-            if puppy_line_update(project,updated) {puppy_title(updated,puppy_line_label());}else {puppy_title(project,cg_error);}
+            updated=puppy_line_update(project,updated);
+            if updated {puppy_title(updated,puppy_line_label());}else {puppy_title(project,cg_error);}
         }
         return puppy_line_cancel_drag();
     }

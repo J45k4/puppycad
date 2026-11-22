@@ -79,7 +79,9 @@ fn puppy_write_field(project,field,value) {
     if puppy_value_unchanged(project,field,value) {return 1;}
     let target=load64(field);let updated=project;let mesh=0;
     if puppy_line_report {
-        updated=cad_project_set_line_length(project,j_string(puppy_draft_sketch(project),"id"),j_string(target,"id"),value);
+        let id=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,id);
+        if !model {return 0;}
+        updated=cad_project_set_line_length(model,id,j_string(target,"id"),value);
         return puppy_line_update(project,updated);
     }
     if puppy_history_rows && pc_legacy_solid_part(cad_project_part(project)) {
@@ -159,8 +161,10 @@ fn puppy_variable_apply(project,text) {
     while load8(text+i) && load8(text+i)!=61 {i=i+1;}
     if load8(text+i) {next=m_slice(text,i);text=text+i+1;}
     else if !m_len(name) {return puppy_title(project,"Enter name = expression");}
-    let updated=cad_project_edit_line_variable(project,j_string(puppy_draft_sketch(project),"id"),name,next,text);
-    if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+    let id=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,id);
+    if !model {return puppy_title(project,cg_error);}
+    let updated=puppy_line_update(project,cad_project_edit_line_variable(model,id,name,next,text));
+    if !updated {return puppy_title(project,cg_error);}
     puppy_number_close();return puppy_title(updated,"Variables updated");
 }
 fn puppy_number_close() {
@@ -195,15 +199,16 @@ fn puppy_number_apply(project) {
     if puppy_variable_slot>=0 {return puppy_variable_apply(project,text);}
     if puppy_line_report {
         let id=j_string(puppy_draft_sketch(project),"id");let distance=puppy_distance_row();let updated=0;
-        let row=puppy_line_row();
-        if puppy_new_offset {updated=cad_project_add_offset(project,id,j_string(row,"id"),text);}
-        else if distance {updated=cad_project_set_distance_expression(project,id,j_string(distance,"id"),text);}
-        else if po_kind(row) {updated=cad_project_set_offset_distance(project,id,j_string(row,"id"),text);}
-        else if j_get(row,"field") {updated=cad_project_set_curve_dimension(project,id,j_string(row,"id"),j_string(row,"field"),text);}
-        else {updated=cad_project_set_line_expression(project,id,j_string(row,"id"),text);}
+        let row=puppy_line_row();let model=puppy_sketch_model(project,id);
+        if !model {return puppy_title(project,cg_error);}
+        if puppy_new_offset {updated=cad_project_add_offset(model,id,j_string(row,"id"),text);}
+        else if distance {updated=cad_project_set_distance_expression(model,id,j_string(distance,"id"),text);}
+        else if po_kind(row) {updated=cad_project_set_offset_distance(model,id,j_string(row,"id"),text);}
+        else if j_get(row,"field") {updated=cad_project_set_curve_dimension(model,id,j_string(row,"id"),j_string(row,"field"),text);}
+        else {updated=cad_project_set_line_expression(model,id,j_string(row,"id"),text);}
         if !updated {return puppy_title(project,cg_error);}
-        if m_eq(j_encode(updated),j_encode(project)) {puppy_number_close();return puppy_title(project,"Value unchanged");}
-        if !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
+        if m_eq(j_encode(updated),j_encode(model)) {puppy_number_close();return puppy_title(project,"Value unchanged");}
+        updated=puppy_line_update(project,updated);if !updated {return puppy_title(project,cg_error);}
         if puppy_new_offset {
             let report=j_parse(puppy_line_report+24);
             puppy_line_index=cg_j_count(j_get(report,"lines"))+cg_j_count(j_get(report,"radial"))+cg_j_count(j_get(report,"offsets"))-1;

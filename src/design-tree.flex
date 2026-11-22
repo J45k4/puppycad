@@ -101,6 +101,16 @@ fn puppy_design_part(rows,parent,part) {
             puppy_design_row(rows,parent,"legacy-step",step,pc_legacy_step_name(data,step),0);
             step=load64(step+24);
         }
+        let feature=pc_first(j_get(data,"features"));
+        while feature {
+            if m_eq(j_string(feature,"type"),"sketch") {
+                let row=puppy_design_row(rows,parent,"sketch",feature,puppy_design_name(feature,"Sketch"),0);
+                puppy_design_list(rows,row,j_get(feature,"entities"),"geometry");
+                puppy_design_group(rows,row,j_get(feature,"relations"),"relation","Constraints",0);
+                puppy_design_group(rows,row,j_get(feature,"variables"),"variable","Variables",0);
+            }
+            feature=load64(feature+24);
+        }
         return 1;
     }
     let nodes=pc_nodes(part);let ordered=j_get(j_get(j_get(part,"data"),"tree"),"orderedNodeIds");
@@ -228,7 +238,9 @@ fn puppy_design_action(row) {
 fn puppy_design_owner(row) {
     while load64(row+32) {row=load64(row+32);}return load64(row+24);
 }
-fn puppy_design_sketch_row(row) {return m_eq(load64(row+16),"sketch");}
+fn puppy_design_sketch_row(row) {
+    return m_eq(load64(row+16),"sketch") && !pc_legacy_solid_part(puppy_design_owner(row));
+}
 fn puppy_design_toggle_sketch(project,row) {
     let visible=!load64(row+88);
     let updated=puppy_set_sketch_visibility(project,puppy_design_owner(row),load64(row+24),visible);
