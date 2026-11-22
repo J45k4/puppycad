@@ -15,7 +15,9 @@ fn puppy_active_field(project) {
     if puppy_revolve_open {return cg_v(0,puppy_revolve_angle(),"Revolve angle  deg");}
     if puppy_extrusion_open {return cg_v(0,puppy_extrusion_length,"Extrusion depth  mm");}
     if puppy_profile_value_id {
-        let node=pc_find(pc_nodes(cad_project_part(project)),puppy_profile_value_id+24);
+        let model=puppy_sketch_model(project,j_string(puppy_draft_sketch(project),"id"));
+        if !model {return 0;}
+        let node=pc_find(pc_nodes(cad_project_part(model)),puppy_profile_value_id+24);
         return cg_v(0,0,puppy_profile_property(node));
     }
     if puppy_sheet_entry {

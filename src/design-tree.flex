@@ -221,8 +221,9 @@ fn puppy_design_selected(rows) {
 fn puppy_design_action(row) {
     let kind=load64(row+16);let node=load64(row+24);
     if m_eq(kind,"geometry") {
-        if pc_polygon_entity(node) {return "Set sides";}
-        if pc_capsule_entity(node) {return "Set width";}
+        let type=j_string(puppy_profile_shape(node),"type");
+        if m_eq(type,"polygon") {return "Set sides";}
+        if m_eq(type,"capsule") {return "Set width";}
     }
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {return "Edit sketch";}
     if m_eq(kind,"part") {return "Open part";}

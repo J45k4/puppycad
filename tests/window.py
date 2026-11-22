@@ -2225,6 +2225,95 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Raw TypeScript primitives retain their feature IDs, parameters and saved references.
+        raw_fixture=json.loads((libs/"cad/tests/fixtures/legacy-typescript-direct-primitives.pcad").read_bytes())
+        raw_cases=(
+            ("ellipse",238,dict(height=16.125),31,2483.290394),
+            ("capsule",212,dict(width=8.125),16,1676.913089),
+            ("polygon",212,dict(sides=9,radius=8.5,rotation=-23.125),9,1671.890573),
+        )
+        for index,(kind,sketch_y,fields,samples,expected_volume) in enumerate(raw_cases):
+            artifact=f"legacy-direct-{kind}"
+            document=dict(raw_fixture,items=[raw_fixture["items"][index]],selectedPath=[0])
+            path=Path(tmp)/f"{artifact}.pcad"
+            path.write_text(json.dumps(document))
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            app,window=open_app(path,design_tree=True)
+            if kind=="ellipse":
+                click(window,91,sketch_y)
+                verify(window,"Editing body")
+                key("F8")
+                verify(window,"body/sketch/0   Width 24.5 mm")
+                key("Tab")
+                verify(window,"body/sketch/0   Height 13.75 mm")
+                legacy_number("16.125 mm")
+                verify(window,"Edited")
+                key("Control_L+z")
+                verify(window,"body/sketch/0   Height 13.75 mm")
+                key("Control_L+y")
+                verify(window,"body/sketch/0   Height 16.125 mm")
+                key("Escape")
+            else:
+                click(window,26,sketch_y)
+                click(window,99,sketch_y+26)
+                key("Return")
+                verify(window,"Set value")
+                type_value("8.125" if kind=="capsule" else "9")
+                key("Return")
+                verify(window,"Profile updated")
+                if kind=="polygon":
+                    key("F8")
+                    verify(window,"body/sketch/0   Radius 6.5 mm")
+                    legacy_number("8.5 mm")
+                    verify(window,"Edited")
+                    key("Tab")
+                    verify(window,"body/sketch/0   Rotation 13.25 deg")
+                    legacy_number("-23.125 deg")
+                    verify(window,"Edited")
+                    key("Escape")
+            key("F3")  # Show the full sketch without the Design panel over it.
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            original,saved=(doc["items"][0]["data"] for doc in (document,json.loads(path.read_bytes())))
+            old,edited=original["features"][0],saved["features"][0]
+            assert "cad" not in saved and saved["solidSteps"]==original["solidSteps"]
+            assert saved["features"][1:]==original["features"][1:]
+            assert edited["entities"]==[dict(old["entities"][0],**fields)]
+            assert edited["target"]==old["target"] and edited["profiles"]==old["profiles"]
+            assert len(edited["vertices"])==samples
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            assert math.isclose(triangulation(stl)[1],expected_volume,abs_tol=.002)
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
+        # A side count change may not retarget the face used by the attached sketch.
+        document=dict(raw_fixture,items=[raw_fixture["items"][4]],selectedPath=[0])
+        path=Path(tmp)/"Protected polygon face.pcad"
+        initial=json.dumps(document).encode()
+        path.write_bytes(initial)
+        app,window=open_app(path,design_tree=True)
+        click(window,26,238)
+        click(window,99,264)
+        key("Return")
+        verify(window,"Set value")
+        type_value("9")
+        key("Return")
+        verify(window,"Sketch edit changes a face used by boss/sketch")
+        key("Escape")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert path.read_bytes()==initial
+        key("Escape")
+        app.wait(3)
+
         # A PartBuilder sketch without any solid can open and save its own editing state.
         path=Path(tmp)/"Legacy sketch only.pcad"
         initial=(libs/"cad/tests/fixtures/legacy-typescript-sketch-only.pcad").read_bytes()
@@ -4354,7 +4443,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,890,20)
         verify(window,"Choose a relation")
         key("n")
-        verify(window,"Pick an ellipse or elliptic arc for Normal")
+        verify(window,"Pick the source curve for Normal")
         click(window,*normal_pixel(3-20*cosine,2-20*sine))
         verify(window,"Pick the line endpoint for Normal")
         click(window,*normal_pixel(line["p1"]["x"],line["p1"]["y"]))
@@ -4390,6 +4479,120 @@ with tempfile.TemporaryDirectory() as tmp:
         stl=path.with_suffix(".stl")
         assert math.isclose(triangulation(stl)[1],640*23*6*math.sin(math.tau/128),abs_tol=.004)
         shutil.copyfile(stl,output_dir/"normal-ellipse-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Saved round Normals follow a resized circle and the midpoint of a finite arc.
+        round_fixture=json.loads((libs/"cad/tests/fixtures/round-normal.pcad").read_bytes())
+        round_cases=(
+            ("normal-circle",2,"Radius","20 mm","25 mm",(0,25),(0,30)),
+            ("normal-circular-arc",2,"Sweep","-90 deg","-30 deg",
+             (19.318517,-5.176381),(30.909626,-8.282209)),
+        )
+        for index,(artifact,tabs,field,old,new,p0,p1) in enumerate(round_cases):
+            path=Path(tmp)/f"{artifact}.pcad"
+            round_fixture["selectedPath"]=[index]
+            path.write_text(json.dumps(round_fixture))
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            baseline=path.with_name(f"{artifact}-before.stl")
+            subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+            app,window=open_app(path)
+            key("F8")
+            verify(window,"normal-line")
+            click(window,890,20)
+            verify(window,"Choose a relation")
+            key("n")
+            verify(window,"Pick the source curve for Normal")
+            key("Escape")
+            for _ in range(tabs):
+                key("Tab")
+            verify(window,f"round-guide   {field} {old}")
+            legacy_number(new)
+            verify(window,"Edited")
+            key("Control_L+z")
+            verify(window,f"round-guide   {field} {old}")
+            key("Control_L+y")
+            verify(window,f"round-guide   {field} {new}")
+            key("Home")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            saved=json.loads(path.read_bytes())
+            before,after=({n["id"]:n for n in doc["items"][index]["data"]["cad"]["nodes"]}
+                          for doc in (round_fixture,saved))
+            assert saved["items"][1-index]==round_fixture["items"][1-index]
+            original=before["native-sketch-1"]["relations"]
+            assert after["native-sketch-1"]["relations"][:2]==original[:2]
+            for end,expected in (("p0",p0),("p1",p1)):
+                actual=after["normal-line"][end]
+                assert math.dist((actual["x"],actual["y"]),expected)<.00004,actual
+            if index:
+                arc=after["round-guide"]["arc"]
+                assert arc==dict(before["round-guide"]["arc"],sweep=arc["sweep"])
+                assert math.isclose(arc["sweep"],-math.pi/6,abs_tol=1e-12)
+            else:
+                assert after["round-guide"]["primitive"]==dict(before["round-guide"]["primitive"],radius=25)
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            if index:
+                assert stl.read_bytes()==baseline.read_bytes()
+            else:
+                bounds,volume=triangulation(stl)
+                assert bounds==[(-25,25),(-25,25),(0,10)]
+                assert math.isclose(volume,160*25**2*math.sin(math.tau/32),abs_tol=.025),volume
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
+        # A saved Normal follows a finite line whose length drives the midpoint.
+        path=Path(tmp)/"Finite line Normal.pcad"
+        original=(libs/"cad/tests/fixtures/linear-normal.pcad").read_bytes()
+        path.write_bytes(original)
+        shutil.copyfile(path,output_dir/"normal-line-input.pcad")
+        baseline=path.with_name("Finite line Normal before.stl")
+        subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"normal-source   10 mm")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        key("n")
+        verify(window,"Pick the source curve for Normal")
+        key("Escape")
+        legacy_number("15 mm")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"normal-source   10 mm")
+        key("Control_L+y")
+        verify(window,"normal-source   15 mm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"normal-line.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        before,after=({n["id"]:n for n in doc["items"][0]["data"]["cad"]["nodes"]}
+                      for doc in (json.loads(original),json.loads(path.read_bytes())))
+        assert after["normal-source"]["p0"]==before["normal-source"]["p0"]
+        assert after["normal-source"]["p1"]==dict(x=15,y=0)
+        for endpoint,y in (("p0",0),("p1",5)):
+            point=after["normal-line"][endpoint]
+            assert math.dist((point["x"],point["y"]),(7.5,y))<.00004,point
+        assert next(rel for rel in after["native-sketch-1"]["relations"] if rel["type"]=="normal")==next(
+            rel for rel in before["native-sketch-1"]["relations"] if rel["type"]=="normal")
+        shutil.copyfile(path,output_dir/"normal-line-edited.pcad")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert stl.read_bytes()==baseline.read_bytes()
+        shutil.copyfile(stl,output_dir/"normal-line-edited.stl")
         key("Escape")
         app.wait(3)
 
@@ -8186,6 +8389,46 @@ with tempfile.TemporaryDirectory() as tmp:
         bounds,volume=triangulation(stl)
         assert bounds==[(0,24),(0,8),(-16,0)] and math.isclose(volume,2985.6614576,abs_tol=.0001)
         shutil.copyfile(stl,output_dir/"sampled-aperture-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # The inner chamfer keeps the sampled edge ordinal on a true TypeScript aperture.
+        path=Path(tmp)/"Sampled inner chamfer.pcad"
+        initial=(libs/"cad/tests/fixtures/typescript-sampled-inner-chamfer.pcad").read_bytes()
+        path.write_bytes(initial)
+        shutil.copyfile(path,output_dir/"sampled-inner-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Saved inner rim bevel  d1 0.15 mm")
+        legacy_number("0.2")
+        verify(window,"Saved inner rim bevel  d1 0.2 mm")
+        key("Tab")
+        verify(window,"Saved inner rim bevel  d2 0.25 mm")
+        legacy_number("0.3")
+        verify(window,"Saved inner rim bevel  d2 0.3 mm")
+        key("Control_L+z")
+        verify(window,"Saved inner rim bevel  d2 0.25 mm")
+        key("Control_L+y")
+        verify(window,"Saved inner rim bevel  d2 0.3 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        source=json.loads(initial);saved=json.loads(path.read_bytes())
+        source["revision"]=saved["revision"]
+        nodes=source["items"][0]["data"]["cad"]["nodes"]
+        next(n for n in nodes if n["id"]=="bevel").update(d1=.2,d2=.3)
+        assert saved==source
+        shutil.copyfile(path,output_dir/"sampled-inner-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Saved inner rim bevel  d1 0.2 mm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"sampled-inner.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert math.isclose(triangulation(stl)[1],1477.697502484,abs_tol=.0001)
+        shutil.copyfile(stl,output_dir/"sampled-inner-edited.stl")
         key("Escape")
         app.wait(3)
 

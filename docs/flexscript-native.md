@@ -252,10 +252,11 @@ within its sweep. For **Internal tangent**, pick the outer circular curve
 first and the inner curve second. A driving dimension rebuilds the contact
 while keeping the relation.
 
-Choose **Normal** (N) in **Dimensions → Relations**, then click an ellipse
-or elliptic arc and the endpoint of a line. The endpoint stays on the
-curve and the line stays perpendicular as dimensions change. An elliptic
-arc limits the endpoint to its signed sweep.
+Choose **Normal** (N) in **Dimensions → Relations**, then click a line,
+circle, ellipse, or circular or elliptic arc. Click the endpoint of a
+different line. That endpoint stays on the source and the line stays
+perpendicular as dimensions change. A line limits contact to its segment,
+and an arc limits it to its signed sweep.
 
 Choose **Midpoint** in **Relations**, click the source line or arc, then click
 a point, line endpoint or supported shape center. Changing a source dimension
@@ -459,7 +460,10 @@ sketch and solid-step records and can be undone.
 
 Click a PartBuilder sketch in Design to edit it. **Dimensions** (F8)
 opens the saved dimensions and relations for supported lines, circles,
-circular arcs, elliptic arcs and points. Choose **Smooth** (J), select a
+full ellipses, circular arcs, elliptic arcs, regular polygons, and points.
+Expand the sketch and select a polygon or capsule to reach **Set sides**
+or **Set width**. You can also point at its outline in Sketch and press F2.
+Choose **Smooth** (J), select a
 control or fit spline and drag one of its points to reshape it. Closed fit
 splines also expose their points. The sketch toolbar adds lines, circles,
 rectangles and points, including in files without a solid. The editor saves
@@ -503,7 +507,7 @@ center and axes. The diameter circle uses the ordinary circle dimensions.
 
 A polygon starts with six sides. Point at its outline and press F2, or
 select it in the Design tree and choose **Set sides**, to change the count
-to 3–64. **Dimensions** drives its radius. Press F2 over a slot or choose
+to 3–64. **Dimensions** drives its radius and rotation. Press F2 over a slot or choose
 **Set width** in the tree to change the full width in millimetres while
 keeping both cap centers in place.
 

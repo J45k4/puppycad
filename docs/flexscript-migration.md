@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`540b5ff305c97aa44227c7212e2b6833544324c8` includes the shared library and
+`667b2cc6502cf7143bbaa46d9d6d0ce50416b271` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
@@ -272,11 +272,12 @@ drags an anchored circular pattern with a −180° sweep. Original TypeScript
 reopens the edited files. The grid and circular exports have matching
 closed meshes, bounds and signed volumes.
 
-A TypeScript v4 plate with a sampled half-ellipse aperture now retains its
-saved outer-edge chamfer. The native editor sets the two setbacks to 0.75
-and 1.25 mm and reopens the 2,985.661458 mm³ solid. The guard accepts the
-original outside edge numbering on a direct corner-rectangle outline.
-Sampled aperture edge numbering remains open.
+A TypeScript v4 plate with a sampled half-ellipse aperture retains its
+saved chamfer. The outside edge fixture reopens at 2,985.661458 mm³ after
+editing both setbacks. An inner edge fixture reopens at 1,477.697502 mm³
+after setting 0.2 and 0.3 mm. The guard certifies the original ordered
+samples on a single canonical half-ellipse and its closing chord, including
+original TypeScript files whose seams start on either entity.
 
 The shared `55f2890` archive passed all 76 SDK tests. Biscuit's checked VM
 replayed each native grid, circular pattern, elliptic join and outer bevel
@@ -290,6 +291,21 @@ with their relations and exported geometry intact. The `540b5ff` archive
 passed 77 SDK tests. Biscuit's checked VM reproduced both saved graphs and
 four frozen v11 builds matched the native STL bytes. The checked ellipse
 fixture authors the relation and changes the width in separate calls.
+
+The native editor also reopens imported Normals after increasing a circle's
+radius, shortening a signed circular sweep, and lengthening a finite line.
+The affected endpoint stays on its source, while the archived relation ID
+and the follower's driving length survive. The circle rebuilds its solid.
+The two construction guides leave their independent solids byte-identical.
+
+Direct PartBuilder ellipse axes and rotation, capsule width, and regular
+polygon radius, rotation and side count edit in the original records. The
+profile cache follows the TypeScript sample order. The tests preserve an
+attached ellipse cap and reject a polygon side count that would redirect an
+attached face or selected corner. Biscuit's checked VM and two frozen v11
+jobs per case reproduced the saved native data and STL bytes across these
+three forms, the five Normal cases, and the sampled inner chamfer.
+The pinned `667b2cc` SDK passed all 80 CAD test programs.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the
@@ -592,8 +608,9 @@ rectangle, regular polygon, circle, ellipse or capsule. The SDK uses the
 original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
-within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with sampled curved interior boundaries still need selector support.
+within 0.00012 mm, and Biscuit reproduces the native STL bytes. The ordered
+selector for a sampled interior boundary covers the single canonical
+half-ellipse and chord case described above.
 For a closed convex loop of straight segments, TypeScript's edge ordinals
 and vertical aliases match native geometry with shuffled and reversed
 segments. The edited square's closed 3,960 mm³ STL also matches the checked

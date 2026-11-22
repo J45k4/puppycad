@@ -230,20 +230,27 @@ fn puppy_sketch_hit(nodes,sk,point) {
     }
     return hit;
 }
+fn puppy_profile_shape(node) {
+    let primitive=j_get(node,"primitive");if primitive {return primitive;}
+    return node;
+}
 fn puppy_profile_property(node) {
-    if pc_polygon_entity(node) {return "Polygon sides";}
-    if pc_capsule_entity(node) {return "Slot width (mm)";}
+    let type=j_string(puppy_profile_shape(node),"type");
+    if m_eq(type,"polygon") {return "Polygon sides";}
+    if m_eq(type,"capsule") {return "Slot width (mm)";}
     return 0;
 }
 fn puppy_profile_open(project,node) {
-    let shape=j_get(node,"primitive");let text=m_int(j_integer(shape,"sides"));
-    if pc_capsule_entity(node) {text=puppy_display_number(pc_pose_number(j_get(shape,"width")));}
+    let shape=puppy_profile_shape(node);let text=m_int(j_integer(shape,"sides"));
+    if m_eq(j_string(shape,"type"),"capsule") {text=puppy_display_number(pc_pose_number(j_get(shape,"width")));}
     puppy_profile_value_id=puppy_snapshot(j_string(node,"id"));
     puppy_anchor=0;
     return puppy_text_open(project,text);
 }
 fn puppy_profile_pick_value(project) {
-    let sketch=j_string(puppy_draft_sketch(project),"id");let nodes=pc_nodes(cad_project_part(project));
+    let sketch=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sketch);
+    if !model {return puppy_title(project,cg_error);}
+    let nodes=pc_nodes(cad_project_part(model));
     let node=puppy_sketch_hit(nodes,sketch,puppy_draft_point(puppy_pointer_x,puppy_pointer_y));
     if puppy_profile_property(node) {return puppy_profile_open(project,node);}
     let row=pc_first(nodes);let last=0;
@@ -259,7 +266,9 @@ fn puppy_profile_pick_value(project) {
 fn puppy_profile_apply(project,text) {
     let id=puppy_profile_value_id+24;
     let sketch=j_string(puppy_draft_sketch(project),"id");
-    let updated=cad_project_set_profile_parameter(project,sketch,id,text);if !updated {return puppy_title(project,cg_error);}
+    let model=puppy_sketch_model(project,sketch);if !model {return puppy_title(project,cg_error);}
+    let updated=puppy_sketch_result(project,sketch,cad_project_set_profile_parameter(model,sketch,id,text));
+    if !updated {return puppy_title(project,cg_error);}
     if !m_eq(j_encode(updated),j_encode(project)) {puppy_push(updated);}
     puppy_number_close();puppy_fit_sketch(updated,1);
     return puppy_title(updated,"Profile updated");
@@ -414,7 +423,7 @@ fn puppy_loft_key(project,key,mods) {
 }
 fn puppy_draft_key(project,key,mods) {
     if pc_legacy_solid_part(cad_project_part(project)) {
-        if key!=55 && key!=74 && (mods&3 || (key!=21 && key!=6 && key!=15 && key!=13)) {return 1;}
+        if key!=55 && key!=74 && (mods&3 || (key!=21 && key!=6 && key!=15 && key!=13 && key!=59)) {return 1;}
     }
     if key==37 {
         puppy_revolve_axis=!puppy_revolve_axis;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());

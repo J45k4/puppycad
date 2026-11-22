@@ -35,10 +35,11 @@ fn puppy_direction_has_tangent(project) {
 }
 fn puppy_direction_has_normal(project) {
     if !puppy_direction_lines() {return 0;}
+    if puppy_direction_has_lines() {return 1;}
     let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
     let row=pc_first(pc_nodes(cad_project_part(model)));
     while row {
-        if m_eq(j_string(row,"sketchId"),sk) && pc_ellipse_entity(row) {return 1;}
+        if m_eq(j_string(row,"sketchId"),sk) && !pct_line(row) && pc_normal_curve(row) {return 1;}
         row=load64(row+24);
     }
     return 0;
@@ -100,7 +101,7 @@ fn puppy_direction_hint() {
     }
     if puppy_direction_mode==10 {
         if puppy_direction_source {return "Pick the line endpoint for Normal";}
-        return "Pick an ellipse or elliptic arc for Normal";
+        return "Pick the source curve for Normal";
     }
     let pick="Pick the source ";if puppy_direction_source {pick="Pick the follower ";}
     if puppy_direction_mode==7 {
@@ -145,7 +146,7 @@ fn puppy_direction_pick_curve_anchor(project,model,nodes,sk,point) {
     if !puppy_direction_source {
         let curve=puppy_sketch_hit(nodes,sk,point);
         let supported=pc_midpoint_kind(curve);if on_curve {supported=pc_point_on_curve_kind(curve);}
-        if normal {supported=pc_ellipse_entity(curve);}
+        if normal {supported=pc_normal_curve(curve);}
         if supported {puppy_direction_source=puppy_snapshot(j_string(curve,"id"));}
         return puppy_title(project,puppy_direction_hint());
     }
