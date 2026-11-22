@@ -230,6 +230,56 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        plane_path=Path(tmp)/"Front plane.pcad"
+        app,window=open_app(plane_path,"Click two rectangle corners",design_tree=True)
+        click(window,900,20)
+        verify(window,"Part workspace")
+        click(window,503,55)
+        verify(window,"Choose a plane for the new sketch")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"new-sketch-planes.png"],check=True)
+        key("Escape")
+        verify(window,"New sketch cancelled")
+        key("Shift_L+s")
+        verify(window,"Choose a plane for the new sketch")
+        click(window,180,55)  # Front (XZ)
+        verify(window,"Editing Sketch 2")
+        click(window,440,378)
+        click(window,520,338)
+        verify(window,"Sketch edited")
+        click(window,900,20)
+        verify(window,"Part workspace")
+        key("Control_L+s")
+        verify(window,"Saved")
+        document=json.loads(plane_path.read_bytes())
+        graph=document["items"][0]["data"]["cad"]
+        new_sketch=next(n for n in graph["nodes"] if n["id"]=="native-sketch-2")
+        assert new_sketch["targetId"]=="plane-front"
+        assert graph["rootNodeIds"].count("plane-front")==1 and graph["rootNodeIds"][-1]==new_sketch["id"]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(plane_path,"Click two rectangle corners",design_tree=True)
+        click(window,228,125)
+        for letter in "sketch 2":
+            key("space" if letter==" " else letter)
+        key("Return")
+        click(window,80,186)
+        verify(window,"Selected Sketch 2")
+        key("Return")
+        verify(window,"Editing Sketch 2")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"front-reference.stl"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",plane_path,reference],check=True)
+        assert triangulation(plane_path.with_suffix(".stl"))==triangulation(reference)==(
+            [(-10,10),(0,10),(-5,5)],2000)
+        shutil.copyfile(plane_path,output_dir/"front-plane.pcad")
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
@@ -3718,6 +3768,9 @@ with tempfile.TemporaryDirectory() as tmp:
         path.write_text(json.dumps(original))
         app, window = open_app(path)
         click(window, 503, 55)
+        verify(window, 'Choose a plane for the new sketch')
+        subprocess.run(['magick','import','-window',hex(window),output_dir/'new-sketch-on-part.png'],check=True)
+        click(window, 420, 55)
         verify(window, 'Click a face for the new sketch')
         click(window, 100, 120)
         verify(window, 'Click a visible extrusion face')

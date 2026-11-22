@@ -229,6 +229,7 @@ fn puppy_export_shortcut(project,extension) {
 fn puppy_command(key,mods) {
     puppy_forget_click();
     if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
+    if puppy_plane_chooser {return puppy_plane_command(cad_project_open(puppy_history+24),key,mods);}
     if puppy_sheet_scene {return puppy_sheet_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_join_drag {
         if key==GUI_KEY_ESCAPE {puppy_join_end_drag();return puppy_title(cad_project_open(puppy_history+24),"Smooth drag cancelled");}return 1;
@@ -305,6 +306,9 @@ fn puppy_command(key,mods) {
         if key==17 {return puppy_add_item(project,"part");}
         if key==4 {return puppy_add_item(project,"assembly");}
     }
+    if key==22 && mods&3 && !(mods&0x3c0) && cad_project_part(project) && !puppy_draft {
+        return puppy_start_plane_chooser(project);
+    }
     if key==69 && !(mods&0x3c3) {return puppy_workspace_switch(project);}
     if key==9 && !(mods&0x3c0) && cad_project_part(project) && !puppy_draft {
         puppy_sketch=0;puppy_picking_face=!puppy_picking_face;
@@ -338,6 +342,7 @@ fn puppy_command(key,mods) {
                 if m_len(sketch) && m_eq(owner,j_string(cad_project_part(project),"id")) {
                     let index=puppy_workspace_sketch_index(project,sketch);
                     if index>=0 {puppy_draft_index=index;puppy_draft=1;puppy_sketch=1;puppy_empty=0;puppy_explicit_sketch=1;}
+                    else {puppy_workspace_show_part(project);}
                 }
             }else {project=cad_project_open(puppy_history+24);}
         }
@@ -495,6 +500,7 @@ fn puppy_editor(path,source,project,report) {
             else if puppy_mate_event(event) {dirty=1;}
             else if puppy_step_event(event) {dirty=1;}
             else if puppy_pattern_event(event) {dirty=1;}
+            else if puppy_plane_chooser && puppy_plane_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
             else if puppy_design_available() && puppy_objects_event(event) {dirty=1;}
             else if puppy_sheet_scene && (kind==GUI_QUIT || kind==GUI_CLOSE) {
                 puppy_sheet_close();running=puppy_command(GUI_KEY_ESCAPE,0);dirty=1;
@@ -608,7 +614,7 @@ fn puppy_editor(path,source,project,report) {
                         let data=j_get(cad_project_item(current),"data");
                         if puppy_servo(data) && x>=625 {puppy_command(43,0);}else {puppy_command(19,0);}
                     }
-                    else if x>=452 && x<560 && cad_project_part(current) {puppy_command(9,0);}
+                    else if x>=452 && x<560 && cad_project_part(current) {puppy_command(22,3);}
                     else if x>=452 {puppy_command(43,0);}
                     dirty=1;
                 }

@@ -25,6 +25,11 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
   F12 switches between Part and Sketch. Extrude and Revolve create a feature
   and return to Part.
 
+From Part, click **New sketch** or press Shift+S. Choose **Top (XY)**,
+**Front (XZ)**, or **Right (YZ)**. Choose **On face** to attach the sketch
+to an existing solid, then click its face. Keys 1, 2, and 3 select a plane
+while the chooser is open. Escape cancels.
+
 Save writes all of the items and their sketches to the same PCAD file.
 
 The shared Flexscript CAD library evaluates the selected part or assembly.

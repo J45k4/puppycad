@@ -128,6 +128,12 @@ fn puppy_toolbar_build(w) {
     let part=cad_project_item(project);let feature=puppy_feature(project);
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
+    if puppy_plane_chooser {
+        if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
+        puppy_action_bar(puppy_plane_actions(),rgb,w,-1);
+        puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;
+        return 1;
+    }
     if puppy_sheet_scene {
         let scene=j_parse(puppy_sheet_scene+24);
         let title=j_string(scene,"name");
@@ -289,13 +295,14 @@ fn puppy_toolbar_build(w) {
         puppy_bar_button(rgb,w,194,38,"-");puppy_bar_button(rgb,w,238,38,"+");
         let label=m_cat(j_string(feature,"name"),m_cat(" / ",m_cat(puppy_field(feature),m_cat("   ",m_cat(puppy_display_dimension(project,feature),puppy_property_unit(feature,puppy_property))))));
         puppy_bar_button(rgb,w,376,68,"Export");
-        puppy_bar_button(rgb,w,452,108,"Face sketch");
-        if puppy_picking_face {puppy_bar_rect(rgb,w,452,66,108,2,143,217,184);}
         let label_x=656;
         if w>=900 && puppy_line_button(project) {puppy_bar_button(rgb,w,656,90,"Dimensions");label_x=754;}
         puppy_bar_text(rgb,w,label_x,60,label,w-140);
     }
     if !puppy_draft && cad_project_part(project) {
+        puppy_bar_button(rgb,w,452,108,"New sketch");
+        if puppy_picking_face {puppy_bar_rect(rgb,w,452,66,108,2,143,217,184);}
+
         if puppy_draft_sketch(project) {
             let view="Edit sketch";if puppy_sketch {view="Part";}
             puppy_bar_button(rgb,w,288,84,view);
@@ -416,7 +423,7 @@ fn puppy_compact_actions(project) {
                 let label="Edit sketch";if puppy_sketch {label="Part";}
                 puppy_compact_button(rows,label,69,0);
             }
-            if solid {puppy_compact_button(rows,"Face sketch",9,0);}
+            puppy_compact_button(rows,"New sketch",22,3);
         }
         if !assembly {
             puppy_compact_button(rows,"Loft",38,0);

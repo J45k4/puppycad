@@ -8,7 +8,7 @@ global puppy_design_folds=0;
 global puppy_design_scroll=0;
 
 fn puppy_design_available() {
-    return !puppy_reader_report && !puppy_tree_open && !puppy_history_rows && !puppy_step_input && !puppy_mating
+    return !puppy_plane_chooser && !puppy_reader_report && !puppy_tree_open && !puppy_history_rows && !puppy_step_input && !puppy_mating
         && !puppy_line_report && !puppy_number_text && !puppy_loft_open && !puppy_patterns && !puppy_edge_kind && !puppy_construction_ids;
 }
 fn puppy_design_toggle() {

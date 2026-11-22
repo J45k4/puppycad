@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`d0be309111bb08854d16cdd67543f996757290f4` includes the shared library and
+`f1b952d5e96c7fdf31d6dffffc72381d62185323` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -680,6 +680,13 @@ sketch, undoes and redoes the edit without leaving it, then returns to
 Part and reopens the assembly. The saved file retains the other items and
 the assembly references. A blank sketch can also return to Part before
 it contributes a solid.
+
+The Part workspace creates sketches on Top, Front or Right, or starts a
+face sketch. The SDK reuses existing plane IDs and adds missing planes to
+legacy v4 parts. The native test draws on Front, saves and reopens the
+sketch, and extrudes it along +Y. Its 20 × 10 × 10 mm envelope and
+2,000 mm³ volume match Rust. Biscuit’s checked VM produces the same CAD
+graph and two frozen builds export byte-identical STLs.
 
 The shared drawing renderer exports the standalone sensor fixture’s four A4
 sheets, including the projected dimensions, section, enlarged hinge detail
