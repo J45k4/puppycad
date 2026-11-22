@@ -17,6 +17,7 @@ from project import compare_solid_packages, edge_document, loft_document, revolv
 # processes off the desktop display and GPU, even when launched from a desktop.
 root = Path(__file__).resolve().parents[1]
 output_dir = root / 'workdir/flexscript'
+libs = Path(os.environ.get("FLEXSCRIPT_LIB", root.parent / "flexscript/libs"))
 xvfb = shutil.which('Xvfb') or output_dir/'headless/Xvfb'
 if not os.access(xvfb, os.X_OK):
     raise SystemExit('The native window test requires Xvfb (xorg-server-xvfb).')
@@ -1895,6 +1896,54 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Edit a saved selected corner without changing the TypeScript loop or index.
+        path=Path(tmp)/"Legacy selected corner.pcad"
+        oracle=libs/"cad/tests/fixtures/legacy-typescript-selected-corner-chamfer.pcad"
+        original=oracle.read_bytes()
+        path.write_bytes(original)
+        app,window=open_app(path,design_tree=True)
+        key("F7")
+        verify(window,"Depth  mm  8")
+        for _ in range(5):
+            key("Tab")
+        verify(window,"Chamfer 1 distance  mm  3")
+        legacy_number("22")
+        verify(window,"Finish radius is too large for adjacent profile edges")
+        key("Escape")
+        assert path.read_bytes()==original
+        legacy_number("4")
+        verify(window,"Chamfer 1 distance  mm  4")
+        key("Control_L+z")
+        verify(window,"Chamfer 1 distance  mm  3")
+        key("Control_L+y")
+        verify(window,"Chamfer 1 distance  mm  4")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-selected-corner.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        expected=json.loads(original)
+        expected["revision"]+=1
+        finish=expected["items"][0]["data"]["solidSteps"][0]["finishes"][0]
+        assert finish["vertices"]==[3]
+        finish["radius"]=4
+        assert json.loads(path.read_bytes())==expected
+        shutil.copyfile(path,output_dir/"legacy-selected-corner-edited.pcad")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(-10,10),(-6,6),(0,8)] and math.isclose(volume,1856,abs_tol=.001)
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        assert {(6,6,8),(10,2,8)}<=vertices and (10,6,8) not in vertices
+        shutil.copyfile(stl,output_dir/"legacy-selected-corner-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -3275,6 +3324,83 @@ with tempfile.TemporaryDirectory() as tmp:
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         assert bounds==[(30.0,40.0),(-5.0,5.0),(0.0,10.0)] and math.isclose(volume,1000,rel_tol=1e-8)
+        key("Escape")
+        app.wait(3)
+
+        # An anchor on a finite guide keeps its freedom along the segment.
+        path=Path(tmp)/"Point on guide.pcad"
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"layout-guide   20 mm   DOF 7")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,185,54)
+        verify(window,"Pick the source line or circle for Point on curve")
+        click(window,190,358)
+        verify(window,"Pick the follower anchor for Point on curve")
+        click(window,138,244)
+        verify(window,"Point on curve updated")
+        key("F2")
+        verify(window,"Set value")
+        type_value("4 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+s")
+        verify(window,"Saved")
+        nodes={node["id"]:node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+        link_id=f"native-point-on-curve-{datum}-{guide}"
+        assert next(rel for rel in nodes[sk]["relations"] if rel["id"]==link_id)==dict(
+            id=link_id,type="pointOnCurve",a=dict(entityId=datum,point="center"),b=guide)
+        center=nodes[datum]["primitive"]["center"]
+        end=nodes[guide]["p1"]
+        for position in (center,end):
+            assert math.dist((position["x"],position["y"]),(4,0))<=.000002,(center,end)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+
+        # A saved circular contact follows its driving diameter through solid rebuild.
+        path=Path(tmp)/"Point on circle.pcad"
+        path.write_bytes((libs/"cad/tests/fixtures/point-on-circle.pcad").read_bytes())
+        shutil.copyfile(path,output_dir/"point-on-circle-input.pcad")
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"rim   Diameter 40 mm   DOF 1")
+        key("F2")
+        verify(window,"Set value")
+        type_value("50 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"rim   Diameter 40 mm   DOF 1")
+        key("Control_L+y")
+        verify(window,"rim   Diameter 50 mm   DOF 1")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"point-on-circle.png"],check=True)
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        nodes={node["id"]:node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+        relation=next(rel for rel in nodes["native-sketch-1"]["relations"] if rel["id"]=="ring-contact-from-web")
+        assert relation==dict(id="ring-contact-from-web",type="pointOnCurve",a=dict(entityId="probe",point="center"),b="rim")
+        assert nodes["probe"]["primitive"]["center"]==dict(x=25,y=0)
+        shutil.copyfile(path,output_dir/"point-on-circle-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        bounds,volume=triangulation(path.with_suffix(".stl"))
+        assert bounds==[(-25,25),(-25,25),(0,10)] and math.isclose(volume,320*25**2*math.sin(math.tau/64),abs_tol=.008),(bounds,volume)
+        shutil.copyfile(path.with_suffix(".stl"),output_dir/"point-on-circle-edited.stl")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=path.with_name("Point on circle reference.3mf")
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
         key("Escape")
         app.wait(3)
 
@@ -4660,7 +4786,6 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
-        libs=Path(os.environ.get("FLEXSCRIPT_LIB",root.parent/"flexscript/libs"))
         path=Path(tmp)/"Constrained plate.pcad"
         path.write_bytes((libs/"cad/tests/fixtures/constrained-plate.pcad").read_bytes())
         app,window=open_app(path)
@@ -6967,6 +7092,8 @@ with tempfile.TemporaryDirectory() as tmp:
              ((5.847759,9.234633,9.25),(5.414214,8.585786,9.25),(14.363906,20,10),(0,20,1.856942))),
             ("typescript-multiple-apertures.pcad","mixed-direct-apertures","multiple-aperture-chamfer",3437.651029,
              ((10.427106,14.400705,9.25),(6.745087,12.837780,9.25),(20,17.269161,10),(20,20,8.286079))),
+            ("typescript-traced-apertures.pcad","mixed-traced-apertures","traced-aperture-chamfer",2169.047976,
+             ((6.5,14.1,9.25),(7.25,17.6,9.25),(6.639314,20,10),(20,20,1.092652))),
         )
         for fixture,item_id,artifact,expected_volume,expected_vertices in aperture_cases:
             path=Path(tmp)/f"{artifact}.pcad"

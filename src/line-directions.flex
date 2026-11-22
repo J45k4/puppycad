@@ -1,7 +1,7 @@
 import "cad/project-line-directions.flex";
 import "cad/project-concentric.flex";
 import "cad/project-tangent-author.flex";
-import "cad/project-midpoint-author.flex";
+import "cad/project-point-on-curve-author.flex";
 
 global puppy_direction_mode=0;
 global puppy_direction_source=0;
@@ -31,14 +31,15 @@ fn puppy_direction_has_tangent(project) {
     if puppy_direction_lines() {return puppy_direction_has_curves(project,0,1);}
     return puppy_direction_has_curves(project,1,2);
 }
-fn puppy_direction_has_midpoint(project) {
+fn puppy_direction_has_curve_anchor(project,on_curve) {
     let report=j_parse(puppy_line_report+24);
     let line=pc_first(j_get(report,"lines"));let point=pc_first(j_get(report,"points"));
     if line {return point || load64(line+24);}
     if !point || !load64(point+24) {return 0;}
     let nodes=pc_nodes(cad_project_part(project));
     while point {
-        if pc_midpoint_kind(pc_find(nodes,j_string(point,"id"))) {return 1;}
+        let row=pc_find(nodes,j_string(point,"id"));
+        if (on_curve && pc_point_on_curve_kind(row)) || (!on_curve && pc_midpoint_kind(row)) {return 1;}
         point=load64(point+24);
     }
     return 0;
@@ -47,7 +48,8 @@ fn puppy_direction_available() {
     if !puppy_line_report || puppy_direction_mode || puppy_symmetry_mode || puppy_distance_picking || puppy_line_drag {return 0;}
     if puppy_direction_has_lines() {return 1;}
     let project=cad_project_open(puppy_history+24);
-    return puppy_direction_has_curves(project,0,2) || puppy_direction_has_tangent(project) || puppy_direction_has_midpoint(project);
+    return puppy_direction_has_curves(project,0,2) || puppy_direction_has_tangent(project)
+        || puppy_direction_has_curve_anchor(project,0) || puppy_direction_has_curve_anchor(project,1);
 }
 fn puppy_direction_button_left(w) {return w-128;}
 fn puppy_direction_draw(rgb,w) {
@@ -68,6 +70,10 @@ fn puppy_direction_hint() {
         if puppy_direction_source {return "Pick the follower anchor for Midpoint";}
         return "Pick the source line or arc for Midpoint";
     }
+    if puppy_direction_mode==9 {
+        if puppy_direction_source {return "Pick the follower anchor for Point on curve";}
+        return "Pick the source line or circle for Point on curve";
+    }
     let pick="Pick the source ";if puppy_direction_source {pick="Pick the follower ";}
     if puppy_direction_mode==7 {
         if puppy_direction_source {return "Pick the inner curve for Internal tangent";}
@@ -86,7 +92,8 @@ fn puppy_direction_actions(buttons) {
     let circular_pair=puppy_direction_has_curves(project,1,2);
     if circular_pair || (puppy_direction_lines() && puppy_direction_has_curves(project,0,1)) {puppy_compact_button(buttons,"Tangent",23,0);}
     if circular_pair {puppy_compact_button(buttons,"Internal tangent",12,0);}
-    if puppy_direction_has_midpoint(project) {puppy_compact_button(buttons,"Midpoint",16,0);}
+    if puppy_direction_has_curve_anchor(project,0) {puppy_compact_button(buttons,"Midpoint",16,0);}
+    if puppy_direction_has_curve_anchor(project,1) {puppy_compact_button(buttons,"Point on curve",10,0);}
     puppy_compact_button(buttons,"Cancel",GUI_KEY_ESCAPE,0);return buttons;
 }
 fn puppy_direction_command(project,key) {
@@ -97,29 +104,35 @@ fn puppy_direction_command(project,key) {
     if key==6 && puppy_direction_has_curves(project,0,2) {mode=5;}
     if key==23 && puppy_direction_has_tangent(project) {mode=6;}
     if key==12 && puppy_direction_has_curves(project,1,2) {mode=7;}
-    if key==16 && puppy_direction_has_midpoint(project) {mode=8;}
+    if key==16 && puppy_direction_has_curve_anchor(project,0) {mode=8;}
+    if key==10 && puppy_direction_has_curve_anchor(project,1) {mode=9;}
     if mode {puppy_direction_end();puppy_bar_page=0;puppy_direction_mode=mode;}
     return puppy_title(project,puppy_direction_hint());
 }
-fn puppy_direction_pick_midpoint(project,nodes,sk,point) {
+fn puppy_direction_pick_curve_anchor(project,nodes,sk,point) {
+    let on_curve=puppy_direction_mode==9;
     if !puppy_direction_source {
         let curve=puppy_sketch_hit(nodes,sk,point);
-        if pc_midpoint_kind(curve) {puppy_direction_source=puppy_snapshot(j_string(curve,"id"));}
+        let supported=pc_midpoint_kind(curve);if on_curve {supported=pc_point_on_curve_kind(curve);}
+        if supported {puppy_direction_source=puppy_snapshot(j_string(curve,"id"));}
         return puppy_title(project,puppy_direction_hint());
     }
     let anchor=puppy_distance_hit(point);
     if !anchor {return puppy_title(project,puppy_direction_hint());}
     let source=m_slice(puppy_direction_source+24,load64(puppy_direction_source+16));
     if m_eq(j_string(anchor,"entityId"),source) {return puppy_title(project,"Pick an anchor on a different entity");}
-    let updated=cad_project_toggle_midpoint(project,sk,source,anchor);
+    let updated=0;let label="Midpoint updated";
+    if on_curve {
+        updated=cad_project_toggle_point_on_curve(project,sk,source,anchor);label="Point on curve updated";
+    }else {updated=cad_project_toggle_midpoint(project,sk,source,anchor);}
     if !updated || !puppy_line_update(project,updated) {return puppy_title(project,cg_error);}
-    return puppy_title(updated,"Midpoint updated");
+    return puppy_title(updated,label);
 }
 fn puppy_direction_pick(project,x,y) {
     if puppy_direction_mode==1 {return 1;}
     let sk=j_string(puppy_draft_sketch(project),"id");let nodes=pc_nodes(cad_project_part(project));
     let point=puppy_draft_point(x,y);let center=puppy_direction_mode>=5;let picked=0;
-    if puppy_direction_mode==8 {return puppy_direction_pick_midpoint(project,nodes,sk,point);}
+    if puppy_direction_mode>=8 {return puppy_direction_pick_curve_anchor(project,nodes,sk,point);}
     if center {
         let hit=puppy_sketch_hit(nodes,sk,point);
         if puppy_direction_mode==5 {picked=pc_concentric_curve(nodes,sk,j_string(hit,"id"));}

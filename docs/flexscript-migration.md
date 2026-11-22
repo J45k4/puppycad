@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`3b0c814e4dce8fb6787f5532d4a887a6bed462b3` includes the shared library and
+`3378ea72151c6886d5716830b1410c984435cbbe` includes the shared library and
 the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
 VM verified all 45 historical CAD and runtime import paths against the
 archived catalog and VM. The v10 artifact lineage, the v11 worker and
@@ -126,6 +126,14 @@ point follows from 10 to 15 mm. Rust checks the reopened geometry. Biscuit's
 checked VM reconstructs the saved relation and two frozen builds match
 the native STL bytes.
 
+Point on curve supports a saved point, line endpoint or supported center
+on a finite straight line or a closed circle. The native test authors the
+line relation and shortens its guide until the point reaches the endpoint.
+It also opens an imported circular relation, changes the diameter from 40
+to 50 mm, undoes and redoes the change, extrudes and reopens the part. The
+saved relation keeps its original ID. Rust agrees on the reopened 3MF. The
+checked VM and two frozen builds match the STL and reject a stale contact.
+
 The shared SDK evaluates original TypeScript PartBuilder v4 files in their
 `features` and `solidSteps` representation. Six reference fixtures cover a
 translated intersection, face sockets before and after a source translation,
@@ -143,7 +151,15 @@ from 2.5 to 3.25 mm and loft height from 30 to 32 mm, retains the original
 shell source ID and reopens the saved model. The checked VM repeats those
 edits and two frozen v11 builds match the native STL. A saved four-line
 profile also evaluates without changing its original JSON entities.
-Legacy sketch editing and several finishes still need support.
+Legacy PartBuilder profile chamfers and fillets retain the selected corner,
+the order of sequential finishes and the original aperture. The native
+History test edits a chamfer from 3 to 4 mm and rejects an overlapping
+setback. After undo, redo, save and reopen, its 1,856 mm³ result has the
+same bevel corners as TypeScript. The SDK also checks the sampled fillet on
+a partial revolve and exposes fillet radius and segment fields. The checked
+VM and frozen worker match all five accepted exports. Sampled curves require
+a saved outline that agrees with the evaluated vertex order. Legacy sketch
+editing still needs support.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the
@@ -447,7 +463,7 @@ original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
 within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with traced interior boundaries still need selector support.
+with sampled curved interior boundaries still need selector support.
 For a closed convex loop of straight segments, TypeScript's edge ordinals
 and vertical aliases match native geometry with shuffled and reversed
 segments. The edited square's closed 3,960 mm³ STL also matches the checked
@@ -467,6 +483,12 @@ second test targets the rotated rectangular hole after a circular hole.
 Eight TypeScript exports with both holes agree with the native sampled
 surfaces within 0.000015 mm. The checked VM and two frozen builds match
 the edited STL. Re-entrant and out-of-range selectors fail without an export.
+Saved selectors also cover traced straight-line apertures, including reversed
+or shuffled authored segments mixed with a circular aperture. The headless
+test reopens the edited 2,169.048 mm³ solid and verifies the rim vertices.
+Seven corresponding native and TypeScript exports agree within 0.000010 mm
+at sampled surfaces. The checked VM and two frozen jobs match the edited STL.
+Sampled curved apertures and ambiguous endpoint welds fail before export.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.

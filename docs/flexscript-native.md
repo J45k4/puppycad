@@ -256,6 +256,10 @@ a point, line endpoint or supported shape center. Changing a source dimension
 moves the follower. On an arc, the midpoint lies halfway through the signed
 sweep. Pick the same source and follower again to remove the relation.
 
+Choose **Point on curve** in **Relations**, then click a straight line or
+circle and the follower anchor. The anchor can slide along the curve. When
+the anchor is dragged beyond a line, it stops at the nearest endpoint.
+
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
 existing pattern, or press P to cycle through patterns. Tab selects the
@@ -427,8 +431,9 @@ Design and open **Feature history**. Tab cycles through the available
 dimensions and translations. **Set value** (F2) edits the selected value.
 The operation and extent buttons change the Boolean or choose between
 blind and through-all extrusion. For a circular loft, edit the radii,
-height or segment count. For its shell, edit the wall thickness. Up and Down
-move a step one slot. Each
+height or segment count. For its shell, edit the wall thickness. For a saved
+profile finish, edit the chamfer distance, fillet radius or fillet segment
+count. Up and Down move a step one slot. Each
 accepted edit keeps the document's original sketch and solid-step records
 and can be undone. Sketch editing in this file representation is pending.
 
