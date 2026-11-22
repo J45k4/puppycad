@@ -350,18 +350,27 @@ fn puppy_curve_buttons(rows) {
 fn puppy_profile_buttons(rows) {
     puppy_compact_button(rows,"Diameter circle",7,0);
     puppy_compact_button(rows,"Center rectangle",21,3);
-    puppy_compact_button(rows,"3-point rectangle",23,0);
-    puppy_compact_button(rows,"3-point centered",23,3);
+    puppy_compact_button(rows,"3-pt rectangle",23,0);
+    puppy_compact_button(rows,"3-pt centered",23,3);
+    puppy_compact_button(rows,"Polygon",10,3);
+    puppy_compact_button(rows,"Slot",22,3);
 }
 fn puppy_curve_bar(rgb,w,x) {
     if puppy_curves_page==3 {
         let rows=cg_array();puppy_profile_buttons(rows);
-        let left=194;let width=puppy_limit((w-68-left-24)/4,1,156);let i=0;
+        let left=194;let width=puppy_limit((w-68-left-8*(cg_count(rows)-1))/cg_count(rows),1,144);let i=0;
         while i<cg_count(rows) {
             let row=cg_at(rows,i);
             if x>=left && x<left+width {return puppy_command(load64(row+8),load64(row+16));}
             if rgb {
-                puppy_bar_button(rgb,w,left,width,load64(row));
+                let label=load64(row);
+                if width<110 {
+                    if i==0 {label="Dia. circle";}
+                    if i==1 {label="Center rect.";}
+                    if i==2 {label="3-pt rect.";}
+                    if i==3 {label="3-pt center";}
+                }
+                puppy_bar_button(rgb,w,left,width,label);
                 if puppy_tool==i+9 {puppy_bar_rect(rgb,w,left,66,width,2,143,217,184);}
             }
             left=left+width+8;i=i+1;

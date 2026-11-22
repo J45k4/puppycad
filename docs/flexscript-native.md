@@ -323,7 +323,7 @@ can still display independent bodies. Repair or suppress the failed feature
 before exporting. Rolling back before the first feature leaves an empty
 viewport. Reopen History to move the rollback position forward.
 
-The **Profiles** toolbar adds four placement modes.
+The **Profiles** toolbar provides these placement modes.
 
 | Tool | Picks |
 | --- | --- |
@@ -331,10 +331,18 @@ The **Profiles** toolbar adds four placement modes.
 | **Center rectangle** (Shift+R) | The center and a corner |
 | **3-point rectangle** (T) | Two points on the first edge, then a point setting the height |
 | **3-point centered** (Shift+T) | The center, a side midpoint, then a point setting the perpendicular half-height |
+| **Polygon** (Shift+G) | A center and a vertex |
+| **Slot** (Shift+S) | Both cap centers and a point on the side wall |
 
 Open **Dimensions** (F8) to drive the rectangle’s width, height or
 rotation. All three rectangle modes save an editable rectangle with its
 center and axes. The diameter circle uses the ordinary circle dimensions.
+
+A polygon starts with six sides. Point at its outline and press F2, or
+select it in the Design tree and choose **Set sides**, to change the count
+to 3–64. **Dimensions** drives its radius. Press F2 over a slot or choose
+**Set width** in the tree to change the full width in millimetres while
+keeping both cap centers in place.
 
 Choose **More tools → Conics → Ellipse** (Shift+E). Click the center, the
 endpoint of the first axis, then a point to set the perpendicular height.

@@ -3,6 +3,7 @@ import "construction.flex";
 import "cad/project-ellipse-split.flex";
 
 // Draft coordinates use 4 logical pixels per millimetre at the default zoom.
+global puppy_profile_value_id=0;
 global puppy_draft=0;
 global puppy_draft_index=0;
 global puppy_profile_index=1;
@@ -104,6 +105,7 @@ fn puppy_tool_name() {
     if puppy_tool==7 {return "ellipse";}if puppy_tool==8 {return "threePointCircle";}
     if puppy_tool==9 {return "diameterCircle";}if puppy_tool==10 {return "centerRectangle";}
     if puppy_tool==11 {return "threePointRectangle";}if puppy_tool==12 {return "threePointCenterRectangle";}
+    if puppy_tool==13 {return "polygon";}if puppy_tool==14 {return "capsule";}
     if puppy_tool==2 {return "line";}
     if puppy_tool==1 {return "circle";}
     return "rectangle";
@@ -146,6 +148,15 @@ fn puppy_draft_hint() {
         if puppy_anchor==1 {return "Click a side midpoint";}
         return "Click to set the perpendicular height";
     }
+    if puppy_tool==13 {
+        if !puppy_anchor {return "Click the polygon center";}
+        return "Click a vertex";
+    }
+    if puppy_tool==14 {
+        if !puppy_anchor {return "Click the first cap center";}
+        if puppy_anchor==1 {return "Click the second cap center";}
+        return "Click a side wall to set the slot width";
+    }
     if puppy_tool>=4 {
         if puppy_tool==5 {return "Control spline: pick 3n + 1 points, then Finish";}
         if puppy_tool==6 {return "Periodic spline: pick at least three points, then Finish";}
@@ -183,6 +194,40 @@ fn puppy_sketch_hit(nodes,sk,point) {
         i=i+1;
     }
     return hit;
+}
+fn puppy_profile_property(node) {
+    if pc_polygon_entity(node) {return "Polygon sides";}
+    if pc_capsule_entity(node) {return "Slot width (mm)";}
+    return 0;
+}
+fn puppy_profile_open(project,node) {
+    let shape=j_get(node,"primitive");let text=m_int(j_integer(shape,"sides"));
+    if pc_capsule_entity(node) {text=puppy_display_number(pc_pose_number(j_get(shape,"width")));}
+    puppy_profile_value_id=puppy_snapshot(j_string(node,"id"));
+    puppy_anchor=0;
+    return puppy_text_open(project,text);
+}
+fn puppy_profile_pick_value(project) {
+    let sketch=j_string(puppy_draft_sketch(project),"id");let nodes=pc_nodes(cad_project_part(project));
+    let node=puppy_sketch_hit(nodes,sketch,puppy_draft_point(puppy_pointer_x,puppy_pointer_y));
+    if puppy_profile_property(node) {return puppy_profile_open(project,node);}
+    let row=pc_first(nodes);let last=0;
+    while row {
+        if m_eq(j_string(row,"sketchId"),sketch) && ((puppy_tool==13 && pc_polygon_entity(row)) || (puppy_tool==14 && pc_capsule_entity(row))) {
+            last=row;
+        }
+        row=load64(row+24);
+    }
+    if last {return puppy_profile_open(project,last);}
+    return puppy_title(project,"Point at a polygon or slot");
+}
+fn puppy_profile_apply(project,text) {
+    let id=puppy_profile_value_id+24;
+    let sketch=j_string(puppy_draft_sketch(project),"id");
+    let updated=cad_project_set_profile_parameter(project,sketch,id,text);if !updated {return puppy_title(project,cg_error);}
+    if !m_eq(j_encode(updated),j_encode(project)) {puppy_push(updated);}
+    puppy_number_close();puppy_fit_sketch(updated,1);
+    return puppy_title(updated,"Profile updated");
 }
 fn puppy_offset_pick(project,point) {
     let sketch=puppy_draft_sketch(project);let sk=j_string(sketch,"id");let nodes=pc_nodes(cad_project_part(project));
@@ -230,6 +275,7 @@ fn puppy_draft_click(x,y) {
         if need==3 && puppy_tool>=7 && puppy_anchor==1 && puppy_mx==load64(puppy_curve_coords) && puppy_my==load64(puppy_curve_coords+8) {
             if puppy_tool==7 {return puppy_title(project,"Choose a first axis endpoint away from the center");}
             if puppy_tool==8 {return puppy_title(project,"Choose a different point on the rim");}
+            if puppy_tool==14 {return puppy_title(project,"Choose distinct slot cap centers");}
             return puppy_title(project,"Choose a second rectangle point away from the first");
         }
         let pair=puppy_curve_coords+puppy_anchor*16;
@@ -333,6 +379,11 @@ fn puppy_draft_key(project,key,mods) {
     if key==74 {
         if !puppy_fit_sketch(project,0) {return puppy_title(project,cg_error);}
         return puppy_title(project,"Sketch fitted");
+    }
+    if key==59 {return puppy_profile_pick_value(project);}
+    if (key==10 || key==22) && mods&3 {
+        puppy_curves_page=3;puppy_anchor=0;puppy_tool=13;if key==22 {puppy_tool=14;}
+        return puppy_title(project,puppy_draft_hint());
     }
     if key==10 {puppy_curves_page=(puppy_curves_page+1)%4;return puppy_title(project,puppy_draft_hint());}
     if (key==8 || key==6) && mods&3 {

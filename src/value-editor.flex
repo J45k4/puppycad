@@ -7,6 +7,10 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_profile_value_id {
+        let node=pc_find(pc_nodes(cad_project_part(project)),puppy_profile_value_id+24);
+        return cg_v(0,0,puppy_profile_property(node));
+    }
     if puppy_sheet_entry {
         let field=cg_at(puppy_sheet_setting_fields(project),puppy_sheet_setting);
         return cg_v(0,0,load64(field+8));
@@ -136,6 +140,7 @@ fn puppy_variable_apply(project,text) {
     puppy_number_close();return puppy_title(updated,"Variables updated");
 }
 fn puppy_number_close() {
+    if puppy_profile_value_id {puppy_drop(puppy_profile_value_id);puppy_profile_value_id=0;}
     puppy_sheet_entry=0;
     puppy_new_offset=0;
     if puppy_offset_pick_id {puppy_drop(puppy_offset_pick_id);puppy_offset_pick_id=0;}
@@ -147,6 +152,7 @@ fn puppy_number_close() {
 }
 fn puppy_number_apply(project) {
     let text=puppy_number_text+24;
+    if puppy_profile_value_id {return puppy_profile_apply(project,text);}
     if puppy_sheet_entry {return puppy_sheet_entry_apply(project,text);}
     if puppy_patterns {return puppy_pattern_apply(project,text);}
     if puppy_step_path_entry {return puppy_step_start(project,text);}

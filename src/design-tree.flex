@@ -51,6 +51,8 @@ fn puppy_design_node(rows,parent,node,nodes) {
         if m_eq(j_string(entity,"sketchId"),id) && !pc_model_feature(entity) {
             let geom=j_string(j_get(entity,"primitive"),"type");if !m_len(geom) {geom=type;if m_len(type)>6 && m_eq(m_slice(type,6),"sketch") {geom=type+6;}}
             if m_eq(geom,"CornerRectangle") {geom="Corner rectangle";}
+            if pc_capsule_entity(entity) {geom="Slot";}
+            if pc_polygon_entity(entity) {geom="Polygon";}
             let name=j_string(entity,"name");if m_len(name) {geom=name;}
             puppy_design_row(rows,row,"geometry",entity,geom,0);
         }entity=load64(entity+24);
@@ -167,6 +169,10 @@ fn puppy_design_selected(rows) {
 }
 fn puppy_design_action(row) {
     let kind=load64(row+16);let node=load64(row+24);
+    if m_eq(kind,"geometry") {
+        if pc_polygon_entity(node) {return "Set sides";}
+        if pc_capsule_entity(node) {return "Set width";}
+    }
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {return "Edit sketch";}
     if m_eq(kind,"part") {return "Open part";}
     if m_eq(kind,"assembly") {return "Open assembly";}
@@ -190,8 +196,11 @@ fn puppy_design_activate(project,row) {
         return puppy_title(cad_project_open(puppy_history+24),"Cannot open this item");
     }
     if m_eq(kind,"sketch") || m_eq(kind,"geometry") {
-        if m_eq(kind,"geometry") {node=load64(load64(row+32)+24);}
-        return puppy_workspace_edit_sketch(project,j_string(node,"id"));
+        let geometry=0;
+        if m_eq(kind,"geometry") {geometry=node;node=load64(load64(row+32)+24);}
+        let result=puppy_workspace_edit_sketch(project,j_string(node,"id"));
+        if puppy_profile_property(geometry) {return puppy_profile_open(project,geometry);}
+        return result;
     }
     if !m_eq(kind,"part") && !m_eq(kind,"assembly") && pc_model_feature(node) {
         puppy_history_begin(project);if !puppy_history_rows {return 1;}

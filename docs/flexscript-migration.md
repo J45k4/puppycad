@@ -76,7 +76,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`2dd36cad38ddb20f9a8c34d8ec24e5331c0620b6` includes the shared library and
+`5f192a1e4813aa99efc3fbd6b6070967d5c0cb89` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -718,6 +718,15 @@ hole, and drives the width to 60 mm. After reopening and extrusion its
 produces the same CAD graph. Two frozen builds export byte-identical
 STLs. A saved width that disagrees with its driver fails the build.
 See `workdir/flexscript/centered-rectangle-preview.png`.
+
+The native editor creates a regular polygon and a three-point slot with
+the v4 primitive records. The headless test changes six sides to eight,
+drives the polygon radius to 24 mm, and reopens the drawing to widen the
+slot from 6 mm to 8 mm without moving its cap centers. The resulting
+extrusion matches Rust’s 3MF. Biscuit’s checked program produces the same
+CAD graph, two frozen builds produce byte-identical STLs, and a saved
+polygon radius inconsistent with its driver fails the build.
+See `workdir/flexscript/polygon-slot-preview.png`.
 
 Remaining standalone UI work also includes additional sketch and feature authoring and
 inspectors for additional design records. Include its `docs/pcad-electrical.md` workflows
