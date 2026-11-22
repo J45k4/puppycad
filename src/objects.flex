@@ -410,11 +410,13 @@ fn puppy_panel_click(x,y) {
 fn puppy_objects_event(event) {
     if puppy_design_available() {
         let kind=gui_event_kind(event);let x=puppy_pointer_x;let y=puppy_pointer_y-76;
+        if puppy_design_menu_event(event,x,y) {return 1;}
         let inside=x>=0 && x<puppy_design_width() && y>=0;
         if !puppy_design_open {inside=x>=0 && x<85 && y>=0 && y<28;}
         if kind==GUI_MOUSE_DOWN && !puppy_button {
             if inside {
                 if gui_event_button(event)==1 {if puppy_design_open {puppy_design_click(x,y);}else {puppy_design_toggle();}}
+                if gui_event_button(event)==3 && puppy_design_open {return puppy_design_context(x,y);}
                 return 1;
             }puppy_design_focus=0;puppy_search_focus(0);
         }

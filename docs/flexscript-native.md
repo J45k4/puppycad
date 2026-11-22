@@ -42,7 +42,9 @@ for the toolbar.
 The **Design** sidebar opens with the file, including a new empty sketch.
 Click a disclosure triangle to expand a part, sketch or group. Search by
 name, type or ID to reveal matching records and their parents. Click a
-row to see its ID and available action. With the tree focused, Up and Down
+row to see its ID and available action. Right-click a sketch to choose
+**Edit sketch**, or right-click another row to see its available actions.
+Press Escape to dismiss the menu. With the tree focused, Up and Down
 select rows, Left and Right navigate branches, and Enter opens the selected
 action. Collapse the panel with **‹** or
 F3 and reopen it with **Design ›** or F3.

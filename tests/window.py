@@ -281,15 +281,27 @@ with tempfile.TemporaryDirectory() as tmp:
         app.wait(3)
 
         # The first launch shows the authored tree before the sketch has a solid.
+        from PIL import Image
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
-        click(window,64,212)  # Sketch 1
+        click(window,64,212,button=3)  # Sketch 1
         verify(window,"Selected Sketch 1")
-        click(window,74,615)
+        frame=output_dir/"design-context-menu.png"
+        subprocess.run(["magick","import","-window",hex(window),frame],check=True)
+        with Image.open(frame) as image:
+            assert image.convert("RGB").getpixel((70,214)) == (89,111,109)
+        key("Escape")
+        dismissed=Path(tmp)/"dismissed-menu.png"
+        subprocess.run(["magick","import","-window",hex(window),dismissed],check=True)
+        with Image.open(dismissed) as image:
+            assert image.convert("RGB").getpixel((70,214)) != (89,111,109)
+        click(window,64,212,button=3)
+        click(window,84,227)  # Edit sketch
         verify(window,"Editing Sketch 1")
         click(window,400,398)
         click(window,560,318)
-        click(window,26,211)  # Expand the sketch.
+        click(window,64,212,button=3)
+        click(window,84,253)  # Expand
         click(window,110,238)
         verify(window,"Selected Corner rectangle")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"design-sketch-tree.png"],check=True)
@@ -300,13 +312,18 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
         app,window=open_app(path,design_tree=True)
+        click(window,64,212,button=3)
+        click(window,84,227)  # Re-enter Sketch from the reopened Part.
+        verify(window,"Editing Sketch 1")
+        key("F12")
+        verify(window,"Part workspace")
         click(window,55,125)
         for letter in "extrude":
             key(letter)
         key("Return")
-        click(window,75,185)
+        click(window,75,185,button=3)
         verify(window,"Selected Extrusion 1")
-        click(window,70,615)
+        key("Return")  # Feature history
         verify(window,"Extrusion 1   active")
         key("Escape")
         verify(window,"Feature history closed")

@@ -6,12 +6,19 @@ global puppy_design_selection=0;
 global puppy_design_entity=0;
 global puppy_design_folds=0;
 global puppy_design_scroll=0;
+global puppy_design_menu_count=0;
+global puppy_design_menu_x=0;
+global puppy_design_menu_y=0;
+global puppy_design_menu_choice=0;
+global PUPPY_DESIGN_MENU_WIDTH=148;
+global PUPPY_DESIGN_MENU_ROW=26;
 
 fn puppy_design_available() {
     return !puppy_plane_chooser && !puppy_reader_report && !puppy_tree_open && !puppy_history_rows && !puppy_step_input && !puppy_mating
         && !puppy_line_report && !puppy_number_text && !puppy_loft_open && !puppy_patterns && !puppy_edge_kind && !puppy_construction_ids;
 }
 fn puppy_design_toggle() {
+    puppy_design_menu_close();
     puppy_design_focus=0;puppy_search_focus(0);puppy_query_set("");puppy_design_open=puppy_tree_open || !puppy_design_open;puppy_tree_open=0;
     puppy_tree_dirty=1;return 1;
 }
@@ -244,6 +251,86 @@ fn puppy_design_fold(row) {
     cg_j_int(folds,load64(row+8),!load64(row+72));puppy_design_folds=puppy_snapshot(j_encode(folds));puppy_tree_dirty=1;
 }
 fn puppy_design_capacity(h) {return puppy_limit((h-172)/26,0,1024);}
+fn puppy_design_hit(rows,y,h) {
+    if y<72 || (y-72)/26>=puppy_design_capacity(h) {return 0;}
+    return cg_at(rows,puppy_design_scroll+(y-72)/26);
+}
+fn puppy_design_menu_close() {
+    if puppy_design_menu_count {puppy_design_menu_count=0;puppy_tree_dirty=1;}
+}
+fn puppy_design_context(x,y) {
+    let h=gui_height(load64(puppy_device))-76;
+    let project=cad_project_open(puppy_history+24);
+    let row=puppy_design_hit(puppy_design_rows(project),y,h);
+    puppy_menu_rows=0;
+    if !row {return 1;}
+    puppy_search_focus(0);puppy_design_focus=1;puppy_design_choose(project,row);
+    let count=(puppy_design_action(row)!=0)+(load64(row+56)!=0 && !m_len(puppy_query()));
+    if !count {return 1;}
+    let width=puppy_design_width();
+    let menu_width=puppy_limit(PUPPY_DESIGN_MENU_WIDTH,1,width-4);
+    puppy_design_menu_x=puppy_limit(x,2,width-menu_width-2);
+    puppy_design_menu_y=puppy_limit(y+2,2,h-count*PUPPY_DESIGN_MENU_ROW-4);
+    puppy_design_menu_choice=0;puppy_design_menu_count=count;
+    return 1;
+}
+fn puppy_design_menu_activate(choice) {
+    puppy_design_menu_close();
+    let project=cad_project_open(puppy_history+24);
+    let row=puppy_design_selected(puppy_design_rows(project));
+    if row {
+        if !choice && puppy_design_action(row) {puppy_design_activate(project,row);return 1;}
+        if load64(row+56) && !m_len(puppy_query()) {puppy_design_fold(row);}
+    }
+    return 1;
+}
+fn puppy_design_menu_event(event,x,y) {
+    if !puppy_design_menu_count {return 0;}
+    let kind=gui_event_kind(event);
+    if kind==GUI_MOUSE_DOWN || kind==GUI_MOUSE_MOVE {
+        let width=puppy_limit(PUPPY_DESIGN_MENU_WIDTH,1,puppy_design_width()-4);
+        let dy=y-puppy_design_menu_y-1;
+        let inside=x>puppy_design_menu_x && x<puppy_design_menu_x+width-1 && dy>=0 && dy<puppy_design_menu_count*PUPPY_DESIGN_MENU_ROW;
+        if kind==GUI_MOUSE_MOVE {
+            if inside {puppy_design_menu_choice=dy/PUPPY_DESIGN_MENU_ROW;puppy_tree_dirty=1;}
+            return 1;
+        }
+        if inside && gui_event_button(event)==1 {return puppy_design_menu_activate(dy/PUPPY_DESIGN_MENU_ROW);}
+        puppy_design_menu_close();
+        if gui_event_button(event)==3 && x>=0 && x<puppy_design_width() && y>=0 {return puppy_design_context(x,y);}
+        return 1;
+    }
+    if kind==GUI_KEY_DOWN {
+        let key=gui_event_code(event);
+        if key==40 || key==88 {return puppy_design_menu_activate(puppy_design_menu_choice);}
+        if key==GUI_KEY_ESCAPE {puppy_design_menu_close();}
+        if key==GUI_KEY_UP_ARROW || key==GUI_KEY_DOWN_ARROW {
+            puppy_design_menu_choice=(puppy_design_menu_choice+1)%puppy_design_menu_count;puppy_tree_dirty=1;
+        }
+        return 1;
+    }
+    if kind==GUI_WHEEL || kind==GUI_RESIZE || (kind==GUI_FOCUS && !gui_event_code(event)) {
+        puppy_design_menu_close();return 1;
+    }
+    return 0;
+}
+fn puppy_design_menu_draw(rgb,w,h,row) {
+    let x=puppy_design_menu_x;let y=puppy_design_menu_y;
+    let width=puppy_limit(PUPPY_DESIGN_MENU_WIDTH,1,w-4);
+    let height=puppy_design_menu_count*PUPPY_DESIGN_MENU_ROW+2;
+    puppy_ui_rect(rgb,w,h,x+2,y+2,width,height,16,25,27);
+    puppy_ui_rect(rgb,w,h,x,y,width,height,89,111,109);
+    let action=puppy_design_action(row);let fold="Expand";
+    if load64(row+72) {fold="Collapse";}
+    let i=0;while i<puppy_design_menu_count {
+        let top=y+1+i*PUPPY_DESIGN_MENU_ROW;let label=fold;
+        if !i && action {label=action;}
+        if i==puppy_design_menu_choice {puppy_ui_rect(rgb,w,h,x+1,top,width-2,PUPPY_DESIGN_MENU_ROW,53,76,72);}
+        else {puppy_ui_rect(rgb,w,h,x+1,top,width-2,PUPPY_DESIGN_MENU_ROW,30,43,47);}
+        puppy_ui_text(rgb,w,h,x+10,top+18,label,x+width-6);
+        i=i+1;
+    }
+}
 fn puppy_design_panel(w,h) {
     let rgb=m_take(w*h*4);puppy_ui_rect(rgb,w,h,0,0,w,h,30,43,47);
     puppy_ui_rect(rgb,w,h,w-1,0,1,h,74,96,95);
@@ -275,6 +362,7 @@ fn puppy_design_panel(w,h) {
         puppy_ui_text(rgb,w,h,13,h-51,detail,w-8);
         let action=puppy_design_action(selected);
         if action {puppy_ui_rect(rgb,w,h,10,h-36,w-20,27,48,68,70);puppy_ui_text(rgb,w,h,18,h-17,action,w-16);}
+        if puppy_design_menu_count {puppy_design_menu_draw(rgb,w,h,selected);}
     }
     puppy_ui_upload(rgb,w,h);return 1;
 }
@@ -288,8 +376,7 @@ fn puppy_design_click(x,y) {
     if y>=h-36 && y<h-9 {
         let r=puppy_design_selected(rows);if r && puppy_design_action(r) {return puppy_design_activate(project,r);}return 1;
     }
-    if y<72 || (y-72)/26>=puppy_design_capacity(h) {return 1;}
-    let r=cg_at(rows,puppy_design_scroll+(y-72)/26);if !r {return 1;}
+    let r=puppy_design_hit(rows,y,h);if !r {return 1;}
     if load64(r+56) && (x<26+load64(r+40)*13 || m_eq(load64(r+16),"group")) {puppy_design_fold(r);return 1;}
     return puppy_design_choose(project,r);
 }
