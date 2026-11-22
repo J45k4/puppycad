@@ -27,23 +27,34 @@ global puppy_picking_face=0;
 global puppy_pending_title=0;
 global puppy_projection_save_needed=0;
 
-fn puppy_snapshot(text) {
-    let n=m_len(text);let snapshot=alloc(n+25);
+fn puppy_snapshot_allocate(text,n,tail_bytes) {
+    let snapshot=alloc(n+25+tail_bytes);
     m_assert(snapshot>0,"Cannot allocate document history");
     store64(snapshot,0);store64(snapshot+8,0);store64(snapshot+16,n);
     m_copy(snapshot+24,text,n+1);return snapshot;
 }
+fn puppy_snapshot(text) {return puppy_snapshot_allocate(text,m_len(text),0);}
 fn puppy_drop(snapshot) {return syscall(11,snapshot,load64(snapshot+16)+25,0,0,0,0);}
+// Document history stores the workspace's assembly ID after the JSON string.
+fn puppy_history_parent(snapshot) {return snapshot+25+load64(snapshot+16);}
+fn puppy_history_snapshot(text) {
+    let parent="";if puppy_workspace_parent_id {parent=puppy_workspace_parent_id+24;}
+    let bytes=m_len(parent)+1;
+    let snapshot=puppy_snapshot_allocate(text,m_len(text),bytes);
+    m_copy(puppy_history_parent(snapshot),parent,bytes);return snapshot;
+}
 fn puppy_trim(snapshot) {
     while snapshot {
-        let next=load64(snapshot+8);if puppy_saved_history==snapshot {puppy_saved_history=0;}puppy_drop(snapshot);snapshot=next;
+        let next=load64(snapshot+8);if puppy_saved_history==snapshot {puppy_saved_history=0;}
+        let bytes=load64(snapshot+16)+26+m_len(puppy_history_parent(snapshot));
+        syscall(11,snapshot,bytes,0,0,0,0);snapshot=next;
     }
     return 0;
 }
 fn puppy_push(project) {
     let rebuilt=cad_project_rebuild_projections(project);
     if rebuilt {project=rebuilt;}
-    let next=puppy_snapshot(j_encode(project));
+    let next=puppy_history_snapshot(j_encode(project));
     puppy_trim(load64(puppy_history+8));store64(puppy_history+8,next);
     store64(next,puppy_history);puppy_history=next;puppy_part_sketch_dirty=1;return 1;
 }
@@ -357,6 +368,7 @@ fn puppy_command(key,mods) {
         let next=load64(puppy_history);
         if key==28 || (mods&3) {next=load64(puppy_history+8);}
         if next {
+            let previous_item=cad_project_item(project);
             let part=cad_project_part(project);let owner=j_string(part,"id");let sketch="";
             let keep_part=part && !puppy_sketch;
             if puppy_draft && puppy_explicit_sketch && !puppy_line_report {sketch=j_string(puppy_draft_sketch(project),"id");}
@@ -367,6 +379,13 @@ fn puppy_command(key,mods) {
                          j_encode(j_get(puppy_part_tree(next_part),"sketchVisibility")));
             if puppy_refresh(project) {
                 puppy_history=next;puppy_anchor=0;
+                let next_item=cad_project_item(project);
+                if !m_eq(j_string(previous_item,"id"),j_string(next_item,"id")) {
+                    puppy_workspace_clear_parent();
+                    let parent=puppy_history_parent(next);
+                    if load8(parent) {puppy_workspace_parent_id=puppy_snapshot(parent);}
+                    puppy_design_select_item(next_item);
+                }
                 if keep_part {puppy_workspace_show_part(project);}
                 if m_len(sketch) && m_eq(owner,j_string(cad_project_part(project),"id")) {
                     let index=puppy_workspace_sketch_index(project,sketch);
@@ -504,7 +523,7 @@ fn puppy_editor(path,source,project,report) {
     if source {puppy_disk=puppy_snapshot(source);}
     puppy_projection_save_needed=normalized && !puppy_reader_report;
     if !source || puppy_projection_save_needed {source=j_encode(project);}
-    puppy_history=puppy_snapshot(source);puppy_root=puppy_history;puppy_saved_history=puppy_history;
+    puppy_history=puppy_history_snapshot(source);puppy_root=puppy_history;puppy_saved_history=puppy_history;
     if !puppy_reader_report {
         if puppy_step_input {puppy_step_begin(project);}
         else if cad_project_is_studio(project) {puppy_title(project,"PCAD design opened");}
@@ -559,7 +578,11 @@ fn puppy_editor(path,source,project,report) {
             else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
                 let x=gui_event_x(event);let y=gui_event_y(event);
                 let width=gui_width(load64(puppy_device));
-                if y<76 {puppy_forget_click();}
+                let current=0;let compact=0;
+                if y<76 {
+                    puppy_forget_click();current=cad_project_open(puppy_history+24);
+                    compact=puppy_workspace_toolbar_compact(current,width);
+                }
                 if puppy_history_rows {
                     let current=cad_project_open(puppy_history+24);
                     if y>=42 && y<68 {puppy_compact_bar(0,width,current,x);}
@@ -574,7 +597,7 @@ fn puppy_editor(path,source,project,report) {
                     }else if y>=76 {puppy_edge_pick(current,x,y);}
                     dirty=1;
                 }
-                else if !puppy_sketch && !puppy_empty && width>=800 && y>=6 && y<34 && x>=width-420 && x<width-335 && cad_project_part(cad_project_open(puppy_history+24)) {
+                else if !puppy_sketch && !puppy_empty && !compact && y>=6 && y<34 && x>=width-420 && x<width-335 && cad_project_part(current) {
                     puppy_command(11,0);dirty=1;
                 }
                 else if puppy_loft_open {
@@ -584,34 +607,33 @@ fn puppy_editor(path,source,project,report) {
                     }
                     dirty=1;
                 }
-                else if puppy_breadcrumb_click(x,y) {dirty=1;}
-                else if width>=800 && y>=6 && y<34 && x>=width-505 && x<width-429 && cad_project_part(cad_project_open(puppy_history+24)) {
+                else if puppy_breadcrumb_click(current,x,y) {dirty=1;}
+                else if !compact && y>=6 && y<34 && x>=width-505 && x<width-429 && cad_project_part(current) {
                     puppy_command(38,0);dirty=1;
                 }
                 else if puppy_isolated && x>=12 && x<98 && y>=6 && y<37 {puppy_command(68,0);dirty=1;}
                 else if !puppy_sketch && !puppy_empty && y>=6 && y<37 && puppy_objects_button(x) {puppy_command(23,0);dirty=1;}
-                else if width>=800 && y>=6 && y<34 && puppy_value_button_hit(x) {
+                else if !compact && y>=6 && y<34 && puppy_value_button_hit(current,x) {
                     puppy_command(59,0);dirty=1;
                 }
-                else if puppy_draft && width>=800 && y>=6 && y<34 && x>=12 && x<88 {puppy_command(37,0);dirty=1;}
-                else if puppy_draft && width>=800 && y>=6 && y<37 && x>=width-420 && x<width-335 {
+                else if puppy_draft && !compact && y>=6 && y<34 && x>=12 && x<88 {puppy_command(37,0);dirty=1;}
+                else if puppy_draft && !compact && y>=6 && y<37 && x>=width-420 && x<width-335 {
                     puppy_command(10,0);dirty=1;
                 }
-                else if cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-140 && x<width-12 {
+                else if !compact && y>=6 && y<37 && cad_project_is_studio(current) && x>=width-140 && x<width-12 {
                     puppy_command(18,0);dirty=1;
-                }else if cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-260 && x<width-148 {
+                }else if !compact && y>=6 && y<37 && cad_project_is_studio(current) && x>=width-260 && x<width-148 {
                     puppy_command(12,192);dirty=1;
-                }else if !cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-109 && x<width-12 {
+                }else if !compact && y>=6 && y<37 && !cad_project_is_studio(current) && x>=width-109 && x<width-12 {
                     if puppy_draft {puppy_command(69,0);}else {puppy_command(63,0);}
                     dirty=1;
-                }else if !cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-235 && x<width-117 {
+                }else if !compact && y>=6 && y<37 && !cad_project_is_studio(current) && x>=width-235 && x<width-117 {
                     puppy_command(4,3);dirty=1;
-                }else if !cad_project_is_studio(project) && width>=800 && y>=6 && y<37 && x>=width-327 && x<width-243 {
+                }else if !compact && y>=6 && y<37 && !cad_project_is_studio(current) && x>=width-327 && x<width-243 {
                     puppy_command(17,3);dirty=1;
-                }else if width<800 && y>=42 && y<68 {
-                    puppy_compact_bar(0,width,cad_project_open(puppy_history+24),x);dirty=1;
+                }else if compact && y>=42 && y<68 {
+                    puppy_compact_bar(0,width,current,x);dirty=1;
                 }else if y>=42 && y<68 {
-                    let current=cad_project_open(puppy_history+24);
                     if (puppy_draft || puppy_camera_available()) && x>=width-60 && x<width-12 {puppy_command(74,0);}
                     else if !puppy_draft && !puppy_empty && x>=width-132 && x<width-68 {puppy_command(8,195);}
                     else if !puppy_draft && cad_project_part(current) && x>=568 && x<648 {puppy_command(64,0);}

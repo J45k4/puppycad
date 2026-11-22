@@ -30,8 +30,10 @@ When you open a referenced part from an assembly, click the underlined
 **Assembly** breadcrumb to return to that assembly from Part or Sketch.
 The Assembly link stays available when you switch to another part used by
 that assembly. Breadcrumb links highlight on hover and work with the
-Design sidebar collapsed. In a narrow window the path can use the
-workspace names **Assembly**, **Part**, and **Sketch** to fit.
+Design sidebar collapsed. Undo and Redo restore the Assembly link from
+the original visit to a part. In a narrow window the
+path can use the workspace names **Assembly**, **Part**, and **Sketch** to
+fit. The toolbar uses paged controls when it needs more space for the path.
 
 From Part, click **New sketch** or press Shift+S. Choose **Top (XY)**,
 **Front (XZ)**, or **Right (YZ)**. Choose **On face** to attach the sketch

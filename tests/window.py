@@ -244,6 +244,11 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,assembly_link,20)
         verify(window,"Opened Arm assembly")
         assert "  |  Arm assembly  |  Assembly" in title(window)
+        key("Control_L+z")
+        verify(window,"  |  Arm  |  Solid")
+        assert len(breadcrumb_links(window,"workspace-breadcrumb-after-undo.png"))==1
+        key("Control_L+y")
+        verify(window,"  |  Arm assembly  |  Assembly")
         click(window,43,92)  # Show the Design tree after testing the hidden sidebar.
         click(window,55,160)
         verify(window,"Opened Base")
@@ -323,6 +328,65 @@ with tempfile.TemporaryDirectory() as tmp:
         base=saved["items"][0]["data"]["cad"]["nodes"]
         assert sum(n.get("primitive",{}).get("construction",False) for n in base)==1
         assert len(base)==len(workspace_doc["items"][0]["data"]["cad"]["nodes"])+1
+        key("Escape")
+        app.wait(3)
+
+        crowded_path=Path(tmp)/"Crowded workspace.pcad"
+        base=workspace_doc["items"][0]["data"]
+        graph=base["cad"]
+        sketch=next(n for n in graph["nodes"] if n["type"]=="sketch")
+        outline=next(n for n in graph["nodes"] if n["type"]=="sketchCornerRectangle")
+        extrusion=next(n for n in graph["nodes"] if n["type"]=="extrude")
+        graph["nodes"].extend([
+            dict(sketch,id="extra-sketch",name="Extra sketch"),
+            dict(outline,id="extra-outline",sketchId="extra-sketch",p0={"x":30,"y":-10},p1={"x":50,"y":10}),
+            dict(extrusion,id="extra-block",name="Extra block",sketchId="extra-sketch",profileId="extra-sketch-profile-1"),
+        ])
+        graph["rootNodeIds"].extend(["extra-sketch","extra-block"])
+        base["tree"]["orderedNodeIds"].extend(["extra-sketch","extra-block"])
+        crowded_path.write_text(json.dumps(workspace_doc))
+        app,window=open_app(crowded_path,"Assembly opened",design_tree=True)
+        click(window,55,160)
+        verify(window,"Opened Base")
+        key("t")
+        focus_search(window,75)
+        for letter in "extra":
+            key(letter)
+        click(window,92,163)
+        verify(window,"Selected Extra block")
+        click(window,58,615)
+        verify(window,"Isolated Extra block")
+        key("t")
+        xlib.XResizeWindow(connection,window,800,640)
+        xlib.XSync(connection,0)
+        time.sleep(.22)
+        key("v")
+        verify(window,"  |  Base  |  Sketch")
+        preview,preview_links=breadcrumb_frame(window,"workspace-isolated-preview-breadcrumb.png")
+        assert preview.width==800 and len(preview_links)==2
+        left,right=preview_links[1]
+        assert right-left>=28
+        click(window,(left+right)//2,20)
+        verify(window,"Part workspace")
+        crowded,[(left,right)]=breadcrumb_frame(window,"workspace-isolated-part-breadcrumb.png")
+        assert crowded.width==800 and right-left>=65
+        click(window,(left+right)//2,20)
+        verify(window,"Opened Arm assembly")
+        click(window,55,160)
+        verify(window,"Opened Base")
+        click(window,229,125)
+        for letter in "inspection-assembly":
+            key("minus" if letter=="-" else letter)
+        key("Return")
+        click(window,85,160)
+        verify(window,"Opened Inspection assembly")
+        key("Control_L+z")
+        verify(window,"  |  Base  |  Solid")
+        assembly_link,=breadcrumb_links(window,"workspace-original-parent-after-undo.png")
+        click(window,assembly_link,20)
+        verify(window,"Opened Arm assembly")
+        key("Control_L+s")
+        verify(window,"Saved")
         key("Escape")
         app.wait(3)
 
