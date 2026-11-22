@@ -1,5 +1,7 @@
 # Sketch workspace
 
+This guide covers the reference web editor under `typescript/`. The [Flexscript editor guide](flexscript-native.md) covers the current native application.
+
 Choose **New → Part**, select **Sketch plane**, then **New sketch**. Sketch mode keeps the project layout, hierarchy, and panel sizes in place. Sketch tools and the drawing canvas use the existing viewport, and sketch properties use the existing properties panel. Finish or Cancel restores the part controls without recreating the 3D view. The workspace supports drawing lines, rectangles, circles, and native three-point arcs. Finish keeps the sketch as an independent entry in the project hierarchy. **Apply changes** saves the part. A sketch does not need a solid or a closed region to be saved.
 
 Select the sketch and choose **Extrude sketch**, a closed region, and its depth. The extrusion references that sketch; reopening the sketch and changing a driving dimension rebuilds dependent geometry after Finish and Apply. Existing extrusion sketches also have **Edit sketch**.

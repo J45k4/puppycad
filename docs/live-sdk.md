@@ -1,6 +1,8 @@
 # Live TypeScript SDK
 
-The SDK edits a running PuppyCAD project through the same command API used by the GUI. The server saves each accepted operation in `workdir/saved-projects/<project-id>.json` and broadcasts the resulting project to connected viewers. The server project is the source of truth for this workflow.
+The TypeScript implementation and its commands are under `typescript/`. Run the Bun examples from that directory.
+
+The SDK edits a running PuppyCAD project through the same command API used by the GUI. The server saves each accepted operation in the repository root’s `workdir/saved-projects/<project-id>.json` and broadcasts the resulting project to connected viewers. The server project is the source of truth for this workflow.
 
 Start the server with `bun dev`. In another terminal:
 
@@ -18,7 +20,7 @@ The example reconstructs the original `bowl_with_flowerholder.gltf`: a tapered b
 
 See [reference measurements and verification](flower-holder-reference.md) for dimensions, tolerances, and the original fixture. The model is authored with revolves, fillets, extrusions and boolean cuts; it does not import the reference triangles as its output.
 
-The implementation contract and its remaining limits are maintained in `spec/puppycad.tex`. Render its PDF with `bash spec/render.sh`.
+The implementation contract and its remaining limits are maintained in `../spec/puppycad.tex`. Render its PDF with `bash ../spec/render.sh`.
 
 ## Editing in the UI
 

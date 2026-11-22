@@ -18,6 +18,10 @@ afterEach(async () => {
 })
 
 describe("server project store", () => {
+	it("keeps existing projects in the repository workdir", () => {
+		expect(getProjectFileUrl("bracket").href).toBe(new URL("../../workdir/saved-projects/bracket.json", import.meta.url).href)
+	})
+
 	it("GET loads a saved canonical project and returns 404 for missing files", async () => {
 		const missing = await getProject(new Request("http://localhost/api/projects/missing-project"), "missing-project")
 		expect(missing.status).toBe(404)

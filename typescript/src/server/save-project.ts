@@ -4,7 +4,7 @@ import type { Project } from "../contract"
 import { applySyncedProjectCommands, ProjectCommandError, type SyncedProjectCommand } from "../project-commands"
 import { normalizeProjectFile, serializeProjectFile } from "../project-file"
 
-const SAVE_DIRECTORY_URL = new URL("../../workdir/saved-projects/", import.meta.url)
+const SAVE_DIRECTORY_URL = new URL("../../../workdir/saved-projects/", import.meta.url)
 
 type ProjectEventSubscriber = {
 	clientId: string

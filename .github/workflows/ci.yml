@@ -4,13 +4,18 @@ on:
   push:
     branches:
       - master
+      - flexscript
   pull_request:
     branches:
       - master
+      - flexscript
 
 jobs:
-  build:
+  typescript-reference:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,3 +39,37 @@ jobs:
 
       - name: Format
         run: bun run format
+
+  native-editor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: puppycad
+      - name: Read the SDK revision
+        id: sdk
+        working-directory: puppycad
+        run: echo "rev=$(cat flexscript-sdk.rev)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: J45k4/flexscript
+          ref: ${{ steps.sdk.outputs.rev }}
+          path: flexscript
+      - name: Install the bootstrap compiler
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/flex-bootstrap"
+          cd "$RUNNER_TEMP/flex-bootstrap"
+          gh release download 0.0.6 --repo J45k4/flexscript --pattern flexscript-0.0.6-linux-x86_64
+          echo '297eb85c4c3b05320a6384966e4b8c273cc2cbbefc97b9e5ab1cf393c28a5d80  flexscript-0.0.6-linux-x86_64' | sha256sum --check
+          install -m 755 flexscript-0.0.6-linux-x86_64 flexscript
+          echo "$PWD" >> "$GITHUB_PATH"
+      - name: Build and export a part headlessly
+        working-directory: puppycad
+        run: |
+          ./build.sh
+          editor=workdir/flexscript/puppycad
+          "$editor" --roundtrip rust/fixtures/extruded-rectangle.pcad "$RUNNER_TEMP/part.pcad"
+          "$editor" --export "$RUNNER_TEMP/part.pcad" "$RUNNER_TEMP/part.stl"
+          test -s "$RUNNER_TEMP/part.stl"

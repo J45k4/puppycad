@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const ROOT = join(import.meta.dir, "..")
+const ROOT = join(import.meta.dir, "..", "..")
 const hasCargo = spawnSync("cargo", ["--version"], { encoding: "utf8" }).status === 0
 
 function exportFixture(output: string) {

@@ -1,5 +1,7 @@
 # Puppycad CLI Plan
 
+The TypeScript implementation and its commands are under `typescript/`. Run the Bun examples from that directory.
+
 The Puppycad CLI is not a terminal clone of the GUI. It is the control surface for a running PCAD/Puppycad engine server and a compiler frontend for code-first TypeScript models.
 
 Server projects remain the source of truth for interactive GUI editing and synchronized mutation. For code-first work, a `.pcad.ts` module is the source of truth and compiles into the same project/feature graph consumed by the server engine. Generated `.pcad` JSON is an interchange snapshot or cache, not a second hand-authored CAD language.

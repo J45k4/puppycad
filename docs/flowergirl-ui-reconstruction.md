@@ -1,5 +1,7 @@
 # Flowergirl reconstruction through the UI
 
+This guide covers the reference web editor under `typescript/`. The [Flexscript editor guide](flexscript-native.md) covers the current native application.
+
 The project **Flowergirl — built through UI** (`54eed525-6fb5-4e01-85d4-135f71a92ce2`) was created with the integrated browser's native PuppyCAD controls. Its five part definitions, five assembly instances, 18 connectors and nine fixed connections were entered through the UI. Saved model files were read only for comparison; they were not used to populate the reconstruction.
 
 Reference project: `30fbfab4-72f1-4696-8a0c-e7194cad084d`, revision 39. Reconstruction verified at revision 38. The reference remains unchanged.

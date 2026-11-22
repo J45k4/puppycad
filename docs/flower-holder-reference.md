@@ -1,5 +1,7 @@
 # Flower holder reference reconstruction
 
+The TypeScript implementation and its commands are under `typescript/`. Run the Bun examples from that directory.
+
 The authoritative source is `test/fixtures/bowl_with_flowerholder.gltf`, copied unchanged from the supplied `workdir/bowl_with_flowerholder.gltf`.
 
 SHA-256: `ee97462f49afefe778329d85f93d643a0a96d5114ff87c7fb0b1e12f911e00ba`.

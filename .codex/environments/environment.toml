@@ -9,6 +9,6 @@ script = ""
 name = "Run"
 icon = "run"
 command = '''
-bun install
-bun run ./src/main.ts
+./build.sh
+exec workdir/flexscript/puppycad workdir/flexscript/untitled.pcad
 '''

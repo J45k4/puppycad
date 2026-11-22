@@ -11,7 +11,7 @@ import { requireValue } from "../src/required"
 import type { Sketch } from "../src/schema"
 import { threePointRectangle } from "../src/sketch-rectangle"
 
-const ROOT = join(import.meta.dir, "..")
+const ROOT = join(import.meta.dir, "..", "..")
 const FIXTURES = join(ROOT, "rust", "fixtures")
 
 // Sketch count per top-level part for each native fixture.

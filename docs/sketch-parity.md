@@ -1,5 +1,7 @@
 # Onshape sketch parity tracking
 
+This guide covers the reference web editor under `typescript/`. The [Flexscript editor guide](flexscript-native.md) covers the current native application.
+
 The goal is a comparable sketch authoring workflow, including native geometry, editing tools, constraints, dimensions, and durable dependencies. The existing ring demonstration and native arc demonstration prove specific workflows; they do not prove complete parity.
 
 Reference: [Onshape Sketch Tools](https://cad.onshape.com/help/Content/Sketch/sketch_tools.htm). The original Flowergirl document remains the workflow reference. The table below is the current capability summary. The development sequence below it records incremental evidence and earlier limitations; later entries supersede earlier status statements. Passing tests do not establish coverage of missing tools.

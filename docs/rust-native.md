@@ -344,7 +344,7 @@ spline ends are rejected.
 
 ## Constraints
 
-**Solver** (`solver.rs`, structure of `src/sketch-solver.ts`). Parameters:
+**Solver** (`solver.rs`, structure of `typescript/src/sketch-solver.ts`). Parameters:
 anchor coordinates, radii, ellipse axes and rotation, arc start and sweep,
 shape variables of rectangles, rotated rectangles, polygons and slots
 (`solver::ShapeVar`), and auxiliary curve parameters for point-on-spline and
@@ -387,7 +387,7 @@ would move them. Web graph `sketchConstraint` nodes (length, width, height,
 horizontal, vertical) are edited in place and move to sketch relations once
 they gain a label position, reference flag or expression.
 
-**DOF and diagnostics.** `Problem::analyze` ports `src/sketch-redundancy.ts`
+**DOF and diagnostics.** `Problem::analyze` ports `typescript/src/sketch-redundancy.ts`
 (rank of the relation Jacobian by two-pass Gram–Schmidt). Free DOF: line 4,
 point 2, circle 3, arc 5, ellipse 5, elliptic arc 7, spline 2 per handle,
 corner rectangle 4, rotated rectangle 5, polygon 4, slot 5; pattern copies
@@ -429,7 +429,7 @@ line angles and point dimensions.
   `reference: true`. Angles cannot be references.
 - **Expressions.** Values accept `+ - * / ( )`, `pi`, units `mm cm m um in
   inch ft deg rad` and `#name` variables (`sketch_value.rs`, port of
-  `src/sketch-value.ts`). Labels show `expression = value`; saved as
+  `typescript/src/sketch-value.ts`). Labels show `expression = value`; saved as
   `expression` beside the evaluated `value`.
 - **Variables.** With nothing selected, **SKETCH VARIABLES** lists
   `name = expression` rows (empty deletes an unused one, renaming rewrites
@@ -580,13 +580,13 @@ command, so it is also in the palette.
 ## Assemblies
 
 Top-level `"type": "assembly"` items are web `Assembly` documents
-(`src/contract.ts`): `instances` (`partId`, `transform` with translation,
+(`typescript/src/contract.ts`): `instances` (`partId`, `transform` with translation,
 Euler XYZ degrees, scale), `connectors`, `mates` (`fasten`, `revolute`,
 `prismatic`, `planar`, `ball`) and `actuators` (servos). `actuators`,
 `variables` and mate `params` round-trip verbatim.
 
 **Solver** (`assembly/solver.rs`). Fasten mates are solved exactly like
-`solveFixedAssembly` (`src/assembly-solver.ts`). Natively each fastened group
+`solveFixedAssembly` (`typescript/src/assembly-solver.ts`). Natively each fastened group
 is a rigid body and damped Gauss–Newton moves free bodies until revolute
 (shared origin and Z), slider (same orientation, origin on Z), planar
 (parallel Z, coplanar) and ball (shared origin) mates hold; a revolute servo
@@ -938,13 +938,13 @@ job, uploading screenshots as the `rust-ui-smoke` artifact.
 
 **Round trip.** `rust/tests/roundtrip.rs` loads every `rust/fixtures/*.pcad`,
 saves, reloads and saves again; both saves must match.
-`test/rust-roundtrip.test.ts` (`bun run test`) loads every fixture in the
+`typescript/test/rust-roundtrip.test.ts` (run `bun run test` inside `typescript/`) loads every fixture in the
 TypeScript loader, passes web-built projects (geometry, dimensions with
 expressions and variables, face sketches) through `--roundtrip` and checks
 they come back identical; it checks web face frames against
 `project/face_tests.rs` and the assembly fixture's solved transforms against
 `assembly/tests.rs` (1e-3). `rust/tests/export.rs` and
-`test/rust-export.test.ts` cover `--export`. The cargo-dependent parts are
+`typescript/test/rust-export.test.ts` cover `--export`. The cargo-dependent parts are
 skipped with a warning when `cargo` is missing.
 
 **UI smoke.** A rootless Docker container with Xvfb and software Vulkan

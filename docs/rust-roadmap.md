@@ -12,13 +12,13 @@ everything after it. Each item shows its final status.
 2. CI: build, test, fmt, blocking clippy and the Docker UI smoke
    (`.github/workflows/rust.yml`). **Done.**
 3. Cross-loader round trip (`rust/tests/roundtrip.rs`,
-   `test/rust-roundtrip.test.ts`, `--roundtrip`). **Done.**
+   `typescript/test/rust-roundtrip.test.ts`, `--roundtrip`). **Done.**
 
 ## Phase 1 — Constraint solver
 
-1. `rust/src/solver.rs`, Levenberg–Marquardt port of `src/sketch-solver.ts`. **Done.**
+1. `rust/src/solver.rs`, Levenberg–Marquardt port of `typescript/src/sketch-solver.ts`. **Done.**
 2. Edits as mutate → solve → commit, one undo step. **Done.**
-3. DOF and conflict/redundancy diagnostics (`src/sketch-redundancy.ts`). **Done.**
+3. DOF and conflict/redundancy diagnostics (`typescript/src/sketch-redundancy.ts`). **Done.**
 4. Dragging anchors under constraints, solved every frame. **Done.**
 5. Remove restrictions the solver makes unnecessary. **Partial:** pattern
    copies are regenerated rather than solved; H/V lines rotate only by

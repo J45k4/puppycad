@@ -1,5 +1,7 @@
 # Project tree, viewer, and properties
 
+This guide covers the reference web editor under `typescript/`. The [Flexscript editor guide](flexscript-native.md) covers the current native application.
+
 PuppyCAD uses three columns: the full project hierarchy on the left, the active 3D viewer in the middle, and selection properties on the right. Solid parts expand into features, sketches, outlines/holes, and their line entities. Assemblies expand into instances, connectors, and connections; each instance links to its reusable part definition. The properties panel has no separate feature or instance list.
 
 Select a tree row to inspect it. Enter selects a focused row; Left/Right collapse and expand folders. Clicking a supported border in the viewer reveals and selects its source entity in the project tree. Clicking an assembly part selects its instance. Selection does not save geometry or create an undo step.

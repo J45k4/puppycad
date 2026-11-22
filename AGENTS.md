@@ -4,6 +4,8 @@
 
 **If changes made to typescript code run:**
 
+Run these commands from `typescript/`.
+
 - bun run check
 - bun run lint-fix and after you should add possible lint changes to the commit.
 - bun run test
@@ -24,3 +26,4 @@ if modifying the spec rerender the pdf version
 
 - When making changes always check if there are relevant unit tests and if not add them. If there are relevant unit tests, run them and update them if needed.
 - When making changes to rendering take screenshots into ./workdir folder to check your work visually and make changes if needed.
+- Run GUI and browser tests headlessly. Use the native test harness’s Xvfb display and software rendering for window and screenshot checks.
