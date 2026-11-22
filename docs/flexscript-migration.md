@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`d75dfbe834dd43540bc3ac44db21a0bc839206c2` includes the shared library and
+`12f32bd556857bc6229f95342f11a59d0b6fb3c9` includes the shared library and
 the FlexDB blob APIs required by the backend. The rebuilt Biscuit checked
 VM verified all 45 historical CAD and runtime import paths against the
 archived catalog and VM. The v10 artifact lineage, the v11 worker and
@@ -120,6 +120,11 @@ and two v11 frozen jobs match the native STL bytes.
 Line tangency also supports ellipses and elliptic arcs. The native test
 changes the width from 40 to 48 mm and the rotation from 30° to 45°, then
 undoes, redoes, reopens and extrudes. Rust verifies the resulting 3MF.
+Midpoint supports saved line, circular-arc and elliptic-arc relations.
+The native test changes a construction line from 20 to 30 mm and its
+point follows from 10 to 15 mm. Rust checks the reopened geometry. Biscuit's
+checked VM reconstructs the saved relation and two frozen builds match
+the native STL bytes.
 
 The shared SDK evaluates original TypeScript PartBuilder v4 files in their
 `features` and `solidSteps` representation. Six reference fixtures cover a
@@ -131,8 +136,14 @@ The saved file retains its original format and sketch references. The
 reopened 720 mm³ export matches TypeScript. The checked VM reconstructs the
 edited source and two v11 workers emit the same STL bytes. The authenticated
 Files and frozen download flows preserve all six original source revisions
-and their checked artifact hashes. Legacy sketch editing, lofts and several
-finishes still need support.
+and their checked artifact hashes. Six additional circular loft and shell
+fixtures verify closed geometry, side offsets, rim area and cavity floor
+area against the original exporter. The native test changes wall thickness
+from 2.5 to 3.25 mm and loft height from 30 to 32 mm, retains the original
+shell source ID and reopens the saved model. The checked VM repeats those
+edits and two frozen v11 builds match the native STL. A saved four-line
+profile also evaluates without changing its original JSON entities.
+Legacy sketch editing and several finishes still need support.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the
@@ -436,7 +447,7 @@ original TypeScript loop order so a saved edge ordinal still picks its
 intended side. All five models reopened after editing both setbacks in
 the native editor. Their TypeScript exports match the bevel vertices
 within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
-with holes still need selector and clipping support.
+with several holes or traced interior boundaries still need selector support.
 For a closed convex loop of straight segments, TypeScript's edge ordinals
 and vertical aliases match native geometry with shuffled and reversed
 segments. The edited square's closed 3,960 mm³ STL also matches the checked
@@ -448,6 +459,13 @@ profile uses a bounded solid subtraction. A deep bevel can cross the notch
 without filling it. The native edit yields a closed 2,750 mm³ STL. The
 checked VM and two v11 frozen jobs match it byte for byte. The test also
 checks that ineligible inset and re-entrant edges fail without an STL.
+
+One primitive aperture can retain its saved edge numbering for inner rims
+and outer bevels. Seven TypeScript exports agree with native manufacturing
+vertices and sampled surfaces. The headless test edits both rim setbacks,
+preserves the selector and reopens the closed 3,484.173 mm³ result. The
+checked VM and two frozen builds match the native STL. Re-entrant and
+out-of-range selectors fail without an export.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.

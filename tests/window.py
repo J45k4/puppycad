@@ -1832,6 +1832,56 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Legacy shell and loft parameters keep their source reference after editing.
+        oracle=root/"tests/fixtures/legacy-flared-shell.pcad"
+        path=Path(tmp)/"Legacy loft shell.pcad"
+        original=oracle.read_bytes()
+        path.write_bytes(original)
+        app,window=open_app(path,design_tree=True)
+        click(window,89,212)
+        key("Return")
+        verify(window,"Wall thickness  mm  2.5")
+        legacy_number("18")
+        verify(window,"Shell thickness consumes the loft interior")
+        key("Escape")
+        assert path.read_bytes()==original
+        legacy_number("3.25")
+        verify(window,"Wall thickness  mm  3.25")
+        key("Control_L+z")
+        verify(window,"Wall thickness  mm  2.5")
+        key("Control_L+y")
+        verify(window,"Wall thickness  mm  3.25")
+        key("Left")
+        verify(window,"Bottom radius  mm  12")
+        key("Tab")
+        verify(window,"Top radius  mm  18")
+        key("Tab")
+        verify(window,"Height  mm  30")
+        legacy_number("32")
+        verify(window,"Height  mm  32")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-loft-edited.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        expected=json.loads(original)
+        expected["revision"]+=1
+        steps=expected["items"][0]["data"]["solidSteps"]
+        steps[0]["loft"]["height"]=32
+        steps[1]["thickness"]=3.25
+        assert json.loads(path.read_bytes())==expected
+        shutil.copyfile(path,output_dir/"legacy-loft-edited.pcad")
+        key("Escape")
+        verify(window,"Feature history closed")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        bounds,volume=triangulation(path.with_suffix(".stl"))
+        assert bounds==[(-14,22),(-25,11),(3,35)] and math.isclose(volume,9638.160617,abs_tol=.003)
+        shutil.copyfile(path.with_suffix(".stl"),output_dir/"legacy-loft-edited.stl")
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -3132,6 +3182,86 @@ with tempfile.TemporaryDirectory() as tmp:
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         assert bounds[2]==(0.0,10.0) and math.isclose(volume,153600*math.sin(math.tau/128),rel_tol=1e-6)
+        key("Escape")
+        app.wait(3)
+
+        # A standalone point follows a driven construction line's midpoint.
+        path=Path(tmp)/"Midpoint guide.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        item=document["items"][0]
+        item["name"]="Midpoint guide"
+        graph=item["data"]["cad"]
+        sketch=graph["nodes"][3]
+        sk=sketch["id"]
+        guide,datum="layout-guide","center-mark"
+        zero=dict(x=0,y=0)
+        graph["nodes"]=graph["nodes"][:4]+[
+            dict(id=guide,type="sketchLine",sketchId=sk,p0=zero,p1=dict(x=20,y=0),construction=True),
+            dict(id=datum,type="sketchPrimitive",sketchId=sk,
+                 primitive=dict(id=datum,type="point",center=dict(x=5,y=5),construction=True)),
+            dict(id="block-outline",type="sketchPrimitive",sketchId=sk,
+                 primitive=dict(id="block-outline",type="rectangle",center=dict(x=35,y=0),width=10,height=10,rotation=0)),
+        ]
+        sketch["relations"]=[
+            dict(id="guide-origin",type="fixed",anchor=dict(entityId=guide,point="p0"),position=zero),
+            dict(id="guide-level",type="horizontal",entityId=guide),
+            dict(id="guide-span",type="length",entityId=guide,value=20),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"layout-guide   20 mm   DOF 7")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,46,54)
+        verify(window,"Pick the source line or arc for Midpoint")
+        click(window,190,358)
+        verify(window,"Pick the follower anchor for Midpoint")
+        click(window,138,244)
+        verify(window,"Midpoint updated")
+
+        def saved_midpoint(length):
+            key("Control_L+s")
+            verify(window,"Saved")
+            nodes={node["id"]:node for node in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+            relations={rel["id"]:rel for rel in nodes[sk]["relations"]}
+            link_id=f"native-midpoint-{datum}-{guide}"
+            assert relations[link_id]==dict(id=link_id,type="midpoint",a=dict(entityId=datum,point="center"),b=guide)
+            assert relations["guide-span"]["value"]==length
+            assert nodes[guide]["p0"]==zero and nodes[guide]["p1"]==dict(x=length,y=0)
+            assert nodes[datum]["primitive"]["center"]==dict(x=length/2,y=0)
+
+        saved_midpoint(20)
+        key("F2")
+        verify(window,"Set value")
+        key("Control_L+a")
+        type_value("30 mm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"layout-guide   20 mm   DOF 5")
+        key("Control_L+y")
+        verify(window,"layout-guide   30 mm   DOF 5")
+        saved_midpoint(30)
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"midpoint-guide.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"layout-guide   30 mm   DOF 5")
+        key("Escape")
+        key("e")
+        verify(window,"Extruded")
+        saved_midpoint(30)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"midpoint-guide-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        assert bounds==[(30.0,40.0),(-5.0,5.0),(0.0,10.0)] and math.isclose(volume,1000,rel_tol=1e-8)
         key("Escape")
         app.wait(3)
 
@@ -6815,6 +6945,60 @@ with tempfile.TemporaryDirectory() as tmp:
         for expected in ((0,0,6),(0,20,6),(1,0,10),(1,20,10),(9,9,0),(9,9,10)):
             assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
         shutil.copyfile(stl,output_dir/"concave-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
+        # The saved clockwise aperture rim keeps its facet and two decimal setbacks.
+        path=Path(tmp)/"Aperture chamfer.pcad"
+        document=json.loads((libs/"cad/tests/fixtures/typescript-hole-chamfers.pcad").read_bytes())
+        document["items"]=[next(item for item in document["items"] if item["id"]=="circular-aperture-rim")]
+        nodes=document["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(node for node in nodes if node["type"]=="chamfer")
+        bevel["notes"]={"keep":"saved clockwise aperture selector"}
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"hole-chamfer-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        for field,previous,value in (("d1","0.5","0.75"),("d2","1.25","1.1")):
+            if field=="d2":
+                key("Tab")
+            verify(window,f"Line bevel  {field} {previous} mm")
+            key("F2")
+            type_value(value)
+            key("Return")
+            verify(window,f"Line bevel  {field} {value} mm")
+        key("Control_L+z")
+        verify(window,"Line bevel  d2 1.25 mm")
+        key("Control_L+y")
+        verify(window,"Line bevel  d2 1.1 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assert saved["items"][0]["data"]["cad"]["nodes"]==[
+            dict(node,d1=0.75,d2=1.1) if node is bevel else node for node in nodes
+        ]
+        shutil.copyfile(path,output_dir/"hole-chamfer-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Line bevel  d1 0.75 mm")
+        key("3")
+        verify(window,"Top view")
+        click(window,735,451)
+        for stroke in ("Down","Down","Down","Left","Left"):
+            key(stroke)
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"hole-chamfer.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(0,20),(0,20),(0,10)] and math.isclose(volume,3484.173166,abs_tol=.003),(bounds,volume)
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        for expected in ((5.847759,9.234633,9.25),(5.414214,8.585786,9.25),(14.363906,20,10),(0,20,1.856942)):
+            assert any(math.dist(vertex,expected)<.0001 for vertex in vertices),expected
+        shutil.copyfile(stl,output_dir/"hole-chamfer.stl")
         key("Escape")
         app.wait(3)
 

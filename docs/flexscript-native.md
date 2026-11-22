@@ -251,6 +251,11 @@ within its sweep. For **Internal tangent**, pick the outer circular curve
 first and the inner curve second. A driving dimension rebuilds the contact
 while keeping the relation.
 
+Choose **Midpoint** in **Relations**, click the source line or arc, then click
+a point, line endpoint or supported shape center. Changing a source dimension
+moves the follower. On an arc, the midpoint lies halfway through the signed
+sweep. Pick the same source and follower again to remove the relation.
+
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
 existing pattern, or press P to cycle through patterns. Tab selects the
@@ -395,6 +400,8 @@ reference. Supported selectors include a single corner or rotated rectangle,
 regular polygon, circle, ellipse, capsule or one closed loop of straight
 sketch lines extruded blind from a reference plane. On a concave loop,
 the saved selector must identify an eligible convex edge.
+For one supported circular or rectangular aperture, the saved selector can
+identify either an outer edge or an aperture rim.
 For face-attached blind joined extrusions, the parent face must resolve to
 the same host face in both editors. Saved fixtures cover a top cap, a
 mirrored bottom cap and an aligned side face.
@@ -419,7 +426,9 @@ To edit a supported TypeScript PartBuilder file, select a solid step in
 Design and open **Feature history**. Tab cycles through the available
 dimensions and translations. **Set value** (F2) edits the selected value.
 The operation and extent buttons change the Boolean or choose between
-blind and through-all extrusion. Up and Down move a step one slot. Each
+blind and through-all extrusion. For a circular loft, edit the radii,
+height or segment count. For its shell, edit the wall thickness. Up and Down
+move a step one slot. Each
 accepted edit keeps the document's original sketch and solid-step records
 and can be undone. Sketch editing in this file representation is pending.
 
