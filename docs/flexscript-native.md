@@ -197,6 +197,14 @@ Click once per point. Period selects Point and Shift+Period selects Datum.
 A filled square marks an ordinary point. A hollow square marks a construction
 point. Both can anchor a dimension. A point adds no edge to a solid profile.
 
+Press **W** or choose **More tools → Conics → Construction**. Click one
+or more sketch entities. Click a selected entity again to deselect it.
+**Apply** (Enter) converts the selection to construction geometry. If
+every selected entity is already construction, Apply restores it to
+ordinary geometry. **Escape** cancels the selection. Blue dashed curves
+remain available as sketch guides and do not contribute to extrusion
+profiles. Undo restores the entire selection in one step.
+
 In the F8 sketch editor, drag a point marker to preview its motion. Driving
 dimensions can move connected geometry or limit the point to an axis or
 circle. A fixed point stays in place. Release to accept the move as one undo

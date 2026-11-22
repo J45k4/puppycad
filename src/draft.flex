@@ -1,4 +1,5 @@
 import "smooth.flex";
+import "construction.flex";
 import "cad/project-ellipse-split.flex";
 
 // Draft coordinates use 4 logical pixels per millimetre at the default zoom.
@@ -297,6 +298,10 @@ fn puppy_draft_key(project,key,mods) {
         if key==28 {return puppy_draft_revolve(project,cg_v(0,0,0),cg_v(0,1000000,0));}
         return 1;
     }
+    if key==26 {
+        puppy_anchor=0;puppy_construction_ids=puppy_snapshot("[]");
+        return puppy_title(project,"Pick sketch geometry, then Apply");
+    }
     if key==27 && mods&3 {puppy_curves_page=2;puppy_tool=-6;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());}
     if key==13 {
         puppy_join_select(0);puppy_anchor=0;puppy_curves_page=1;puppy_tool=-5;if mods&3 {puppy_tool=-4;}
@@ -351,11 +356,19 @@ fn puppy_draft_key(project,key,mods) {
     return 1;
 }
 fn puppy_draft_path(points,mode,w,h) {
-    let count=cg_count(points);let data=m_take(count*8);let i=0;
+    return puppy_draft_stroke(points,mode,w,h,0);
+}
+fn puppy_draft_stroke(points,mode,w,h,dashed) {
+    let size=cg_count(points);if !size {return 1;}let count=size;
+    // Close dashed curves explicitly so the last segment continues the dash phase.
+    if dashed && mode==2 {count=count+1;mode=3;}
+    let data=m_take(count*12);let i=0;let length=0;
     while i<count {
-        let p=cg_at(points,i);
-        render_float(data+i*8,2*(load64(p)-puppy_draft_cx)*puppy_draft_scale,w*1000000000);
-        render_float(data+i*8+4,2*(load64(p+8)-puppy_draft_cy)*puppy_draft_scale-76000000000,h*1000000000);i=i+1;
+        let p=cg_at(points,i%size);
+        if dashed && i {length=length+pc_line_span(cg_at(points,i-1),p);}
+        render_float(data+i*12+8,length*puppy_draft_scale,1000000000);
+        render_float(data+i*12,2*(load64(p)-puppy_draft_cx)*puppy_draft_scale,w*1000000000);
+        render_float(data+i*12+4,2*(load64(p+8)-puppy_draft_cy)*puppy_draft_scale-76000000000,h*1000000000);i=i+1;
     }
     return render_mesh_upload(puppy_sketch_mesh,data,count,0x88e8)
         && render_draw(puppy_device,load64(puppy_sketch_mesh+8),mode,0,count);
@@ -422,6 +435,7 @@ fn puppy_draw_draft() {
     if puppy_symmetry_mode {selected=0;if puppy_symmetry_axis {selected=puppy_symmetry_axis+24;}}
     if puppy_drag_point_id {selected=puppy_drag_point_id+24;}
     let pattern=0;let sources=0;if puppy_patterns {pattern=puppy_pattern_rel(project);if puppy_pattern_sources {sources=j_parse(puppy_pattern_sources+24);}}
+    if puppy_construction_ids {sources=j_parse(puppy_construction_ids+24);}
     let i=0;
     while i<cg_count(paths) {
         let path=cg_at(paths,i);let points=load64(path);let mode=3;
@@ -431,11 +445,11 @@ fn puppy_draw_draft() {
         if pattern && puppy_pattern_contains(pattern,j_string(entity,"id")) {highlight=1;}
         let src=pc_first(sources);while src {if m_eq(j_value(src),j_string(entity,"id")) {highlight=1;}src=load64(src+24);}
         let style=puppy_loft_open;
-        if mode==0 && j_value(j_get(j_get(entity,"primitive"),"construction")) {style=3;}
+        if cad_sketch_is_construction(entity) {style=6;if mode==0 {style=3;}}
         if highlight {style=2;}
         render_gl(puppy_device,"glUniform1i",color,style,0,0,0,0);
         if mode==0 {render_gl(puppy_device,"glEnable",0x8642,0,0,0,0,0);}
-        if !puppy_draft_path(points,mode,w,h) {return 0;}
+        if !puppy_draft_stroke(points,mode,w,h,style==6) {return 0;}
         if mode==0 {render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);}
         if highlight && puppy_line_report && !offset && pc_sketch_circle(entity) && j_get(puppy_line_row(),"field") {
             let circle=j_get(entity,"primitive");let c=pc_uv(j_get(circle,"center"));let r=pc_pose_number(j_get(circle,"radius"));

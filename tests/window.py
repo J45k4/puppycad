@@ -179,6 +179,77 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        path=Path(tmp)/"Construction plate.pcad"
+        app,window=open_app(path,"Click two rectangle corners")
+        click(window,400,398)
+        click(window,560,318)
+        key("c")
+        click(window,480,358)
+        click(window,496,358)
+        key("l")
+        click(window,440,334)
+        click(window,520,334)
+        key("w")
+        verify(window,"Pick sketch geometry, then Apply")
+        click(window,460,334)
+        verify(window,"1 selected")
+        key("Return")
+        verify(window,"Construction geometry")
+        key("w")
+        click(window,460,334)
+        click(window,496,358)
+        verify(window,"2 selected")
+        click(window,496,358)
+        verify(window,"1 selected")
+        click(window,496,358)
+        click(window,50,56)
+        verify(window,"Construction geometry")
+        def construction_flags():
+            key("Control_L+s")
+            verify(window,"Saved")
+            nodes=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+            return [n.get("construction") or n.get("primitive",{}).get("construction",False)
+                    for n in nodes if n.get("sketchId")=="native-sketch-1" and n["type"].startswith("sketch")]
+        assert construction_flags()==[False,True,True]
+        key("Control_L+z")
+        assert construction_flags()==[False,False,True]
+        key("Control_L+y")
+        assert construction_flags()==[False,True,True]
+        key("w")
+        click(window,400,358)
+        key("Escape")
+        verify(window,"Construction edit cancelled")
+        assert construction_flags()==[False,True,True]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        capture(window,"construction-geometry.png",True)
+        from PIL import Image
+        with Image.open(output_dir/"construction-geometry.png") as shot:
+            pixels=shot.convert("RGB")
+            counts=pixels.crop((390,305,570,415)).getcolors(180*110)
+            assert sum(n for n,c in counts if c==(56,148,189))>80,counts
+            line=[pixels.getpixel((x,334))==(56,148,189) for x in range(442,518)]
+            if not any(line):  # OpenGL rasterizes horizontal edges on a pixel boundary.
+                line=[pixels.getpixel((x,333))==(56,148,189) for x in range(442,518)]
+            assert sum(a!=b for a,b in zip(line,line[1:]))>=10,line
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"construction-rust.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        _,objects=package_geometry(reference)
+        assert len(objects)==1 and math.isclose(objects[0][1][1],8000,abs_tol=.001)
+        key("Escape")
+        app.wait(3)
+
         path=Path(tmp)/"Split ellipse.pcad"
         app,window=open_app(path,"Click two rectangle corners")
         key("Shift_L+e")

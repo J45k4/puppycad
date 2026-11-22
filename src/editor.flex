@@ -219,6 +219,7 @@ fn puppy_command(key,mods) {
     if puppy_join_drag {
         if key==GUI_KEY_ESCAPE {puppy_join_end_drag();return puppy_title(cad_project_open(puppy_history+24),"Smooth drag cancelled");}return 1;
     }
+    if puppy_construction_ids {return puppy_construction_key(cad_project_open(puppy_history+24),key);}
     if puppy_mating {return puppy_mate_key(cad_project_open(puppy_history+24),key);}
     if puppy_step_input {return puppy_step_key(cad_project_open(puppy_history+24),key);}
     if puppy_patterns {
@@ -464,6 +465,12 @@ fn puppy_editor(path,source,project,report) {
             if puppy_reader_report {
                 let result=puppy_reader_event(event);running=result!=0;
                 if result==2 {dirty=1;}
+            }
+            else if puppy_construction_ids && kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
+                let x=gui_event_x(event);let y=gui_event_y(event);let current=cad_project_open(puppy_history+24);
+                if y>=76 {puppy_construction_pick(current,x,y);}
+                else if y>=42 && y<68 {puppy_action_bar(puppy_construction_actions(),0,gui_width(load64(puppy_device)),x);}
+                dirty=1;
             }
             else if puppy_number_event(event) {dirty=1;}
             else if puppy_mate_event(event) {dirty=1;}
