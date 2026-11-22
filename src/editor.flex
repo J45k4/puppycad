@@ -293,8 +293,7 @@ fn puppy_command(key,mods) {
         if !(mods&0x3c0) {return puppy_pattern_key(cad_project_open(puppy_history+24),key);}
         if !(mods&192) || (key!=29 && key!=28 && key!=22 && key!=8) {return 1;}
     }else if key==62 && !(mods&0x3c0) && puppy_draft && !puppy_line_report && !puppy_loft_open && !puppy_revolve_axis {
-        let project=cad_project_open(puppy_history+24);
-        if !pc_legacy_solid_part(cad_project_part(project)) {return puppy_pattern_begin(project);}
+        return puppy_pattern_begin(cad_project_open(puppy_history+24));
     }
     if key==12 && mods&192 && !puppy_line_report && !puppy_loft_open && !puppy_history_rows && !puppy_edge_kind {
         return puppy_step_prompt(cad_project_open(puppy_history+24));

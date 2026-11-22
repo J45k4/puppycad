@@ -267,7 +267,10 @@ Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
 existing pattern, or press P to cycle through patterns. Tab selects the
 next field and F2 edits it. Grid fields cover columns, rows and both step
-vectors in millimetres. Circular fields cover count, angle and center.
+vectors in millimetres. Enter `2 x 3` in **Columns** or **Rows** to change
+both counts in one edit. This can preserve an attached face when the total
+number of pattern instances stays the same. Circular fields cover count,
+angle and center.
 Choose **Pick center** (R) and click a sketch anchor to follow it, or click
 an empty position for a fixed center. Drag a blue grid handle to change its
 spacing vector. Shift keeps the original direction. Drag the circular sweep
@@ -413,6 +416,8 @@ sketch lines extruded blind from a reference plane. On a concave loop,
 the saved selector must identify an eligible convex edge.
 With primitive or straight-line apertures, the saved selector can identify
 an outer edge or an aperture rim.
+A plate with a directly authored corner rectangle and a sampled curved
+aperture supports saved outer-edge chamfers.
 For face-attached blind joined extrusions, the parent face must resolve to
 the same host face in both editors. Saved fixtures cover top caps, mirrored
 bottom caps and aligned sides, including the inside wall of a through hole.
@@ -454,8 +459,10 @@ control or fit spline and drag one of its points to reshape it. Closed fit
 splines also expose their points. The sketch toolbar adds lines, circles,
 rectangles and points, including in files without a solid. The editor saves
 the original records and sketch IDs. Editing an arc or spline rebuilds the
-outline in its original order. An edit that would change a referenced profile
-or extrusion face is rejected before it enters Undo history.
+outline in its original order. **Patterns** (F5) creates or edits grid and
+circular patterns in the same file, retaining the IDs of surviving copies.
+An edit that would redirect a referenced profile, extrusion face or numbered
+edge finish is rejected before it enters Undo history.
 
 For Biscuit standalone schema-1 files, open **History** (F7), or right-click
 a feature or part in Design and choose **Feature history**. In a narrow
@@ -514,16 +521,17 @@ or a circular or elliptic arc nearest your click to the first boundary it
 reaches. Arc intersections respect the saved sweep. Projected boundaries
 continue to follow their source. Each edit can be undone.
 
-In **More tools**, choose **Tangent** (Shift+J), click a free line, circular
-arc or open spline endpoint, then click the new arc’s endpoint. **Smooth**
+In **More tools**, choose **Tangent** (Shift+J) and pick an endpoint on a
+line, finite circular or elliptic arc, or open spline. Then click the new
+arc’s endpoint. **Smooth**
 (J) joins the nearest endpoints of two curves. Select the curve to keep in
 place first, then the curve to align. Selecting the same pair again removes
 their smooth join. To reshape a joined chain, select a curve with **Smooth**
 and drag one of its handles. Release to apply one undo step. Escape cancels
 the drag. Select a closed spline with **Smooth** to edit its points.
-The tools also accept editable line and circular dimensions in the same
-sketch. The editor rejects an edit if it conflicts with another driver or
-requires deforming a closed smooth chain.
+Changing a driving arc radius, axis length, rotation or sweep carries its
+joined curve. The editor rejects an edit if it conflicts with another driver
+or requires deforming a closed smooth chain.
 
 Choose **More tools** for arcs and splines. For a three-point arc (A), click
 the start, a point on the arc and the end. A fit spline (S) passes through

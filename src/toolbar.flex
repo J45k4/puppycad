@@ -667,6 +667,7 @@ fn puppy_compact_actions(project) {
         puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Point",55,0);
         puppy_compact_button(rows,"Construction point",55,3);puppy_compact_button(rows,"Fit",74,0);
         puppy_compact_button(rows,"Smooth",13,0);
+        puppy_compact_button(rows,"Patterns",62,0);
         return rows;
     }
     if studio {

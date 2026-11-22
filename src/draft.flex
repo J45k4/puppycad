@@ -662,7 +662,7 @@ fn puppy_draw_draft() {
         if !puppy_draft_path(split_cuts,0,w,h) {return 0;}render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);
     }
 
-    if pattern && !puppy_pattern_guides(project,pattern,color,w,h) {return 0;}
+    if pattern && !puppy_pattern_guides(model,pattern,color,w,h) {return 0;}
     let distance=puppy_distance_row();
     let first=puppy_distance_first;if puppy_symmetry_mode {first=puppy_symmetry_anchor;}
     if first {

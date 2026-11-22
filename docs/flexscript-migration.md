@@ -77,12 +77,12 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`0eec3211d1bc38ff455719d05b4bb09e3adad8f0` includes the shared library and
+`55f28903cfd788fa037c70a116d10d7d3f5b2efa` includes the shared library and
 the FlexDB blob APIs required by the backend. Its default local build
 bootstraps the compiler from the pinned revision. PuppyCAD and Biscuit
 produced byte-identical compilers. Biscuit's checked VM matched the
 archived VM across all 45 historical CAD and runtime import paths. The
-`da58397` headless browser tests passed desktop and mobile builds, protected ZIP
+`0eec321` headless browser tests passed desktop and mobile builds, protected ZIP
 downloads, and integrated PCAD fabrication with the pinned KiCad
 executable. The KiCad v3/v4 upgrade preserves the earlier fabrication
 ZIP and produces matching board data and rear silkscreen in new builds.
@@ -160,6 +160,14 @@ an off-sweep conflict and a drag along the curve. Against TypeScript's
 nearest-arc routine, 576 differential cases agree within 1 nm. The native
 picker also creates the relation on a sketch containing an ellipse and a
 point.
+
+Finite elliptic arcs support directed smooth joins through their start or
+end. The native editor creates a join and reopens a TypeScript-authored
+clockwise join after a height edit from 10 to 18 mm. The attached 12 mm
+line follows the same endpoint and retains its direction relative to the
+arc. Against original TypeScript, 144 sampled endpoint frames agree within
+0.6 nm. Construction geometry keeps the independent solid STL byte-identical
+before and after the edit.
 
 The shared solver handles a point or line endpoint on an open control,
 open fit or periodic fit spline. The headless editor drags across both
@@ -253,7 +261,27 @@ Native editing also covers the points of a closed fit spline. The SDK
 checks open fit splines with saved endpoint coincidences and sampling close
 to TypeScript's subdivision threshold. On a 108-edge periodic fixture,
 checked save and checked export fit the existing instruction budget when
-run as separate executions. PartBuilder pattern editing remains open.
+run as separate executions.
+
+PartBuilder grid and circular patterns edit in the original saved format.
+The native editor resizes a 3 × 2 grid to 2 × 3 in one edit and retains
+its boss on `plate-solid-face-30`. The surviving copies keep their IDs.
+The SDK rejects an edit that would redirect an attached face, a consumed
+profile or an edge finish. The native editor also creates a new grid and
+drags an anchored circular pattern with a −180° sweep. Original TypeScript
+reopens the edited files. The grid and circular exports have matching
+closed meshes, bounds and signed volumes.
+
+A TypeScript v4 plate with a sampled half-ellipse aperture now retains its
+saved outer-edge chamfer. The native editor sets the two setbacks to 0.75
+and 1.25 mm and reopens the 2,985.661458 mm³ solid. The guard accepts the
+original outside edge numbering on a direct corner-rectangle outline.
+Sampled aperture edge numbering remains open.
+
+The shared `55f2890` archive passed all 76 SDK tests. Biscuit's checked VM
+replayed each native grid, circular pattern, elliptic join and outer bevel
+edit. Two frozen v11 builds per model produced STL bytes identical to
+PuppyCAD's exports and repeated the same reports.
 
 Standalone History previews suppression, restoration and feature ordering
 before Apply writes an edit. It also previews an earlier feature of the

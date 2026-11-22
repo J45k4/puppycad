@@ -2342,6 +2342,153 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Resize both axes together so the original cap ordinal stays attached.
+        pattern_source=json.loads((libs/"cad/tests/fixtures/legacy-typescript-patterns.pcad").read_bytes())
+        path=Path(tmp)/"Legacy grid pattern.pcad"
+        path.write_text(json.dumps(pattern_source))
+        shutil.copyfile(path,output_dir/"legacy-grid-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,94,238)
+        verify(window,"Editing plate")
+        key("F3")
+        key("F5")
+        verify(window,"linear-pattern-1   Columns   3")
+        legacy_number("2")
+        verify(window,"Sketch edit changes a face used by boss/sketch")
+        key("Escape")
+        assert json.loads(path.read_bytes())==pattern_source
+        legacy_number("2 x 3")
+        verify(window,"linear-pattern-1   Columns   2")
+        key("Control_L+z")
+        verify(window,"linear-pattern-1   Columns   3")
+        key("Control_L+y")
+        verify(window,"linear-pattern-1   Columns   2")
+        key("Tab")
+        verify(window,"Rows   3")
+        key("Tab")
+        verify(window,"Step X (mm)   14")
+        legacy_number("15 mm")
+        verify(window,"Step X (mm)   15")
+        key("Tab")
+        key("Tab")
+        verify(window,"Row X (mm)   4")
+        legacy_number("5 mm")
+        verify(window,"Row X (mm)   5")
+        key("Tab")
+        legacy_number("12 mm")
+        verify(window,"Row Y (mm)   12")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        old,new=(doc["items"][0]["data"] for doc in (pattern_source,saved))
+        assert "cad" not in new and new["solidSteps"]==old["solidSteps"]
+        assert new["features"][1:]==old["features"][1:]
+        assert new["features"][2]["target"]["face"]["faceId"]=="plate-solid-face-30"
+        grid=new["features"][0]["relations"][0]
+        assert grid==dict(id="linear-pattern-1",type="linearPattern",sources=["grid-hole"],
+                         instances=[[f"pattern-copy-{i}"] for i in (1,3,4,6,7)],
+                         step=dict(x=15,y=0),columns=2,rowStep=dict(x=5,y=12))
+        shutil.copyfile(path,output_dir/"legacy-grid-edited.pcad")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-grid.png"],check=True)
+        key("Escape")
+        key("F12")
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        assert triangulation(stl)==([(-40,40),(-30,30),(0,11)],36720)
+        shutil.copyfile(stl,output_dir/"legacy-grid-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Drag the center of a clockwise pattern while it follows its own saved anchor.
+        path=Path(tmp)/"Legacy circular pattern.pcad"
+        pattern_source["selectedPath"]=[1]
+        path.write_text(json.dumps(pattern_source))
+        shutil.copyfile(path,output_dir/"legacy-ring-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,94,238)
+        verify(window,"Editing plate")
+        key("F3")
+        key("F5")
+        verify(window,"circular-pattern-1   Count   4")
+        legacy_number("3")
+        verify(window,"circular-pattern-1   Count   3")
+        key("Tab")
+        legacy_number("-180 deg")
+        verify(window,"Angle (deg)   -180")
+        key("Home")
+        drag(window,1,(480,358),(489,341),cancel=True,dragging="Dragging pattern")
+        verify(window,"Pattern drag cancelled")
+        drag(window,1,(480,358),(489,341))
+        key("Control_L+s")
+        verify(window,"Saved")
+        before=pattern_source["items"][1]["data"]
+        after=json.loads(path.read_bytes())["items"][1]["data"]
+        sketch=after["features"][0]
+        ring=sketch["relations"][0]
+        assert ring["centerAnchor"]==dict(entityId="ring-center",point="center")
+        assert ring["center"]==next(e["center"] for e in sketch["entities"] if e["id"]=="ring-center")
+        assert math.dist((ring["center"]["x"],ring["center"]["y"]),(1,2))<.1
+        assert ring["angle"]==-180 and ring["instances"]==[["circular-copy-1"],["circular-copy-2"]]
+        assert after["features"][1:]==before["features"][1:] and after["solidSteps"]==before["solidSteps"]
+        (output_dir/"legacy-ring-center.json").write_text(json.dumps(ring["center"]))
+        shutil.copyfile(path,output_dir/"legacy-ring-edited.pcad")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"legacy-ring.png"],check=True)
+        key("Escape")
+        key("F12")
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(-40,40),(-30,30),(0,8)] and math.isclose(volume,37824,abs_tol=.0001)
+        shutil.copyfile(stl,output_dir/"legacy-ring-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Adding a new pattern keeps the original PartBuilder representation.
+        path=Path(tmp)/"Create a legacy grid pattern.pcad"
+        pattern_source["selectedPath"]=[2]
+        path.write_text(json.dumps(pattern_source))
+        app,window=open_app(path,design_tree=True)
+        click(window,94,264)
+        verify(window,"Editing plate")
+        key("F3")
+        key("Home")
+        key("F5")
+        verify(window,"Pick source geometry for a pattern")
+        click(window,334,461)
+        verify(window,"1 selected")
+        key("g")
+        verify(window,"linear-pattern-1   Columns   2")
+        key("Control_L+s")
+        verify(window,"Saved")
+        part=json.loads(path.read_bytes())["items"][2]["data"]
+        original=pattern_source["items"][2]["data"]
+        assert "cad" not in part and part["solidSteps"]==original["solidSteps"]
+        sketch=part["features"][0]
+        grid=sketch["relations"][0]
+        assert grid["sources"]==["grid-hole"] and grid["instances"]==[["pattern-copy-1"]]
+        assert sketch["entities"][:2]==original["features"][0]["entities"]
+        key("Escape")
+        key("F12")
+        verify(window,"Part workspace")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        assert triangulation(path.with_suffix(".stl"))==([(-40,40),(-30,30),(0,8)],37824)
+        key("Escape")
+        app.wait(3)
+
         # The original Biscuit standalone feature-history plate, with a
         # through cut and a dependent transform of the result.
         history_path=Path(tmp)/"Standalone feature history.pcad"
@@ -4077,6 +4224,108 @@ with tempfile.TemporaryDirectory() as tmp:
         assert math.isclose(triangulation(stl)[1],8395.521379435,abs_tol=.0001)
         assert stl.read_bytes()!=baseline.read_bytes()
         shutil.copyfile(stl,output_dir/"spline-source-contact-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A saved smooth join follows a finite clockwise elliptic arc after a height edit.
+        path=Path(tmp)/"Elliptic arc smooth join.pcad"
+        initial=(libs/"cad/tests/fixtures/elliptic-smooth-join.pcad").read_bytes()
+        path.write_bytes(initial)
+        shutil.copyfile(path,output_dir/"elliptic-join-input.pcad")
+        baseline=path.with_name("Elliptic smooth join original.stl")
+        subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+        app,window=open_app(path)
+        key("F8")
+        verify(window,"tangent-line   12 mm")
+        for _ in range(3):
+            key("Tab")
+        verify(window,"arc-guide   Height 10 mm")
+        legacy_number("18 mm")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"arc-guide   Height 10 mm")
+        key("Control_L+y")
+        verify(window,"arc-guide   Height 18 mm")
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"elliptic-join.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        source=json.loads(initial)
+        saved=json.loads(path.read_bytes())
+        assert saved["items"][1]==source["items"][1]
+        before,after=({n["id"]:n for n in doc["items"][0]["data"]["cad"]["nodes"]} for doc in (source,saved))
+        arc=after["arc-guide"]
+        assert arc==dict(before["arc-guide"],arc=dict(before["arc-guide"]["arc"],height=18))
+        tangent=after["tangent-line"]
+        for key_name,expected in (("p0",(11.398348,-2.837787)),("p1",(2.459747,-10.844123))):
+            point=tangent[key_name]
+            assert math.dist((point["x"],point["y"]),expected)<.000004,(key_name,point)
+        start=tangent["p0"];end=tangent["p1"]
+        assert math.isclose(math.hypot(end["x"]-start["x"],end["y"]-start["y"]),12,abs_tol=.000002)
+        relations=after["native-sketch-1"]["relations"]
+        assert relations==[dict(rel,value=18,expression="18 mm") if rel["id"]=="arc-height" else rel
+                           for rel in before["native-sketch-1"]["relations"]]
+        shutil.copyfile(path,output_dir/"elliptic-join-edited.pcad")
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(40,50),(-1,9),(0,10)] and math.isclose(volume,780.36206,abs_tol=.001)
+        assert stl.read_bytes()==baseline.read_bytes()
+        shutil.copyfile(stl,output_dir/"elliptic-join-edited.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Author the same directed join through the native Smooth picker.
+        path=Path(tmp)/"Author elliptic smooth join.pcad"
+        sketch=before["native-sketch-1"]
+        sketch["relations"]=[rel for rel in sketch["relations"] if rel["id"]!="smooth-from-web"]
+        line=before["tangent-line"]
+        for end in ("p0","p1"):
+            line[end]["y"]-=3
+        path.write_text(json.dumps(source))
+        app,window=open_app(path)
+        key("F12")
+        verify(window,"Editing Tangent guide")
+        key("Home")
+        key("j")
+        verify(window,"Pick the source curve for Smooth")
+        geometry=before["arc-guide"]["arc"]
+        rotation=math.radians(geometry["rotation"])
+
+        def arc_guide_point(t):
+            angle=geometry["startAngle"]+t*geometry["sweep"]
+            x=20*math.cos(angle);y=5*math.sin(angle)
+            return x*math.cos(rotation)-y*math.sin(rotation),x*math.sin(rotation)+y*math.cos(rotation)
+
+        samples=[arc_guide_point(i/64) for i in range(65)]
+        low_x=line["p1"]["x"];low_y=line["p1"]["y"]
+        high_x=50;high_y=max(y for _,y in samples)
+        scale=min(912/(high_x-low_x),516/(high_y-low_y))
+
+        def join_pixel(x,y):
+            return round(480+(x-(low_x+high_x)/2)*scale),round(358-(y-(low_y+high_y)/2)*scale)
+
+        click(window,*join_pixel(*arc_guide_point(.4)))
+        verify(window,"Pick the curve that should follow")
+        click(window,*join_pixel((line["p0"]["x"]+line["p1"]["x"])/2,(line["p0"]["y"]+line["p1"]["y"])/2))
+        verify(window,"Smooth join updated")
+        key("Control_L+s")
+        verify(window,"Saved")
+        edited={n["id"]:n for n in json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]}
+        created=next(rel for rel in edited["native-sketch-1"]["relations"] if rel["type"]=="smoothJoin")
+        assert created["a"]==dict(entityId="arc-guide",point="p1")
+        assert created["b"]==dict(entityId="tangent-line",point="p0")
+        assert edited["arc-guide"]==before["arc-guide"]
+        for name,expected in (("p0",(9.585732483,.301754781)),("p1",(-.041910958,-6.861239130))):
+            point=edited["tangent-line"][name]
+            assert math.dist((point["x"],point["y"]),expected)<.000003
+        key("F12")
+        verify(window,"Part workspace")
         key("Escape")
         app.wait(3)
 
@@ -7729,6 +7978,48 @@ with tempfile.TemporaryDirectory() as tmp:
         for expected in ((4,5,10),(16,5,10),(4,6,14),(16,6,14)):
             assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
         shutil.copyfile(stl,output_dir/"face-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A sampled aperture leaves the original outer edge numbering intact.
+        path=Path(tmp)/"Sampled aperture chamfer.pcad"
+        initial=(libs/"cad/tests/fixtures/typescript-sampled-aperture-chamfer.pcad").read_bytes()
+        path.write_bytes(initial)
+        shutil.copyfile(path,output_dir/"sampled-aperture-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Saved outer edge bevel  d1 0.5 mm")
+        legacy_number("0.75")
+        verify(window,"Saved outer edge bevel  d1 0.75 mm")
+        key("Tab")
+        verify(window,"Saved outer edge bevel  d2 0.75 mm")
+        legacy_number("1.25")
+        verify(window,"Saved outer edge bevel  d2 1.25 mm")
+        key("Control_L+z")
+        verify(window,"Saved outer edge bevel  d2 0.75 mm")
+        key("Control_L+y")
+        verify(window,"Saved outer edge bevel  d2 1.25 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        source=json.loads(initial);saved=json.loads(path.read_bytes())
+        source["revision"]=saved["revision"]
+        nodes=source["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(n for n in nodes if n["id"]=="bevel")
+        bevel.update(d1=.75,d2=1.25)
+        assert saved==source
+        shutil.copyfile(path,output_dir/"sampled-aperture-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Saved outer edge bevel  d1 0.75 mm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"sampled-aperture.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        bounds,volume=triangulation(stl)
+        assert bounds==[(0,24),(0,8),(-16,0)] and math.isclose(volume,2985.6614576,abs_tol=.0001)
+        shutil.copyfile(stl,output_dir/"sampled-aperture-edited.stl")
         key("Escape")
         app.wait(3)
 

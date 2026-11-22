@@ -78,7 +78,9 @@ fn puppy_join_handles(node) {
             let name=ps_end_name(node,i);if name {let f=ps_endpoint(node,name);if f {cg_push(rows,cg_v(load64(f),ps_anchor(id,name),0));}}
             i=i+1;
         }
-        if pc_circular_arc(node) {cg_push(rows,cg_v(pc_uv(j_get(j_get(node,"arc"),"center")),ps_anchor(id,"center"),0));}
+        if pc_finite_arc(node) && ps_end_name(node,0) {
+            cg_push(rows,cg_v(pc_uv(j_get(pc_curve_geometry(node),"center")),ps_anchor(id,"center"),0));
+        }
     }return rows;
 }
 fn puppy_join_clear_preview() {

@@ -66,14 +66,16 @@ fn puppy_pattern_guides(project,rel,color,w,h) {
     let ok=puppy_draft_path(dots,0,w,h);render_gl(puppy_device,"glDisable",0x8642,0,0,0,0,0);return ok;
 }
 fn puppy_pattern_down(project,x,y) {
-    if puppy_pattern_center {return puppy_pattern_click(project,x,y);}
-    let rel=puppy_pattern_rel(project);let handles=puppy_pattern_handles(project,rel);let at=puppy_draft_point(x,y);
+    let sk=j_string(puppy_draft_sketch(project),"id");let model=puppy_sketch_model(project,sk);
+    if !model {return puppy_title(project,cg_error);}
+    if puppy_pattern_center {return puppy_pattern_click(project,model,x,y);}
+    let rel=puppy_pattern_rel(project);let handles=puppy_pattern_handles(model,rel);let at=puppy_draft_point(x,y);
     let i=0;let best=65;let handle=0;while i<cg_count(handles) {
         let row=cg_at(handles,i);let p=load64(row);
         let dx=(load64(p)-load64(at))*puppy_draft_scale/1000000000;let dy=(load64(p+8)-load64(at+8))*puppy_draft_scale/1000000000;
         let d=dx*dx+dy*dy;if d<best {best=d;handle=row;}i=i+1;
     }
-    if !handle {return puppy_pattern_click(project,x,y);}
+    if !handle {return puppy_pattern_click(project,model,x,y);}
     puppy_pattern_moved=0;puppy_pattern_drag=load64(handle+8);puppy_pattern_down_x=x;puppy_pattern_down_y=y;
     if puppy_pattern_drag==PUPPY_RING_ANGLE {
         puppy_pattern_last_angle=puppy_pattern_angle_at(at,pc_uv(j_get(rel,"center")));puppy_pattern_drag_angle=pc_pose_number(j_get(rel,"angle"));
@@ -113,7 +115,8 @@ fn puppy_pattern_drag_edit(project,x,y) {
         let pt=pc_json_point(cg_v(load64(base)+dx,load64(base+8)+dy,0));
         if puppy_pattern_drag==PUPPY_RING_CENTER {
             let sk=j_string(puppy_draft_sketch(project),"id");
-            return cad_project_move_pattern_center(project,sk,j_string(rel,"id"),pt);
+            let model=puppy_sketch_model(project,sk);if !model {return 0;}
+            return puppy_sketch_result(project,sk,cad_project_move_pattern_center(model,sk,j_string(rel,"id"),pt));
         }
         j_add(settings,key,pt);
     }

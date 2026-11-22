@@ -68,19 +68,45 @@ fn puppy_pattern_accept(project,updated) {
 }
 fn puppy_pattern_change(project,settings) {
     let rel=puppy_pattern_rel(project);let sk=j_string(puppy_draft_sketch(project),"id");
-    return cad_project_set_pattern(project,sk,j_string(rel,"id"),settings);
+    let model=puppy_sketch_model(project,sk);if !model {return 0;}
+    return puppy_sketch_result(project,sk,cad_project_set_pattern(model,sk,j_string(rel,"id"),settings));
+}
+fn puppy_pattern_grid_separator(text) {
+    let i=0;let end=m_len(text)-2;
+    while i<end {
+        if load8(text+i)==32 && load8(text+i+1)==120 && load8(text+i+2)==32 {return i+1;}
+        i=i+1;
+    }
+    return 0;
+}
+fn puppy_pattern_set_count(settings,key,text,variables) {
+    let quantity=pcv_evaluate(text,0,variables,0);if !quantity {return 0;}
+    let value=load64(quantity);
+    if f64_lt(f64_from_i64(500),f64_magnitude(value)) {return cg_fail("Pattern value exceeds range");}
+    let count=f64_to_i64_round(value);
+    if value!=f64_from_i64(count) || count<1 || count>32 {return cg_fail("Enter an integer from 1 to 32");}
+    cg_j_int(settings,key,count);return 1;
 }
 fn puppy_pattern_apply(project,text) {
     let field=puppy_pattern_field(project);if !field {return puppy_title(project,"Select a pattern");}
     let rel=load64(field);let slot=puppy_pattern_slot;let grid=pp_kind(rel)==1;let kind=1;
     if !slot || grid && slot==1 {kind=0;}else if !grid && slot==1 {kind=2;}
-    cg_begin();let q=pcv_evaluate(text,kind,pcv_bind(j_get(puppy_draft_sketch(project),"variables")),0);if !q {return puppy_title(project,cg_error);}
-    let value=load64(q);if f64_lt(f64_from_i64(500),f64_magnitude(value)) {return puppy_title(project,"Pattern value exceeds range");}
-    let settings=j_object();
+    cg_begin();let variables=pcv_bind(j_get(puppy_draft_sketch(project),"variables"));let settings=j_object();
     if !kind {
-        let count=f64_to_i64_round(value);if value!=f64_from_i64(count) || count<1 || count>32 {return puppy_title(project,"Enter an integer from 1 to 32");}
-        let key="count";if grid {key="columns";if slot {key="rows";}}cg_j_int(settings,key,count);
+        let separator=0;if grid {separator=puppy_pattern_grid_separator(text);}
+        if separator {
+            if !puppy_pattern_set_count(settings,"columns",m_slice(text,separator-1),variables)
+                || !puppy_pattern_set_count(settings,"rows",text+separator+2,variables) {
+                return puppy_title(project,cg_error);
+            }
+        }else {
+            let key="count";if grid {key="columns";if slot {key="rows";}}
+            if !puppy_pattern_set_count(settings,key,text,variables) {return puppy_title(project,cg_error);}
+        }
     }else {
+        let q=pcv_evaluate(text,kind,variables,0);if !q {return puppy_title(project,cg_error);}
+        let value=load64(q);
+        if f64_lt(f64_from_i64(500),f64_magnitude(value)) {return puppy_title(project,"Pattern value exceeds range");}
         let number=cg_json_number(f64_to_i64_round(f64_mul(value,f64_from_i64(1000000))));
         if !grid && slot==1 {cg_j_set(settings,"angle",number);}
         else {
@@ -100,7 +126,8 @@ fn puppy_pattern_key(project,key) {
     else if (key==10 || key==6) && puppy_pattern_sources {
         let settings=j_object();let kind="linearPattern";if key==6 {kind="circularPattern";}
         cg_j_text(settings,"type",kind);let sk=j_string(puppy_draft_sketch(project),"id");
-        let updated=cad_project_add_pattern(project,sk,j_parse(puppy_pattern_sources+24),settings);
+        let model=puppy_sketch_model(project,sk);if !model {return puppy_title(project,cg_error);}
+        let updated=puppy_sketch_result(project,sk,cad_project_add_pattern(model,sk,j_parse(puppy_pattern_sources+24),settings));
         if !updated {return puppy_title(project,cg_error);}puppy_pattern_index=cg_count(puppy_pattern_rows(updated))-1;
         puppy_pattern_slot=0;puppy_pattern_selection(0);return puppy_pattern_accept(project,updated);
     }else if key==19 {puppy_pattern_selection(0);puppy_pattern_index=puppy_pattern_index+1;puppy_pattern_slot=0;puppy_pattern_center=0;}
@@ -142,8 +169,8 @@ fn puppy_pattern_contains(rel,id) {
     let s=pc_first(j_get(rel,"sources"));while s {if m_eq(j_value(s),id) {return 1;}s=load64(s+24);}
     let g=pc_first(j_get(rel,"instances"));while g {s=pc_first(g);while s {if m_eq(j_value(s),id) {return 1;}s=load64(s+24);}g=load64(g+24);}return 0;
 }
-fn puppy_pattern_click(project,x,y) {
-    let pt=puppy_draft_point(x,y);let nodes=pc_nodes(cad_project_part(project));let sk=j_string(puppy_draft_sketch(project),"id");
+fn puppy_pattern_click(project,model,x,y) {
+    let pt=puppy_draft_point(x,y);let nodes=pc_nodes(cad_project_part(model));let sk=j_string(puppy_draft_sketch(project),"id");
     if puppy_pattern_center {
         let a=puppy_pattern_anchor(nodes,sk,pt);let settings=j_object();j_add(settings,"center",pc_json_point(pt));
         if !a {a=j_new(0,0);}j_add(settings,"centerAnchor",a);let updated=puppy_pattern_change(project,settings);
