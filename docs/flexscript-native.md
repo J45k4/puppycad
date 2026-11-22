@@ -219,7 +219,7 @@ endpoint stays in place. Escape cancels a drag, and releasing the pointer
 accepts it as one undo step. **Done** returns to the previous view. Ctrl+S
 saves the drawing.
 
-In **Dimensions**, choose **Line relations** and select **Parallel** or
+In **Dimensions**, choose **Relations** and select **Parallel** or
 **Perpendicular**. Click the line to keep first, then click the follower.
 The relation works with existing lengths, fixed points and coincident
 endpoints. The follower stays selected for **Set length** (F2). Select the
@@ -229,6 +229,11 @@ Choose **Equal** in the same control to link the lengths of two straight
 lines. Pick the line to keep first and the follower second. Once linked,
 a driving dimension on either line changes both lengths. A conflicting
 fixed point or another driving length can prevent the edit.
+
+Choose **Concentric** to link the centers of two circles, ellipses or their
+arcs. Click the curve to keep first, then the follower. A driving distance
+or permitted drag on either center moves both. Each curve keeps its own
+size and orientation.
 
 Open **Patterns** (F5) in a sketch. Click source geometry to select it,
 then choose **Grid** (G) or **Circular** (C). Click a member to select an
@@ -366,11 +371,12 @@ radius. Press F2 on its dimension to enter an exact value. Escape cancels
 the selection. The saved file records the edges and the dimension so you
 can reopen the drawing and edit the finish.
 
-For a saved TypeScript chamfer on a blind reference-plane rectangle,
-select its feature in the Design tree. Press F2 to edit `d1`, or press
-Tab to select `d2` first. **Objects** lists both fields under **Driving
-fields**. Enter millimetres. Entering zero for `d2` makes it follow `d1`.
-The feature keeps its original extrusion-edge reference.
+For a saved TypeScript chamfer, select its feature in the Design tree.
+Press F2 to edit `d1`, or press Tab to select `d2` first. **Objects** lists
+both fields under **Driving fields**. Enter millimetres. Entering zero for
+`d2` makes it follow `d1`. The feature keeps its original extrusion-edge
+reference. Supported selectors include a single corner or rotated rectangle,
+regular polygon, circle, ellipse or capsule extruded blind from a reference plane.
 
 Open **History** or press **F7** to inspect a v4 part’s solid features.
 Click a row or use Left and Right to select it. **Suppress** (S) toggles
@@ -598,6 +604,12 @@ keep their placements. Enter applies the edit and solves the assembly.
 If a mate holds the occurrence, the panel shows its resulting placement.
 Ctrl+Z and Ctrl+Y undo and redo each accepted edit. **Back** returns to the
 occurrence details.
+
+To switch an occurrence's part definition, select it under **Occurrences**
+in the Design tree and choose **Replace part**. Click a part in the chooser,
+or use **Search parts** to filter the list. The occurrence retains its ID,
+placement, connectors and mates. Use **Cancel** or Escape to close the
+chooser. An invalid replacement leaves the existing assembly intact.
 
 To move or rotate a connector frame in a v4 assembly, expand **Connectors**
 in the Design tree and select the connector. Click an X, Y or Z value below

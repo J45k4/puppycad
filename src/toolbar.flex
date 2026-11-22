@@ -285,9 +285,10 @@ fn puppy_toolbar_build(w) {
         }
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
-    if puppy_plane_chooser {
+    if puppy_plane_chooser || puppy_replace_target {
         if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
-        puppy_action_bar(puppy_plane_actions(),rgb,w,-1);
+        let actions=0;if puppy_replace_target {actions=puppy_replace_actions();}else {actions=puppy_plane_actions();}
+        puppy_action_bar(actions,rgb,w,-1);
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;
         return 1;
     }

@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`1930d64403d8e6ff74e735cb0881c96029c97737` includes the shared library and
+`eb5a115e404458f38acc335d179ca25a9d9c6d91` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -146,7 +146,7 @@ sketch, closes it and extrudes a 1,500 mm³ triangular prism. Rust matches
 its bounds and volume. Biscuit's checked VM reproduces the native part and
 two frozen jobs produce the same STL. See `workdir/flexscript/line-perpendicular.png`.
 
-The native **Line relations** control also links straight-line lengths with
+The native **Relations** control also links straight-line lengths with
 Equal. It preserves the parallel or perpendicular relation and the saved
 coincident and fixed anchors. The window test drives the follower to 25 mm,
 undoes that change, then drives the source to 30 mm and reopens and extrudes
@@ -154,6 +154,15 @@ the linked profile. Rejected dual drivers leave the original sketch and any
 downstream solid intact. The saved 9,000 mm³ profile extrusion matches Rust's
 3MF, and Biscuit's checked VM and two frozen builds reproduce the native
 STL. See `workdir/flexscript/line-equal.png`.
+
+Concentric relations tie the centers of saved circles, ellipses and their
+arcs. The native window test picks a circle and a rotated ellipse, then
+drives their shared center from X 10 mm to X 16 mm. It preserves both sets
+of dimensions and the saved relation IDs through undo, redo, save and
+reopen. The resulting annular extrusion matches Rust's 3MF. The checked VM
+and two frozen builds reproduce the native STL. The SDK also rejects
+incompatible fixed centers and saved geometry that disagrees with a
+named Concentric relation. See `workdir/flexscript/concentric-seat.png`.
 
 The native editor also authors three-point ellipses and circles. The
 headless window test draws a 50 × 20 mm ellipse rotated 53.130102° and
@@ -355,8 +364,15 @@ The native window test edits `d1` and `d2`, rejects a negative distance, and
 preserves the feature, selector and opaque metadata on save. Reopening and
 exporting the edited body matches the TypeScript bevel vertices and 3,960 mm³
 volume. The checked VM and two frozen builds reproduce the native STL.
-Other legacy extrusion selector topologies still need to be resolved.
-See `workdir/flexscript/legacy-chamfer.png`.
+
+The same blind reference-plane selector now resolves a single rotated
+rectangle, regular polygon, circle, ellipse or capsule. The SDK uses the
+original TypeScript loop order so a saved edge ordinal still picks its
+intended side. All five models reopened after editing both setbacks in
+the native editor. Their TypeScript exports match the bevel vertices
+within 0.00012 mm, and Biscuit reproduces the native STL bytes. Profiles
+with holes, traced boundaries or face attachments still need selector
+and clipping support. See `workdir/flexscript/rotated-chamfer.png`.
 
 V4 lofts resolve two sketch profile references, match their perimeters and
 build a ruled surface. The native picker supports a new body and a join.
@@ -530,6 +546,14 @@ saves and reopens the model, then compares its three bodies with Rust.
 The checked VM replays the same frame edit. Two frozen builds reproduce
 the native STL facets. A conflicting fasten leaves the saved assembly
 intact. See `workdir/flexscript/assembly-connector-frame.png`.
+
+The native Design tree can replace an occurrence's part definition in
+place. The window test changes the upper arm from Arm to Slim arm, then
+undoes, redoes, saves and reopens the model. Only that occurrence's part ID
+changes in the authored graph. The stored transform and both mate endpoints
+remain intact. Rust agrees on the reopened 3MF. The checked VM and two frozen
+jobs reproduce the STL, and the base and forearm exports remain byte-identical.
+See `workdir/flexscript/replace-occurrence.png`.
 
 Biscuit's checked VM drives the elbow to 90°, detaches it and removes the
 upper-arm occurrence. The frozen worker produces identical STL bytes before
@@ -722,6 +746,16 @@ accept renumbered pads with the reviewed binding and reject a mismatched
 revision before publishing manufacturing outputs. They also download and
 re-execute the original v9 release under its exact profile and verify its
 archived ZIP and journal byte for byte.
+
+The `native-project-checks-11` profile restores the original advisory
+`continuity.json` for a declared harness without required paths. The
+report is `unknown` and preserves the original frozen-source digest.
+Release jobs with optional continuity can complete, while a requirement
+for verified continuity still blocks promotion. Populated and empty
+harness cases match the historical report bytes. An eight-board fixture
+still fits the 24-file limit, and a board-only job retains its v10 outputs.
+The authenticated upgrade preserves the original v10 ZIP, journal and
+toolchain descriptor, including exact replay under the v10 worker profile.
 
 The original authenticated Files CAD routes also use the checked VM and
 shared CAD SDK. They cover revision-bound previews and checks, copper and

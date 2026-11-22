@@ -115,15 +115,16 @@ with tempfile.TemporaryDirectory() as tmp:
             xlib.XSync(connection, 0)
             time.sleep(0.15)
 
-        def focus_search(window, x):
+        def focus_search(window, x, *, design=False):
             from PIL import Image
-            click(window, x, 100)
+            click(window, x, 126 if design else 100)
+            focus_y=139 if design else 113
             # SDL must have started text input before X sends the first key.
             frame = Path(tmp) / 'search-focus.png'
             for _ in range(60):
                 subprocess.run(['magick', 'import', '-window', hex(window), frame], check=True)
                 with Image.open(frame) as img:
-                    if img.convert('RGB').getpixel((20, 113)) == (143, 217, 184):
+                    if img.convert('RGB').getpixel((20, focus_y)) == (143, 217, 184):
                         return
                 time.sleep(.05)
             raise AssertionError('Search field did not gain focus')
@@ -2281,7 +2282,7 @@ with tempfile.TemporaryDirectory() as tmp:
         key("F8")
         def pick_direction(label,button_x):
             click(window,890,20)
-            verify(window,"Choose a line relation")
+            verify(window,"Choose a relation")
             click(window,button_x,54)
             verify(window,f"Pick the source line for {label}")
             click(window,384,486)
@@ -2370,7 +2371,7 @@ with tempfile.TemporaryDirectory() as tmp:
         key("F8")
         verify(window,"native-entity-1   20 mm   DOF 2")
         click(window,890,20)
-        verify(window,"Choose a line relation")
+        verify(window,"Choose a relation")
         click(window,310,54)
         verify(window,"Pick the source line for Equal")
         click(window,480,616)
@@ -2422,6 +2423,86 @@ with tempfile.TemporaryDirectory() as tmp:
         compare_solid_packages(path.with_suffix(".3mf"),reference)
         bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
         assert bounds[2]==(0.0,10.0) and math.isclose(volume,9000,rel_tol=5e-5)
+        key("Escape")
+        app.wait(3)
+
+        # The named datum dimension moves the concentric seat and bore together.
+        path=Path(tmp)/"Concentric seat.pcad"
+        document=json.loads((root/"rust/fixtures/graph-constrained-line.pcad").read_bytes())
+        item=document["items"][0]
+        item["name"]="Concentric seat"
+        graph=item["data"]["cad"]
+        sketch=graph["nodes"][3]
+        sk=sketch["id"]
+        bore,seat,datum="outer-bore","ellipse-seat","station-datum"
+        def concentric_node(id,kind,center,**fields):
+            return dict(id=id,sketchId=sk,type="sketchPrimitive",primitive=dict(id=id,type=kind,center=center,**fields))
+        graph["nodes"]=graph["nodes"][:4]+[
+            concentric_node(bore,"circle",dict(x=10,y=0),radius=15,segments=64),
+            concentric_node(seat,"ellipse",dict(x=13,y=2),width=12,height=6,rotation=30,segments=64),
+            concentric_node(datum,"point",dict(x=0,y=0),construction=True),
+        ]
+        sketch["relations"]=[
+            dict(id="datum-origin",type="fixed",anchor=dict(entityId=datum,point="center"),position=dict(x=0,y=0)),
+            dict(id="station-center-x",type="distance",axis="x",a=dict(entityId=datum,point="center"),b=dict(entityId=bore,point="center"),value=10),
+            dict(id="outer-diameter",type="diameter",entityId=bore,value=30),
+            dict(id="seat-width",type="width",entityId=seat,value=12),
+            dict(id="seat-height",type="height",entityId=seat,value=6),
+            dict(id="seat-angle",type="rotation",entityId=seat,value=30),
+        ]
+        path.write_text(json.dumps(document))
+        app,window=open_app(path,"Click two rectangle corners")
+        key("F8")
+        verify(window,"outer-bore   Diameter 30 mm   DOF 3")
+        click(window,890,20)
+        verify(window,"Choose a relation")
+        click(window,70,54)
+        verify(window,"Pick the source curve for Concentric")
+        click(window,738,358)
+        verify(window,"Pick the follower curve for Concentric")
+        click(window,621,272)
+        verify(window,"Concentric updated")
+        key("d")
+        verify(window,"station-center-x   X distance   10 mm   DOF 1")
+        key("F2")
+        verify(window,"Set value")
+        key("Control_L+a")
+        type_value("1.6 cm")
+        key("Return")
+        verify(window,"Edited")
+        key("Control_L+z")
+        verify(window,"X distance   10 mm")
+        key("Control_L+y")
+        verify(window,"X distance   16 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())["items"][0]["data"]["cad"]["nodes"]
+        nodes={node["id"]:node for node in saved}
+        center=dict(x=16,y=0)
+        assert nodes[bore]["primitive"]==dict(id=bore,type="circle",center=center,radius=15,segments=64)
+        assert nodes[seat]["primitive"]==dict(id=seat,type="ellipse",center=center,width=12,height=6,rotation=30,segments=64)
+        relations={row["id"]:row for row in nodes[sk]["relations"]}
+        relation_id=f"native-concentric-{bore}-{seat}"
+        assert relations[relation_id]==dict(id=relation_id,type="concentric",a=bore,b=seat)
+        assert relations["station-center-x"]["expression"]=="1.6 cm" and relations["station-center-x"]["value"]==16
+        key("Home")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"concentric-seat.png"],check=True)
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Click two rectangle corners")
+        key("e")
+        verify(window,"Extruded")
+        key("Control_L+s")
+        verify(window,"Saved")
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"concentric-seat-reference.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        bounds,volume=package_geometry(path.with_suffix(".3mf"))[1][0][1]
+        area=(15**2-6*3)*32*math.sin(math.tau/64)
+        assert bounds==[(1.0,31.0),(-15.0,15.0),(0.0,10.0)] and math.isclose(volume,area*10,rel_tol=1e-6)
         key("Escape")
         app.wait(3)
 
@@ -5887,6 +5968,127 @@ with tempfile.TemporaryDirectory() as tmp:
                 assert any(math.dist(vertex,expected)<.0001 for vertex in vertices), expected
         shutil.copyfile(path,output_dir/"legacy-chamfer-edited.pcad")
         shutil.copyfile(stl,output_dir/"legacy-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
+        # A rotated source keeps TypeScript's original edge numbering.
+        path=Path(tmp)/"Rotated chamfer.pcad"
+        document=json.loads((libs/"cad/tests/fixtures/typescript-convex-chamfers.pcad").read_bytes())
+        document["items"]=[next(item for item in document["items"] if item["id"]=="rotated-rectangle")]
+        nodes=document["items"][0]["data"]["cad"]["nodes"]
+        bevel=next(node for node in nodes if node["type"]=="chamfer")
+        bevel["notes"]={"keep":"original TS edge reference"}
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"rotated-chamfer-input.pcad")
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Unequal chamfer  d1 2 mm")
+        key("F2")
+        type_value("4")
+        key("Return")
+        verify(window,"Unequal chamfer  d1 4 mm")
+        key("Tab")
+        verify(window,"Unequal chamfer  d2 3 mm")
+        key("F2")
+        type_value("1")
+        key("Return")
+        verify(window,"Unequal chamfer  d2 1 mm")
+        key("Control_L+z")
+        verify(window,"Unequal chamfer  d2 3 mm")
+        key("Control_L+y")
+        verify(window,"Unequal chamfer  d2 1 mm")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assert saved["items"][0]["data"]["cad"]["nodes"]==[
+            dict(node,d1=4,d2=1) if node is bevel else node for node in nodes
+        ]
+        shutil.copyfile(path,output_dir/"rotated-chamfer-edited.pcad")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,design_tree=True)
+        click(window,101,264)
+        verify(window,"Unequal chamfer  d1 4 mm")
+        click(window,735,451)
+        key("4")
+        verify(window,"Back view")
+        key("Up")
+        key("Up")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"rotated-chamfer.png"],check=True)
+        key("Control_L+e")
+        verify(window,"Exported")
+        stl=path.with_suffix(".stl")
+        _,volume=triangulation(stl)
+        assert math.isclose(volume,3312,abs_tol=.001),volume
+        from struct import iter_unpack
+        vertices={tuple(face[i:i+3]) for face in iter_unpack("<12fH",stl.read_bytes()[84:]) for i in (3,6,9)}
+        # The unequal bevel is on the positive local-height edge of the rectangle.
+        for expected in ((-7.892305,-1.937822,6),(12.892305,10.062178,6),
+                         (-7.392305,-2.803848,10),(13.392305,9.196152,10)):
+            assert any(math.dist(vertex,expected)<.00001 for vertex in vertices),expected
+        shutil.copyfile(stl,output_dir/"rotated-chamfer.stl")
+        key("Escape")
+        app.wait(3)
+
+        # Replacing a part keeps the occurrence and its two mate endpoints.
+        path=Path(tmp)/"Replace occurrence.pcad"
+        document=json.loads((root/"rust/fixtures/assembly.pcad").read_bytes())
+        slim=json.loads(json.dumps(document["items"][1]))
+        slim.update(id="slim-arm",name="Slim arm")
+        outline=next(node for node in slim["data"]["cad"]["nodes"] if node["type"]=="sketchCornerRectangle")
+        outline["p0"]["x"]=-3
+        outline["p1"]["x"]=3
+        document["items"].insert(2,slim)
+        document["selectedPath"]=[3]
+        assembly=document["items"][3]["data"]
+        assembly["instances"][1]["transform"]["memo"]="Keep the authored pose"
+        path.write_text(json.dumps(document))
+        shutil.copyfile(path,output_dir/"replace-occurrence-input.pcad")
+        app,window=open_app(path,"Assembly opened",design_tree=True)
+        click(window,105,317,button=3)
+        verify(window,"Selected Upper arm")
+        click(window,134,332)
+        verify(window,"Choose a replacement for Upper arm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"replace-occurrence-chooser.png"],check=True)
+        key("Escape")
+        verify(window,"Part replacement cancelled")
+        assert json.loads(path.read_bytes())==document
+        click(window,108,615)  # Open the chooser from the selected occurrence details.
+        verify(window,"Choose a replacement for Upper arm")
+        focus_search(window,76,design=True)
+        type_value("slim")
+        key("Return")
+        click(window,84,160)
+        verify(window,"Part replaced with Slim arm")
+        key("Control_L+z")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads(path.read_bytes())["items"]==document["items"]
+        key("Control_L+y")
+        key("Control_L+s")
+        verify(window,"Saved")
+        saved=json.loads(path.read_bytes())
+        assembly["instances"][1]["partId"]="slim-arm"
+        assert saved["items"]==document["items"] and saved["selectedPath"]==[3]
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(path,"Assembly opened",design_tree=True)
+        click(window,105,317)
+        verify(window,"Selected Upper arm")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"replace-occurrence.png"],check=True)
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"reference-replaced-occurrence.3mf"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
+        compare_solid_packages(path.with_suffix(".3mf"),reference)
+        _,bodies=package_geometry(path.with_suffix(".3mf"))
+        assert bodies[1][1][0]==[(-3.0,3.0),(-20.0,20.0),(10.0,15.0)]
+        assert math.isclose(bodies[1][1][1],1200,rel_tol=1e-6)
+        key("Control_L+e")
+        verify(window,"Exported")
+        shutil.copyfile(path,output_dir/"replace-occurrence-edited.pcad")
+        for stl in path.parent.glob("Replace occurrence*.stl"):
+            shutil.copyfile(stl,output_dir/stl.name)
         key("Escape")
         app.wait(3)
         # Editing a connector moves the attached arm and its hinged follower.
