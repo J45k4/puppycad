@@ -171,12 +171,20 @@ To start a part, launch the editor with an unused project path, for example
 `workdir/flexscript/puppycad workdir/flexscript/new-part.pcad`. The new
 part starts with an empty XY sketch. Choose **Rectangle** and click opposite
 corners. To add a hole, choose **Circle** and click its centre and rim inside
-the rectangle. **Extrude** creates a 10 mm body. Use + or − to change the
-depth. You can save and reopen the sketch before extruding.
+the rectangle. Click **Extrude** or press X to open a 3D preview.
+The default is a 10 mm blind extrusion. **Depth** (D) accepts a value
+in millimetres. **End** (E) cycles Blind and Symmetric, with Through all
+and Up to body available for cuts and joins. **Flip** (F) reverses
+Blind or Up to body. **Operation** (O) cycles New body, Cut and Join
+when an earlier body is available. For Up to body, click **Target** (U)
+then click the earlier solid, or use Tab to cycle eligible bodies.
+Apply (Enter) commits one undo step. Cancel (Escape) returns to the
+sketch. Right-drag orbits the preview, middle-drag pans, and Home fits it.
 
 Choose **Line** to draw a segment by clicking its two endpoints. Lines that
 meet end to end can enclose a profile, including one with a concave outline.
-In the sketch canvas, R, C and L select rectangle, circle and line. E extrudes, P cycles closed
+In the sketch canvas, R, C and L select rectangle, circle and line. E
+commits a quick 10 mm extrusion, P cycles closed
 regions, and Tab selects another sketch in the part. The wheel changes the
 sketch scale. Escape cancels an unfinished shape. Undo and redo work across
 sketch creation and extrusion. The project file is created on its first save.
@@ -400,6 +408,7 @@ cancels a pending face pick.
 | --- | --- |
 | Click the dimension label or press Tab | Cycle through the selected extrusion’s editable dimensions, then select the next extrusion. All supported profiles expose depth. Corner rectangles also expose width and height. |
 | Click + or − | Change the selected dimension by 1 mm. The keyboard also accepts keypad + and −. |
+| **Extrusion options** in the Design tree or F4 in Part mode | Reopen the extrusion preview to edit its operation, depth, direction or end condition. |
 | Sketch / Solid or V | Switch between the selected profile’s outer and inner outlines and the shaded solid. |
 | Left-click a solid | Select and highlight the nearest body or assembly occurrence. Click empty space to clear the selection. |
 | Middle-drag | Pan the 3D view. |

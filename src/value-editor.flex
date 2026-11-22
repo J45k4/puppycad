@@ -7,6 +7,7 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_extrusion_open {return cg_v(0,puppy_extrusion_length,"Extrusion depth  mm");}
     if puppy_profile_value_id {
         let node=pc_find(pc_nodes(cad_project_part(project)),puppy_profile_value_id+24);
         return cg_v(0,0,puppy_profile_property(node));
@@ -190,6 +191,7 @@ fn puppy_number_apply(project) {
     if load8(text)==43 {text=text+1;}
     cg_begin();let value=cg_number(j_new(6,text));
     if cg_error {return puppy_title(project,"Enter a decimal from -500 to 500 with up to six places");}
+    if puppy_extrusion_open {return puppy_extrusion_set_depth(project,value);}
     let field=puppy_active_field(project);
     if field && puppy_value_unchanged(project,field,value) {
         puppy_number_close();return puppy_title(project,"Value unchanged");
@@ -248,7 +250,11 @@ fn puppy_number_event(event) {
         let w=gui_width(load64(puppy_device));let x=gui_event_x(event);let y=gui_event_y(event);
         if gui_event_button(event)==1 && y>=42 && y<68 {
             if x>=w-150 && x<w-86 {return puppy_number_apply(cad_project_open(puppy_history+24));}
-            if x>=w-78 && x<w-8 {puppy_number_close();return puppy_title(cad_project_open(puppy_history+24),"Edit cancelled");}
+            if x>=w-78 && x<w-8 {
+                puppy_number_close();let project=cad_project_open(puppy_history+24);
+                if puppy_extrusion_open {return puppy_extrusion_status(project,0);}
+                return puppy_title(project,"Edit cancelled");
+            }
         }
         return 1;
     }
@@ -260,7 +266,11 @@ fn puppy_number_event(event) {
         if key==6 && puppy_number_selected {gui_clipboard_copy(puppy_number_text+24);}
         return 1;
     }
-    if key==GUI_KEY_ESCAPE {puppy_number_close();return puppy_title(cad_project_open(puppy_history+24),"Edit cancelled");}
+    if key==GUI_KEY_ESCAPE {
+        puppy_number_close();let project=cad_project_open(puppy_history+24);
+        if puppy_extrusion_open {return puppy_extrusion_status(project,0);}
+        return puppy_title(project,"Edit cancelled");
+    }
     if key==43 && puppy_variable_slot>=0 {return puppy_variable_open(cad_project_open(puppy_history+24),puppy_variable_slot+1);}
     if key==40 || key==88 {return puppy_number_apply(cad_project_open(puppy_history+24));}
     if key==42 || key==76 {return puppy_number_replace("",key==42,key==76);}

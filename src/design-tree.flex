@@ -282,7 +282,7 @@ fn puppy_design_hit(rows,y,h) {
 fn puppy_design_menu_close() {
     if puppy_design_menu_count {puppy_design_menu_count=0;puppy_tree_dirty=1;}
 }
-fn puppy_design_menu_entries(row) {
+fn puppy_design_menu_entries(project,row) {
     let entries=cg_array();let action=puppy_design_action(row);
     if action {cg_push(entries,cg_v(action,1,0));}
     if load64(row+56) && !m_len(puppy_query()) {
@@ -293,6 +293,9 @@ fn puppy_design_menu_entries(row) {
         let label="Show sketch";if load64(row+88) {label="Hide sketch";}
         cg_push(entries,cg_v(label,3,0));
     }
+    if !puppy_sketch && m_eq(load64(row+16),"extrude") && puppy_design_owner(row)==cad_project_part(project) {
+        cg_push(entries,cg_v("Extrusion options",4,0));
+    }
     return entries;
 }
 fn puppy_design_context(x,y) {
@@ -302,7 +305,7 @@ fn puppy_design_context(x,y) {
     puppy_menu_rows=0;
     if !row {return 1;}
     puppy_search_focus(0);puppy_design_focus=1;puppy_design_choose(project,row);
-    let count=cg_count(puppy_design_menu_entries(row));
+    let count=cg_count(puppy_design_menu_entries(project,row));
     if !count {return 1;}
     let width=puppy_design_width();
     let menu_width=puppy_limit(PUPPY_DESIGN_MENU_WIDTH,1,width-4);
@@ -316,12 +319,13 @@ fn puppy_design_menu_activate(choice) {
     let project=cad_project_open(puppy_history+24);
     let row=puppy_design_selected(puppy_design_rows(project));
     if row {
-        let entry=cg_at(puppy_design_menu_entries(row),choice);
+        let entry=cg_at(puppy_design_menu_entries(project,row),choice);
         if entry {
             let command=load64(entry+8);
             if command==1 {puppy_design_activate(project,row);}
             if command==2 {puppy_design_fold(row);}
             if command==3 {puppy_design_toggle_sketch(project,row);}
+            if command==4 {puppy_extrusion_begin(project,load64(row+24));}
         }
     }
     return 1;
@@ -380,13 +384,13 @@ fn puppy_design_menu_event(event,x,y) {
     }
     return 0;
 }
-fn puppy_design_menu_draw(rgb,w,h,row) {
+fn puppy_design_menu_draw(rgb,w,h,project,row) {
     let x=puppy_design_menu_x;let y=puppy_design_menu_y;
     let width=puppy_limit(PUPPY_DESIGN_MENU_WIDTH,1,w-4);
     let height=puppy_design_menu_count*PUPPY_DESIGN_MENU_ROW+2;
     puppy_ui_rect(rgb,w,h,x+2,y+2,width,height,16,25,27);
     puppy_ui_rect(rgb,w,h,x,y,width,height,89,111,109);
-    let entries=puppy_design_menu_entries(row);
+    let entries=puppy_design_menu_entries(project,row);
     let i=0;while i<cg_count(entries) {
         let top=y+1+i*PUPPY_DESIGN_MENU_ROW;let label=load64(cg_at(entries,i));
         if i==puppy_design_menu_choice {puppy_ui_rect(rgb,w,h,x+1,top,width-2,PUPPY_DESIGN_MENU_ROW,53,76,72);}
@@ -465,7 +469,7 @@ fn puppy_design_panel(w,h) {
         puppy_ui_text(rgb,w,h,13,h-51,detail,w-8);
         let action=puppy_design_action(selected);
         if action {puppy_ui_rect(rgb,w,h,10,h-36,w-20,27,48,68,70);puppy_ui_text(rgb,w,h,18,h-17,action,w-16);}
-        if puppy_design_menu_count {puppy_design_menu_draw(rgb,w,h,selected);}
+        if puppy_design_menu_count {puppy_design_menu_draw(rgb,w,h,project,selected);}
     }
     if eye_tip && !puppy_design_menu_count {puppy_design_eye_tooltip(rgb,w,h,eye_y,eye_tip);}
     puppy_ui_upload(rgb,w,h);return 1;

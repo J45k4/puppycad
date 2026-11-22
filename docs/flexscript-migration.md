@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`a712a552d9de7d1a93e3cfa7fb0179b44fbd5dba` includes the shared library and
+`9fb948998afb45795ac442b30619b52376dd19c6` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -204,6 +204,15 @@ The native UI trial changed a 160 mm sketch width to 161 mm, exercised undo
 and redo, and reopened the saved driving relation. The resulting sketch and
 solid are captured under `workdir/flexscript/`. The general constraint solver and
 remaining solid feature types still need to be ported.
+
+The native extrusion dialog previews the evaluated solid and authors or
+edits depth, operation, direction and end condition. The headless test
+cancels and applies a 12 mm symmetric extrusion, exercises undo and redo,
+then reopens it and flips a blind extrusion. A separate cut uses a picked
+earlier body to set the extent. All three reopened 3MFs match Rust in
+body bounds and signed volume. Biscuit's checked VM and independent frozen
+jobs produced byte-identical STLs from these same saved drawings. A
+missing target fails the frozen build without an STL.
 
 The native editor and CLI export 3MF through the shared library. FreeCAD
 opened both the Flexscript and Rust exports of a two-body fixture as two

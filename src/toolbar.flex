@@ -197,6 +197,15 @@ fn puppy_toolbar_build(w) {
     let part=cad_project_item(project);let feature=puppy_feature(project);
     let rgb=m_take(w*76*4);puppy_bar_rect(rgb,w,0,0,w,76,30,43,47);
     puppy_bar_rect(rgb,w,0,75,w,1,73,96,95);
+    if puppy_extrusion_open {
+        if puppy_number_text {puppy_number_bar(rgb,w,project);}
+        else {
+            if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
+            if w<800 {puppy_compact_bar(rgb,w,project,-1);}
+            else {puppy_action_bar(puppy_extrusion_actions(),rgb,w,-1);}
+        }
+        puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
+    }
     if puppy_plane_chooser {
         if puppy_status {puppy_bar_text(rgb,w,12,25,puppy_status+24,w-8);}
         puppy_action_bar(puppy_plane_actions(),rgb,w,-1);
@@ -484,6 +493,7 @@ fn puppy_curve_bar(rgb,w,x) {
     return 1;
 }
 fn puppy_compact_actions(project) {
+    if puppy_extrusion_open {return puppy_extrusion_actions();}
     if puppy_patterns {return puppy_pattern_actions(project);}
     if puppy_line_report {return puppy_line_actions();}
     if puppy_history_rows {return puppy_history_actions(project);}
@@ -517,7 +527,7 @@ fn puppy_compact_actions(project) {
         }else if puppy_draft {
             puppy_compact_button(rows,"Done sketch",69,0);
             puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Circle",6,0);
-            puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Extrude",8,0);
+            puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Extrude",27,0);
             puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split ellipse",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
             puppy_profile_buttons(rows);
             puppy_compact_button(rows,"Next profile",19,0);puppy_compact_button(rows,"Patterns",62,0);
@@ -532,6 +542,7 @@ fn puppy_compact_actions(project) {
                 puppy_compact_button(rows,label,69,0);
             }
             puppy_compact_button(rows,"New sketch",22,3);
+            if m_eq(j_string(puppy_feature(project),"type"),"extrude") {puppy_compact_button(rows,"Extrusion options",61,0);}
         }
         if !assembly {
             puppy_compact_button(rows,"Loft",38,0);

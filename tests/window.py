@@ -375,6 +375,143 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # Depth edits are temporary until Apply commits one feature history step.
+        extrusion_path=Path(tmp)/"Extrusion options.pcad"
+        app,window=open_app(extrusion_path,"Click two rectangle corners")
+        click(window,440,378)
+        click(window,520,338)
+        verify(window,"Sketch edited")
+
+        def saved_extrusion_graph():
+            key("Control_L+s")
+            verify(window,"Saved")
+            return json.loads(extrusion_path.read_bytes())["items"][0]["data"]["cad"]
+
+        original_graph=saved_extrusion_graph()
+
+        def preview_symmetric_extrusion():
+            click(window,400,55)  # Extrude
+            verify(window,"Extrusion preview")
+            key("e")
+            verify(window,"Symmetric")
+            key("d")
+            key("Control_L+a")
+            type_value("12")
+            key("Return")
+            verify(window,"Extrusion preview")
+            verify(window,"12 mm")
+
+        preview_symmetric_extrusion()
+        capture(window,"extrusion-symmetric-preview.png",False,surface=(76,167,192))
+        key("Escape")
+        verify(window,"Extrusion cancelled")
+        assert saved_extrusion_graph()==original_graph
+        preview_symmetric_extrusion()
+        key("Return")
+        verify(window,"Extruded")
+        symmetric_graph=saved_extrusion_graph()
+        symmetric=next(n for n in symmetric_graph["nodes"] if n["type"]=="extrude")
+        assert (symmetric["operation"],symmetric["endCondition"],symmetric["depth"])==("newBody","symmetric",12)
+        key("Control_L+z")
+        verify(window,"|  Sketch")
+        assert saved_extrusion_graph()==original_graph
+        key("Control_L+y")
+        verify(window,"|  Solid")
+        assert saved_extrusion_graph()==symmetric_graph
+        key("Escape")
+        app.wait(3)
+
+        def compare_saved_extrusion(flavor,expected_bodies):
+            key("Control_L+Alt_L+e")
+            verify(window,"Exported")
+            native=extrusion_path.with_suffix(".3mf")
+            reference=Path(tmp)/f"{flavor}-rust.3mf"
+            subprocess.run([root/"rust/target/debug/puppycad","--export",extrusion_path,reference],check=True)
+            compare_solid_packages(native,reference)
+            assert [geometry for _,geometry in package_geometry(native)[1]]==expected_bodies
+            shutil.copyfile(extrusion_path,output_dir/f"{flavor}.pcad")
+            shutil.move(native,output_dir/f"{flavor}.3mf")
+
+        app,window=open_app(extrusion_path)
+        compare_saved_extrusion("extrusion-symmetric",[([(-10,10),(-5,5),(-6,6)],2400)])
+        key("F4")
+        verify(window,"Extrusion preview")
+        key("Return")
+        verify(window,"Extrusion unchanged")
+        key("F4")
+        verify(window,"Extrusion preview")
+        verify(window,"Symmetric")
+        key("e")
+        verify(window,"Blind")
+        key("f")
+        verify(window,"Flipped")
+        key("Return")
+        verify(window,"Extrusion edited")
+        edited_graph=saved_extrusion_graph()
+        edited=[n for n in edited_graph["nodes"] if n["type"]=="extrude"]
+        assert len(edited)==1 and edited[0]["id"]==symmetric["id"]
+        assert "endCondition" not in edited[0] and edited[0]["flip"] is True and edited[0]["depth"]==12
+        compare_saved_extrusion("extrusion-flipped",[([(-10,10),(-5,5),(-12,0)],2400)])
+        key("Escape")
+        app.wait(3)
+
+        # The cut acts on the latest body, with its reach set by an earlier body.
+        extrusion_path=Path(tmp)/"Extrusion target.pcad"
+        target_document=json.loads((root/"rust/fixtures/extrude-options.pcad").read_bytes())
+        target_part=target_document["items"][0]["data"]
+        graph=target_part["cad"]
+        nodes={n["id"]:n for n in graph["nodes"]}
+        nodes["native-entity-1"].update(p0={"x":100,"y":-10},p1={"x":130,"y":10})
+        nodes["extrude-1"]["name"]="Limit block"
+        nodes["native-entity-3"].update(p0={"x":-80,"y":-50},p1={"x":80,"y":50})
+        nodes["extrude-3"].update(name="Main block",operation="newBody",depth=40)
+        for field in ("endCondition","targetId","flip"):
+            del nodes["extrude-3"][field]
+        graph["nodes"]=[n for n in graph["nodes"] if n["id"]!="extrude-2"]
+        graph["rootNodeIds"].remove("extrude-2")
+        target_part["tree"]["orderedNodeIds"].remove("extrude-2")
+        extrusion_path.write_text(json.dumps(target_document))
+        app,window=open_app(extrusion_path,design_tree=True)
+        click(window,80,125)
+        for letter in "hole sketch":
+            key("space" if letter==" " else letter)
+        key("Return")
+        click(window,90,186)
+        key("Return")
+        verify(window,"Editing Hole sketch")
+        click(window,400,55)
+        verify(window,"Extrusion preview")
+        key("o")
+        verify(window,"Cut")
+        for end in ("Symmetric","Through all","Up to body"):
+            key("e")
+            verify(window,end)
+        verify(window,"Target Main block")
+        key("Tab")
+        verify(window,"Target Limit block")
+        key("Tab")
+        verify(window,"Target Main block")
+        key("u")
+        verify(window,"Click a target body")
+        click(window,30,120)
+        verify(window,"Click a valid earlier target body")
+        click(window,550,362)
+        verify(window,"Target Limit block")
+        capture(window,"extrusion-target-preview.png",False,surface=(76,167,192))
+        key("Return")
+        verify(window,"Extruded")
+        cut=next(n for n in saved_extrusion_graph()["nodes"] if n["type"]=="extrude" and n["operation"]=="cut")
+        assert (cut["sketchId"],cut["endCondition"],cut["targetId"])==("native-sketch-2","up-to-body","extrude-1")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(extrusion_path)
+        compare_saved_extrusion("extrusion-up-to-body",[
+            ([(100,130),(-10,10),(-30,30)],36000),
+            ([(-80,80),(-50,50),(0,40)],592000),
+        ])
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
@@ -3799,6 +3936,8 @@ with tempfile.TemporaryDirectory() as tmp:
         app.wait(3)
         app, window = open_app(path, 'Click two rectangle corners')
         click(window, 402, 55)
+        verify(window, 'Extrusion preview')
+        key('Return')
         verify(window, 'Extrusion 1  depth 10 mm')
         key('Control_L+z')
         verify(window, '|  Sketch  |  Sketch 1')

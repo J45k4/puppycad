@@ -8,6 +8,7 @@ import "line-editor.flex";
 import "pattern.flex";
 import "step-import.flex";
 import "mate-editor.flex";
+import "extrusion.flex";
 
 // History owns immutable document snapshots. Temporary evaluation and drawing
 // allocations belong to the event's arena and are discarded after each event.
@@ -228,6 +229,7 @@ fn puppy_export_shortcut(project,extension) {
 }
 fn puppy_command(key,mods) {
     puppy_forget_click();
+    if puppy_extrusion_open {return puppy_extrusion_key(cad_project_open(puppy_history+24),key,mods);}
     if key==60 && !(mods&0x3c3) && (puppy_design_available() || puppy_tree_open || puppy_step_input) {return puppy_design_toggle();}
     if puppy_plane_chooser {return puppy_plane_command(cad_project_open(puppy_history+24),key,mods);}
     if puppy_sheet_scene {return puppy_sheet_key(cad_project_open(puppy_history+24),key,mods);}
@@ -302,6 +304,10 @@ fn puppy_command(key,mods) {
     if key==GUI_KEY_LEFT {puppy_yaw=puppy_yaw-8000;return 1;}
     if key==GUI_KEY_RIGHT {puppy_yaw=puppy_yaw+8000;return 1;}
     let project=cad_project_open(puppy_history+24);
+    if key==61 && !(mods&0x3c3) && !puppy_sketch && cad_project_part(project) {
+        let feature=puppy_feature(project);
+        if m_eq(j_string(feature,"type"),"extrude") {return puppy_extrusion_begin(project,feature);}
+    }
     if !cad_project_is_studio(project) && (mods&3) && !(mods&0x3c0) {
         if key==17 {return puppy_add_item(project,"part");}
         if key==4 {return puppy_add_item(project,"assembly");}
@@ -504,6 +510,7 @@ fn puppy_editor(path,source,project,report) {
                 dirty=1;
             }
             else if puppy_number_event(event) {dirty=1;}
+            else if puppy_extrusion_event(event) {dirty=1;}
             else if puppy_mate_event(event) {dirty=1;}
             else if puppy_step_event(event) {dirty=1;}
             else if puppy_pattern_event(event) {dirty=1;}
@@ -605,7 +612,7 @@ fn puppy_editor(path,source,project,report) {
                         }else if puppy_curves_page {puppy_curve_bar(0,width,x);}
                         else if x>=194 && x<280 {puppy_command(21,0);}
                         else if x>=288 && x<355 {puppy_command(6,0);}
-                        else if x>=364 && x<445 {puppy_command(8,0);}
+                        else if x>=364 && x<445 {puppy_command(27,0);}
                         else if x>=452 && x<552 {puppy_command(19,0);}
                         else if x>=560 && x<620 {puppy_command(15,0);}
                         else if x>=628 && x<713 {puppy_command(18,0);}
@@ -670,6 +677,7 @@ fn puppy_editor(path,source,project,report) {
     if puppy_reader_offsets {syscall(11,puppy_reader_offsets,(puppy_reader_count+1)*8,0,0,0,0);}
     puppy_distance_cancel();puppy_line_cancel_drag();if puppy_line_report {puppy_drop(puppy_line_report);}
     if puppy_number_text {puppy_number_close();}
+    puppy_extrusion_close();
     puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);
     if puppy_pending_title {puppy_drop(puppy_pending_title);}
     puppy_forget_click();puppy_end_isolation();puppy_clear_pick();puppy_trim(puppy_root);if puppy_disk {puppy_drop(puppy_disk);}if puppy_status {puppy_drop(puppy_status);}puppy_view_close();return 0;

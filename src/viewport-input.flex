@@ -200,9 +200,27 @@ fn puppy_set_hinge(project,hit,parts) {
     }
     puppy_selected=index;puppy_hinge=puppy_snapshot(j_string(mate,"id"));return 1;
 }
-fn puppy_view_down(button,x,y) {
-    if puppy_button {return 1;}
+fn puppy_view_press(button,x,y) {
+    if puppy_button {return 0;}
     puppy_button=button;puppy_start_x=x;puppy_start_y=y;puppy_prev_x=x;puppy_prev_y=y;puppy_moved=0;
+    return 1;
+}
+fn puppy_view_anchor_camera(button,ray,hit) {
+    puppy_rim=-1;puppy_start_roll=puppy_roll;puppy_orbit_depth=0;
+    if !ray {return 1;}
+    if hit {
+        m_copy(puppy_orbit_point,load64(hit),24);
+        let dir=load64(ray+8);let axis=0;let k=8;
+        while k<24 {if cg_abs(load64(dir+k))>cg_abs(load64(dir+axis)) {axis=k;}k=k+8;}
+        puppy_orbit_depth=(load64(puppy_orbit_point+axis)-load64(load64(ray)+axis))*1000/load64(dir+axis);
+    }else if button==2 {
+        puppy_orbit_depth=(puppy_radius*puppy_zoom/100+2)*1000;
+        m_copy(puppy_orbit_point,puppy_ray_at(ray,puppy_orbit_depth),24);
+    }
+    return 1;
+}
+fn puppy_view_down(button,x,y) {
+    if !puppy_view_press(button,x,y) {return 1;}
     let source=puppy_history;if puppy_step_preview {source=puppy_step_preview;}
     let project=cad_project_open(source+24);let ray=puppy_ray(x,y);
     let hit=0;let element=0;
@@ -211,20 +229,7 @@ fn puppy_view_down(button,x,y) {
             element=puppy_mate_hit(project,ray);if element {hit=load64(element+32);}
         }else {hit=cad_project_surface_hit_in(project,load64(ray),load64(ray+8),puppy_visible_id());}
     }
-    if button!=1 {
-        puppy_rim=-1;puppy_start_roll=puppy_roll;puppy_orbit_depth=0;
-        if !ray {return 1;}
-        if hit {
-            m_copy(puppy_orbit_point,load64(hit),24);
-            let dir=load64(ray+8);let axis=0;let k=8;
-            while k<24 {if cg_abs(load64(dir+k))>cg_abs(load64(dir+axis)) {axis=k;}k=k+8;}
-            puppy_orbit_depth=(load64(puppy_orbit_point+axis)-load64(load64(ray)+axis))*1000/load64(dir+axis);
-        }else if button==2 {
-            puppy_orbit_depth=(puppy_radius*puppy_zoom/100+2)*1000;
-            m_copy(puppy_orbit_point,puppy_ray_at(ray,puppy_orbit_depth),24);
-        }
-        return 1;
-    }
+    if button!=1 {return puppy_view_anchor_camera(button,ray,hit);}
     puppy_clear_pick();
     if !element && !hit {return puppy_title(project,cg_error);}
     let picked=hit;if element {picked=element;}

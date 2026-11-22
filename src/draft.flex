@@ -416,6 +416,7 @@ fn puppy_draft_key(project,key,mods) {
     if key==18 && puppy_draft_on_face(project) {
         puppy_face_operation=(puppy_face_operation+1)%3;return puppy_title(project,puppy_operation(project));
     }
+    if key==27 && !(mods&0x3c3) {return puppy_extrusion_begin(project,0);}
     if key==8 {return puppy_draft_extrude(project);}
     if key==43 {
         let previous=puppy_draft_index;puppy_draft_index=previous+1;
