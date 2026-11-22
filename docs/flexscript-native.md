@@ -1,7 +1,8 @@
 # Native Flexscript editor
 
 The editor opens a single `.pcad` file in PuppyCAD v4 or Biscuit standalone schema version 1 per window on Linux.
-Pass the file path to open it directly. Save writes back to that path.
+Use `./run.sh drawing.pcad` to build and open a file, or `./run.sh` to open
+`untitled.pcad` in the current directory. Save writes back to that path.
 If a v4 drawing contains several top-level parts or assemblies, **Next item** or F6
 switches between them inside the same window. Save remembers the selection.
 

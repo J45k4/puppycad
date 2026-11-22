@@ -7,15 +7,16 @@ from the sibling Flexscript checkout at `../flexscript/libs/cad/`.
 
 ## Build and run
 
-Build from the repository root with the Flexscript SDK next to this checkout
+Run from the repository root with the Flexscript SDK next to this checkout
 and the `flexscript` compiler on your PATH.
 
 ```sh
-./build.sh
-workdir/flexscript/puppycad drawing.pcad
+./run.sh drawing.pcad
 ```
 
-An unused filename opens a blank part. Ctrl+S saves to that path.
+The launcher builds and opens the native editor. Running `./run.sh` with no
+arguments opens `untitled.pcad` in the current directory. An unused filename
+starts a blank part. Ctrl+S saves to that path.
 The same executable exports existing drawings headlessly.
 
 ```sh

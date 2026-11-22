@@ -65,7 +65,10 @@ with tempfile.TemporaryDirectory() as tmp:
             return subprocess.run(['xprop', '-id', hex(window), '_NET_WM_NAME'], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
 
         def open_app(path, ready="selects a dimension"):
-            process = subprocess.Popen([output_dir / 'puppycad', path])
+            if path is None:
+                process = subprocess.Popen([root/"run.sh"], cwd=tmp)
+            else:
+                process = subprocess.Popen([output_dir/'puppycad', path])
             for _ in range(120):
                 root_window = XID()
                 parent = XID()
@@ -168,6 +171,13 @@ with tempfile.TemporaryDirectory() as tmp:
         def type_value(text):
             for char in text:
                 key({'.':'period','-':'minus',' ':'space','=':'equal','#':'Shift_L+3','+':'Shift_L+equal','*':'Shift_L+8'}.get(char,char))
+
+        app,window=open_app(None,"Click two rectangle corners")
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert json.loads((Path(tmp)/"untitled.pcad").read_bytes())["version"]==4
+        key("Escape")
+        app.wait(3)
 
         path=Path(tmp)/"Elliptical washer.pcad"
         app,window=open_app(path,"Click two rectangle corners")
