@@ -77,10 +77,14 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`b487445f6c07ae15f34392f3e0def604e1f4f3c9` includes the shared library and
+`53299c3c990a7f7b70d680223f76da95e00c9537` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
+
+The pinned compiler supports up to 4,096 ordinary Flexscript functions.
+The native editor builds through the direct pipeline as it grows. Compiler
+tests cover calls at the new limit and rejection of an extra declaration.
 
 The SDK's `cad_render_rgb` and the existing
 `/biscuit/cad/render.flex` import reproduced the original renderer's
@@ -339,6 +343,17 @@ first boundary segment reverses the order of the two regions. Biscuit's
 checked VM and two frozen builds per region produced the same STL bytes as
 the native editor from both saved drawings.
 
+**Use edges** also recognizes circular rims and open arcs on the evaluated
+face. SDK tests extrude a projected arc-and-line profile. The native test
+projects the circular pocket in Rust's `face-sketch.pcad` and saves it as a
+v4 circle. It also projects a separate annular cap, cuts it to 15 mm thick,
+and drives the original hole from 20 to 26 mm in diameter. The projection
+and extrusion retain their IDs through save and reopen. The final native
+and Rust STLs match in bounds and within 0.01 mm³ in volume. The checked VM
+and two frozen builds reproduce the native STL byte for byte. A regular
+16-sided face retains its straight projected edges. The private display
+capture is `workdir/flexscript/projected-circular-rim.png`.
+
 After orbiting the camera, the test also picked the right wall and joined
 a 20 × 20 × 10 mm boss. Both exports reached X = 90 mm and placed the boss
 between Z = 20 and 40 mm. Biscuit's checked VM picked a cap and verified the
@@ -538,7 +553,7 @@ shared Arm part definition. See `workdir/flexscript/occurrence-menu.png`
 and `workdir/flexscript/part-occurrence-chooser.png`.
 
 The native **History** panel exposes the v4 feature order, suppression,
-rollback and evaluation errors. The shared evaluator keeps independent
+deletion, rollback and evaluation errors. The shared evaluator keeps independent
 bodies visible when a feature fails. Manufacturing still requires every
 active feature to succeed. The headless editor test opens Rust’s
 `feature-tree.pcad` and unsuppresses the cut. Moving the cut past the join
@@ -551,6 +566,16 @@ The checked VM exercises the same edits and keeps an independent ring in
 the preview when the mounting plate is suppressed and its dependants fail.
 Two frozen builds produced identical STLs for the rolled-back graph.
 A build with broken dependencies failed without producing an STL.
+
+The editor deletes independent solid features and keeps their source
+sketches. The headless test uses the Delete feature button, undoes and
+redoes the edit, saves, and reopens the sketch. A separate deletion
+preserves the earlier block and refuses to remove its supporting feature
+while a suppressed cut still depends on it. After reopening, the native
+STL of the remaining block matches Rust. Biscuit's checked VM and two
+frozen builds produce the identical 500,000 mm³ STL from the saved file.
+The SDK tests check rollback positions, face attachments, projected edges
+and up-to-body references.
 
 The shared source inspector checks semantic records across v4 parts and
 assemblies, including suppressed features and inactive items. It also

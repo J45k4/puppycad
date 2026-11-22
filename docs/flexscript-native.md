@@ -337,8 +337,10 @@ can reopen the drawing and edit the finish.
 
 Open **History** or press **F7** to inspect a v4 part’s solid features.
 Click a row or use Left and Right to select it. **Suppress** (S) toggles
-a feature. **Roll before** (B) and **Roll after** (A) set where evaluation
-stops. **Restore end** (E) evaluates the entire timeline again. Up and Down
+a feature. **Delete feature** or Delete removes the selected feature and
+keeps its source sketch. PuppyCAD blocks deletion when a downstream feature
+or sketch depends on it. **Roll before** (B) and **Roll after** (A) set where
+evaluation stops. **Restore end** (E) evaluates the entire timeline again. Up and Down
 move the selected feature earlier or later. The editor rejects moves that
 break a dependency or change a boolean’s target body. Ctrl+Z and Ctrl+Y
 undo and redo these edits. Ctrl+S saves the timeline to the open file.
@@ -409,14 +411,15 @@ cycle through join, cut and new body. A face cut runs inward. Escape
 cancels a pending face pick.
 
 In a face sketch, **Use edges** in Conics or Shift+U projects the supporting
-face's straight boundary lines. **Pick edge** or U lets you click a straight
-body edge guide, and Escape leaves the picking tool. The blue projected lines
-follow their source and can form a profile. Their endpoints are fixed by
-the projection. The **Line** tool snaps to a projected edge within six
-pixels. A line across a closed projected outline splits it into separate
-profiles. Click **Profile** or press P to cycle through them. The amber
+face boundary as lines, circles and arcs. Other curved contours retain
+their straight segments. **Pick edge** or U lets you click a straight body
+edge guide, and Escape leaves the picking tool. The blue projected geometry
+follows its source and can form a profile. The **Line** tool snaps to a
+projected line within six pixels. A line across a closed straight outline
+splits it into separate profiles. Click **Profile** or press P to cycle
+through them. The amber
 outline shows the region used by the next extrusion. **Construction**
-turns selected lines into guides and excludes them from the profile.
+turns selected geometry into guides and excludes it from the profile.
 
 | Control | Action |
 | --- | --- |

@@ -76,7 +76,11 @@ fn puppy_design_node(rows,parent,node,nodes,used) {
             if m_eq(geom,"CornerRectangle") {geom="Corner rectangle";}
             if pc_capsule_entity(entity) {geom="Slot";}
             if pc_polygon_entity(entity) {geom="Polygon";}
-            if j_get(projected,j_string(entity,"id")) {geom="Projected line";}
+            if j_get(projected,j_string(entity,"id")) {
+                let kind=pc_projection_kind(entity);
+                geom="Projected line";
+                if kind==2 {geom="Projected circle";}else if kind==3 {geom="Projected arc";}
+            }
             let name=j_string(entity,"name");if m_len(name) {geom=name;}
             puppy_design_row(rows,row,"geometry",entity,geom,0);
         }entity=load64(entity+24);

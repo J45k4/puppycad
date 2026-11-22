@@ -46,7 +46,8 @@ fn puppy_history_actions(project) {
     while feature && i<puppy_history_index {feature=load64(feature+24);i=i+1;}
     let node=pc_find(pc_nodes(cad_project_part(project)),j_string(feature,"id"));let toggle="Suppress";
     if j_value(j_get(node,"suppressed")) {toggle="Unsuppress";}
-    puppy_compact_button(rows,toggle,22,0);puppy_compact_button(rows,"Roll before",5,0);
+    puppy_compact_button(rows,toggle,22,0);puppy_compact_button(rows,"Delete feature",76,0);
+    puppy_compact_button(rows,"Roll before",5,0);
     puppy_compact_button(rows,"Roll after",4,0);puppy_compact_button(rows,"Restore end",8,0);
     puppy_compact_button(rows,"Move earlier",82,0);puppy_compact_button(rows,"Move later",81,0);
     puppy_compact_button(rows,"Done",GUI_KEY_ESCAPE,0);return rows;
@@ -58,12 +59,15 @@ fn puppy_history_key(project,key) {
         if key==80 {puppy_history_index=puppy_history_index-1;}else {puppy_history_index=puppy_history_index+1;}
         return puppy_history_select(project,rows);
     }
-    let updated=0;
-    let move=0;
-    if key==22 || key==81 || key==82 {
+    let updated=0;let move=0;let removed=0;
+    if key==22 || key==76 || key==81 || key==82 {
         let row=pc_first(rows);let i=0;while i<puppy_history_index {row=load64(row+24);i=i+1;}
         let id=j_string(row,"id");let node=pc_find(pc_nodes(cad_project_part(project)),id);
         if key==22 {updated=cad_project_suppress_feature(project,id,!j_value(j_get(node,"suppressed")));}
+        else if key==76 {
+            removed=j_string(row,"name");if !m_len(removed) {removed=id;}
+            updated=cad_project_delete_feature(project,id);
+        }
         else {
             move=1;if key==82 {move=-1;}
             updated=cad_project_move_feature(project,id,move);
@@ -77,7 +81,12 @@ fn puppy_history_key(project,key) {
         if !puppy_refresh(updated) {return puppy_title(project,cg_error);}
         puppy_push(updated);puppy_history_index=puppy_history_index+move;
     }
-    return puppy_history_select(updated,j_parse(puppy_history_rows+24));
+    rows=j_parse(puppy_history_rows+24);
+    if removed && !pc_first(rows) {
+        puppy_history_close();puppy_design_select_item(cad_project_part(updated));
+        return puppy_title(updated,m_cat("Deleted ",removed));
+    }
+    return puppy_history_select(updated,rows);
 }
 
 fn puppy_history_offset(count,height) {

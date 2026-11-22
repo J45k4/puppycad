@@ -761,6 +761,141 @@ with tempfile.TemporaryDirectory() as tmp:
             key("Escape")
             app.wait(3)
 
+        # A projected circle stays linked when a hole in its support changes.
+        curved_path=Path(tmp)/"Projected rim.pcad"
+        ring=json.loads((root/"rust/fixtures/face-sketch.pcad").read_bytes())
+        ring_part=ring["items"][0]["data"]
+        ring_graph=ring_part["cad"]
+        source_circle=next(n for n in ring_graph["nodes"] if n["id"]=="native-entity-2")
+        source_circle["sketchId"]="native-sketch-1"
+        corners=[(-40,-30),(40,-30),(40,30),(-40,30)]
+        source_outline=[
+            dict(id=f"ring-edge-{i}",type="sketchLine",sketchId="native-sketch-1",
+                 p0=dict(zip("xy",a)),p1=dict(zip("xy",b)))
+            for i,(a,b) in enumerate(zip(corners,corners[1:]+corners[:1]),1)
+        ]
+        ring_graph["nodes"]=ring_graph["nodes"][:4]+source_outline+[source_circle,ring_graph["nodes"][5]]
+        ring_graph["rootNodeIds"]=ring_graph["rootNodeIds"][:5]
+        ring_part["tree"]["orderedNodeIds"]=["native-sketch-1","extrude-1"]
+        curved_path.write_text(json.dumps(ring))
+        app,window=open_app(curved_path)
+        key("3")
+        verify(window,"Top view")
+        key("f")
+        verify(window,"Click a face for the new sketch")
+        click(window,555,358)  # Material outside the through-hole.
+        verify(window,"Sketch 2  |  Click two rectangle corners")
+
+        def saved_rim_graph():
+            key("Control_L+s")
+            verify(window,"Saved")
+            return json.loads(curved_path.read_bytes())["items"][0]["data"]["cad"]
+
+        def projected_rim(graph,radius,sketch_id="native-sketch-2",face_id="extrude-1-solid-face-38"):
+            nodes={n["id"]:n for n in graph["nodes"]}
+            side=nodes[sketch_id]
+            face=nodes[side["targetId"]]
+            assert (face["sourceId"],face["faceId"])==("extrude-1",face_id)
+            relations=side["relations"]
+            assert len(relations)==5 and all(r["type"]=="projected" and r["sourceFaceId"]==face["faceId"]
+                                             for r in relations)
+            assert sum(nodes[r["entityId"]]["type"]=="sketchLine" for r in relations)==4
+            rim,=[r for r in relations if nodes[r["entityId"]]["type"]=="sketchPrimitive"]
+            primitive=nodes[rim["entityId"]]["primitive"]
+            assert primitive["type"]=="circle" and primitive["segments"]==32
+            assert math.isclose(primitive["radius"],radius,abs_tol=.0001), primitive
+            assert all(abs(value)<.0001 for value in primitive["center"].values())
+            return rim
+
+        before_rim=saved_rim_graph()
+        key("Shift_L+u")
+        verify(window,"Projected face edges")
+        curved=saved_rim_graph()
+        rim_link=projected_rim(curved,10)
+        key("Control_L+z")
+        verify(window,"|  Sketch  |  Sketch 2")
+        assert saved_rim_graph()==before_rim
+        key("Control_L+y")
+        verify(window,"|  Sketch  |  Sketch 2")
+        assert saved_rim_graph()==curved
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(curved_path,"Sketch 2  |  Click two rectangle corners")
+        capture(window,"projected-circular-rim.png",False,surface=(112,191,245))
+        from PIL import Image
+
+        with Image.open(output_dir/"projected-circular-rim.png") as image:
+            circle=image.convert("RGB").crop((427,305,533,411))
+            assert sum(n for n,color in circle.getcolors(circle.width*circle.height)
+                       if color==(112,191,245))>150
+        key("o")
+        verify(window,"|  cut")
+        click(window,400,55)
+        verify(window,"Extrusion preview / Cut / Blind")
+        key("d")
+        key("Control_L+a")
+        type_value("5")
+        key("Return")
+        verify(window,"Blind / 5 mm")
+        key("Return")
+        verify(window,"Extruded")
+        old_cut_graph=saved_rim_graph()
+        cut,=[n for n in old_cut_graph["nodes"] if n.get("operation")=="cut"]
+        assert (cut["profileId"],cut["depth"])==("native-sketch-2-profile-1",5)
+        key("Escape")
+        app.wait(3)
+
+        app,window=open_app(curved_path)
+        key("F12")
+        verify(window,"Editing Block sketch")
+        key("F8")
+        for _ in source_outline:
+            key("Tab")
+        verify(window,"Diameter 20 mm")
+        key("F2")
+        type_value("26")
+        key("Return")
+        verify(window,"Edited")
+        resized=saved_rim_graph()
+        assert next(n for n in resized["nodes"] if n["id"]==source_circle["id"])["primitive"]["radius"]==13
+        assert projected_rim(resized,13)==rim_link
+        assert next(n for n in resized["nodes"] if n["id"]==cut["id"])==cut
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(curved_path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        curved_ref=Path(tmp)/"projected-rim-rust.stl"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",curved_path,curved_ref],check=True)
+        expected_volume=15*(80*60-16*13**2*math.sin(math.tau/32))
+        native_stl=curved_path.with_suffix(".stl")
+        native_bounds,native_volume=triangulation(native_stl)
+        rust_bounds,rust_volume=triangulation(curved_ref)
+        assert native_bounds==rust_bounds==[(-40,40),(-30,30),(0,15)]
+        assert math.isclose(native_volume,rust_volume,rel_tol=.00001)
+        assert math.isclose(native_volume,expected_volume,rel_tol=.00001)
+        shutil.copyfile(curved_path,output_dir/"projected-circular-rim.pcad")
+        shutil.copyfile(native_stl,output_dir/"projected-circular-rim.stl")
+        key("Escape")
+        app.wait(3)
+
+        # An earlier circular pocket contributes an inner loop on the top face.
+        curved_path=Path(tmp)/"Projected pocket rim.pcad"
+        shutil.copyfile(root/"rust/fixtures/face-sketch.pcad",curved_path)
+        app,window=open_app(curved_path)
+        key("3")
+        verify(window,"Top view")
+        key("f")
+        verify(window,"Click a face for the new sketch")
+        click(window,555,358)
+        verify(window,"Sketch 4  |  Click two rectangle corners")
+        key("Shift_L+u")
+        verify(window,"Projected face edges")
+        projected_rim(saved_rim_graph(),10,"native-sketch-4","extrude-1-solid-face-6")
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)
@@ -3122,6 +3257,73 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window, "Exported")
         subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
         compare_solid_packages(path.with_suffix(".3mf"), reference)
+        key("Escape")
+        app.wait(3)
+
+        # History deletion removes the feature and both saved registrations.
+        path = Path(tmp)/"Delete block.pcad"
+        path.write_bytes((root/"rust/fixtures/extruded-rectangle.pcad").read_bytes())
+        app, window = open_app(path, design_tree=True)
+        key("F7")
+        verify(window, "1 / 1   Block   active")
+        capture(window, "feature-history-delete.png", False)
+        click(window, 420, 55)  # Delete feature in the History toolbar.
+        verify(window, "Deleted Block")
+        key("Control_L+z")
+        key("F7")
+        verify(window, "1 / 1   Block   active")
+        key("Control_L+y")
+        verify(window, "This part has no solid features")
+        key("Control_L+s")
+        verify(window, "Saved")
+        data = json.loads(path.read_bytes())["items"][0]["data"]
+        assert all(node["id"] != "extrude-1" for node in data["cad"]["nodes"])
+        assert "extrude-1" not in data["cad"]["rootNodeIds"]
+        assert data["tree"]["orderedNodeIds"] == ["native-sketch-1"]
+        key("Escape")
+        app.wait(3)
+        app, window = open_app(path, "Click two rectangle corners", design_tree=True)
+        key("F7")
+        verify(window, "This part has no solid features")
+        key("Escape")
+        app.wait(3)
+
+        # Suppressed dependents still block deletion of their source feature.
+        path = Path(tmp)/"Delete blocked solid.pcad"
+        path.write_bytes((root/"rust/fixtures/feature-tree.pcad").read_bytes())
+        app, window = open_app(path, design_tree=True)
+        key("F7")
+        verify(window, "1 / 3   Extrusion 1   active")
+        key("Delete")
+        verify(window, "Later cut or join features depend on this extrusion")
+        key("Right")
+        verify(window, "2 / 3   Extrusion 3   suppressed")
+        key("Right")
+        verify(window, "3 / 3   Extrusion 2   active")
+        key("Delete")
+        verify(window, "2 / 2   Extrusion 3   suppressed")
+        key("Control_L+z")
+        verify(window, "2 / 3   Extrusion 3   suppressed")
+        key("Control_L+y")
+        verify(window, "2 / 2   Extrusion 3   suppressed")
+        key("Control_L+s")
+        verify(window, "Saved")
+        data = json.loads(path.read_bytes())["items"][0]["data"]
+        assert [node["id"] for node in data["cad"]["nodes"] if node["type"] == "extrude"] == ["native-extrude-1", "native-extrude-3"]
+        key("Escape")
+        key("Escape")
+        app.wait(3)
+        app, window = open_app(path)
+        key("Control_L+e")
+        verify(window, "Exported")
+        native_stl = path.with_suffix(".stl")
+        reference = Path(tmp)/"deleted-feature-rust.stl"
+        subprocess.run([root/"rust/target/debug/puppycad", "--export", path, reference], check=True)
+        bounds, volume = triangulation(native_stl)
+        ref_bounds, ref_volume = triangulation(reference)
+        assert bounds == ref_bounds and math.isclose(volume, ref_volume, abs_tol=.01)
+        shutil.copyfile(path, output_dir/"feature-history-deleted.pcad")
+        shutil.copyfile(native_stl, output_dir/"feature-history-deleted.stl")
         key("Escape")
         app.wait(3)
 
