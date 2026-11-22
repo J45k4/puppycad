@@ -350,7 +350,7 @@ fn puppy_toolbar_build(w) {
         puppy_bar_text(rgb,w,left,60,puppy_studio_label(project),w-140);
     }else if puppy_draft && puppy_revolve_axis {
         puppy_bar_button(rgb,w,194,76,"X axis");puppy_bar_button(rgb,w,278,76,"Y axis");puppy_bar_button(rgb,w,362,76,"Cancel");
-    }else if puppy_draft && puppy_curves_page {puppy_curve_bar(rgb,w,-1);}
+    }else if puppy_draft && puppy_curves_page {puppy_curve_bar(project,rgb,w,-1);}
     else if puppy_draft {
         puppy_bar_button(rgb,w,194,86,"Rectangle");puppy_bar_button(rgb,w,288,67,"Circle");
         puppy_bar_button(rgb,w,560,60,"Line");
@@ -441,7 +441,7 @@ fn puppy_profile_buttons(rows) {
     puppy_compact_button(rows,"Polygon",10,3);
     puppy_compact_button(rows,"Slot",22,3);
 }
-fn puppy_curve_bar(rgb,w,x) {
+fn puppy_curve_bar(project,rgb,w,x) {
     if puppy_curves_page==3 {
         let rows=cg_array();puppy_profile_buttons(rows);
         let left=194;let width=puppy_limit((w-68-left-8*(cg_count(rows)-1))/cg_count(rows),1,144);let i=0;
@@ -467,6 +467,17 @@ fn puppy_curve_bar(rgb,w,x) {
     if puppy_curves_page==2 {
         if x>=194 && x<280 {return puppy_command(8,3);}if x>=288 && x<416 {return puppy_command(6,3);}if x>=424 && x<534 {return puppy_command(27,3);}
         if x>=542 && x<664 {return puppy_command(26,0);}
+        if puppy_draft_on_face(project) {
+            let width=puppy_limit(w-740,0,100);
+            let pick_width=puppy_limit(w-848,0,100);
+            if x>=672 && x<672+width {return puppy_command(24,3);}
+            if pick_width>=80 && x>=780 && x<780+pick_width {return puppy_command(24,0);}
+            if rgb {
+                let label="Use edges";if width<80 {label="Edges";}
+                puppy_bar_button(rgb,w,672,width,label);
+                if pick_width>=80 {puppy_bar_button(rgb,w,780,pick_width,"Pick edge");}
+            }
+        }
         if rgb {
             puppy_bar_button(rgb,w,194,86,"Ellipse");puppy_bar_button(rgb,w,288,128,"3-point circle");puppy_bar_button(rgb,w,424,110,"Split ellipse");puppy_bar_button(rgb,w,542,122,"Construction");
             if puppy_tool==7 {puppy_bar_rect(rgb,w,194,66,86,2,143,217,184);}
@@ -531,7 +542,10 @@ fn puppy_compact_actions(project) {
             puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split ellipse",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
             puppy_profile_buttons(rows);
             puppy_compact_button(rows,"Next profile",19,0);puppy_compact_button(rows,"Patterns",62,0);
-            if puppy_draft_on_face(project) {puppy_compact_button(rows,puppy_operation(project),18,0);}
+            if puppy_draft_on_face(project) {
+                puppy_compact_button(rows,puppy_operation(project),18,0);
+                puppy_compact_button(rows,"Use edges",24,3);puppy_compact_button(rows,"Pick edge",24,0);
+            }
             if puppy_pending_face_index(project)>=0 {puppy_compact_button(rows,"Solid",25,0);}
         }else if assembly {
             if !puppy_empty {puppy_compact_button(rows,"Solve",25,0);puppy_compact_button(rows,"Mate",13,0);}

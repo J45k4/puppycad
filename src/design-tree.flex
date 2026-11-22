@@ -68,6 +68,7 @@ fn puppy_design_node(rows,parent,node,nodes,used) {
     let row=puppy_design_row(rows,parent,kind,node,name,0);
     if !m_eq(kind,"sketch") {return row;}
     store64(row+88,puppy_sketch_displayed(load64(parent+24),node,used));
+    let projected=puppy_projected_entities(node);
     let id=j_string(node,"id");let entity=pc_first(nodes);while entity {
         let type=j_string(entity,"type");
         if m_eq(j_string(entity,"sketchId"),id) && !pc_model_feature(entity) {
@@ -75,6 +76,7 @@ fn puppy_design_node(rows,parent,node,nodes,used) {
             if m_eq(geom,"CornerRectangle") {geom="Corner rectangle";}
             if pc_capsule_entity(entity) {geom="Slot";}
             if pc_polygon_entity(entity) {geom="Polygon";}
+            if j_get(projected,j_string(entity,"id")) {geom="Projected line";}
             let name=j_string(entity,"name");if m_len(name) {geom=name;}
             puppy_design_row(rows,row,"geometry",entity,geom,0);
         }entity=load64(entity+24);

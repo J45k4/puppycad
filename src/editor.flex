@@ -24,6 +24,7 @@ global puppy_exit_requested=0;
 global puppy_part_choice=0;
 global puppy_picking_face=0;
 global puppy_pending_title=0;
+global puppy_projection_save_needed=0;
 
 fn puppy_snapshot(text) {
     let n=m_len(text);let snapshot=alloc(n+25);
@@ -39,6 +40,8 @@ fn puppy_trim(snapshot) {
     return 0;
 }
 fn puppy_push(project) {
+    let rebuilt=cad_project_rebuild_projections(project);
+    if rebuilt {project=rebuilt;}
     let next=puppy_snapshot(j_encode(project));
     puppy_trim(load64(puppy_history+8));store64(puppy_history+8,next);
     store64(next,puppy_history);puppy_history=next;puppy_part_sketch_dirty=1;return 1;
@@ -152,7 +155,7 @@ fn puppy_title(project,message) {
     puppy_pending_title=puppy_snapshot(m_data(title));return 1;
 }
 fn puppy_save(project) {
-    if puppy_disk && puppy_saved_history==puppy_history {return puppy_title(project,"Saved");}
+    if puppy_disk && puppy_saved_history==puppy_history && !puppy_projection_save_needed {return puppy_title(project,"Saved");}
     if puppy_disk && !m_eq(puppy_read(puppy_path),puppy_disk+24) {return puppy_title(project,"File changed on disk");}
     if !cad_project_is_studio(project) && puppy_revision==0x7fffffffffffffff {return puppy_title(project,"Revision limit reached");}
     if !cad_project_is_studio(project) {cg_j_int(project,"revision",puppy_revision+1);}
@@ -169,6 +172,7 @@ fn puppy_save(project) {
     }
     if !saved {return puppy_title(project,"Save failed");}
     if puppy_disk {puppy_drop(puppy_disk);}puppy_disk=puppy_snapshot(text);puppy_revision=puppy_revision+1;puppy_saved_history=puppy_history;
+    puppy_projection_save_needed=0;
     return puppy_title(project,"Saved");
 }
 fn puppy_has_other_item(project) {
@@ -293,6 +297,7 @@ fn puppy_command(key,mods) {
     if key==GUI_KEY_UP_ARROW {puppy_pitch=puppy_limit(puppy_pitch+8000,-85000,85000);return 1;}
     if key==GUI_KEY_DOWN_ARROW {puppy_pitch=puppy_limit(puppy_pitch-8000,-85000,85000);return 1;}
     if key==GUI_KEY_ESCAPE {
+        if puppy_draft && puppy_tool==-7 {puppy_tool=0;return puppy_title(cad_project_open(puppy_history+24),"Edge projection cancelled");}
         if puppy_revolve_axis {puppy_revolve_axis=0;puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),"Revolve cancelled");}
         if puppy_picking_face {puppy_picking_face=0;return puppy_title(cad_project_open(puppy_history+24),0);}
         if puppy_anchor {puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());}
@@ -468,6 +473,11 @@ fn puppy_editor(path,source,project,report) {
     puppy_orthographic=cad_project_is_studio(project);
     if !puppy_view_open() {return puppy_error(gui_error);}
     puppy_loft_view=m_take(56);puppy_step_view=m_take(72);puppy_curve_coords=m_take(4096*16);let mark=m_mark();
+    let normalized=0;
+    if source && !j_get(report,"readOnly") {
+        let rebuilt=cad_project_rebuild_projections(project);
+        if rebuilt && rebuilt!=project && !m_eq(j_encode(project),j_encode(rebuilt)) {project=rebuilt;normalized=1;}
+    }
     if !j_get(report,"readOnly") && !puppy_refresh(project) {
         if !source || !cg_error {
             let why=cg_error;if !why {why=gui_error;}if !why {why="Cannot display drawing";}
@@ -479,7 +489,9 @@ fn puppy_editor(path,source,project,report) {
     if j_get(report,"readOnly") {
         if !puppy_reader_begin(report,source) {puppy_view_close();return puppy_error(gui_error);}
     }else if source && puppy_draft {puppy_fit_sketch(project,1);}
-    if source {puppy_disk=puppy_snapshot(source);}else {source=j_encode(project);}
+    if source {puppy_disk=puppy_snapshot(source);}
+    puppy_projection_save_needed=normalized && !puppy_reader_report;
+    if !source || puppy_projection_save_needed {source=j_encode(project);}
     puppy_history=puppy_snapshot(source);puppy_root=puppy_history;puppy_saved_history=puppy_history;
     if !puppy_reader_report {
         if puppy_step_input {puppy_step_begin(project);}
@@ -609,7 +621,7 @@ fn puppy_editor(path,source,project,report) {
                             if x>=194 && x<270 {puppy_command(27,0);}
                             else if x>=278 && x<354 {puppy_command(28,0);}
                             else if x>=362 && x<438 {puppy_command(37,0);}
-                        }else if puppy_curves_page {puppy_curve_bar(0,width,x);}
+                        }else if puppy_curves_page {puppy_curve_bar(current,0,width,x);}
                         else if x>=194 && x<280 {puppy_command(21,0);}
                         else if x>=288 && x<355 {puppy_command(6,0);}
                         else if x>=364 && x<445 {puppy_command(27,0);}

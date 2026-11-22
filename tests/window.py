@@ -512,6 +512,126 @@ with tempfile.TemporaryDirectory() as tmp:
         key("Escape")
         app.wait(3)
 
+        # A side-face outline remains linked when its source extrusion changes.
+        projected_path=Path(tmp)/"Projected side outline.pcad"
+        shutil.copyfile(root/"rust/fixtures/extruded-rectangle.pcad",projected_path)
+        app,window=open_app(projected_path)
+        key("2")
+        verify(window,"Right view")
+        key("f")
+        verify(window,"Click a face for the new sketch")
+        click(window,480,358)
+        verify(window,"Sketch 2  |  Click two rectangle corners")
+
+        def save_projected_data():
+            key("Control_L+s")
+            verify(window,"Saved")
+            return json.loads(projected_path.read_bytes())["items"][0]["data"]
+
+        before_projection=save_projected_data()
+        key("u")
+        verify(window,"Click a body edge guide to project it")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"projected-edge-guides.png"],check=True)
+        click(window,680,358)
+        verify(window,"Projected body edge")
+        key("Escape")
+        verify(window,"Edge projection cancelled")
+        single=save_projected_data()
+        assert len(single["cad"]["nodes"])==len(before_projection["cad"]["nodes"])+1
+        side=next(n for n in single["cad"]["nodes"] if n["id"]=="native-sketch-2")
+        link,=side["relations"]
+        assert link["type"]=="projected" and "sourceFaceId" not in link
+        line=next(n for n in single["cad"]["nodes"] if n["id"]==link["entityId"])
+        assert line["type"]=="sketchLine" and line["sketchId"]==side["id"]
+        assert {(line[end]["x"],line[end]["y"]) for end in ("p0","p1")}=={(0,0),(100,0)}
+        edge=link["sourceEdge"]
+        assert {tuple(edge["a"]),tuple(edge["b"])}=={(80,-50,0),(80,50,0)}
+        assert edge["via"]==[80,0,0] and {tuple(n) for n in edge["normals"]}=={(1,0,0),(0,0,-1)}
+        key("Control_L+z")
+        verify(window,"|  Sketch  |  Sketch 2")
+        assert save_projected_data()==before_projection
+        key("Shift_L+u")
+        verify(window,"Projected face edges")
+
+        def projected_boundary(data,depth):
+            nodes={n["id"]:n for n in data["cad"]["nodes"]}
+            sketch=nodes["native-sketch-2"]
+            face=nodes[sketch["targetId"]]
+            assert (face["sourceId"],face["faceId"])==("extrude-1","extrude-1-solid-face-2")
+            lines={n["id"]:n for n in nodes.values()
+                   if n["type"].startswith("sketch") and n.get("sketchId")==sketch["id"]}
+            relations=[r for r in sketch["relations"] if r["type"]=="projected"]
+            assert len(lines)==len(relations)==4 and {r["entityId"] for r in relations}==set(lines)
+            assert all(n["type"]=="sketchLine" for n in lines.values())
+            outline={frozenset((n[end]["x"],n[end]["y"]) for end in ("p0","p1")) for n in lines.values()}
+            assert outline=={
+                frozenset(((0,0),(100,0))),frozenset(((100,0),(100,depth))),
+                frozenset(((100,depth),(0,depth))),frozenset(((0,depth),(0,0))),
+            }, outline
+            assert all(r["sourceFaceId"]==face["faceId"] for r in relations)
+            return {(r["id"],r["entityId"],r["sourceFaceId"]) for r in relations}
+
+        created=save_projected_data()
+        links=projected_boundary(created,60)
+        capture(window,"projected-side-sketch.png",False,surface=(112,191,245))
+        click(window,576,20)  # More tools → Curves
+        click(window,576,20)  # Conics
+        click(window,715,55)  # Use edges
+        verify(window,"Face edges already projected")
+        assert save_projected_data()==created
+        key("o")
+        verify(window,"|  cut")
+        key("e")
+        verify(window,"Extruded")
+        original_cut=save_projected_data()
+        assert projected_boundary(original_cut,60)==links
+        cut=next(n for n in original_cut["cad"]["nodes"] if n["type"]=="extrude" and n["operation"]=="cut")
+        assert (cut["sketchId"],cut["profileId"],cut["depth"])==("native-sketch-2","native-sketch-2-profile-1",10)
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(projected_path)
+        key("F2")
+        verify(window,"Set value")
+        type_value("74")
+        key("Return")
+        verify(window,"Block  depth 74 mm")
+        reshaped=save_projected_data()
+        assert projected_boundary(reshaped,74)==links
+        assert next(n for n in reshaped["cad"]["nodes"] if n["id"]==cut["id"])==cut
+        key("Control_L+z")
+        verify(window,"Block  depth 60 mm")
+        assert save_projected_data()==original_cut
+        key("Control_L+y")
+        verify(window,"Block  depth 74 mm")
+        assert save_projected_data()==reshaped
+        key("Escape")
+        app.wait(3)
+        app,window=open_app(projected_path)
+        key("Control_L+e")
+        verify(window,"Exported")
+        reference=Path(tmp)/"projected-side-rust.stl"
+        subprocess.run([root/"rust/target/debug/puppycad","--export",projected_path,reference],check=True)
+        expected=([(-80,70),(-50,50),(0,74)],1110000)
+        assert triangulation(projected_path.with_suffix(".stl"))==triangulation(reference)==expected
+        shutil.copyfile(projected_path,output_dir/"projected-side-outline.pcad")
+        key("Escape")
+        app.wait(3)
+
+        stale=json.loads(projected_path.read_bytes())
+        for node in stale["items"][0]["data"]["cad"]["nodes"]:
+            if node["type"]=="sketchLine" and node.get("sketchId")=="native-sketch-2":
+                for end in ("p0","p1"):
+                    if node[end]["y"]==74:
+                        node[end]["y"]=60
+        projected_path=Path(tmp)/"Stale projected outline.pcad"
+        cached=json.dumps(stale).encode()
+        projected_path.write_bytes(cached)
+        app,window=open_app(projected_path)
+        assert projected_path.read_bytes()==cached
+        assert projected_boundary(save_projected_data(),74)==links
+        key("Escape")
+        app.wait(3)
+
         # The first launch shows the authored tree before the sketch has a solid.
         path=Path(tmp)/"Design tree.pcad"
         app,window=open_app(path,"Click two rectangle corners",design_tree=True)

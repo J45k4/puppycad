@@ -4,7 +4,7 @@ global puppy_sketch_mesh=0;
 
 fn puppy_sketch_open() {
     let vertex="#version 450 core\nlayout(location=0) in vec3 point; out float distancePx; uniform int guide; void main(){gl_Position=vec4(point.xy,0.0,1.0);distancePx=point.z;gl_PointSize=guide==5?13.0:7.0;}";
-    let fragment="#version 450 core\nuniform int guide;in float distancePx;out vec4 color;void main(){if(guide==6 && mod(distancePx,12.0)>8.0)discard;if(guide==5){float d=length(gl_PointCoord-vec2(0.5));if(d>0.5)discard;color=d>0.32?vec4(0.87,0.94,0.97,1.0):vec4(0.22,0.58,0.74,1.0);return;}if(guide==3 && all(lessThan(abs(gl_PointCoord-vec2(0.5)),vec2(0.24)))) discard; color=(guide==4 || guide==6)?vec4(0.22,0.58,0.74,1.0):guide==2?vec4(1.0,0.69,0.27,1.0):guide==1?vec4(0.20,0.28,0.30,1.0):vec4(0.56,0.85,0.72,1.0);}";
+    let fragment="#version 450 core\nuniform int guide;in float distancePx;out vec4 color;void main(){if(guide==6 && mod(distancePx,12.0)>8.0)discard;if(guide==5){float d=length(gl_PointCoord-vec2(0.5));if(d>0.5)discard;color=d>0.32?vec4(0.87,0.94,0.97,1.0):vec4(0.22,0.58,0.74,1.0);return;}if(guide==3 && all(lessThan(abs(gl_PointCoord-vec2(0.5)),vec2(0.24)))) discard; color=guide==7?vec4(0.44,0.75,0.96,1.0):(guide==4 || guide==6)?vec4(0.22,0.58,0.74,1.0):guide==2?vec4(1.0,0.69,0.27,1.0):guide==1?vec4(0.20,0.28,0.30,1.0):vec4(0.56,0.85,0.72,1.0);}";
     puppy_sketch_program=render_program(puppy_device,vertex,fragment);
     let attribute=m_take(48);gui__zero(attribute,48);
     store64(attribute+8,3);store64(attribute+16,0x1406);

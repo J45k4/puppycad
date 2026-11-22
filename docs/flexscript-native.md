@@ -404,6 +404,13 @@ continue drawing, or press V to inspect the solid and V again to return.
 cycle through join, cut and new body. A face cut runs inward. Escape
 cancels a pending face pick.
 
+In a face sketch, **Use edges** in Conics or Shift+U projects the supporting
+face's straight boundary lines. **Pick edge** or U lets you click a straight
+body edge guide, and Escape leaves the picking tool. The blue projected lines
+follow their source and can form a profile. Their endpoints are fixed by
+the projection. Use **Construction** to turn selected lines into guides
+that do not contribute to a solid.
+
 | Control | Action |
 | --- | --- |
 | Click the dimension label or press Tab | Cycle through the selected extrusion’s editable dimensions, then select the next extrusion. All supported profiles expose depth. Corner rectangles also expose width and height. |

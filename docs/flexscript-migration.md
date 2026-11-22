@@ -77,7 +77,7 @@ alongside the existing geometry, spatial and assembly suites.
 
 Biscuit's build scripts and CI read the same SDK commit from
 `flexscript-sdk.rev`. The local SDK branch `puppycad-cad-sdk` at
-`9fb948998afb45795ac442b30619b52376dd19c6` includes the shared library and
+`0ba550b52da8863d4091c543f1e83f9842d00d4c` includes the shared library and
 the FlexDB blob APIs required by the backend. The backend, project checker
 and checked VM tests passed at this revision. The frozen-worker and headless browser suites also passed after rebuilding from the recorded pin. Hosted CI verification
 requires publishing the SDK commit.
@@ -317,6 +317,17 @@ plane and save its stable reference. The window regression picked the block’s
 top face, drew a 20 × 20 mm rectangle, reopened the sketch, made a 10 mm
 inward cut and exercised undo and redo. After reopening, Flexscript and Rust
 both exported a closed 956,000 mm³ solid with the pocket floor at Z = 50 mm.
+
+Native **Use edges** and **Pick edge** author straight projected lines in
+the Rust v4 relation format. The SDK locks their endpoints and resolves
+their sources before the sketch's first consuming feature. The native
+test projects a side, cuts the block, and changes the supporting depth
+from 60 to 74 mm. The four linked IDs survive undo, redo and reopening.
+The rebuilt STL has a volume of 1,110,000 mm³ and matches Rust in bounds
+and signed volume. Biscuit's checked VM edits the same saved drawing to
+82 mm and matches both frozen builds byte for byte at 1,230,000 mm³.
+Separate frozen jobs prove that a stale endpoint cache rebuilds to the
+same STL as a refreshed drawing.
 After orbiting the camera, the test also picked the right wall and joined
 a 20 × 20 × 10 mm boss. Both exports reached X = 90 mm and placed the boss
 between Z = 20 and 40 mm. Biscuit's checked VM picked a cap and verified the

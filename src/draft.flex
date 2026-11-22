@@ -1,6 +1,7 @@
 import "smooth.flex";
 import "construction.flex";
 import "cad/project-ellipse-split.flex";
+import "cad/projection-author.flex";
 
 // Draft coordinates use 4 logical pixels per millimetre at the default zoom.
 global puppy_profile_value_id=0;
@@ -47,6 +48,31 @@ fn puppy_pending_face(project) {
 fn puppy_draft_on_face(project) {
     let sketch=puppy_draft_sketch(project);
     return m_eq(j_string(pc_find(pc_nodes(cad_project_part(project)),j_string(sketch,"targetId")),"type"),"face");
+}
+fn puppy_projected_entities(sketch) {
+    let projected=0;let relation=pc_first(j_get(sketch,"relations"));
+    while relation {
+        if m_eq(j_string(relation,"type"),"projected") {
+            if !projected {projected=j_object();}
+            cg_j_int(projected,j_string(relation,"entityId"),1);
+        }
+        relation=load64(relation+24);
+    }
+    return projected;
+}
+fn puppy_use_edges(project,point) {
+    let id=j_string(puppy_draft_sketch(project),"id");let updated=0;
+    if point {updated=cad_project_project_edge(project,id,point,8000000000/puppy_draft_scale);}
+    else {updated=cad_project_project_face_edges(project,id);}
+    if !updated {
+        let message=cg_error;
+        if m_eq(message,"No new face edges to project") {message="Face edges already projected";}
+        return puppy_title(project,message);
+    }
+    puppy_push(updated);
+    if point {return puppy_title(updated,"Projected body edge");}
+    puppy_curves_page=0;puppy_profile_index=1;puppy_fit_sketch(updated,1);
+    return puppy_title(updated,"Projected face edges");
 }
 fn puppy_operation(project) {
     if puppy_draft_on_face(project) {
@@ -111,6 +137,7 @@ fn puppy_tool_name() {
     return "rectangle";
 }
 fn puppy_draft_hint() {
+    if puppy_tool==-7 {return "Click a body edge guide to project it";}
     if puppy_tool==-6 {if puppy_anchor {return "Pick the second cut on this ellipse";}return "Pick a cut on an ellipse or elliptic arc";}
     if puppy_tool==-4 {if puppy_anchor {return "Click the new tangent arc endpoint";}return "Pick a curve endpoint to start a tangent arc";}
     if puppy_tool==-5 {if puppy_anchor {return "Pick the curve that should follow or drag a source point";}return "Pick the source curve for Smooth";}
@@ -264,6 +291,7 @@ fn puppy_draft_click(x,y) {
     if puppy_tool==-6 {return puppy_split_click(project,p);}
     if puppy_tool==-4 || puppy_tool==-5 {return puppy_join_click(project,p);}
     if puppy_tool==-3 {return puppy_offset_pick(project,p);}
+    if puppy_tool==-7 {return puppy_use_edges(project,p);}
     if puppy_tool<0 {
         let sketch=puppy_draft_sketch(project);
         if !cad_project_add_primitive(project,j_string(sketch,"id"),puppy_tool_name(),p,0) {return puppy_title(project,cg_error);}
@@ -370,6 +398,11 @@ fn puppy_draft_key(project,key,mods) {
         puppy_anchor=0;puppy_construction_ids=puppy_snapshot("[]");
         return puppy_title(project,"Pick sketch geometry, then Apply");
     }
+    if key==24 && puppy_draft_on_face(project) {
+        puppy_anchor=0;
+        if mods&3 {return puppy_use_edges(project,0);}
+        puppy_tool=-7;return puppy_title(project,puppy_draft_hint());
+    }
     if key==27 && mods&3 {puppy_curves_page=2;puppy_tool=-6;puppy_anchor=0;return puppy_title(project,puppy_draft_hint());}
     if key==13 {
         puppy_join_select(0);puppy_anchor=0;puppy_curves_page=1;puppy_tool=-5;if mods&3 {puppy_tool=-4;}
@@ -472,8 +505,15 @@ fn puppy_draw_draft() {
     render_gl(puppy_device,"glUniform1i",color,1,0,0,0,0);
     if !puppy_draft_path(axes,1,w,h) {return 0;}
     if !puppy_reader_report && puppy_draft_on_face(project) {
-        let loops=cad_project_sketch_face_loops(project,sketch);let j=0;
-        while j<cg_count(loops) {if !puppy_draft_path(cg_at(loops,j),2,w,h) {return 0;}j=j+1;}
+        if puppy_tool==-7 {
+            let guides=cad_project_projection_guides(project,id);let j=0;
+            render_gl(puppy_device,"glUniform1i",color,6,0,0,0,0);
+            while j<cg_count(guides) {if !puppy_draft_stroke(cg_at(guides,j),3,w,h,1) {return 0;}j=j+1;}
+            if cg_error {cg_begin();}
+        }else {
+            let loops=cad_project_sketch_face_loops(project,sketch);let j=0;
+            while j<cg_count(loops) {if !puppy_draft_path(cg_at(loops,j),2,w,h) {return 0;}j=j+1;}
+        }
     }
     if puppy_revolve_axis && puppy_anchor {
         let axis=cg_array();cg_push(axis,cg_v(puppy_ax,puppy_ay,0));cg_push(axis,cg_v(puppy_mx,puppy_my,0));
@@ -516,6 +556,7 @@ fn puppy_draw_draft() {
     if puppy_drag_point_id {selected=puppy_drag_point_id+24;}
     let pattern=0;let sources=0;if puppy_patterns {pattern=puppy_pattern_rel(project);if puppy_pattern_sources {sources=j_parse(puppy_pattern_sources+24);}}
     if puppy_construction_ids {sources=j_parse(puppy_construction_ids+24);}
+    let projected=puppy_projected_entities(sketch);
     let i=0;
     while i<cg_count(paths) {
         let path=cg_at(paths,i);let points=load64(path);let mode=3;
@@ -530,6 +571,7 @@ fn puppy_draw_draft() {
         if pattern && puppy_pattern_contains(pattern,j_string(entity,"id")) {highlight=1;}
         let src=pc_first(sources);while src {if m_eq(j_value(src),j_string(entity,"id")) {highlight=1;}src=load64(src+24);}
         let style=puppy_loft_open;
+        if j_get(projected,j_string(entity,"id")) {style=7;}
         if cad_sketch_is_construction(entity) {style=6;if mode==0 {style=3;}}
         if highlight {style=2;}
         render_gl(puppy_device,"glUniform1i",color,style,0,0,0,0);
