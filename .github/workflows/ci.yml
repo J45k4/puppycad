@@ -54,7 +54,7 @@ jobs:
         with:
           repository: J45k4/flexscript
           ref: ${{ steps.sdk.outputs.rev }}
-          path: flexscript
+          path: puppycad/workdir/flexscript/checkout
       - name: Install the bootstrap compiler
         env:
           GH_TOKEN: ${{ github.token }}

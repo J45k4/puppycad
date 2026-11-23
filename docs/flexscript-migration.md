@@ -1397,6 +1397,49 @@ CAD graph, two frozen builds produce byte-identical STLs, and a saved
 polygon radius inconsistent with its driver fails the build.
 See `workdir/flexscript/polygon-slot-preview.png`.
 
+The saved capsule center distance is now a driving dimension. The shared
+solver reports it in the distance list next to the width, and
+`cad_project_set_distance_expression` edits it with the shared expression
+evaluator. The headless window test drives one slot's span to
+`#stock * 3 + 2 mm` (14 mm) in both arrangements: with a free cap, both
+centers move; with the far cap fixed, the capsule resizes around it. Both
+variants convert the distance to a measured reference, reject the edit while
+the value is measured, undo, redo, save, reopen and export. The reopened
+solids measure 546.68996 mm³ fixed and 545.18996 mm³ free, and an edit that
+would move geometry coupled to a second driving span is rejected without
+changing the document. The SDK tests also cover the distance report,
+reference toggling and removal. See `workdir/flexscript/span-pair-package-07eb1eb/`.
+
+An anchor shared by two spline contacts follows the curves' actual finite
+crossing. When the source curves cross more than once, the saved or requested
+position selects the nearest candidate before the combined constraint solve.
+The headless window test drags a shared point across both branches of a
+self-crossing pair, verifies the exact crossing at (70.980762, 0) mm on the
+control spline and the 0.3 mm refit at (38.571429, 0.128571) mm on the fit
+spline, and rejects a conflicting drag that would deform a closed smooth
+chain. Undo, redo and reopen retain the relations, and the construction
+edits leave the exported solid byte-identical. The new
+`project-spline-crossings.flex` intersects finite cubic spans directly.
+
+The PCB adapter resolves a fixed mate of a derived fitted package back to
+the matching authored board in its own scope before accepting its part IDs.
+A historical standalone assembly reopens with all seven occurrences,
+including the pinned generated package at its saved front-side pose, saves
+byte for byte, and exports a seven-object 3MF and a faceted STEP carrying
+all seven `NEXT_ASSEMBLY_USAGE_OCCURRENCE` records and the original part
+name. The linked-boards test rebuilds the projected copper, net rules and
+mounting bores through the shared evaluator. See
+`workdir/flexscript/span-pair-package-07eb1eb/package/fitted-connector-package.png`.
+
+The SDK revision is pinned at `07eb1eb`. All 85 CAD SDK test programs pass,
+including the new spline-pair-contact and fitted-package suites. Biscuit's
+complete ordinary `check.sh` workflow — every build target and all 96
+suites, from CAD geometry through checked imports, assemblies, electrical,
+gripper, phone-holder, playback, project build workers, frozen deterministic
+builds and evidence releases — and its ordinary `./build.sh build` run green
+against the same pinned revision. Biscuit's checked programs and frozen
+project builds evaluate the same shared library as the editor.
+
 Remaining standalone work includes additional sketch and feature authoring
 and design inspectors, along with mixed-constraint solving and the other
 open cases in the parity inventory.

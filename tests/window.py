@@ -2487,6 +2487,50 @@ with tempfile.TemporaryDirectory() as tmp:
             key("Escape")
             app.wait(3)
 
+        # The saved capsule center distance is editable through Dimensions.
+        for index,fixed in enumerate((False,True)):
+            artifact="slot-span-value-fixed" if fixed else "slot-span-value-free"
+            path=Path(tmp)/f"{artifact}.pcad"
+            document=dict(span_fixture,items=[span_fixture["items"][index]],selectedPath=[0])
+            path.write_text(json.dumps(document))
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            app,window=open_app(path)
+            key("F8")
+            verify(window,"slot/sketch/0   Width 4 mm")
+            key("d")
+            verify(window,"slot-span   Distance   10 mm")
+            legacy_number("#stock * 3 + 2 mm")
+            verify(window,"Edited")
+            key("r")
+            verify(window,"Reference Distance   14 mm")
+            key("F2")
+            verify(window,"Reference distance is measured")
+            key("Control_L+z")
+            verify(window,"slot-span   Distance   14 mm")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            saved=json.loads(path.read_bytes())["items"][0]["data"]
+            old=document["items"][0]["data"]
+            slot=saved["features"][0]
+            assert slot["entities"]==[dict(old["features"][0]["entities"][0],**{
+                "from":dict(x=14 if fixed else 12,y=0),"to":dict(x=0 if fixed else -2,y=0)})]
+            assert slot["relations"][0]==dict(old["features"][0]["relations"][0],
+                                              value=14,expression="#stock * 3 + 2 mm")
+            assert saved["features"][1:]==old["features"][1:] and saved["solidSteps"]==old["solidSteps"]
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            key("Escape")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            assert math.isclose(triangulation(stl)[1],546.68996 if fixed else 545.18996,abs_tol=.002)
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
         # A PartBuilder sketch without any solid can open and save its own editing state.
         path=Path(tmp)/"Legacy sketch only.pcad"
         initial=(libs/"cad/tests/fixtures/legacy-typescript-sketch-only.pcad").read_bytes()
@@ -4961,6 +5005,80 @@ with tempfile.TemporaryDirectory() as tmp:
             assert math.isclose(math.dist((foot["x"],foot["y"]),(tip["x"],tip["y"])),8,abs_tol=.00004)
             shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
             key("Escape")
+            key("Control_L+e")
+            verify(window,"Exported")
+            stl=path.with_suffix(".stl")
+            assert stl.read_bytes()==baseline.read_bytes()
+            shutil.copyfile(stl,output_dir/f"{artifact}-edited.stl")
+            key("Escape")
+            app.wait(3)
+
+        # A point shared by two spline constraints follows their actual finite crossing.
+        pair_fixture=json.loads((libs/"cad/tests/fixtures/spline-pair-contact.pcad").read_bytes())
+        for index,case in enumerate(("refit","branch")):
+            artifact=f"spline-pair-{case}"
+            path=Path(tmp)/f"{artifact}.pcad"
+            pair_fixture["selectedPath"]=[index]
+            initial=json.dumps(pair_fixture).encode()
+            path.write_bytes(initial)
+            shutil.copyfile(path,output_dir/f"{artifact}-input.pcad")
+            baseline=path.with_name(f"{artifact}-before.stl")
+            subprocess.run([output_dir/"puppycad","--export",path,baseline],check=True)
+            app,window=open_app(path)
+            key("F12")
+            verify(window,"Editing Spline normals")
+            if case=="branch":
+                key("F8")
+                verify(window,"body-profile   Diameter 10 mm")
+            key("Home")
+            click(window,480,358,button=4,count=24)
+            click(window,480,358,button=5,count=22)  # 10 pixels/mm gives an exact refit of 0.3 mm.
+            if case=="refit":
+                key("j")
+                click(window,900,529)
+                verify(window,"drag a source point")
+                start,target=(955,529),(955,526)
+                drag(window,1,start,(955,579))
+                verify(window,"Conflicting or unsolved sketch constraint")
+                key("Control_L+s")
+                verify(window,"Saved")
+                assert path.read_bytes()==initial
+                drag(window,1,start,target)
+                verify(window,"Smooth point moved")
+                expected=(38.571429,.128571)
+            else:
+                start,target=(245,531),(855,523)
+                drag(window,1,start,target,cancel=True,dragging="Dragging sketch point")
+                verify(window,"Drag cancelled")
+                drag(window,1,start,target)
+                verify(window,"body-profile   Diameter 10 mm")
+                expected=(70.980762,0)
+            key("Control_L+z")
+            key("Control_L+s")
+            verify(window,"Saved")
+            assert path.read_bytes()==initial
+            key("Control_L+y")
+            key("Home")
+            subprocess.run(["magick","import","-window",hex(window),output_dir/f"{artifact}.png"],check=True)
+            key("Control_L+s")
+            verify(window,"Saved")
+            result=json.loads(path.read_bytes())
+            old,new=({n["id"]:n for n in d["items"][index]["data"]["cad"]["nodes"]} for d in (pair_fixture,result))
+            assert result["items"][1-index]==pair_fixture["items"][1-index]
+            assert new["native-sketch-1"]["relations"]==old["native-sketch-1"]["relations"]
+            assert new["control-crossing"]==old["control-crossing"] and new["normal-solid"]==old["normal-solid"]
+            if case=="refit":
+                assert new["fit-crossing"]["spline"]["points"]==[dict(x=0,y=0),dict(x=90,y=.3)]
+            else:
+                assert new["fit-crossing"]==old["fit-crossing"]
+            center=new["crossing-marker"]["primitive"]["center"]
+            assert math.dist((center["x"],center["y"]),expected)<.000002,center
+            shutil.copyfile(path,output_dir/f"{artifact}-edited.pcad")
+            if case=="branch":
+                key("Escape")
+            key("Escape")
+            app.wait(3)
+            app,window=open_app(path)
             key("Control_L+e")
             verify(window,"Exported")
             stl=path.with_suffix(".stl")
@@ -7880,6 +7998,34 @@ with tempfile.TemporaryDirectory() as tmp:
         assert json.loads(path.read_bytes())['nodes'][0]['size'] == [40, 31, 5]
         key('Escape')
         app.wait(3)
+        # The historical standalone assembly retains its pinned, generated connector package.
+        path=Path(tmp)/"Fitted connector package.pcad"
+        original=(libs/"cad/tests/fixtures/studio-fitted-package.pcad").read_bytes()
+        path.write_bytes(original)
+        app,window=open_app(path,"PCAD design opened",design_tree=True)
+        assert "  |  Assembly" in title(window)
+        key("3")
+        verify(window,"Top view")
+        subprocess.run(["magick","import","-window",hex(window),output_dir/"fitted-connector-package.png"],check=True)
+        key("Control_L+s")
+        verify(window,"Saved")
+        assert path.read_bytes()==original
+        key("Control_L+Alt_L+e")
+        verify(window,"Exported")
+        key("Control_L+Shift_L+e")
+        verify(window,"Exported")
+        bodies=dict(package_geometry(path.with_suffix(".3mf"))[1])
+        assert len(bodies)==7 and {"Controller board","Sensor board","U1 on PCB"}<=bodies.keys()
+        bounds,volume=bodies["U1 on PCB"]
+        assert bounds==[(11,14),(18,20),(7.1,8.1)] and math.isclose(volume,6,abs_tol=.00001)
+        step=path.with_suffix(".step")
+        assert step.read_bytes().count(b"=NEXT_ASSEMBLY_USAGE_OCCURRENCE(")==7
+        assert b"PRODUCT('pkg-part-91207448','Sensor terminal block'" in step.read_bytes()
+        shutil.copyfile(path,output_dir/"fitted-connector-package.pcad")
+        shutil.copyfile(step,output_dir/"fitted-connector-package.step")
+        key("Escape")
+        app.wait(3)
+
         path = Path(tmp) / 'Sensor unit.pcad'
         original = json.loads((root / 'tests/fixtures/sensor-unit.pcad').read_bytes())
         path.write_text(json.dumps(original))

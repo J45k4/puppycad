@@ -15,8 +15,13 @@ if [[ -z ${FLEXSCRIPT_LIB:-} || -z ${FLEX_COMPILER:-} ]]; then
     [[ "$rev" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid SDK revision" >&2; exit 1; }
     sdk="$output/sdk/$rev"
     if [[ ! -d "$sdk" ]]; then
+        checkout=${FLEXSCRIPT_DIR:-"$output/checkout"}
+        if ! git -C "$checkout" rev-parse --verify --quiet "$rev^{commit}" > /dev/null 2>&1; then
+            printf 'Flexscript SDK %s is unavailable in %s. See the SDK setup in docs/flexscript-native.md.\n' "$rev" "$checkout" >&2
+            exit 1
+        fi
         mkdir -p "$output/sdk" "$stage/sdk"
-        git -C "${FLEXSCRIPT_DIR:-../flexscript}" archive "$rev" compiler vm lib libs extensions platform scripts | tar -x -C "$stage/sdk"
+        git -C "$checkout" archive "$rev" compiler vm lib libs extensions platform scripts | tar -x -C "$stage/sdk"
         mv -T "$stage/sdk" "$sdk" 2>/dev/null || [[ -d "$sdk" ]]
     fi
     FLEXSCRIPT_LIB=${FLEXSCRIPT_LIB:-"$sdk/libs"}

@@ -183,8 +183,18 @@ wiring. **Show all** restores it.
 ## Build and run
 
 Build from the repository root with the Flexscript bootstrap compiler on PATH.
-The build reads `flexscript-sdk.rev` and takes that revision from the sibling
-`../flexscript` Git checkout. Use `FLEXSCRIPT_DIR` for a different checkout.
+The build reads `flexscript-sdk.rev` and takes that revision from the Git-ignored
+clone at `workdir/flexscript/checkout`. To create it, clone a repository that
+contains the pinned commit. For example, if `../flexscript` has the local
+`puppycad-cad-sdk` branch, use this one-time setup.
+
+```sh
+git clone --no-local --branch puppycad-cad-sdk ../flexscript workdir/flexscript/checkout
+```
+
+The clone has its own Git history and object store. Fetch a new SDK revision
+into this clone when updating the pin. Set `FLEXSCRIPT_DIR` to use a different
+checkout for a revision that has yet to be cached.
 For development against local CAD changes, set `FLEXSCRIPT_LIB` to the SDK's
 `libs` directory. `FLEX_COMPILER` can select a prebuilt compiler.
 
@@ -470,6 +480,12 @@ between a driving and measured width. Choose **Smooth** (J), click the slot
 outline, and drag a free cap center. With one driving center distance, the
 opposite cap follows as needed to keep that distance. If the opposite cap
 is fixed, drag along the set radius around it.
+The saved center distance also appears in the **Dimensions** distance list.
+Select it and press F2 to enter a value or expression such as
+`#stock * 3 + 2 mm`. The edit moves both free cap centers, or resizes the
+capsule from a fixed cap, and can be undone. Press R to switch the distance
+between driving and measured. The distance cannot be edited while other
+driving geometry couples both caps.
 The same tool exposes the points of control and fit splines, including closed
 fit splines. The sketch toolbar adds lines, circles,
 rectangles and points, including in files without a solid. The editor saves
