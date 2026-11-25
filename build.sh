@@ -28,7 +28,69 @@ if [[ -z ${FLEXSCRIPT_LIB:-} || -z ${FLEX_COMPILER:-} ]]; then
     if [[ -z ${FLEX_COMPILER:-} ]]; then
         FLEX_COMPILER="$sdk/flexscript"
         if [[ ! -x "$FLEX_COMPILER" ]]; then
-            FLEXSCRIPT_LIB="$sdk/libs" flexscript "$sdk/compiler/main.flex" -o "$stage/compiler"
+            if ! FLEXSCRIPT_LIB="$sdk/libs" flexscript "$sdk/compiler/main.flex" -o "$stage/compiler" 2>/dev/null; then
+                python3 - "$sdk" "$stage/bridge-sdk" <<'PY'
+import re, shutil, sys
+from pathlib import Path
+
+sdk, dst = Path(sys.argv[1]), Path(sys.argv[2])
+dst.mkdir(parents=True, exist_ok=True)
+KEYWORDS = {"requires","ensures","reads","modifies","releases","trusted","terminates","verify","invariant","decreases"}
+
+def skip_block(src, i):
+    n, depth, quoted = len(src), 0, False
+    while i < n:
+        c = src[i]; i += 1
+        if quoted:
+            if c == '\\': i += 1
+            elif c == '"': quoted = False
+        elif c == '"': quoted = True
+        elif c == '/' and i < n and src[i] == '/':
+            while i < n and src[i] != '\n': i += 1
+        elif c == '{': depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0: return i
+    raise RuntimeError("unterminated proof block")
+
+def strip_annotations(src):
+    out, n, i, dropping = [], len(src), 0, False
+    while i < n:
+        start = i
+        nl = src.find('\n', i)
+        line, i = (src[i:], n) if nl == -1 else (src[i:nl], nl + 1)
+        kept = True
+        if dropping:
+            kept = False
+            if line.endswith(';'): dropping = False
+        else:
+            s = line.lstrip(' \t')
+            m = re.match(r'[A-Za-z0-9_]+', s)
+            word = m.group(0) if m else ''
+            rest = s[len(word):].lstrip(' \t') if word else ''
+            if (word == 'proof' and rest.startswith('{')) or (word in ('lemma', 'spec') and (rest.startswith('fn ') or rest.startswith('fn\t'))):
+                i = skip_block(src, start)
+                while i < n and src[i] in ' \t\r': i += 1
+                if i + 1 < n and src[i:i+2] == '//':
+                    while i < n and src[i] != '\n': i += 1
+                if i < n and src[i] == '\n': i += 1
+                kept = False
+            elif word in KEYWORDS:
+                kept = False
+                if not line.endswith(';'): dropping = True
+        if kept: out.append(line + '\n')
+    return ''.join(out)
+
+for d in ("lib", "libs", "extensions", "platform", "scripts"):
+    (dst / d).symlink_to(sdk / d)
+for d in ("compiler", "vm"):
+    shutil.copytree(sdk / d, dst / d)
+    for path in (dst / d).rglob("*.flex"):
+        path.write_text(strip_annotations(path.read_text()))
+PY
+                FLEXSCRIPT_LIB="$sdk/libs" flexscript "$stage/bridge-sdk/compiler/main.flex" -o "$stage/bridge"
+                FLEXSCRIPT_LIB="$sdk/libs" "$stage/bridge" "$sdk/compiler/main.flex" -o "$stage/compiler"
+            fi
             mv "$stage/compiler" "$FLEX_COMPILER"
         fi
     fi

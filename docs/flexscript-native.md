@@ -200,11 +200,10 @@ wiring. **Show all** restores it.
 Build from the repository root with the Flexscript bootstrap compiler on PATH.
 The build reads `flexscript-sdk.rev` and takes that revision from the Git-ignored
 clone at `workdir/flexscript/checkout`. To create it, clone a repository that
-contains the pinned commit. For example, if `../flexscript` has the local
-`puppycad-cad-sdk` branch, use this one-time setup.
+contains the pinned commit from Flexscript's `master` branch, for example:
 
 ```sh
-git clone --no-local --branch puppycad-cad-sdk ../flexscript workdir/flexscript/checkout
+git clone https://github.com/J45k4/flexscript.git workdir/flexscript/checkout
 ```
 
 The clone has its own Git history and object store. Fetch a new SDK revision
