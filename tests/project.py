@@ -151,15 +151,24 @@ def check_profiles(editor, directory):
         feature["profileId"] = sketch["id"] + f"-profile-{index}"
         input_file.write_text(json.dumps(doc))
         check(input_file, bounds, 40*area)
-    # Inner circle intersects the ellipse. Reject the ambiguous region and
-    # preserve the previous export. Construction geometry is ignored.
+    # Inner circle intersects the ellipse. Subdivide into selectable closed cuts,
+    # preserve the previous export when an invalid profile is requested, and ignore construction geometry.
     inner["primitive"]["center"]["x"] = 45
-    feature["profileId"] = sketch["id"] + "-profile-1"
+    cut_volumes = []
+    for index in (1, 2, 3):
+        feature["profileId"] = sketch["id"] + f"-profile-{index}"
+        input_file.write_text(json.dumps(doc))
+        subprocess.run([editor, "--export", input_file, output], check=True)
+        _, volume = triangulation(output)
+        cut_volumes.append(volume)
+    assert all(v > 1000 for v in cut_volumes), cut_volumes
+    feature["profileId"] = sketch["id"] + "-profile-99"
     input_file.write_text(json.dumps(doc))
     previous = output.read_bytes()
     result = subprocess.run([editor, "--export", input_file, output], capture_output=True)
-    assert result.returncode and b"intersect or touch" in result.stderr
+    assert result.returncode and b"not found" in result.stderr
     assert output.read_bytes() == previous
+    feature["profileId"] = sketch["id"] + "-profile-1"
     for node in [inner, island, separate]:
         node["primitive"]["construction"] = True
     input_file.write_text(json.dumps(doc))
@@ -532,12 +541,17 @@ def check_line_contours(editor, directory):
     verify(contour+[hole, recess]+extras, 1, [(30, 40), (20, 30), (0, 60)], 100)
     verify(contour+[hole, recess]+extras, 2, [(0, 50), (0, 40), (0, 60)], 1100-64)
     saved = output.read_bytes()
-    for entities in [contour[:-1], contour+[line(corners[0], (2, 2))],
-                     [line((0, 0), (20, 20)), line((20, 20), (0, 20)),
-                      line((0, 20), (20, 0)), line((20, 0), (0, 0))]]:
+    for entities in [contour[:-1], contour+[line(corners[0], (2, 2))]]:
         write(entities)
         assert subprocess.run([editor, "--export", model, output], capture_output=True).returncode
         assert output.read_bytes() == saved
+    bowtie = [line((0, 0), (20, 20)), line((20, 20), (0, 20)),
+              line((0, 20), (20, 0)), line((20, 0), (0, 0))]
+    for index in (1, 2):
+        write(bowtie, index)
+        subprocess.run([editor, "--export", model, output], check=True)
+        _, volume = triangulation(output)
+        assert math.isclose(volume, 100 * 60), volume
 
 
 def check_assembly(editor, directory):

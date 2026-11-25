@@ -98,9 +98,9 @@ fn puppy_workspace_edit_sketch(project,id) {
     let index=puppy_workspace_sketch_index(project,id);
     if index<0 {return puppy_title(project,"Select a sketch in the Design tree");}
     if !puppy_sketch_model(project,id) {return puppy_title(project,cg_error);}
-    puppy_end_isolation();puppy_clear_pick();puppy_search_focus(0);puppy_design_focus=0;
+    puppy_end_isolation();puppy_clear_pick();puppy_infer_reset();puppy_search_focus(0);puppy_design_focus=0;
     puppy_picking_face=0;puppy_revolve_axis=0;puppy_anchor=0;
-    puppy_tool=0;puppy_curves_page=0;puppy_draft_index=index;puppy_profile_index=1;puppy_face_operation=0;
+    puppy_tool=0;puppy_curves_page=0;puppy_draft_index=index;puppy_profile_index=1;puppy_profile_selected=1;puppy_face_operation=0;
     puppy_draft=1;puppy_sketch=1;puppy_empty=0;puppy_explicit_sketch=1;puppy_bar_page=0;
     puppy_fit_sketch(project,1);
     return puppy_title(project,m_cat("Editing ",puppy_design_name(puppy_draft_sketch(project),"Sketch")));
@@ -110,7 +110,7 @@ fn puppy_workspace_edit_sketch(project,id) {
 // Entering Part explicitly leaves that sketch available from the Design tree.
 fn puppy_workspace_show_part(project) {
     if puppy_draft && puppy_pending_face_index(project)<0 {puppy_empty=1;}
-    puppy_draft=0;puppy_sketch=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_bar_page=0;
+    puppy_draft=0;puppy_sketch=0;puppy_anchor=0;puppy_revolve_axis=0;puppy_bar_page=0;puppy_draft_panning=0;
     return 1;
 }
 
@@ -118,12 +118,21 @@ fn puppy_workspace_switch(project) {
     if !cad_project_part(project) {return 1;}
     if puppy_draft {
         let index=puppy_draft_index;
-        if !puppy_refresh(project) {return puppy_title(project,cg_error);}
+        if !puppy_refresh(project) {puppy_draft_notice_set(cg_error);return puppy_title(project,cg_error);}
         puppy_workspace_show_part(project);puppy_draft_index=index;
+        if puppy_history_problem {puppy_draft_notice_set(puppy_history_problem+24);}
         return puppy_title(project,"Part workspace");
     }
     if puppy_sketch {
         puppy_sketch=0;return puppy_title(project,"Part workspace");
+    }
+    if pc_nodes(cad_project_part(project)) {
+        if puppy_selected_face {
+            return puppy_open_face_sketch(project,j_parse(puppy_selected_face+24));
+        }
+        if puppy_face_fill_count {
+            return puppy_title(project,"This surface has no matching extrusion face");
+        }
     }
     let sketch=puppy_draft_sketch(project);
     return puppy_workspace_edit_sketch(project,j_string(sketch,"id"));
@@ -148,6 +157,9 @@ fn puppy_plane_actions() {
 }
 fn puppy_start_plane_chooser(project) {
     puppy_search_focus(0);puppy_design_focus=0;puppy_tree_open=0;
+    if !puppy_support_sketch && puppy_selected_face {
+        return puppy_open_face_sketch(project,j_parse(puppy_selected_face+24));
+    }
     puppy_plane_chooser=1;puppy_picking_face=0;
     if puppy_support_sketch {return puppy_title(project,"Choose a sketch support");}
     return puppy_title(project,"Choose a plane for the new sketch");

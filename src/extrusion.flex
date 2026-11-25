@@ -43,6 +43,7 @@ fn puppy_extrusion_status(project,error) {
     let status=m_buffer();
     m_text(status,"Extrusion preview / ");m_text(status,operation);m_text(status," / ");m_text(status,condition);
     if puppy_extrusion_input_depth() {m_text(status," / ");m_text(status,puppy_display_number(puppy_extrusion_length));m_text(status," mm");}
+    if !puppy_extrusion_feature && puppy_profile_count(project)>1 {m_text(status," / Profile ");m_text(status,m_int(puppy_profile_index));}
     if puppy_extrusion_flip {m_text(status," / Flipped");}
     if puppy_extrusion_end_condition==3 {m_text(status," / Target ");m_text(status,j_string(puppy_extrusion_target(),"name"));}
     if error {m_text(status," / ");m_text(status,error);}
@@ -63,13 +64,16 @@ fn puppy_extrusion_draw_result(project) {
     let view=0;if result {view=cad_project_feature_history(result);}
     if !view || j_get(view,"error") {
         let error=cg_error;if !error {error="Cannot evaluate extrusion";}
+        puppy_draft_notice_set(error);
         puppy_extrusion_view_show(0);return puppy_extrusion_status(project,error);
     }
+    puppy_draft_notice_clear();
     if !puppy_extrusion_view_show(j_get(view,"mesh")) {return puppy_extrusion_status(project,"Cannot display extrusion");}
     puppy_extrusion_result=puppy_snapshot(j_encode(result));return puppy_extrusion_status(project,0);
 }
 fn puppy_extrusion_close() {
     if !puppy_extrusion_open {return 1;}
+    puppy_draft_notice_clear();
     if puppy_extrusion_feature {puppy_drop(puppy_extrusion_feature);puppy_extrusion_feature=0;}
     if puppy_extrusion_result {puppy_drop(puppy_extrusion_result);puppy_extrusion_result=0;}
     puppy_drop(puppy_extrusion_targets);puppy_extrusion_targets=0;
@@ -82,6 +86,9 @@ fn puppy_extrusion_begin(project,feature) {
     if feature {
         if !m_eq(j_string(feature,"type"),"extrude") {return puppy_title(project,"Select an extrusion to edit");}
         id=j_string(feature,"id");
+    }else {
+        puppy_profile_index=puppy_free_profile_index(project,j_string(puppy_draft_sketch(project),"id"),puppy_profile_index);
+        puppy_profile_selected=1;
     }
     let targets=cad_project_extrusion_targets(project,id);if !targets {return puppy_title(project,cg_error);}
     let stage=cad_project_extrusion_target_stage(project,id);if !stage {return puppy_title(project,cg_error);}
@@ -134,6 +141,9 @@ fn puppy_extrusion_actions() {
     if puppy_extrusion_can_flip() {puppy_compact_button(rows,"Flip",9,0);}
     if pc_first(puppy_extrusion_target_rows()) {puppy_compact_button(rows,"Operation",18,0);}
     if puppy_extrusion_end_condition==3 {puppy_compact_button(rows,"Target",24,0);}
+    if !puppy_extrusion_feature && puppy_profile_count(cad_project_open(puppy_history+24))>1 {
+        puppy_compact_button(rows,m_cat("Profile ",m_int(puppy_profile_index)),19,0);
+    }
     puppy_compact_button(rows,"Apply",40,0);
     puppy_compact_button(rows,"Cancel",GUI_KEY_ESCAPE,0);
     return rows;
@@ -160,6 +170,9 @@ fn puppy_extrusion_key(project,key,mods) {
     }else if key==24 && puppy_extrusion_end_condition==3 {
         puppy_extrusion_picking=1;puppy_extrusion_view_show(0);
         return puppy_title(project,"Extrusion preview / Click a target body or press Tab to cycle");
+    }else if key==19 && !puppy_extrusion_feature {
+        let total=puppy_profile_count(project);
+        if total>0 {puppy_profile_index=(puppy_profile_index%total)+1;}
     }else if key==43 && puppy_extrusion_end_condition==3 && count {
         puppy_extrusion_target_index=(puppy_extrusion_target_index+1)%count;
     }else {return 1;}

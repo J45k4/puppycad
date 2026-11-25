@@ -22,7 +22,12 @@ global puppy_pointer_x=0;
 global puppy_pointer_y=0;
 
 fn puppy_objects_button(x) {
-    let left=12;if puppy_isolated {left=108;}return x>=left && x<left+76;
+    let left=12;if puppy_isolated {left=108;}
+    let project=cad_project_open(puppy_history+24);
+    let bw=76;
+    if !puppy_draft && !cad_project_is_studio(project) && cad_project_part(project)
+        && !puppy_workspace_toolbar_compact(project,gui_width(load64(puppy_device))) {bw=34;}
+    return x>=left && x<left+bw;
 }
 fn puppy_search_focus(active) {
     if active!=puppy_search_active {

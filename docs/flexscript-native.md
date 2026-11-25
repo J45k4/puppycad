@@ -17,14 +17,32 @@ part and receive distinct instance IDs. Undo removes one insertion at a time.
 - **Assembly** shows occurrences and mates. Select an assembly in the Design
   tree and choose **Open assembly**. Use **Insert** to place parts and
   **Mate** to constrain how they move.
-- **Part** shows the solid and its features. Select a part in the tree and
-  choose **Open part**. Use **Sketch** in the toolbar to open its current
-  sketch, or select a specific sketch under that part.
-- **Sketch** provides the 2D drawing and dimension tools. Choose **Done
-  sketch** or click the underlined **Part** breadcrumb to return to the
-  owning part, even if the sketch has no solid.
-  F12 switches between Part and Sketch. Extrude and Revolve create a feature
-  and return to Part.
+- **Part** shows the solid and its features with an icon-only toolbar (**New
+  sketch**, **Edit sketch**, **Fillet / Chamfer edges**, **Loft**, **Feature
+  history**, **Dimensions**, **− / + / Set value**, **Export STL**, **Export
+  STEP**, **Fit view**, **Objects**, **New part**, **New assembly**, and
+  **Next item**) and hover tooltips showing each action's name and shortcut.
+  Clicking an already-selected 3D face, edge, or vertex a second time unselects
+  it. Select a part in the tree and choose **Open part**, or click the **Edit
+  sketch** icon to open its current sketch.
+- **Sketch** provides an icon-only 2D drawing toolbar (**Select**, **Line**,
+  **Corner rectangle**, **Center circle**, **3-point arc**, **Polygon**, **Fit
+  spline**, **Point**, **Extrude**, **Profile**, **Dimensions**, **Solid**, and
+  **Patterns**) with hover tooltips showing each tool's name and shortcut.
+  Overlapping shapes and cutting lines automatically subdivide into separate
+  selectable profile regions (highlighted with a translucent fill and orange
+  outline). Click **Select**, press `Escape` while using a sketch primitive
+  tool, or press Shift+P to hover and left-click any cut or sketch vertex
+  directly (clicking an already-selected cut unselects it); click the
+  **Profile** icon (`P`) to cycle cuts, or right-click inside any cut for
+  **Extrude profile N** / **Select profile N**. Drag with the **middle mouse
+  button** to pan the 2D sketch canvas (and use the scroll wheel to zoom or
+  **Fit** / `Home` to re-center). Inside the 3D **Extrude** preview you can
+  also click **Profile N** (`P`) to switch cuts live before applying.
+  Right-clicking while drawing cancels the in-progress shape. Choose **Done
+  sketch** or click the underlined **Part** breadcrumb to return to the owning
+  part, even if the sketch has no solid. F12 switches between Part and Sketch.
+  Extrude and Revolve create a feature and return to Part.
 
 When you open a referenced part from an assembly, click the underlined
 **Assembly** breadcrumb to return to that assembly from Part or Sketch.
@@ -39,10 +57,7 @@ In a narrow window the path can use the workspace names **Assembly**, **Part**, 
 **Sketch** to fit. The toolbar uses paged controls when it needs more space
 for the path.
 
-From Part, click **New sketch** or press Shift+S. Choose **Top (XY)**,
-**Front (XZ)**, or **Right (YZ)**. Choose **On face** to attach the sketch
-to an existing solid, then click its face. Keys 1, 2, and 3 select a plane
-while the chooser is open. Escape cancels.
+From Part, click a planar face in the viewport to highlight that face and its boundary outline, then click **Sketch**, **New sketch**, or press Shift+S to start a new sketch directly on it. Click directly on a sharp crease edge to highlight that edge in orange, then click **Edges** (or press H / Shift+H) to chamfer or fillet it immediately. With no face selected, **Sketch** (F12) edits the active sketch and **New sketch** (Shift+S) asks for **Top (XY)**, **Front (XZ)**, **Right (YZ)**, or **On face** (then click a face). Keys 1, 2, and 3 select a plane while the chooser is open. Escape cancels.
 
 To move an existing v4 sketch, right-click its Design row in Part and
 choose **Sketch support**. Pick a reference plane or choose **On face**.
@@ -69,7 +84,7 @@ name, type or ID to reveal matching records and their parents. Click a
 part, assembly or sketch row to open its workspace and update the
 breadcrumb. Other rows show their ID and available action.
 Right-click a sketch to choose
-**Edit sketch**, or right-click another row to see its available actions.
+**Edit sketch** or **Rename**, or right-click a part, assembly, feature, or occurrence to **Rename** it or see its available actions. Right-click a top-level part or assembly (or right-click **Save** / press Ctrl+Shift+S) to **Rename file** and save to a new `.pcad` filename without overwriting existing files.
 Press Escape to dismiss the menu. With the tree focused, Up and Down
 select rows, Left and Right navigate branches, and Enter opens the selected
 action. Collapse the panel with **‹** or
@@ -417,9 +432,11 @@ itself, the picker stays open so you can choose another section.
 
 Choose **Edges** or press **H** to chamfer a solid. Choose **Fillet** or
 press **Shift+H** for a round. Click each visible straight edge to include
-it. Selected edges turn amber, and clicking one again removes it. Choose
-**Apply** or press Enter to create the feature with a 1 mm distance or
-radius. Press F2 on its dimension to enter an exact value. Escape cancels
+it (or select an edge directly in Part mode first). Selected edges turn amber,
+and clicking one again removes it. Click **Radius** / **Distance** (or press
+**D** / **F2**) to change the default 1 mm size and inspect the live 3D bevel
+or round preview before choosing **Apply** or pressing Enter. Press F2 on the
+created feature’s dimension later to edit it. Escape cancels
 the selection. The saved file records the edges and the dimension so you
 can reopen the drawing and edit the finish.
 
@@ -601,13 +618,15 @@ turns selected geometry into guides and excludes it from the profile.
 | Click + or − | Change the selected dimension by 1 mm. The keyboard also accepts keypad + and −. |
 | **Extrusion options** in the Design tree or F4 in Part mode | Reopen the extrusion preview to edit its operation, depth, direction or end condition. |
 | Sketch / Solid or V | Switch between the selected profile’s outer and inner outlines and the shaded solid. |
-| Left-click a solid | Select and highlight the nearest body or assembly occurrence. Click empty space to clear the selection. |
+| Left-click a solid | Select and highlight the clicked sharp corner vertex, straight crease edge, planar face, or smooth curved surface (such as a cylinder wall or fillet, with its boundary outline) on the nearest body or occurrence. Click empty space to clear the selection. Hovering over a visible face, curved surface, or sharp corner vertex in 3D (or a sketch vertex or edge/outline midpoint in 2D) highlights it live — edge midpoints show a yellow square marker, and moving horizontally or vertically from hovered reference points shows yellow dashed alignment guides and snaps while drawing. |
+| Right-click a selection | Open a context menu with available actions for a selected 3D vertex (**Center view here**, **Copy coordinates**, **New sketch...**, **Mate**, **Fix/Unfix**, **Fit view**, **Clear selection**), 3D edge (**Fillet edge**, **Chamfer edge**), 3D face (**New sketch on face**, **Normal to face**), or 2D sketch vertex (**Line from vertex**, **Circle at vertex**, **Rectangle from vertex**, **Dimensions & constraints**, **Center view here**, **Copy coordinates**). |
 | Middle-drag | Pan the 3D view. |
-| Right-drag | Orbit around the surface under the pointer. A tangential drag at the viewport rim rolls the camera. |
+| Right-drag | Orbit freely in 3D around the surface under the pointer (without a Z-up lock). A tangential drag at the viewport rim rolls the camera. |
 | Arrow keys, mouse wheel | Orbit and zoom the solid view. |
 | Fit or Home | Recenter the drawing and restore the opening zoom at the current orientation. |
 | Undo / Redo | Move through the edit history. Ctrl+Z and Ctrl+Y also work. |
 | Save or Ctrl+S | Save to the open `.pcad` file. External content changes prevent overwriting the file. |
+| Rename file (Ctrl+Shift+S or right-click **Save**) | Rename and save the open `.pcad` file to a new filename without overwriting existing files. |
 | Export or Ctrl+E | Write a binary STL per body beside the project, choosing unused filenames. |
 | Ctrl+Alt+E | Write all bodies in the selected part to one 3MF beside the project, choosing an unused filename. |
 | STEP or Ctrl+Shift+E | Write a faceted AP214 `.step` file beside the drawing. A repeated export uses the next unused filename. |

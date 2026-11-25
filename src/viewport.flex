@@ -9,6 +9,8 @@ import "view-cube.flex";
 import "drawing-view.flex";
 import "part-sketches.flex";
 import "extrusion-preview.flex";
+import "face-selection.flex";
+import "viewport-menu.flex";
 
 global puppy_device=0;
 global puppy_empty=0;
@@ -16,8 +18,8 @@ global puppy_surface=0;
 global puppy_material=0;
 global puppy_center=0;
 global puppy_radius=1;
-global puppy_yaw=42000;
-global puppy_pitch=26000;
+global puppy_cam_basis=0;
+global puppy_start_basis=0;
 global puppy_zoom=280;
 global puppy_orthographic=0;
 global puppy_solved_assembly=0;
@@ -30,6 +32,15 @@ fn puppy_colored_mesh() {
     store64(attrs+72,1);store64(attrs+80,12);
     return render_mesh(puppy_device,16,attrs,2);
 }
+// Shaded solid surfaces add a smooth per-corner normal after position and color.
+fn puppy_shaded_mesh() {
+    let attrs=m_take(144);gui__zero(attrs,144);store64(attrs+8,3);store64(attrs+16,0x1406);
+    store64(attrs+48,1);store64(attrs+56,3);store64(attrs+64,0x1401);
+    store64(attrs+72,1);store64(attrs+80,12);
+    store64(attrs+96,2);store64(attrs+104,3);store64(attrs+112,0x1406);
+    store64(attrs+128,16);
+    return render_mesh(puppy_device,28,attrs,3);
+}
 fn puppy_vertex_color(vertex,rgb) {
     store8(vertex+12,rgb>>16);store8(vertex+13,rgb>>8);store8(vertex+14,rgb);store8(vertex+15,255);
 }
@@ -41,12 +52,14 @@ fn puppy_part_rgb(part) {
 fn puppy_view_open() {
     puppy_device=render_open("PuppyCAD",960,640,GUI_RESIZABLE|GUI_HIGH_DPI);
     if !puppy_device {return 0;}
-    let vertex="#version 450 core\nlayout(location=0) in vec3 position;layout(location=1) in vec3 vertexColor;flat out vec3 ink; uniform mat4 camera; uniform vec2 ortho; out vec3 world;flat out int picked;uniform ivec2 selection;uniform vec3 cameraPan;uniform int moving,lineOverlay;uniform vec3 axis,pivot;uniform vec2 cs; void main(){ink=vertexColor;picked=int(gl_VertexID>=selection.x && gl_VertexID<selection.y);world=position;if(moving!=0){vec3 r=position-pivot;world=pivot+cs.x*r+cs.y*cross(axis,r)+(1.0-cs.x)*dot(axis,r)*axis;}gl_Position=camera*vec4(world-cameraPan,1.0);if(ortho.x>0.0){gl_Position.z=ortho.x*(2.0*(gl_Position.w-0.001)/(ortho.y-0.001)-1.0);gl_Position.w=ortho.x;}if(lineOverlay==2){gl_Position.z-=0.00001*gl_Position.w;}gl_PointSize=5.0;}";
-    let fragment="#version 450 core\nin vec3 world;flat in int picked;flat in vec3 ink;uniform int lineOverlay;out vec4 color; void main(){if(lineOverlay!=0){color=vec4(ink,1.0);return;}vec3 n=normalize(cross(dFdx(world),dFdy(world)));float light=max(0.0,dot(n,normalize(vec3(-0.4,-0.6,1.0))));color=vec4((picked==1?vec3(0.98,0.69,0.28):ink)*(0.54+light*0.46),1.0);}";
+    let vertex="#version 450 core\nlayout(location=0) in vec3 position;layout(location=1) in vec3 vertexColor;layout(location=2) in vec3 vertexNormal;flat out vec3 ink; uniform mat4 camera; uniform vec2 ortho; out vec3 world;out vec3 vNormal;flat out int picked;uniform ivec2 selection;uniform vec3 cameraPan;uniform int moving,lineOverlay;uniform vec3 axis,pivot;uniform vec2 cs; void main(){ink=vertexColor;picked=int(gl_VertexID>=selection.x && gl_VertexID<selection.y);world=position;vNormal=vertexNormal;if(moving!=0){vec3 r=position-pivot;world=pivot+cs.x*r+cs.y*cross(axis,r)+(1.0-cs.x)*dot(axis,r)*axis;vNormal=cs.x*vNormal+cs.y*cross(axis,vNormal)+(1.0-cs.x)*dot(axis,vNormal)*axis;}gl_Position=camera*vec4(world-cameraPan,1.0);if(ortho.x>0.0){gl_Position.z=ortho.x*(2.0*(gl_Position.w-0.001)/(ortho.y-0.001)-1.0);gl_Position.w=ortho.x;}if(lineOverlay==2){gl_Position.z-=0.00025*gl_Position.w;}if(lineOverlay==3){gl_Position.z-=0.00002*gl_Position.w;}gl_PointSize=5.0;}";
+    let fragment="#version 450 core\nin vec3 world;in vec3 vNormal;flat in int picked;flat in vec3 ink;uniform int lineOverlay;out vec4 color; void main(){if(lineOverlay==1 || lineOverlay==2){color=vec4(ink,1.0);return;}vec3 n=dot(vNormal,vNormal)>0.01?normalize(vNormal):normalize(cross(dFdx(world),dFdy(world)));float light=max(0.0,dot(n,normalize(vec3(-0.4,-0.6,1.0))));color=vec4((picked==1?vec3(0.98,0.69,0.28):ink)*(0.54+light*0.46),1.0);}";
     puppy_material=render_material(puppy_device,vertex,fragment);
     if !puppy_material {return 0;}
-    puppy_surface=puppy_colored_mesh();
+    puppy_surface=puppy_shaded_mesh();
     puppy_center=cg_v(0,0,0);puppy_pan=cg_v(0,0,0);puppy_arc=m_take(96);puppy_orbit_point=m_take(24);
+    puppy_cam_basis=m_take(72);puppy_start_basis=m_take(72);puppy_camera_set_angles(42000,26000,0);
+    puppy_sel_face_normal=m_take(24);
     puppy_mesh_bounds=m_take(48);puppy_part_sketch_bounds=m_take(48);
     puppy_extrusion_view_init();
     return puppy_surface && puppy_toolbar_open() && puppy_sketch_open();
@@ -99,37 +112,113 @@ fn puppy_upload(project,mesh) {
     if !puppy_upload_harness(mesh,low,high) {return 0;}
     m_copy(puppy_mesh_bounds,low,24);m_copy(puppy_mesh_bounds+24,high,24);
     puppy_frame_bounds(low,high);
+    puppy_hover_cache_mesh(mesh,isolated);
     let triangles=j_integer(mesh,"triangles");
-    let data=m_take(triangles*48);let at=0;
+    let data=m_take(triangles*84);let at=0;let corner=0;
     puppy_visible_first=0;puppy_visible_count=triangles*3;
-    puppy_first=0;puppy_last=0;let part=pc_first(parts);
+    puppy_first=0;puppy_last=0;puppy_face_clear();let part=pc_first(parts);
     while part {
-        let rgb=puppy_part_rgb(part);let start=at/16;let id=pc_first(j_get(part,"triangles"));
+        let rgb=puppy_part_rgb(part);let start=corner;let id=pc_first(j_get(part,"triangles"));
         while id {
             m_copy(data+at,vertices+j_value(id)*12,12);
-            puppy_vertex_color(data+at,rgb);at=at+16;id=load64(id+24);
+            puppy_vertex_color(data+at,rgb);
+            if puppy_hover_tri_norms && corner<puppy_hover_raw_tri_count*3 {
+                m_copy(data+at+16,puppy_hover_tri_norms+corner*12,12);
+            }else {gui__zero(data+at+16,12);}
+            at=at+28;corner=corner+1;id=load64(id+24);
         }
         let entry=j_object();cg_j_text(entry,"id",j_string(part,"id"));cg_j_text(entry,"name",j_string(part,"name"));
         let occurrence=pc_find(instances,j_string(part,"id"));
         if j_get(occurrence,source_field) {cg_j_text(entry,"part",j_string(occurrence,source_field));}
-        cg_j_int(entry,"first",start);cg_j_int(entry,"count",at/16-start);
+        cg_j_int(entry,"first",start);cg_j_int(entry,"count",corner-start);
         j_add(entry,"bounds",j_parse(j_encode(j_get(part,"bounds"))));j_add(catalog,0,entry);
-        if part==isolated {puppy_visible_first=start;puppy_visible_count=at/16-start;}
-        if puppy_pick_id && m_eq(puppy_pick_id+24,j_string(part,"id")) {puppy_first=start;puppy_last=at/16;}
+        if part==isolated {puppy_visible_first=start;puppy_visible_count=corner-start;}
+        if puppy_pick_id && m_eq(puppy_pick_id+24,j_string(part,"id")) {puppy_first=start;puppy_last=corner;}
         part=load64(part+24);
     }
-    if !render_mesh_upload(puppy_surface,data,at/16,0x88e4) {return 0;}
+    if !render_mesh_upload(puppy_surface,data,corner,0x88e4) {return 0;}
     if puppy_solved_assembly {puppy_drop(puppy_solved_assembly);puppy_solved_assembly=0;}
     let assembly=j_get(mesh,"assembly");
     if assembly {puppy_solved_assembly=puppy_snapshot(j_encode(assembly));}
     if puppy_catalog {puppy_drop(puppy_catalog);}
     puppy_catalog=puppy_snapshot(j_encode(catalog));puppy_tree_dirty=1;return 1;
 }
+fn puppy_camera_orthonormalize(basis) {
+    let right=basis;let up=basis+24;let forward=basis+48;
+    render_normalize(forward);
+    render_cross(right,forward,up);render_normalize(right);
+    render_cross(up,right,forward);render_normalize(up);
+    return 1;
+}
+fn puppy_camera_roll_basis(dst,src,angle) {
+    let c=cg_cos(angle);let s=cg_sin(angle);let k=0;
+    while k<24 {
+        let r=load64(src+k);let u=load64(src+24+k);let f=load64(src+48+k);
+        store64(dst+k,(c*r-s*u)/1000000);
+        store64(dst+24+k,(c*u+s*r)/1000000);
+        store64(dst+48+k,f);
+        k=k+8;
+    }
+    return puppy_camera_orthonormalize(dst);
+}
+fn puppy_camera_set_angles(yaw,pitch,roll) {
+    let basis=puppy_cam_basis;let right=basis;let up=basis+24;let forward=basis+48;
+    let cp=cg_cos(pitch);let sp=cg_sin(pitch);let cy=cg_cos(yaw);let sy=cg_sin(yaw);
+    store64(forward,-cp*cy/1000000);store64(forward+8,cp*sy/1000000);store64(forward+16,-sp);
+    render_normalize(forward);
+    let vertical=cg_v(0,0,1000000);
+    if !load64(forward) && !load64(forward+8) {
+        vertical=cg_v(0,1000000,0);if load64(forward+16)>0 {store64(vertical+8,-1000000);}
+    }
+    render_cross(right,forward,vertical);render_normalize(right);
+    render_cross(up,right,forward);render_normalize(up);
+    puppy_hover_clear();
+    if roll {return puppy_camera_roll_basis(basis,basis,roll);}
+    return 1;
+}
+fn puppy_camera_align_normal(normal) {
+    let basis=puppy_cam_basis;let right=basis;let up=basis+24;let forward=basis+48;
+    store64(forward,-load64(normal)/1000);
+    store64(forward+8,-load64(normal+8)/1000);
+    store64(forward+16,-load64(normal+16)/1000);
+    render_normalize(forward);
+    let vertical=cg_v(0,0,1000000);
+    if cg_abs(load64(forward+16))>990000 {
+        vertical=cg_v(0,1000000,0);if load64(forward+16)>0 {store64(vertical+8,-1000000);}
+    }
+    render_cross(right,forward,vertical);render_normalize(right);
+    render_cross(up,right,forward);render_normalize(up);
+    puppy_hover_clear();return 1;
+}
+fn puppy_camera_rotate(yaw_delta,pitch_delta) {
+    if !yaw_delta && !pitch_delta {return 1;}
+    puppy_hover_clear();
+    let basis=puppy_cam_basis;let right=basis;let up=basis+24;let forward=basis+48;
+    if yaw_delta {
+        let c=cg_cos(yaw_delta);let s=cg_sin(yaw_delta);let k=0;
+        while k<24 {
+            let f=load64(forward+k);let r=load64(right+k);
+            store64(forward+k,(c*f+s*r)/1000000);
+            store64(right+k,(c*r-s*f)/1000000);
+            k=k+8;
+        }
+    }
+    if pitch_delta {
+        let c=cg_cos(pitch_delta);let s=cg_sin(pitch_delta);let k=0;
+        while k<24 {
+            let f=load64(forward+k);let u=load64(up+k);
+            store64(forward+k,(c*f-s*u)/1000000);
+            store64(up+k,(c*u+s*f)/1000000);
+            k=k+8;
+        }
+    }
+    return puppy_camera_orthonormalize(basis);
+}
 fn puppy_eye(distance) {
-    let reach=distance*cg_cos(puppy_pitch)/1000000;
-    let target=puppy_center;return cg_v(load64(target)+reach*cg_cos(puppy_yaw)/1000000,
-                 load64(target+8)-reach*cg_sin(puppy_yaw)/1000000,
-                 load64(target+16)+distance*cg_sin(puppy_pitch)/1000000);
+    let target=puppy_center;let forward=puppy_cam_basis+48;
+    return cg_v(load64(target)-distance*load64(forward)/1000000,
+                load64(target+8)-distance*load64(forward+8)/1000000,
+                load64(target+16)-distance*load64(forward+16)/1000000);
 }
 fn puppy_ray(x,y) {
     let window=load64(puppy_device);let w=gui_width(window);let h=gui_height(window);
@@ -205,7 +294,9 @@ fn puppy_draw() {
     else if puppy_sketch {drawn=puppy_draw_sketch(w,h);}
     else {
         if !puppy_bind_camera(camera,distance,puppy_first,puppy_last) {return 0;}
-        drawn=puppy_empty || (puppy_draw_occurrences() && puppy_draw_harness());
+        if puppy_empty {drawn=puppy_draw_face_selection();}
+        else if puppy_edge_kind && puppy_edge_preview_count {drawn=puppy_edge_draw_preview() && puppy_draw_face_selection();}
+        else {drawn=puppy_draw_occurrences() && puppy_draw_face_selection() && puppy_draw_harness();}
         if drawn {drawn=puppy_part_sketch_draw();}
         if drawn && puppy_mating {
             if puppy_mate_first {drawn=puppy_draw_lines(puppy_first_marker,2);}
@@ -215,18 +306,18 @@ fn puppy_draw() {
     }
     if puppy_reader_report {return drawn && puppy_toolbar_draw(w,h) && gui_gl_swap(window);}
     if puppy_step_input {return drawn && puppy_toolbar_draw(w,h) && puppy_cube_draw() && gui_gl_swap(window);}
-    return drawn && puppy_toolbar_draw(w,h) && puppy_objects_draw(w,h) && puppy_cube_draw() && gui_gl_swap(window);
+    return drawn && puppy_toolbar_draw(w,h) && puppy_objects_draw(w,h) && puppy_cube_draw() && puppy_vmenu_draw(w,h) && gui_gl_swap(window);
 }
 fn puppy_view_close() {
-    puppy_history_close();puppy_history_diagnostic(0);
+    puppy_history_close();puppy_history_diagnostic(0);puppy_vmenu_cleanup();
     if puppy_solved_assembly {puppy_drop(puppy_solved_assembly);puppy_solved_assembly=0;}
     if puppy_catalog {puppy_drop(puppy_catalog);puppy_catalog=0;}
     if puppy_folded_paths {puppy_drop(puppy_folded_paths);puppy_folded_paths=0;}
     puppy_search_focus(0);if puppy_search {puppy_drop(puppy_search);puppy_search=0;}
     if puppy_toolbar_context {tf_context_free(puppy_toolbar_context);}
     render_mesh_close(puppy_first_marker);render_mesh_close(puppy_second_marker);
-    if puppy_edge_kind {puppy_edge_close();}render_mesh_close(puppy_edge_mesh);
-    render_mesh_close(puppy_part_sketch_mesh);
+    if puppy_edge_kind {puppy_edge_close();}render_mesh_close(puppy_edge_mesh);render_mesh_close(puppy_edge_preview_mesh);
+    render_mesh_close(puppy_part_sketch_mesh);puppy_face_close();
     puppy_extrusion_view_close();
     render_mesh_close(puppy_harness_mesh);render_mesh_close(puppy_sketch_mesh);render_mesh_close(puppy_surface);render_material_close(puppy_material);
     render_close(puppy_device);gui_quit();return 0;

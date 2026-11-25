@@ -14,6 +14,7 @@ global puppy_breadcrumb_assembly_left=0;
 global puppy_breadcrumb_assembly_right=0;
 global puppy_breadcrumb_part_left=0;
 global puppy_breadcrumb_part_right=0;
+global puppy_toolbar_hover_id=0;
 
 fn puppy_toolbar_open() {
     puppy_toolbar_context=tf_context();
@@ -90,19 +91,32 @@ fn puppy_bar_button(rgb,w,x,width,label) {
     puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
     return puppy_bar_text(rgb,w,x+8,60,label,x+width);
 }
-// Blend 16×16 masks into the toolbar texture. The marks . + # encode increasing coverage.
+// Blend 16×16 masks into the toolbar texture. The marks . + # encode white coverage,
+// while B/b encode Onshape-style sky-blue anchor rings and o encodes a dark hollow center.
 fn puppy_bar_icon(rgb,w,x,y,mask,tone,mirror) {
     let row=0;while row<16 {
         let line=cg_at(mask,row);let col=0;while col<16 && x+col<w {
             let sample=col;if mirror {sample=15-col;}
             let mark=load8(line+sample);
-            let coverage=0;
-            if mark==46 {coverage=1;}else if mark==43 {coverage=2;}else if mark==35 {coverage=3;}
-            if coverage && x+col>=0 {
+            if x+col>=0 {
                 let pixel=rgb+((y+row)*w+x+col)*4;
-                let channel=0;while channel<3 {
-                    store8(pixel+channel,(load8(pixel+channel)*(3-coverage)+tone*coverage)/3);
-                    channel=channel+1;
+                if mark==66 {
+                    store8(pixel,88);store8(pixel+1,176);store8(pixel+2,255);
+                }else if mark==98 {
+                    store8(pixel,(load8(pixel)+88*2)/3);
+                    store8(pixel+1,(load8(pixel+1)+176*2)/3);
+                    store8(pixel+2,(load8(pixel+2)+255*2)/3);
+                }else if mark==111 {
+                    store8(pixel,30);store8(pixel+1,44);store8(pixel+2,48);
+                }else {
+                    let coverage=0;
+                    if mark==46 {coverage=1;}else if mark==43 {coverage=2;}else if mark==35 {coverage=3;}
+                    if coverage {
+                        let channel=0;while channel<3 {
+                            store8(pixel+channel,(load8(pixel+channel)*(3-coverage)+tone*coverage)/3);
+                            channel=channel+1;
+                        }
+                    }
                 }
             }
             col=col+1;
@@ -128,9 +142,9 @@ fn puppy_bar_history(rgb,w,x,width,redo) {
     cg_push(mask,"                ");
     cg_push(mask,"                ");
     cg_push(mask,"                ");
-    let offset=0;if redo {offset=8;}
+    let offset=0;let id=1;if redo {offset=8;id=2;}
     let tone=126;if load64(puppy_history+offset) {tone=236;}
-    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    puppy_bar_icon_bg(rgb,w,x,width,id);
     return puppy_bar_icon(rgb,w,x+(width-16)/2,48,mask,tone,redo);
 }
 fn puppy_bar_sketch(rgb,w,x,width,label) {
@@ -156,6 +170,825 @@ fn puppy_bar_sketch(rgb,w,x,width,label) {
     puppy_bar_rect(rgb,w,x+5,62,15,1,143,217,184);
     return puppy_bar_text(rgb,w,x+25,60,label,x+width-4);
 }
+fn puppy_bar_icon_bg(rgb,w,x,width,id) {
+    let r=48;let g=68;let b=70;
+    if id && puppy_toolbar_hover_id==id {r=66;g=92;b=96;}
+    return puppy_bar_rect(rgb,w,x,42,width,26,r,g,b);
+}
+fn puppy_bar_row1_icon(rgb,w,x,width,id,mask) {
+    let r=45;let g=64;let b=67;
+    if id && puppy_toolbar_hover_id==id {r=66;g=92;b=96;}
+    puppy_bar_rect(rgb,w,x,6,width,28,r,g,b);
+    return puppy_bar_icon(rgb,w,x+(width-16)/2,12,mask,236,0);
+}
+fn puppy_bar_icon_only(rgb,w,x,width,id,mask,active) {
+    puppy_bar_icon_bg(rgb,w,x,width,id);
+    puppy_bar_icon(rgb,w,x+(width-16)/2,47,mask,236,0);
+    if active {puppy_bar_rect(rgb,w,x,66,width,2,143,217,184);}
+    return 1;
+}
+fn puppy_icon_save() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"  ###########   ");
+    cg_push(mask,"  #  BBB  # ##  ");
+    cg_push(mask,"  #  B B  #  #  ");
+    cg_push(mask,"  #  BBB  #  #  ");
+    cg_push(mask,"  #  #####   #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #  ######  #  ");
+    cg_push(mask,"  #  #bbbb#  #  ");
+    cg_push(mask,"  #  #bbbb#  #  ");
+    cg_push(mask,"  #  #bbbb#  #  ");
+    cg_push(mask,"  #  #bbbb#  #  ");
+    cg_push(mask,"  ############  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_fit() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"  ####    ####  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"      BBBB      ");
+    cg_push(mask,"      BooB      ");
+    cg_push(mask,"      BooB      ");
+    cg_push(mask,"      BBBB      ");
+    cg_push(mask,"                ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  ####    ####  ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_new_sketch() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"   B       +##. ");
+    cg_push(mask,"   B      +#++#.");
+    cg_push(mask," BBBBB   +#+#.+#");
+    cg_push(mask,"   B    +#. +#+#");
+    cg_push(mask,"   B   +#.   ##.");
+    cg_push(mask,"      +#.   +#. ");
+    cg_push(mask,"     +#.   +#.  ");
+    cg_push(mask,"    +#.   +#.   ");
+    cg_push(mask,"   .#.   +#.    ");
+    cg_push(mask,"   ++   +#.     ");
+    cg_push(mask,"   #. .+#.      ");
+    cg_push(mask,"  .####+.       ");
+    cg_push(mask,"  +#+.          ");
+    cg_push(mask,"  BBBBBBBBBBBB  ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_edit_sketch() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"          +##.  ");
+    cg_push(mask,"         +#++#. ");
+    cg_push(mask,"        +#+#.+# ");
+    cg_push(mask,"       +#. +#+# ");
+    cg_push(mask,"      +#.   ##. ");
+    cg_push(mask,"     +#.   +#.  ");
+    cg_push(mask,"    +#.   +#.   ");
+    cg_push(mask,"   +#.   +#.    ");
+    cg_push(mask,"  .#.   +#.     ");
+    cg_push(mask,"  ++   +#.      ");
+    cg_push(mask,"  #. .+#.       ");
+    cg_push(mask," .####+.        ");
+    cg_push(mask," +#+.           ");
+    cg_push(mask,"  BBBBBBBBBBBB  ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_loft() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"     BBBBBB     ");
+    cg_push(mask,"    BooooooB    ");
+    cg_push(mask,"     BBBBBB     ");
+    cg_push(mask,"    #      #    ");
+    cg_push(mask,"    #  ++  #    ");
+    cg_push(mask,"   #   ++   #   ");
+    cg_push(mask,"   #  ++++  #   ");
+    cg_push(mask,"  #   ++++   #  ");
+    cg_push(mask,"  #  ++++++  #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  BBBBBBBBBBBB  ");
+    cg_push(mask," BooooooooooooB ");
+    cg_push(mask,"  BBBBBBBBBBBB  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_history() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"     ######     ");
+    cg_push(mask,"   ##      ##   ");
+    cg_push(mask,"  #    B     #  ");
+    cg_push(mask," #     B      # ");
+    cg_push(mask," #     B      # ");
+    cg_push(mask,"#      B       #");
+    cg_push(mask,"#      B       #");
+    cg_push(mask,"#      BBBBB   #");
+    cg_push(mask,"#              #");
+    cg_push(mask," #            # ");
+    cg_push(mask," #            # ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"   ##      ##   ");
+    cg_push(mask,"     ######     ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_minus() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"   ##########   ");
+    cg_push(mask,"   ##########   ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_plus() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"   ##########   ");
+    cg_push(mask,"   ##########   ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_set_value() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"  ############  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #  #  #  B #  ");
+    cg_push(mask,"  # ###### B #  ");
+    cg_push(mask,"  #  #  #  B #  ");
+    cg_push(mask,"  #  #  #  B #  ");
+    cg_push(mask,"  # ###### B #  ");
+    cg_push(mask,"  #  #  #  B #  ");
+    cg_push(mask,"  #        B #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  ############  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_export() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"       BB       ");
+    cg_push(mask,"      BBBB      ");
+    cg_push(mask,"     BB  BB     ");
+    cg_push(mask,"       BB       ");
+    cg_push(mask,"       BB       ");
+    cg_push(mask,"       BB       ");
+    cg_push(mask,"  ##   BB   ##  ");
+    cg_push(mask,"  #    BB    #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  ############  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_step() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"          BBBB  ");
+    cg_push(mask,"            BB  ");
+    cg_push(mask,"     ##    B B  ");
+    cg_push(mask,"   ##++## B  B  ");
+    cg_push(mask,"  #++++++#      ");
+    cg_push(mask,"  ###++###      ");
+    cg_push(mask,"  #..##bb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"   ###bb##      ");
+    cg_push(mask,"     ###        ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_objects() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"    ######      ");
+    cg_push(mask,"   #      #     ");
+    cg_push(mask,"  #   BB   #    ");
+    cg_push(mask,"  #  B  B  #    ");
+    cg_push(mask,"  #   BB   #    ");
+    cg_push(mask,"   #      #     ");
+    cg_push(mask,"    ######      ");
+    cg_push(mask,"         ##     ");
+    cg_push(mask,"          ##    ");
+    cg_push(mask,"           ##   ");
+    cg_push(mask,"            ##  ");
+    cg_push(mask,"             #  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_new_part() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"            B   ");
+    cg_push(mask,"     ##    BBB  ");
+    cg_push(mask,"   ##++##   B   ");
+    cg_push(mask,"  #++++++#      ");
+    cg_push(mask,"  ###++###      ");
+    cg_push(mask,"  #..##bb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"  #..#bbb#      ");
+    cg_push(mask,"   ###bb##      ");
+    cg_push(mask,"     ###        ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_new_assembly() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"            B   ");
+    cg_push(mask,"   ####    BBB  ");
+    cg_push(mask,"   #++#     B   ");
+    cg_push(mask,"   #++#         ");
+    cg_push(mask,"   ######       ");
+    cg_push(mask,"      #bb#      ");
+    cg_push(mask,"      #bb#      ");
+    cg_push(mask,"   ######       ");
+    cg_push(mask,"   #++#         ");
+    cg_push(mask,"   #++#         ");
+    cg_push(mask,"   ####         ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_next_item() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"        BB      ");
+    cg_push(mask,"         BB     ");
+    cg_push(mask,"  BBBBBBBBBB    ");
+    cg_push(mask,"         BB     ");
+    cg_push(mask,"        BB      ");
+    cg_push(mask,"                ");
+    cg_push(mask,"      ##        ");
+    cg_push(mask,"     ##         ");
+    cg_push(mask,"    ##########  ");
+    cg_push(mask,"     ##         ");
+    cg_push(mask,"      ##        ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_select() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"   #            ");
+    cg_push(mask,"   ##           ");
+    cg_push(mask,"   #+#          ");
+    cg_push(mask,"   #++#         ");
+    cg_push(mask,"   #+++#        ");
+    cg_push(mask,"   #++++#       ");
+    cg_push(mask,"   #+++++#      ");
+    cg_push(mask,"   #++++++#     ");
+    cg_push(mask,"   #+++++++#    ");
+    cg_push(mask,"   #++++####    ");
+    cg_push(mask,"   #+++#        ");
+    cg_push(mask,"   #+# +#       ");
+    cg_push(mask,"   ##   +#      ");
+    cg_push(mask,"         #      ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_line() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"            BBB ");
+    cg_push(mask,"           #BoB ");
+    cg_push(mask,"          # BBB ");
+    cg_push(mask,"         #      ");
+    cg_push(mask,"        #       ");
+    cg_push(mask,"       #        ");
+    cg_push(mask,"      #         ");
+    cg_push(mask,"     #          ");
+    cg_push(mask,"    #           ");
+    cg_push(mask,"   #            ");
+    cg_push(mask,"  #             ");
+    cg_push(mask," BBB            ");
+    cg_push(mask," BoB            ");
+    cg_push(mask," BBB            ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_rect() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"            BBB ");
+    cg_push(mask,"  ##########BoB ");
+    cg_push(mask,"  #         BBB ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask,"  #          #  ");
+    cg_push(mask," BBB##########  ");
+    cg_push(mask," BoB            ");
+    cg_push(mask," BBB            ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_circle() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"     ######     ");
+    cg_push(mask,"   ##     BBB   ");
+    cg_push(mask,"  #       BoB   ");
+    cg_push(mask," #        BBB   ");
+    cg_push(mask," #           #  ");
+    cg_push(mask,"#     BBB     # ");
+    cg_push(mask,"#     BoB     # ");
+    cg_push(mask,"#     BBB     # ");
+    cg_push(mask,"#             # ");
+    cg_push(mask," #           #  ");
+    cg_push(mask," #           #  ");
+    cg_push(mask,"  #         #   ");
+    cg_push(mask,"   ##     ##    ");
+    cg_push(mask,"     ######     ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_arc() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"      BBB       ");
+    cg_push(mask,"    ##BoB##     ");
+    cg_push(mask,"   #  BBB  #    ");
+    cg_push(mask,"  #         #   ");
+    cg_push(mask,"  #    #    #   ");
+    cg_push(mask,"  #   ###   #   ");
+    cg_push(mask,"  #    #    #   ");
+    cg_push(mask,"  #         #   ");
+    cg_push(mask," BBB       BBB  ");
+    cg_push(mask," BoB       BoB  ");
+    cg_push(mask," BBB       BBB  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_polygon() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"     ##  ##     ");
+    cg_push(mask,"   ##     BBB   ");
+    cg_push(mask,"  #   bbb BoB   ");
+    cg_push(mask,"  #  b   bBBB   ");
+    cg_push(mask,"  # b BBB b #   ");
+    cg_push(mask,"  # b BoB b #   ");
+    cg_push(mask,"  # b BBB b #   ");
+    cg_push(mask,"   # b   b #    ");
+    cg_push(mask,"   #  bbb  #    ");
+    cg_push(mask,"    #     #     ");
+    cg_push(mask,"    #     #     ");
+    cg_push(mask,"    #######     ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_spline() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"            BBB ");
+    cg_push(mask,"            BoB ");
+    cg_push(mask,"           #BBB ");
+    cg_push(mask,"           #    ");
+    cg_push(mask,"          #     ");
+    cg_push(mask,"         #      ");
+    cg_push(mask,"      BBB       ");
+    cg_push(mask,"      BoB       ");
+    cg_push(mask,"     #BBB       ");
+    cg_push(mask,"    #           ");
+    cg_push(mask,"   #            ");
+    cg_push(mask," BBB            ");
+    cg_push(mask," BoB            ");
+    cg_push(mask," BBB            ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_point() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"     BBBBBB     ");
+    cg_push(mask,"    BBooooBB    ");
+    cg_push(mask,"    BooooooB    ");
+    cg_push(mask,"    BooooooB    ");
+    cg_push(mask,"    BBooooBB    ");
+    cg_push(mask,"     BBBBBB     ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_profile() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"  ############  ");
+    cg_push(mask,"  #bbbbbbbbbb#  ");
+    cg_push(mask,"  #bbbbbbbbbb#  ");
+    cg_push(mask,"  #bbbbbbbbbb#  ");
+    cg_push(mask,"  #bbbbbbbbbb#  ");
+    cg_push(mask,"  #bbbb#######  ");
+    cg_push(mask,"  #bbbb#        ");
+    cg_push(mask,"  #bbbb#        ");
+    cg_push(mask,"  #bbbb#        ");
+    cg_push(mask,"  #bbbb#        ");
+    cg_push(mask,"  #bbbb#        ");
+    cg_push(mask,"  #bbbb#        ");
+    cg_push(mask,"  ######        ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_dimensions() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask," #            # ");
+    cg_push(mask," #            # ");
+    cg_push(mask," #  #      #  # ");
+    cg_push(mask," # ##      ## # ");
+    cg_push(mask," ############## ");
+    cg_push(mask," # ##      ## # ");
+    cg_push(mask," #  #      #  # ");
+    cg_push(mask," #            # ");
+    cg_push(mask," #            # ");
+    cg_push(mask,"                ");
+    cg_push(mask,"    BBBBBBBB    ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_solid() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"     ##++##     ");
+    cg_push(mask,"   ##++++++##   ");
+    cg_push(mask,"  #++++++++++#  ");
+    cg_push(mask,"  ###++++++###  ");
+    cg_push(mask,"  #..##++##bb#  ");
+    cg_push(mask,"  #....##bbbb#  ");
+    cg_push(mask,"  #....#bbbbb#  ");
+    cg_push(mask,"  #....#bbbbb#  ");
+    cg_push(mask,"  #....#bbbbb#  ");
+    cg_push(mask,"   ##..#bbb##   ");
+    cg_push(mask,"     ###b##     ");
+    cg_push(mask,"       ##       ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_icon_patterns() {
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"  ####    ####  ");
+    cg_push(mask,"  #bb#    #bb#  ");
+    cg_push(mask,"  #bb#    #bb#  ");
+    cg_push(mask,"  ####    ####  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"  ####    ####  ");
+    cg_push(mask,"  #bb#    #bb#  ");
+    cg_push(mask,"  #bb#    #bb#  ");
+    cg_push(mask,"  ####    ####  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    return mask;
+}
+fn puppy_bar_select(rgb,w,x,width,label) {
+    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    puppy_bar_icon(rgb,w,x+4,47,puppy_icon_select(),236,0);
+    return puppy_bar_text(rgb,w,x+23,60,label,x+width-4);
+}
+fn puppy_bar_extrude(rgb,w,x,width,label) {
+    let fill=cg_array();
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"        ####    ");
+    cg_push(fill,"       .        ");
+    cg_push(fill,"       . ++++   ");
+    cg_push(fill,"       . ++++   ");
+    cg_push(fill,"       . ++++   ");
+    cg_push(fill,"         ++++   ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask," ##########     ");
+    cg_push(mask," ##        #    ");
+    cg_push(mask," # #        #   ");
+    cg_push(mask," #  ##########  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  # ###### #  ");
+    cg_push(mask," #  # ##    ##  ");
+    cg_push(mask," #  # # ######  ");
+    cg_push(mask," #  # # #    #  ");
+    cg_push(mask," #  # # #    #  ");
+    cg_push(mask,"  # # # #    #  ");
+    cg_push(mask,"   ##  ##    #  ");
+    cg_push(mask,"    ##########  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    puppy_bar_icon(rgb,w,x+4,47,fill,190,0);
+    puppy_bar_icon(rgb,w,x+4,47,mask,236,0);
+    return puppy_bar_text(rgb,w,x+22,60,label,x+width-3);
+}
+fn puppy_bar_extrude_icon(rgb,w,x,width,id) {
+    let fill=cg_array();
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"        ####    ");
+    cg_push(fill,"       .        ");
+    cg_push(fill,"       . ++++   ");
+    cg_push(fill,"       . ++++   ");
+    cg_push(fill,"       . ++++   ");
+    cg_push(fill,"         ++++   ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask," ##########     ");
+    cg_push(mask," ##        #    ");
+    cg_push(mask," # #        #   ");
+    cg_push(mask," #  ##########  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  # ###### #  ");
+    cg_push(mask," #  # ##    ##  ");
+    cg_push(mask," #  # # ######  ");
+    cg_push(mask," #  # # #    #  ");
+    cg_push(mask," #  # # #    #  ");
+    cg_push(mask,"  # # # #    #  ");
+    cg_push(mask,"   ##  ##    #  ");
+    cg_push(mask,"    ##########  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    puppy_bar_icon_bg(rgb,w,x,width,id);
+    puppy_bar_icon(rgb,w,x+(width-16)/2,47,fill,190,0);
+    puppy_bar_icon(rgb,w,x+(width-16)/2,47,mask,236,0);
+    return 1;
+}
+fn puppy_part_step_x(project) {
+    let part=cad_project_part(project);let feature=puppy_feature(project);
+    let x=354;
+    if (pc_nodes(part) && feature) || (pc_legacy_solid_part(part) && !puppy_empty) {x=394;}
+    if feature && puppy_line_button(project) {x=x+40;}
+    return x+8;
+}
+fn puppy_toolbar_hover_info(project,w,x,y) {
+    if !project {return 0;}
+    if puppy_number_text || puppy_patterns || puppy_line_report || puppy_history_rows || puppy_edge_kind || puppy_loft_open
+        || puppy_extrusion_open || puppy_revolve_open || puppy_shell_open || puppy_mating || puppy_step_input
+        || puppy_plane_chooser || puppy_support_stage || puppy_sheet_scene || puppy_construction_ids || puppy_reader_report {
+        return 0;
+    }
+    if puppy_workspace_toolbar_compact(project,w) {return 0;}
+    let is_part=!puppy_draft && !cad_project_is_studio(project) && cad_project_part(project);
+    if y>=6 && y<34 {
+        if is_part {
+            let ox=12;if puppy_isolated {ox=108;}
+            if !puppy_sketch && !puppy_empty && x>=ox && x<ox+34 {return cg_v(101,ox+17,"Objects & search (T)");}
+            if x>=w-126 && x<w-92 {return cg_v(102,w-109,"New part (Shift+N)");}
+            if x>=w-86 && x<w-52 {return cg_v(103,w-69,"New assembly (Shift+A)");}
+            if puppy_has_other_item(project) && x>=w-46 && x<w-12 {return cg_v(104,w-29,"Next item (F6)");}
+        }
+        return 0;
+    }
+    if y<42 || y>=68 {return 0;}
+    if x>=12 && x<64 {return cg_v(1,38,"Undo (Ctrl+Z)");}
+    if x>=70 && x<122 {return cg_v(2,96,"Redo (Ctrl+Y)");}
+    if x>=128 && x<180 {return cg_v(3,154,"Save (Ctrl+S)");}
+    if (puppy_draft || is_part) && (puppy_draft || puppy_camera_available()) && x>=w-46 && x<w-12 {return cg_v(4,w-29,"Fit view (Home)");}
+    if !puppy_draft && !is_part && puppy_camera_available() && x>=w-60 && x<w-12 {return cg_v(4,w-36,"Fit view (Home)");}
+    if is_part {
+        let part=cad_project_part(project);let feature=puppy_feature(project);
+        if pc_nodes(part) && x>=194 && x<228 {return cg_v(30,211,"New sketch (Shift+S)");}
+        if (pc_nodes(part) || pc_legacy_solid_part(part)) && puppy_draft_sketch(project) && x>=234 && x<268 {
+            if puppy_sketch {return cg_v(31,251,"Part workspace (F12)");}
+            return cg_v(31,251,"Edit sketch (F12)");
+        }
+        if !puppy_sketch && !puppy_empty && pc_nodes(part) && x>=274 && x<308 {return cg_v(32,291,"Fillet / Chamfer edges (H / Shift+H)");}
+        if pc_nodes(part) && x>=314 && x<348 {return cg_v(33,331,"Loft between sketches (Shift+L)");}
+        if ((pc_nodes(part) && feature) || (pc_legacy_solid_part(part) && !puppy_empty)) && x>=354 && x<388 {return cg_v(34,371,"Feature history (F7)");}
+        if feature && puppy_line_button(project) && x>=394 && x<428 {return cg_v(35,411,"Dimensions & constraints (F8)");}
+        if feature {
+            let sx=puppy_part_step_x(project);
+            if x>=sx && x<sx+30 {return cg_v(36,sx+15,"Decrease value (-)");}
+            if x>=sx+36 && x<sx+66 {return cg_v(37,sx+51,"Increase value (+)");}
+            if x>=sx+72 && x<sx+106 {return cg_v(38,sx+89,"Set value (F2)");}
+        }
+        if !puppy_empty && x>=w-126 && x<w-92 {return cg_v(39,w-109,"Export STL (Ctrl+E)");}
+        if !puppy_empty && x>=w-86 && x<w-52 {return cg_v(40,w-69,"Export STEP (Ctrl+Shift+E)");}
+        return 0;
+    }
+    if !puppy_draft || puppy_revolve_axis || puppy_curves_page {return 0;}
+    if x>=194 && x<228 {return cg_v(10,211,"Select (Esc / Shift+P)");}
+    if x>=234 && x<268 {return cg_v(11,251,"Line (L)");}
+    if x>=274 && x<308 {return cg_v(12,291,"Corner rectangle (R)");}
+    if x>=314 && x<348 {return cg_v(13,331,"Center circle (C)");}
+    if x>=354 && x<388 {return cg_v(14,371,"3-point arc (A)");}
+    if x>=394 && x<428 {return cg_v(15,411,"Polygon");}
+    if x>=434 && x<468 {return cg_v(16,451,"Fit spline (S)");}
+    if x>=474 && x<508 {return cg_v(17,491,"Point (.)");}
+    if x>=522 && x<556 {return cg_v(18,539,"Extrude (X)");}
+    if x>=562 && x<608 {
+        if puppy_profile_selected {return cg_v(19,585,m_cat("Profile ",m_cat(m_int(puppy_profile_index)," (P)")));}
+        return cg_v(19,585,"Select profile (P)");
+    }
+    let next_x=614;
+    if puppy_line_button(project) {
+        if x>=614 && x<648 {return cg_v(20,631,"Dimensions & constraints (F8)");}
+        next_x=654;
+    }
+    if puppy_draft_on_face(project) {
+        if x>=614 && x<676 {return cg_v(21,645,m_cat("Operation: ",m_cat(puppy_operation(project)," (O)")));}
+        next_x=682;
+    }
+    if puppy_pending_face_index(project)>=0 {
+        if x>=next_x && x<next_x+34 {return cg_v(22,next_x+17,"Toggle solid preview (V)");}
+        next_x=next_x+40;
+    }
+    if w>=860 && x>=next_x && x<next_x+34 {return cg_v(23,next_x+17,"Sketch patterns (F5)");}
+    return 0;
+}
+fn puppy_toolbar_hover_update(project,w,x,y) {
+    let info=puppy_toolbar_hover_info(project,w,x,y);
+    let id=0;if info {id=load64(info);}
+    if id==puppy_toolbar_hover_id {return 0;}
+    puppy_toolbar_hover_id=id;puppy_toolbar_dirty=1;return 1;
+}
+fn puppy_draw_fillet_icon(rgb,w,x,y) {
+    let fill=cg_array();
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"     +++++      ");
+    cg_push(fill,"   +++++++      ");
+    cg_push(fill,"  ++++++        ");
+    cg_push(fill,"  ++++          ");
+    cg_push(fill,"  +++           ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"   .            ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"     ######     ");
+    cg_push(mask,"   ##      #    ");
+    cg_push(mask,"  #         #   ");
+    cg_push(mask," #      ######  ");
+    cg_push(mask," #    ##     #  ");
+    cg_push(mask," #   #       #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask,"  # #        #  ");
+    cg_push(mask,"   ##        #  ");
+    cg_push(mask,"    ##########  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    puppy_bar_icon(rgb,w,x,y,fill,190,0);
+    return puppy_bar_icon(rgb,w,x,y,mask,236,0);
+}
+fn puppy_draw_chamfer_icon(rgb,w,x,y) {
+    let fill=cg_array();
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"     +++++      ");
+    cg_push(fill,"    ++++++      ");
+    cg_push(fill,"   +++++        ");
+    cg_push(fill,"  ++++          ");
+    cg_push(fill,"  +++           ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"  ..            ");
+    cg_push(fill,"   .            ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    cg_push(fill,"                ");
+    let mask=cg_array();
+    cg_push(mask,"                ");
+    cg_push(mask,"     ######     ");
+    cg_push(mask,"    #      #    ");
+    cg_push(mask,"   #        #   ");
+    cg_push(mask,"  #     ######  ");
+    cg_push(mask," #     #     #  ");
+    cg_push(mask," #    #      #  ");
+    cg_push(mask," #   #       #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask," #  #        #  ");
+    cg_push(mask,"  # #        #  ");
+    cg_push(mask,"   ##        #  ");
+    cg_push(mask,"    ##########  ");
+    cg_push(mask,"                ");
+    cg_push(mask,"                ");
+    puppy_bar_icon(rgb,w,x,y,fill,190,0);
+    return puppy_bar_icon(rgb,w,x,y,mask,236,0);
+}
+fn puppy_bar_fillet(rgb,w,x,width,label,active) {
+    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    puppy_draw_fillet_icon(rgb,w,x+4,47);
+    if active {puppy_bar_rect(rgb,w,x,66,width,2,143,217,184);}
+    return puppy_bar_text(rgb,w,x+23,60,label,x+width-3);
+}
+fn puppy_bar_chamfer(rgb,w,x,width,label,active) {
+    puppy_bar_rect(rgb,w,x,42,width,26,48,68,70);
+    puppy_draw_chamfer_icon(rgb,w,x+4,47);
+    if active {puppy_bar_rect(rgb,w,x,66,width,2,143,217,184);}
+    return puppy_bar_text(rgb,w,x+23,60,label,x+width-3);
+}
 fn puppy_value_button_hit(project,x) {
     if puppy_draft || puppy_empty {return 0;}
     let left=12;
@@ -168,7 +1001,12 @@ fn puppy_action_bar(rows,rgb,w,click) {
     let x=12;let i=0;
     while i<cg_count(rows) {
         let entry=cg_at(rows,i);
-        if rgb {puppy_bar_button(rgb,w,x,width,load64(entry));}
+        if rgb {
+            let label=load64(entry);
+            if m_eq(label,"Fillet") {puppy_bar_fillet(rgb,w,x,width,label,puppy_edge_kind && m_eq(puppy_edge_kind,"fillet"));}
+            else if m_eq(label,"Chamfer") {puppy_bar_chamfer(rgb,w,x,width,label,puppy_edge_kind && m_eq(puppy_edge_kind,"chamfer"));}
+            else {puppy_bar_button(rgb,w,x,width,label);}
+        }
         else if click>=x && click<x+width {return puppy_command(load64(entry+8),load64(entry+16));}
         x=x+width+8;i=i+1;
     }
@@ -332,7 +1170,7 @@ fn puppy_toolbar_build(w) {
         puppy_compact_bar(rgb,w,project,-1);puppy_ui_upload(rgb,w,76);
         puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
-    if puppy_edge_kind {
+    if puppy_edge_kind && !puppy_number_text {
         let label=puppy_edge_label();
         if puppy_status && !m_eq(label,puppy_status+24) {label=m_cat(label,m_cat("  /  ",puppy_status+24));}
         puppy_toolbar_workspace_status(rgb,w,project,label);
@@ -373,19 +1211,25 @@ fn puppy_toolbar_build(w) {
         puppy_ui_upload(rgb,w,76);puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
     }
     let compact=puppy_workspace_toolbar_compact(project,w);
+    let is_part=!puppy_draft && !cad_project_is_studio(project) && cad_project_part(project);
     let title_x=12;
     if puppy_isolated {
         puppy_bar_rect(rgb,w,12,6,86,28,45,64,67);puppy_bar_text(rgb,w,20,25,"Show all",98);title_x=108;
     }
     if !puppy_sketch && !puppy_empty {
-        puppy_bar_rect(rgb,w,title_x,6,76,28,45,64,67);
-        puppy_bar_text(rgb,w,title_x+8,25,"Objects",title_x+76);
-        title_x=title_x+86;
+        if is_part && !compact {
+            puppy_bar_row1_icon(rgb,w,title_x,34,101,puppy_icon_objects());
+            title_x=title_x+44;
+        }else {
+            puppy_bar_rect(rgb,w,title_x,6,76,28,45,64,67);
+            puppy_bar_text(rgb,w,title_x+8,25,"Objects",title_x+76);
+            title_x=title_x+86;
+        }
     }
     if !compact && puppy_draft {
         puppy_bar_rect(rgb,w,12,6,76,28,45,64,67);puppy_bar_text(rgb,w,20,25,"Revolve",88);title_x=98;
     }
-    if !compact && puppy_active_field(project) {
+    if !compact && !is_part && puppy_active_field(project) {
         puppy_bar_rect(rgb,w,title_x,6,76,28,45,64,67);puppy_bar_text(rgb,w,title_x+8,25,"Set value",title_x+76);
         title_x=title_x+86;
     }
@@ -393,10 +1237,19 @@ fn puppy_toolbar_build(w) {
     if cad_project_is_studio(project) {
         status_edge=w-268;if pc_first(j_get(project,"nodes")) {status_edge=w-356;}
     }
-    if cad_project_part(project) {status_edge=w-513;}
+    if cad_project_part(project) {
+        if is_part {status_edge=w-134;}
+        else {status_edge=w-513;}
+    }
     if compact {status_edge=w-8;}
     let title_end=puppy_toolbar_breadcrumbs(project,rgb,w,title_x,status_edge);
-    if !cad_project_is_studio(project) && !compact {
+    if is_part && !compact {
+        puppy_bar_row1_icon(rgb,w,w-126,34,102,puppy_icon_new_part());
+        puppy_bar_row1_icon(rgb,w,w-86,34,103,puppy_icon_new_assembly());
+        if puppy_has_other_item(project) {
+            puppy_bar_row1_icon(rgb,w,w-46,34,104,puppy_icon_next_item());
+        }
+    }else if !cad_project_is_studio(project) && !compact {
         puppy_bar_rect(rgb,w,w-327,6,84,28,45,64,67);puppy_bar_text(rgb,w,w-319,25,"New part",w-243);
         puppy_bar_rect(rgb,w,w-235,6,118,28,45,64,67);puppy_bar_text(rgb,w,w-227,25,"New assembly",w-117);
         if puppy_draft || puppy_has_other_item(project) {
@@ -431,10 +1284,12 @@ fn puppy_toolbar_build(w) {
         if puppy_curves_page==4 {label="Edit";}
         puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,label,w-335);
     }
-    if !puppy_sketch && !puppy_empty && pc_nodes(cad_project_part(project)) {
-        puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);puppy_bar_text(rgb,w,w-413,25,"Edges",w-335);
+    if !is_part && !puppy_sketch && !puppy_empty && pc_nodes(cad_project_part(project)) {
+        puppy_bar_rect(rgb,w,w-420,6,85,28,45,64,67);
+        puppy_draw_fillet_icon(rgb,w,w-416,12);
+        puppy_bar_text(rgb,w,w-396,25,"Edges",w-335);
     }
-    if pc_nodes(cad_project_part(project)) {
+    if !is_part && pc_nodes(cad_project_part(project)) {
         puppy_bar_rect(rgb,w,w-505,6,76,28,45,64,67);
         puppy_bar_text(rgb,w,w-497,25,"Loft",w-429);
     }
@@ -442,7 +1297,11 @@ fn puppy_toolbar_build(w) {
         puppy_bar_text(rgb,w,title_end+8,25,puppy_status+24,status_edge);
     }
     puppy_bar_history(rgb,w,12,52,0);puppy_bar_history(rgb,w,70,52,1);
-    puppy_bar_button(rgb,w,128,52,"Save");
+    if puppy_draft || is_part {
+        puppy_bar_icon_only(rgb,w,128,52,3,puppy_icon_save(),0);
+    }else {
+        puppy_bar_button(rgb,w,128,52,"Save");
+    }
     if cad_project_is_studio(project) {
         if puppy_studio_field(project) {
             puppy_bar_button(rgb,w,194,38,"-");puppy_bar_button(rgb,w,238,38,"+");puppy_bar_button(rgb,w,288,78,"Next field");
@@ -457,17 +1316,37 @@ fn puppy_toolbar_build(w) {
         puppy_bar_button(rgb,w,194,76,"X axis");puppy_bar_button(rgb,w,278,76,"Y axis");puppy_bar_button(rgb,w,362,76,"Cancel");
     }else if puppy_draft && puppy_curves_page {puppy_curve_bar(project,rgb,w,-1);}
     else if puppy_draft {
-        puppy_bar_button(rgb,w,194,86,"Rectangle");puppy_bar_button(rgb,w,288,67,"Circle");
-        puppy_bar_button(rgb,w,560,60,"Line");
-        if puppy_tool==2 {puppy_bar_rect(rgb,w,560,66,60,2,143,217,184);}
-        else if puppy_tool==1 {puppy_bar_rect(rgb,w,288,66,67,2,143,217,184);}
-        else if puppy_tool==0 {puppy_bar_rect(rgb,w,194,66,86,2,143,217,184);}
-        puppy_bar_button(rgb,w,364,81,"Extrude");puppy_bar_button(rgb,w,452,100,m_cat("Profile ",m_int(puppy_profile_index)));
-        let label_x=628;if puppy_line_button(project) {puppy_bar_button(rgb,w,628,90,"Dimensions");label_x=726;}
-        if puppy_draft_on_face(project) {puppy_bar_button(rgb,w,628,85,puppy_operation(project));label_x=721;}
-        if puppy_pending_face_index(project)>=0 {puppy_bar_button(rgb,w,721,70,"Solid");label_x=799;}
-        if w>=920 {puppy_bar_button(rgb,w,label_x,80,"Patterns");label_x=label_x+88;}
-        puppy_bar_text(rgb,w,label_x,60,j_string(puppy_draft_sketch(project),"name"),w-68);
+        puppy_bar_rect(rgb,w,186,45,1,20,68,92,96);
+        puppy_bar_icon_only(rgb,w,194,34,10,puppy_icon_select(),puppy_tool==-10);
+        puppy_bar_icon_only(rgb,w,234,34,11,puppy_icon_line(),puppy_tool==2);
+        puppy_bar_icon_only(rgb,w,274,34,12,puppy_icon_rect(),puppy_tool==0);
+        puppy_bar_icon_only(rgb,w,314,34,13,puppy_icon_circle(),puppy_tool==1);
+        puppy_bar_icon_only(rgb,w,354,34,14,puppy_icon_arc(),puppy_tool==3);
+        puppy_bar_icon_only(rgb,w,394,34,15,puppy_icon_polygon(),puppy_tool==13);
+        puppy_bar_icon_only(rgb,w,434,34,16,puppy_icon_spline(),puppy_tool==4);
+        puppy_bar_icon_only(rgb,w,474,34,17,puppy_icon_point(),puppy_tool==-1);
+        puppy_bar_rect(rgb,w,514,45,1,20,68,92,96);
+        puppy_bar_extrude_icon(rgb,w,522,34,18);
+        puppy_bar_icon_bg(rgb,w,562,46,19);
+        puppy_bar_icon(rgb,w,568,47,puppy_icon_profile(),236,0);
+        let prof_num="-";if puppy_profile_selected {prof_num=m_int(puppy_profile_index);}
+        puppy_bar_text(rgb,w,589,60,prof_num,606);
+        let label_x=614;
+        if puppy_line_button(project) {
+            puppy_bar_icon_only(rgb,w,614,34,20,puppy_icon_dimensions(),0);label_x=654;
+        }
+        if puppy_draft_on_face(project) {
+            puppy_bar_icon_bg(rgb,w,614,62,21);
+            puppy_bar_text(rgb,w,622,60,puppy_operation(project),674);
+            label_x=682;
+        }
+        if puppy_pending_face_index(project)>=0 {
+            puppy_bar_icon_only(rgb,w,label_x,34,22,puppy_icon_solid(),0);label_x=label_x+40;
+        }
+        if w>=860 {
+            puppy_bar_icon_only(rgb,w,label_x,34,23,puppy_icon_patterns(),0);label_x=label_x+42;
+        }
+        puppy_bar_text(rgb,w,label_x+4,60,j_string(puppy_draft_sketch(project),"name"),w-68);
     }else if m_eq(j_string(part,"type"),"assembly") {
         let data=j_get(part,"data");let servo=puppy_servo(data);
         if !puppy_empty {puppy_bar_button(rgb,w,288,78,"Solve");puppy_bar_button(rgb,w,376,68,"Export");}
@@ -479,6 +1358,43 @@ fn puppy_toolbar_build(w) {
             puppy_bar_button(rgb,w,194,38,"-");puppy_bar_button(rgb,w,238,38,"+");
             puppy_bar_text(rgb,w,537+choice_width,60,puppy_servo_label(data,servo),w-215);
         }
+    }else if is_part {
+        let part_node=cad_project_part(project);
+        puppy_bar_rect(rgb,w,186,45,1,20,68,92,96);
+        if pc_nodes(part_node) {
+            puppy_bar_icon_only(rgb,w,194,34,30,puppy_icon_new_sketch(),puppy_picking_face);
+        }
+        if (pc_nodes(part_node) || pc_legacy_solid_part(part_node)) && puppy_draft_sketch(project) {
+            let sk_icon=puppy_icon_edit_sketch();
+            if puppy_sketch {sk_icon=puppy_icon_solid();}
+            puppy_bar_icon_only(rgb,w,234,34,31,sk_icon,0);
+        }
+        if !puppy_sketch && !puppy_empty && pc_nodes(part_node) {
+            puppy_bar_icon_bg(rgb,w,274,34,32);
+            puppy_draw_fillet_icon(rgb,w,283,47);
+        }
+        if pc_nodes(part_node) {
+            puppy_bar_icon_only(rgb,w,314,34,33,puppy_icon_loft(),0);
+        }
+        if (pc_nodes(part_node) && feature) || (pc_legacy_solid_part(part_node) && !puppy_empty) {
+            puppy_bar_icon_only(rgb,w,354,34,34,puppy_icon_history(),0);
+        }
+        if feature && puppy_line_button(project) {
+            puppy_bar_icon_only(rgb,w,394,34,35,puppy_icon_dimensions(),0);
+        }
+        if feature {
+            let sx=puppy_part_step_x(project);
+            puppy_bar_rect(rgb,w,sx-8,45,1,20,68,92,96);
+            puppy_bar_icon_only(rgb,w,sx,30,36,puppy_icon_minus(),0);
+            puppy_bar_icon_only(rgb,w,sx+36,30,37,puppy_icon_plus(),0);
+            puppy_bar_icon_only(rgb,w,sx+72,34,38,puppy_icon_set_value(),0);
+            let label=m_cat(j_string(feature,"name"),m_cat(" / ",m_cat(puppy_field(feature),m_cat("   ",m_cat(puppy_display_dimension(project,feature),puppy_property_unit(feature,puppy_property))))));
+            puppy_bar_text(rgb,w,sx+116,60,label,w-134);
+        }
+        if !puppy_empty {
+            puppy_bar_icon_only(rgb,w,w-126,34,39,puppy_icon_export(),0);
+            puppy_bar_icon_only(rgb,w,w-86,34,40,puppy_icon_step(),0);
+        }
     }else if feature {
         puppy_bar_button(rgb,w,194,38,"-");puppy_bar_button(rgb,w,238,38,"+");
         let label=m_cat(j_string(feature,"name"),m_cat(" / ",m_cat(puppy_field(feature),m_cat("   ",m_cat(puppy_display_dimension(project,feature),puppy_property_unit(feature,puppy_property))))));
@@ -487,22 +1403,11 @@ fn puppy_toolbar_build(w) {
         if w>=900 && puppy_line_button(project) {puppy_bar_button(rgb,w,656,90,"Dimensions");label_x=754;}
         puppy_bar_text(rgb,w,label_x,60,label,w-140);
     }
-    if !puppy_draft && pc_nodes(cad_project_part(project)) {
-        puppy_bar_sketch(rgb,w,452,108,"New sketch");
-        if puppy_picking_face {puppy_bar_rect(rgb,w,452,66,108,2,143,217,184);}
-
-        if puppy_draft_sketch(project) {
-            if puppy_sketch {puppy_bar_button(rgb,w,288,84,"Part");}
-            else {puppy_bar_sketch(rgb,w,288,84,"Sketch");}
-        }
-        if feature {puppy_bar_button(rgb,w,568,80,"History");}
+    if !is_part && !puppy_draft && !puppy_empty {puppy_bar_button(rgb,w,w-132,64,"STEP");}
+    if puppy_draft || puppy_camera_available() {
+        if puppy_draft || is_part {puppy_bar_icon_only(rgb,w,w-46,34,4,puppy_icon_fit(),0);}
+        else {puppy_bar_button(rgb,w,w-60,48,"Fit");}
     }
-    if pc_legacy_solid_part(cad_project_part(project)) {
-        if puppy_draft_sketch(project) {puppy_bar_sketch(rgb,w,288,84,"Sketch");}
-        if !puppy_empty {puppy_bar_button(rgb,w,568,80,"History");}
-    }
-    if !puppy_draft && !puppy_empty {puppy_bar_button(rgb,w,w-132,64,"STEP");}
-    if puppy_draft || puppy_camera_available() {puppy_bar_button(rgb,w,w-60,48,"Fit");}
     puppy_ui_upload(rgb,w,76);
     puppy_toolbar_width=w;puppy_toolbar_dirty=0;return 1;
 }
@@ -513,7 +1418,7 @@ fn puppy_breadcrumb_target(x,y) {
     return 0;
 }
 fn puppy_breadcrumb_navigate(project,target) {
-    puppy_forget_click();puppy_design_menu_close();puppy_menu_rows=0;
+    puppy_forget_click();puppy_design_menu_close();puppy_menu_rows=0;puppy_vmenu_close();
     puppy_search_focus(0);puppy_design_focus=0;
     if puppy_number_text {puppy_number_close();}
     if puppy_line_report {puppy_line_end();}
@@ -686,6 +1591,7 @@ fn puppy_compact_actions(project) {
             puppy_compact_button(rows,"Cancel",37,0);
         }else if puppy_draft {
             puppy_compact_button(rows,"Done sketch",69,0);
+            puppy_compact_button(rows,"Select",19,1);
             puppy_compact_button(rows,"Rectangle",21,0);puppy_compact_button(rows,"Circle",6,0);
             puppy_compact_button(rows,"Line",15,0);puppy_compact_button(rows,"Extrude",27,0);
             puppy_compact_button(rows,"Revolve",37,0);puppy_curve_buttons(rows);puppy_compact_button(rows,"Ellipse",8,3);puppy_compact_button(rows,"3-point circle",6,3);puppy_compact_button(rows,"Split",27,3);puppy_compact_button(rows,"Construction",26,0);puppy_compact_button(rows,"Fit sketch",74,0);
@@ -746,6 +1652,11 @@ fn puppy_compact_bar(rgb,w,project,click) {
             if m_eq(label,"Undo") || m_eq(label,"Redo") {puppy_bar_history(rgb,w,x,width,m_eq(label,"Redo"));}
             else if m_eq(label,"Edit sketch") {puppy_bar_sketch(rgb,w,x,width,"Sketch");}
             else if m_eq(label,"New sketch") {puppy_bar_sketch(rgb,w,x,width,label);}
+            else if m_eq(label,"Extrude") {puppy_bar_extrude(rgb,w,x,width,label);}
+            else if m_eq(label,"Select") {puppy_bar_select(rgb,w,x,width,label);}
+            else if m_eq(label,"Fillet") {puppy_bar_fillet(rgb,w,x,width,label,puppy_edge_kind && m_eq(puppy_edge_kind,"fillet"));}
+            else if m_eq(label,"Chamfer") {puppy_bar_chamfer(rgb,w,x,width,label,puppy_edge_kind && m_eq(puppy_edge_kind,"chamfer"));}
+            else if m_eq(label,"Edges") {puppy_bar_fillet(rgb,w,x,width,label,0);}
             else {puppy_bar_button(rgb,w,x,width,label);}
         }
         i=i+1;

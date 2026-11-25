@@ -269,12 +269,17 @@ fn puppy_export_shortcut(project,extension) {
     if !out {return puppy_title(project,cg_error);}
     return puppy_title(project,m_cat("Exported ",out));
 }
+fn puppy_close_request() {
+    if puppy_saved_history==puppy_history || puppy_exit_requested {return 0;}
+    puppy_exit_requested=1;
+    return puppy_title(cad_project_open(puppy_history+24),"Unsaved edits. Save or close again to discard.");
+}
 fn puppy_command(key,mods) {
     if puppy_assembly_choice_kind {
         if key==GUI_KEY_ESCAPE || key==60 {return puppy_assembly_choice_cancel(cad_project_open(puppy_history+24));}
         return 1;
     }
-    puppy_forget_click();
+    puppy_forget_click();puppy_draft_notice_clear();
     if puppy_shell_open {return puppy_shell_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_revolve_open {return puppy_revolve_key(cad_project_open(puppy_history+24),key,mods);}
     if puppy_extrusion_open {return puppy_extrusion_key(cad_project_open(puppy_history+24),key,mods);}
@@ -344,24 +349,28 @@ fn puppy_command(key,mods) {
         if key==39 {return puppy_standard_view(6);}
     }
     if key==74 && puppy_camera_available() {return puppy_fit();}
-    if key==GUI_KEY_UP_ARROW {puppy_pitch=puppy_limit(puppy_pitch+8000,-85000,85000);return 1;}
-    if key==GUI_KEY_DOWN_ARROW {puppy_pitch=puppy_limit(puppy_pitch-8000,-85000,85000);return 1;}
+    if key==GUI_KEY_UP_ARROW {return puppy_camera_rotate(0,8000);}
+    if key==GUI_KEY_DOWN_ARROW {return puppy_camera_rotate(0,-8000);}
     if key==GUI_KEY_ESCAPE {
-        if puppy_draft && puppy_tool==-7 {puppy_tool=0;return puppy_title(cad_project_open(puppy_history+24),"Edge projection cancelled");}
+        if puppy_draft && puppy_tool==-7 {puppy_tool=-10;return puppy_title(cad_project_open(puppy_history+24),"Edge projection cancelled");}
         if puppy_revolve_axis {puppy_revolve_axis=0;puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),"Revolve cancelled");}
         if puppy_draft && puppy_line_edit_active() {return puppy_line_edit_cancel(cad_project_open(puppy_history+24));}
         if puppy_picking_face {puppy_picking_face=0;return puppy_title(cad_project_open(puppy_history+24),0);}
         if puppy_anchor {
             if puppy_tool==-6 {puppy_split_ellipse_clear();}
-            puppy_anchor=0;return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());
+            puppy_anchor=0;puppy_curves_page=0;puppy_tool=-10;
+            return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());
         }
-        if puppy_saved_history==puppy_history || puppy_exit_requested {return 0;}
-        puppy_exit_requested=1;
-        return puppy_title(cad_project_open(puppy_history+24),"Unsaved edits. Save or close again to discard.");
+        if puppy_draft && puppy_tool!=-10 {
+            if puppy_tool==-6 {puppy_split_ellipse_clear();}
+            puppy_curves_page=0;puppy_tool=-10;
+            return puppy_title(cad_project_open(puppy_history+24),puppy_draft_hint());
+        }
+        return puppy_close_request();
     }
     puppy_exit_requested=0;
-    if key==GUI_KEY_LEFT {puppy_yaw=puppy_yaw-8000;return 1;}
-    if key==GUI_KEY_RIGHT {puppy_yaw=puppy_yaw+8000;return 1;}
+    if key==GUI_KEY_LEFT {return puppy_camera_rotate(-8000,0);}
+    if key==GUI_KEY_RIGHT {return puppy_camera_rotate(8000,0);}
     let project=cad_project_open(puppy_history+24);
     if key==61 && !(mods&0x3c3) && !puppy_sketch && cad_project_part(project) {
         let feature=puppy_feature(project);
@@ -394,6 +403,7 @@ fn puppy_command(key,mods) {
         if key==19 {extension=".pdf";}
         return puppy_export_shortcut(project,extension);
     }
+    if (mods&192) && (mods&3) && key==22 {return puppy_rename_file_begin(project);}
     if (mods&192) && key==22 {return puppy_save(project);}
     if (mods&192) && (key==29 || key==28) {
         let next=load64(puppy_history);
@@ -484,18 +494,21 @@ fn puppy_command(key,mods) {
     }
     return 1;
 }
-fn puppy_pick_sketch(x,y) {
-    let project=cad_project_open(puppy_history+24);
-    let face=puppy_face_ray(project,x,y);
-    if !face {return puppy_title(project,cg_error);}
+fn puppy_open_face_sketch(project,face) {
     let updated=cad_project_add_face_sketch(project,face);
     if !updated || !puppy_refresh(updated) {return puppy_title(project,cg_error);}
     puppy_tool=0;puppy_push(updated);return puppy_title(updated,puppy_draft_hint());
 }
+fn puppy_pick_sketch(x,y) {
+    let project=cad_project_open(puppy_history+24);
+    let face=puppy_face_ray(project,x,y);
+    if !face {return puppy_title(project,cg_error);}
+    return puppy_open_face_sketch(project,face);
+}
 fn puppy_refresh(project) {
     puppy_part_sketch_dirty=1;
-    puppy_revolve_axis=0;puppy_explicit_sketch=0;
-    puppy_forget_click();puppy_clear_pick();puppy_search_focus(0);
+    puppy_revolve_axis=0;puppy_explicit_sketch=0;puppy_draft_panning=0;
+    puppy_forget_click();puppy_clear_pick();puppy_hover_clear();puppy_sketch_hover_clear();puppy_infer_reset();puppy_sketch_sel_clear();puppy_vmenu_close();puppy_draft_notice_clear();puppy_search_focus(0);
     if puppy_isolated && !m_eq(puppy_isolated_owner+24,j_string(cad_project_item(project),"id")) {puppy_end_isolation();}
     puppy_picking_face=0;
     let item=cad_project_item(project);let data=j_get(item,"data");
@@ -545,7 +558,7 @@ fn puppy_editor(path,source,project,report) {
     puppy_path=path;puppy_revision=j_integer(project,"revision");
     puppy_orthographic=cad_project_is_studio(project);
     if !puppy_view_open() {return puppy_error(gui_error);}
-    puppy_loft_view=m_take(56);puppy_step_view=m_take(72);puppy_curve_coords=m_take(4096*16);let mark=m_mark();
+    puppy_loft_view=m_take(56);puppy_step_view=m_take(120);puppy_curve_coords=m_take(4096*16);let mark=m_mark();
     let normalized=0;
     if source && !j_get(report,"readOnly") {
         let rebuilt=cad_project_rebuild_projections(project);
@@ -592,6 +605,10 @@ fn puppy_editor(path,source,project,report) {
                 }
                 if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {breadcrumb=target;}
                 puppy_pointer_x=x;puppy_pointer_y=y;
+                if kind==GUI_MOUSE_MOVE && !puppy_reader_report {
+                    let cur=cad_project_open(puppy_history+24);
+                    if puppy_toolbar_hover_update(cur,gui_width(load64(puppy_device)),x,y) {dirty=1;}
+                }
             }
             if puppy_reader_report {
                 let result=puppy_reader_event(event);running=result!=0;
@@ -616,16 +633,17 @@ fn puppy_editor(path,source,project,report) {
             else if puppy_design_available() && puppy_objects_event(event) {dirty=1;}
             else if puppy_assembly_choice_kind && puppy_assembly_choice_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
             else if puppy_sheet_scene && (kind==GUI_QUIT || kind==GUI_CLOSE) {
-                puppy_sheet_close();running=puppy_command(GUI_KEY_ESCAPE,0);dirty=1;
+                puppy_sheet_close();running=puppy_close_request();dirty=1;
             }
             else if puppy_sheet_scene && puppy_sheet_event(event) {if kind==GUI_MOUSE_DOWN {dirty=1;}}
             else if puppy_join_event(event) {dirty=1;}
             else if puppy_line_event(event) {dirty=1;}
+            else if puppy_vmenu_event(event) {dirty=1;}
             else if puppy_context_event(event) {dirty=1;}
             else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 && !puppy_button && puppy_cube_click(puppy_pointer_x,puppy_pointer_y) {
                 puppy_search_focus(0);puppy_forget_click();dirty=1;
             }else if !puppy_design_available() && !puppy_history_rows && puppy_objects_event(event) {dirty=1;}
-            else if kind==GUI_QUIT || kind==GUI_CLOSE {running=puppy_command(GUI_KEY_ESCAPE,0);dirty=1;}
+            else if kind==GUI_QUIT || kind==GUI_CLOSE {running=puppy_close_request();dirty=1;}
             else if kind==GUI_KEY_DOWN {running=puppy_command(gui_event_code(event),gui_event_modifiers(event));dirty=1;}
             else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==1 {
                 let x=gui_event_x(event);let y=gui_event_y(event);
@@ -649,7 +667,7 @@ fn puppy_editor(path,source,project,report) {
                     }else if y>=76 {puppy_edge_pick(current,x,y);}
                     dirty=1;
                 }
-                else if !puppy_sketch && !puppy_empty && !compact && y>=6 && y<34 && x>=width-420 && x<width-335 && pc_nodes(cad_project_part(current)) {
+                else if !puppy_sketch && !puppy_empty && !compact && y>=6 && y<34 && x>=width-420 && x<width-335 && pc_nodes(cad_project_part(current)) && puppy_draft {
                     puppy_command(11,0);dirty=1;
                 }
                 else if puppy_loft_open {
@@ -659,17 +677,22 @@ fn puppy_editor(path,source,project,report) {
                     }
                     dirty=1;
                 }
-                else if !compact && y>=6 && y<34 && x>=width-505 && x<width-429 && pc_nodes(cad_project_part(current)) {
+                else if !compact && y>=6 && y<34 && x>=width-505 && x<width-429 && pc_nodes(cad_project_part(current)) && puppy_draft {
                     puppy_command(38,0);dirty=1;
                 }
                 else if puppy_isolated && x>=12 && x<98 && y>=6 && y<37 {puppy_command(68,0);dirty=1;}
                 else if !puppy_sketch && !puppy_empty && y>=6 && y<37 && puppy_objects_button(x) {puppy_command(23,0);dirty=1;}
-                else if !compact && y>=6 && y<34 && puppy_value_button_hit(current,x) {
+                else if !compact && y>=6 && y<34 && (cad_project_is_studio(current) || !cad_project_part(current)) && puppy_value_button_hit(current,x) {
                     puppy_command(59,0);dirty=1;
                 }
                 else if puppy_draft && !compact && y>=6 && y<34 && x>=12 && x<88 {puppy_command(37,0);dirty=1;}
                 else if puppy_draft && !compact && y>=6 && y<37 && x>=width-420 && x<width-335 {
                     puppy_command(10,0);dirty=1;
+                }
+                else if !compact && y>=6 && y<37 && !puppy_draft && !cad_project_is_studio(current) && cad_project_part(current) {
+                    if x>=width-126 && x<width-92 {puppy_command(17,3);dirty=1;}
+                    else if x>=width-86 && x<width-52 {puppy_command(4,3);dirty=1;}
+                    else if puppy_has_other_item(current) && x>=width-46 && x<width-12 {puppy_command(63,0);dirty=1;}
                 }
                 else if !compact && y>=6 && y<37 && cad_project_is_studio(current) && x>=width-140 && x<width-12 {
                     puppy_command(18,0);dirty=1;
@@ -687,13 +710,31 @@ fn puppy_editor(path,source,project,report) {
                 }else if compact && y>=42 && y<68 {
                     puppy_compact_bar(0,width,current,x);dirty=1;
                 }else if y>=42 && y<68 {
-                    if (puppy_draft || puppy_camera_available()) && x>=width-60 && x<width-12 {puppy_command(74,0);}
-                    else if !puppy_draft && !puppy_empty && x>=width-132 && x<width-68 {puppy_command(8,195);}
-                    else if !puppy_draft && cad_project_part(current) && x>=568 && x<648 {puppy_command(64,0);}
-                    else if !puppy_draft && width>=900 && x>=656 && x<746 && puppy_feature(current) && puppy_line_button(current) {puppy_command(65,0);}
+                    let is_part=!puppy_draft && !cad_project_is_studio(current) && cad_project_part(current);
+                    if (puppy_draft || is_part) && (puppy_draft || puppy_camera_available()) && x>=width-46 && x<width-12 {puppy_command(74,0);}
+                    else if !puppy_draft && !is_part && puppy_camera_available() && x>=width-60 && x<width-12 {puppy_command(74,0);}
+                    else if !puppy_draft && !is_part && !puppy_empty && x>=width-132 && x<width-68 {puppy_command(8,195);}
                     else if x>=12 && x<64 {puppy_command(29,192);}
                     else if x>=70 && x<122 {puppy_command(28,192);}
                     else if x>=128 && x<180 {puppy_command(22,192);}
+                    else if is_part {
+                        let part_node=cad_project_part(current);let feat=puppy_feature(current);
+                        if !puppy_empty && x>=width-126 && x<width-92 {puppy_command(8,192);}
+                        else if !puppy_empty && x>=width-86 && x<width-52 {puppy_command(8,195);}
+                        else if pc_nodes(part_node) && x>=194 && x<228 {puppy_command(22,3);}
+                        else if (pc_nodes(part_node) || pc_legacy_solid_part(part_node)) && puppy_draft_sketch(current) && x>=234 && x<268 {puppy_command(69,0);}
+                        else if !puppy_sketch && !puppy_empty && pc_nodes(part_node) && x>=274 && x<308 {puppy_command(11,0);}
+                        else if pc_nodes(part_node) && x>=314 && x<348 {puppy_command(38,0);}
+                        else if ((pc_nodes(part_node) && feat) || (pc_legacy_solid_part(part_node) && !puppy_empty)) && x>=354 && x<388 {puppy_command(64,0);}
+                        else if feat && puppy_line_button(current) && x>=394 && x<428 {puppy_command(65,0);}
+                        else if feat {
+                            let sx=puppy_part_step_x(current);
+                            if x>=sx && x<sx+30 {puppy_command(45,0);}
+                            else if x>=sx+36 && x<sx+66 {puppy_command(46,0);}
+                            else if x>=sx+72 && x<sx+106 {puppy_command(59,0);}
+                            else if x>=sx+116 && x<width-134 {puppy_command(43,0);}
+                        }
+                    }
                     else if cad_project_is_studio(current) {
                         if x>=194 && x<232 {puppy_command(45,0);}
                         else if x>=238 && x<276 {puppy_command(46,0);}
@@ -702,22 +743,37 @@ fn puppy_editor(path,source,project,report) {
                         else if x>=452 && x<549 {puppy_command(19,0);}
                     }
                     else if puppy_draft {
-                        let pattern_x=628;
-                        if puppy_line_button(current) {pattern_x=726;}if puppy_draft_on_face(current) {pattern_x=721;}if puppy_pending_face_index(current)>=0 {pattern_x=799;}
-                        if width>=920 && !puppy_revolve_axis && !puppy_curves_page && x>=pattern_x && x<pattern_x+80 {puppy_command(62,0);}
-                        else if !puppy_revolve_axis && !puppy_curves_page && x>=628 && x<718 && puppy_line_button(current) {puppy_command(65,0);}
-                        else if puppy_revolve_axis {
+                        if puppy_revolve_axis {
                             if x>=194 && x<270 {puppy_command(27,0);}
                             else if x>=278 && x<354 {puppy_command(28,0);}
                             else if x>=362 && x<438 {puppy_command(37,0);}
                         }else if puppy_curves_page {puppy_curve_bar(current,0,width,x);}
-                        else if x>=194 && x<280 {puppy_command(21,0);}
-                        else if x>=288 && x<355 {puppy_command(6,0);}
-                        else if x>=364 && x<445 {puppy_command(27,0);}
-                        else if x>=452 && x<552 {puppy_command(19,0);}
-                        else if x>=560 && x<620 {puppy_command(15,0);}
-                        else if x>=628 && x<713 {puppy_command(18,0);}
-                        else if x>=721 && x<791 && puppy_pending_face_index(current)>=0 {puppy_command(25,0);}
+                        else if x>=194 && x<228 {puppy_command(19,1);}
+                        else if x>=234 && x<268 {puppy_command(15,0);}
+                        else if x>=274 && x<308 {puppy_command(21,0);}
+                        else if x>=314 && x<348 {puppy_command(6,0);}
+                        else if x>=354 && x<388 {puppy_draft_select_tool(current,3);}
+                        else if x>=394 && x<428 {puppy_draft_select_tool(current,13);}
+                        else if x>=434 && x<468 {puppy_draft_select_tool(current,4);}
+                        else if x>=474 && x<508 {puppy_draft_select_tool(current,-1);}
+                        else if x>=522 && x<556 {puppy_command(27,0);}
+                        else if x>=562 && x<608 {puppy_command(19,0);}
+                        else {
+                            let next_x=614;let handled=0;
+                            if puppy_line_button(current) {
+                                if x>=614 && x<648 {puppy_command(65,0);handled=1;}
+                                next_x=654;
+                            }
+                            if !handled && puppy_draft_on_face(current) {
+                                if x>=614 && x<676 {puppy_command(18,0);handled=1;}
+                                next_x=682;
+                            }
+                            if !handled && puppy_pending_face_index(current)>=0 {
+                                if x>=next_x && x<next_x+34 {puppy_command(25,0);handled=1;}
+                                next_x=next_x+40;
+                            }
+                            if !handled && width>=860 && x>=next_x && x<next_x+34 {puppy_command(62,0);}
+                        }
                     }
                     else if x>=194 && x<232 {puppy_command(45,0);}
                     else if x>=238 && x<276 {puppy_command(46,0);}
@@ -738,7 +794,37 @@ fn puppy_editor(path,source,project,report) {
                 }
                 else if puppy_picking_face && y>=76 {puppy_pick_sketch(x,y);dirty=1;}
                 else if puppy_draft && y>=76 {puppy_draft_click(x,y);dirty=1;}
-                else if !puppy_sketch && !puppy_empty && y>=76 {puppy_view_down(1,x,y);dirty=1;}
+                else if !puppy_sketch && (!puppy_empty || puppy_part_sketch_available()) && y>=76 {puppy_draft_notice_clear();puppy_view_down(1,x,y);dirty=1;}
+            }
+            else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==3 && gui_event_y(event)>=42 && gui_event_y(event)<68
+                && gui_event_x(event)>=128 && gui_event_x(event)<180 && !puppy_history_rows && !puppy_edge_kind && !puppy_loft_open {
+                let current=cad_project_open(puppy_history+24);
+                if !puppy_workspace_toolbar_compact(current,gui_width(load64(puppy_device))) {
+                    puppy_rename_file_begin(current);dirty=1;
+                }
+            }
+            else if kind==GUI_MOUSE_DOWN && gui_event_button(event)==3 && gui_event_y(event)>=42 && gui_event_y(event)<68
+                && puppy_draft && !puppy_curves_page && !puppy_revolve_axis && !puppy_history_rows && !puppy_edge_kind && !puppy_loft_open
+                && gui_event_x(event)>=562 && gui_event_x(event)<608 {
+                let current=cad_project_open(puppy_history+24);
+                if !puppy_workspace_toolbar_compact(current,gui_width(load64(puppy_device))) {
+                    puppy_command(19,1);dirty=1;
+                }
+            }
+            else if kind==GUI_MOUSE_DOWN && puppy_draft && gui_event_button(event)==2 && gui_event_y(event)>=76 {
+                puppy_draft_pan_begin(gui_event_x(event),gui_event_y(event));dirty=1;
+            }
+            else if kind==GUI_MOUSE_MOVE && puppy_draft_panning {
+                puppy_draft_pan_move(gui_event_x(event),gui_event_y(event));dirty=1;
+            }
+            else if kind==GUI_MOUSE_UP && puppy_draft_panning && gui_event_button(event)==2 {
+                puppy_draft_pan_end(gui_event_x(event),gui_event_y(event),1);dirty=1;
+            }
+            else if kind==GUI_MOUSE_DOWN && puppy_draft && gui_event_button(event)==3 && gui_event_y(event)>=76 {
+                if puppy_anchor {
+                    puppy_anchor=0;puppy_draft_notice_clear();
+                    puppy_title(cad_project_open(puppy_history+24),"Drawing cancelled");dirty=1;
+                }else if puppy_sketch_right_click(gui_event_x(event),gui_event_y(event)) {dirty=1;}
             }
             else if kind==GUI_MOUSE_DOWN && puppy_camera_available() && gui_event_y(event)>=76 {
                 let button=gui_event_button(event);
@@ -748,16 +834,38 @@ fn puppy_editor(path,source,project,report) {
             else if kind==GUI_MOUSE_UP && puppy_button==gui_event_button(event) {
                 puppy_view_move(gui_event_x(event),gui_event_y(event));puppy_view_end(1);dirty=1;
             }
-            else if kind==GUI_FOCUS && !gui_event_code(event) && puppy_button {puppy_view_end(0);dirty=1;}
+            else if kind==GUI_FOCUS && !gui_event_code(event) {
+                if puppy_toolbar_hover_id {puppy_toolbar_hover_id=0;puppy_toolbar_dirty=1;dirty=1;}
+                if puppy_draft_panning {puppy_draft_pan_end(0,0,0);dirty=1;}
+                if puppy_button {puppy_view_end(0);dirty=1;}
+                if puppy_hover_clear() || puppy_sketch_hover_clear() {dirty=1;}
+            }
             else if kind==GUI_MOUSE_MOVE && puppy_anchor {
                 let p=puppy_draft_point(gui_event_x(event),gui_event_y(event));
-                puppy_mx=load64(p);puppy_my=load64(p+8);dirty=1;
+                puppy_mx=load64(p);puppy_my=load64(p+8);
+                puppy_sketch_hover_move(gui_event_x(event),gui_event_y(event));
+                if puppy_tool>=-2 && !puppy_revolve_axis && !puppy_line_report && !puppy_patterns && !puppy_construction_ids {
+                    if puppy_sketch_hover_valid==2 {puppy_mx=puppy_sketch_hover_x;puppy_my=puppy_sketch_hover_y;}
+                    else if puppy_infer_h_valid || puppy_infer_v_valid {
+                        let sx=puppy_infer_sx;let sy=puppy_infer_sy;
+                        if puppy_tool==0 {
+                            if cg_abs(sx-puppy_ax)<10000 {sx=puppy_mx;}
+                            if cg_abs(sy-puppy_ay)<10000 {sy=puppy_my;}
+                        }
+                        puppy_mx=sx;puppy_my=sy;
+                    }
+                }
+                dirty=1;
+            }
+            else if kind==GUI_MOUSE_MOVE {
+                if puppy_draft {if puppy_sketch_hover_move(gui_event_x(event),gui_event_y(event)) {dirty=1;}}
+                else if puppy_hover_3d_move(gui_event_x(event),gui_event_y(event)) {dirty=1;}
             }
             else if kind==GUI_WHEEL && puppy_draft {
                 let step=puppy_limit(puppy_draft_scale/4,1,1000);
-                puppy_draft_scale=puppy_limit(puppy_draft_scale+gui_event_dy(event)*step,1,32000);dirty=1;
+                puppy_draft_scale=puppy_limit(puppy_draft_scale+gui_event_dy(event)*step,400,32000);dirty=1;
             }else if kind==GUI_WHEEL && !puppy_button {
-                puppy_forget_click();
+                puppy_forget_click();puppy_hover_clear();
                 puppy_zoom=puppy_zoom-gui_event_dy(event)*15;
                 if puppy_zoom<120 {puppy_zoom=120;}if puppy_zoom>800 {puppy_zoom=800;}dirty=1;
             }else if kind==GUI_RESIZE || kind==GUI_EXPOSE {dirty=1;}
@@ -783,5 +891,5 @@ fn puppy_editor(path,source,project,report) {
     puppy_workspace_clear_parent();
     puppy_sheet_close();puppy_step_clear();puppy_join_end_drag();puppy_join_select(0);puppy_split_ellipse_clear();
     if puppy_pending_title {puppy_drop(puppy_pending_title);}
-    puppy_forget_click();puppy_end_isolation();puppy_clear_pick();puppy_trim(puppy_root);if puppy_disk {puppy_drop(puppy_disk);}if puppy_status {puppy_drop(puppy_status);}puppy_view_close();return 0;
+    puppy_forget_click();puppy_end_isolation();puppy_clear_pick();puppy_trim(puppy_root);puppy_rename_drop_path();puppy_sketch_face_cache_free();puppy_infer_close();if puppy_disk {puppy_drop(puppy_disk);}if puppy_status {puppy_drop(puppy_status);}puppy_view_close();return 0;
 }

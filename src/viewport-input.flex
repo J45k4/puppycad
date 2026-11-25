@@ -11,8 +11,6 @@ global puppy_prev_x=0;
 global puppy_prev_y=0;
 global puppy_moved=0;
 global puppy_hinge=0;
-global puppy_roll=0;
-global puppy_start_roll=0;
 global puppy_rim=0;
 global puppy_orbit_point=0;
 global puppy_orbit_depth=0;
@@ -74,18 +72,7 @@ fn puppy_occurrence_click() {
 }
 
 fn puppy_view_up(forward) {
-    let vertical=cg_v(0,0,1000000);
-    if !load64(forward) && !load64(forward+8) {
-        vertical=cg_v(0,1000000,0);if load64(forward+16)>0 {store64(vertical+8,-1000000);}
-    }
-    if !puppy_roll {return vertical;}
-    let view=cg_v(load64(forward),load64(forward+8),load64(forward+16));render_normalize(view);
-    let right=m_take(24);render_cross(right,view,vertical);render_normalize(right);
-    let up=m_take(24);render_cross(up,right,view);
-    let c=cg_cos(puppy_roll);let s=cg_sin(puppy_roll);let k=0;
-    while k<24 {store64(up+k,(load64(up+k)*c+load64(right+k)*s)/1000000);k=k+8;}
-    // render_camera accepts up components within ±1e6.
-    render_normalize(up);return up;
+    return cg_v(load64(puppy_cam_basis+24),load64(puppy_cam_basis+32),load64(puppy_cam_basis+40));
 }
 fn puppy_ray_at(ray,depth) {
     let p=m_take(24);let k=0;
@@ -99,13 +86,14 @@ fn puppy_clear_pick() {
     if puppy_definition {puppy_drop(puppy_definition);puppy_definition=0;}
     puppy_copy_focus=0;
     if puppy_pick_id {puppy_drop(puppy_pick_id);puppy_pick_id=0;}
+    puppy_face_clear();puppy_vmenu_close();
     puppy_first=0;puppy_last=0;return 1;
 }
 fn puppy_limit(value,low,high) {if value<low {return low;}if value>high {return high;}return value;}
 fn puppy_fit() {
     let project=cad_project_open(puppy_history+24);
     if cad_project_part(project) {puppy_part_sketch_fit();}
-    gui__zero(puppy_pan,24);puppy_zoom=280;
+    gui__zero(puppy_pan,24);puppy_zoom=280;puppy_hover_clear();
     return puppy_title(project,"View fitted");
 }
 fn puppy_draw_occurrences() {
@@ -206,7 +194,7 @@ fn puppy_view_press(button,x,y) {
     return 1;
 }
 fn puppy_view_anchor_camera(button,ray,hit) {
-    puppy_rim=-1;puppy_start_roll=puppy_roll;puppy_orbit_depth=0;
+    puppy_rim=-1;m_copy(puppy_start_basis,puppy_cam_basis,72);puppy_orbit_depth=0;
     if !ray {return 1;}
     if hit {
         m_copy(puppy_orbit_point,load64(hit),24);
@@ -221,6 +209,7 @@ fn puppy_view_anchor_camera(button,ray,hit) {
 }
 fn puppy_view_down(button,x,y) {
     if !puppy_view_press(button,x,y) {return 1;}
+    puppy_hover_clear();
     let source=puppy_history;if puppy_step_preview {source=puppy_step_preview;}
     let project=cad_project_open(source+24);let ray=puppy_ray(x,y);
     let hit=0;let element=0;
@@ -230,17 +219,54 @@ fn puppy_view_down(button,x,y) {
         }else {hit=cad_project_surface_hit_in(project,load64(ray),load64(ray+8),puppy_visible_id());}
     }
     if button!=1 {return puppy_view_anchor_camera(button,ray,hit);}
+    let can_toggle=!element && (cad_project_part(project) || !j_get(project,"assembly"));
+    let prev_vert=puppy_selected_vertex;let prev_vx=puppy_sel_vx;let prev_vy=puppy_sel_vy;let prev_vz=puppy_sel_vz;
+    let prev_edge_key=puppy_sel_edge_key;let prev_face_key=puppy_sel_face_key;
     puppy_clear_pick();
-    if !element && !hit {return puppy_title(project,cg_error);}
-    let picked=hit;if element {picked=element;}
-    let body=load64(picked+16);let parts=j_parse(puppy_catalog+24);let entry=pc_find(parts,load64(body));
-    if !entry {return puppy_title(project,"Occurrence unavailable");}
-    puppy_select_entry(entry);
+    let vert_hit=0;
+    if !element && (!puppy_empty || puppy_part_sketch_available()) {vert_hit=puppy_vertex_select(x,y);}
+    if vert_hit {
+        if can_toggle && prev_vert && puppy_sel_vx==prev_vx && puppy_sel_vy==prev_vy && puppy_sel_vz==prev_vz {
+            puppy_clear_pick();return puppy_title(project,"Selection cleared");
+        }
+        let coords=puppy_vertex_coords_text();
+        if hit {
+            let body=load64(hit+16);let parts=j_parse(puppy_catalog+24);let entry=pc_find(parts,load64(body));
+            if entry {
+                puppy_pick_id=puppy_snapshot(j_string(entry,"id"));
+                return puppy_title(project,m_cat("Selected ",m_cat(load64(body+8),m_cat("   |   Vertex (",m_cat(coords,")")))));
+            }
+        }
+        return puppy_title(project,m_cat("Selected Vertex (",m_cat(coords,")")));
+    }
+    let edge_body=0;
+    if !element && ray && !puppy_empty {edge_body=puppy_edge_select(project,ray,hit);}
+    if edge_body && can_toggle && prev_edge_key && puppy_sel_edge_key==prev_edge_key {
+        puppy_clear_pick();return puppy_title(project,"Selection cleared");
+    }
+    if !element && !hit && !edge_body {return puppy_title(project,cg_error);}
+    let body=edge_body;
+    if !body {
+        let picked=hit;if element {picked=element;}
+        body=load64(picked+16);
+    }
+    let parts=j_parse(puppy_catalog+24);let entry=pc_find(parts,load64(body));
+    if !entry {puppy_face_clear();return puppy_title(project,"Occurrence unavailable");}
+    puppy_pick_id=puppy_snapshot(j_string(entry,"id"));
     if element {
+        puppy_first=j_integer(entry,"first");puppy_last=puppy_first+j_integer(entry,"count");
         let frame=pm_element_frame(project,element,0);if frame && puppy_mate_mark(element,0) {puppy_mate_selection_frame=puppy_snapshot(j_encode(frame));}
+    }else if !edge_body {
+        if !puppy_face_select(project,ray,hit) {
+            puppy_first=j_integer(entry,"first");puppy_last=puppy_first+j_integer(entry,"count");
+        }else if can_toggle && prev_face_key && puppy_sel_face_key==prev_face_key {
+            puppy_clear_pick();return puppy_title(project,"Selection cleared");
+        }
     }
     if hit && load64(hit+16)==body {puppy_set_hinge(project,hit,parts);}
     let label=m_cat("Selected ",load64(body+8));if element {label=m_cat(label,m_cat("   |   ",load64(element+24)));}
+    else if edge_body {label=m_cat(label,"   |   Edge");}
+    else if puppy_face_fill_count {label=m_cat(label,"   |   Face");}
     return puppy_title(project,label);
 }
 fn puppy_arc_error(ray,direction,angle) {
@@ -302,11 +328,10 @@ fn puppy_view_move(x,y) {
         }
         if puppy_rim {
             let end_x=x-w/2;let end_y=y-h/2;
-            puppy_roll=(puppy_start_roll+pc_angle_degrees(rx*end_y-ry*end_x,rx*end_x+ry*end_y)/1000)%360000;
+            let delta=pc_angle_degrees(rx*end_y-ry*end_x,rx*end_x+ry*end_y)/1000;
+            puppy_camera_roll_basis(puppy_cam_basis,puppy_start_basis,delta);
         }else {
-            let c=cg_cos(puppy_roll);let s=cg_sin(puppy_roll);
-            puppy_yaw=(puppy_yaw+(dx*c-dy*s)*180/(1000*h))%360000;
-            puppy_pitch=puppy_limit(puppy_pitch+(dy*c+dx*s)*180/(1000*h),-85000,85000);
+            puppy_camera_rotate(dx*180000/h,dy*180000/h);
         }
         x=puppy_start_x;y=puppy_start_y;
     }
@@ -322,7 +347,27 @@ fn puppy_view_move(x,y) {
 }
 fn puppy_open_context_menu(x,y,pick) {
     let project=cad_project_open(puppy_history+24);
-    if !cad_project_is_studio(project) {return 0;}
+    if puppy_selected_vertex {return puppy_vmenu_open_at(1,x,y);}
+    if !cad_project_is_studio(project) {
+        if pick && !puppy_empty && puppy_vertex_select(x,y) {
+            let ray=puppy_ray(x,y);
+            if ray {
+                let hit=cad_project_surface_hit_in(project,load64(ray),load64(ray+8),puppy_visible_id());
+                if hit {
+                    let entry=pc_find(j_parse(puppy_catalog+24),load64(load64(hit+16)));
+                    if entry {
+                        if puppy_pick_id {puppy_drop(puppy_pick_id);}
+                        puppy_pick_id=puppy_snapshot(j_string(entry,"id"));
+                    }
+                }
+                cg_error=0;
+            }
+            return puppy_vmenu_open_at(1,x,y);
+        }
+        if puppy_face_tube_count {return puppy_vmenu_open_at(2,x,y);}
+        if puppy_face_fill_count {return puppy_vmenu_open_at(3,x,y);}
+        return 0;
+    }
     let window=load64(puppy_device);let h=gui_height(window);let w=gui_width(window);
     if h<196 || w<104 {return 0;}
     let parts=j_parse(puppy_catalog+24);let entry=0;

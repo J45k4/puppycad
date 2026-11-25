@@ -12,7 +12,7 @@ global puppy_extrusion_view_base_ready=0;
 global puppy_extrusion_view_adjusted=0;
 
 fn puppy_extrusion_view_init() {
-    puppy_extrusion_view_camera=m_take(96);
+    puppy_extrusion_view_camera=m_take(144);
     puppy_extrusion_view_base_bounds=m_take(48);
     puppy_extrusion_view_next_bounds=m_take(48);
 }
@@ -44,12 +44,11 @@ fn puppy_extrusion_view_begin_mesh(mesh) {
     if puppy_extrusion_view_active {return 1;}
     let saved=puppy_extrusion_view_camera;
     m_copy(saved,puppy_center,24);m_copy(saved+24,puppy_pan,24);
-    store64(saved+48,puppy_radius);store64(saved+56,puppy_yaw);
-    store64(saved+64,puppy_pitch);store64(saved+72,puppy_zoom);
-    store64(saved+80,puppy_roll);store64(saved+88,puppy_orthographic);
+    store64(saved+48,puppy_radius);m_copy(saved+56,puppy_cam_basis,72);
+    store64(saved+128,puppy_zoom);store64(saved+136,puppy_orthographic);
     puppy_extrusion_view_active=1;puppy_extrusion_view_adjusted=0;
     puppy_extrusion_view_base_ready=0;
-    puppy_yaw=45000;puppy_pitch=35264;puppy_roll=0;
+    puppy_camera_set_angles(45000,35264,0);
     if mesh {
         if !puppy_extrusion_view_base {puppy_extrusion_view_base=puppy_colored_mesh();}
         if !puppy_extrusion_view_base || !puppy_extrusion_view_upload(puppy_extrusion_view_base,mesh,puppy_extrusion_view_base_bounds,0) {
@@ -88,9 +87,8 @@ fn puppy_extrusion_view_end() {
     if !puppy_extrusion_view_active {return 1;}
     let saved=puppy_extrusion_view_camera;
     m_copy(puppy_center,saved,24);m_copy(puppy_pan,saved+24,24);
-    puppy_radius=load64(saved+48);puppy_yaw=load64(saved+56);
-    puppy_pitch=load64(saved+64);puppy_zoom=load64(saved+72);
-    puppy_roll=load64(saved+80);puppy_orthographic=load64(saved+88);
+    puppy_radius=load64(saved+48);m_copy(puppy_cam_basis,saved+56,72);
+    puppy_zoom=load64(saved+128);puppy_orthographic=load64(saved+136);
     puppy_extrusion_view_active=0;puppy_button=0;
     return 1;
 }

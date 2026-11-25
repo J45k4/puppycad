@@ -15,11 +15,13 @@ fn puppy_camera_available() {
 }
 fn puppy_part_sketch_upload(project) {
     puppy_part_sketch_dirty=0;puppy_part_sketch_lines=0;puppy_part_sketch_points=0;
+    puppy_hover_free_skverts();
     let part=cad_project_part(project);if !part {return 1;}
     let ids=puppy_part_sketch_ids(part);if !cg_count(ids) {return 1;}
     let paths=cad_project_world_sketch_paths(project,ids);
     // Keep the evaluated model and history available if a sketch has errors.
     if !paths || !cg_count(paths) {return 1;}
+    puppy_hover_cache_skverts(paths);
     let low=puppy_part_sketch_bounds;let high=low+24;let k=0;
     while k<24 {store64(low+k,500000001);store64(high+k,-500000001);k=k+8;}
     let lines=m_buffer();let markers=m_buffer();let i=0;

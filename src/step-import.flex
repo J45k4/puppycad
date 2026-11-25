@@ -68,14 +68,14 @@ fn puppy_step_show(project) {
 }
 fn puppy_step_begin(project) {
     let view=puppy_step_view;
-    store64(view,puppy_yaw);store64(view+8,puppy_pitch);store64(view+16,puppy_roll);
-    store64(view+24,puppy_zoom);m_copy(view+32,puppy_pan,24);
-    store64(view+56,puppy_isolated);store64(view+64,puppy_isolated_owner);
+    m_copy(view,puppy_cam_basis,72);
+    store64(view+72,puppy_zoom);m_copy(view+80,puppy_pan,24);
+    store64(view+104,puppy_isolated);store64(view+112,puppy_isolated_owner);
     puppy_isolated=0;puppy_isolated_owner=0;return puppy_step_show(project);
 }
 fn puppy_step_finish(project,apply) {
     if puppy_button {puppy_view_end(0);}
-    let view=puppy_step_view;let old=load64(view+56);let owner=load64(view+64);
+    let view=puppy_step_view;let old=load64(view+104);let owner=load64(view+112);
     puppy_views_open=0;
     if apply {
         if old {puppy_drop(old);puppy_drop(owner);}
@@ -83,8 +83,8 @@ fn puppy_step_finish(project,apply) {
         puppy_push(candidate);puppy_step_clear();return puppy_title(candidate,status);
     }
     puppy_step_clear();puppy_isolated=old;puppy_isolated_owner=owner;puppy_refresh(project);
-    puppy_yaw=load64(view);puppy_pitch=load64(view+8);puppy_roll=load64(view+16);
-    puppy_zoom=load64(view+24);m_copy(puppy_pan,view+32,24);return puppy_title(project,"STEP import cancelled");
+    m_copy(puppy_cam_basis,view,72);
+    puppy_zoom=load64(view+72);m_copy(puppy_pan,view+80,24);return puppy_title(project,"STEP import cancelled");
 }
 fn puppy_step_prepare(path) {
     cg_begin();let source=puppy_read_limit(path,2097152);if !source {return cg_fail("Choose a readable STEP file up to 2 MiB");}

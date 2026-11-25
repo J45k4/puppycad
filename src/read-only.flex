@@ -160,10 +160,10 @@ fn puppy_reader_event(event) {
         else if key==75 || key==81 {puppy_reader_sketch_zoom(-1);}
         else if key==78 || key==82 {puppy_reader_sketch_zoom(1);}else {return 1;}
     }else {
-        if key==75 || key==80 {puppy_yaw=puppy_yaw-15000;}else if key==78 || key==79 {puppy_yaw=puppy_yaw+15000;}
-        else if key==82 {puppy_pitch=puppy_limit(puppy_pitch+10000,-85000,85000);}
-        else if key==81 {puppy_pitch=puppy_limit(puppy_pitch-10000,-85000,85000);}
-        else if key==74 {puppy_zoom=280;puppy_yaw=45000;puppy_pitch=35264;}else {return 1;}
+        if key==75 || key==80 {puppy_camera_rotate(-15000,0);}else if key==78 || key==79 {puppy_camera_rotate(15000,0);}
+        else if key==82 {puppy_camera_rotate(0,10000);}
+        else if key==81 {puppy_camera_rotate(0,-10000);}
+        else if key==74 {puppy_zoom=280;puppy_camera_set_angles(45000,35264,0);}else {return 1;}
     }
     return 2;
 }

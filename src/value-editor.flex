@@ -7,11 +7,16 @@ global puppy_number_paste=0;
 global puppy_variable_slot=-1;
 
 fn puppy_active_field(project) {
+    if puppy_rename_mode {return cg_v(0,0,puppy_rename_prompt_text());}
     if puppy_connector_rename {return cg_v(0,0,"Connector ID");}
     if puppy_connector_slot>=0 {
         return puppy_connector_field(project,puppy_design_selected(puppy_design_rows(project)),puppy_connector_slot);
     }
     if puppy_shell_open {return cg_v(0,puppy_shell_thickness,"Wall thickness  mm");}
+    if puppy_edge_kind {
+        let label="Chamfer distance  mm";if m_eq(puppy_edge_kind,"fillet") {label="Fillet radius  mm";}
+        return cg_v(0,puppy_edge_size,label);
+    }
     if puppy_revolve_open {return cg_v(0,puppy_revolve_angle(),"Revolve angle  deg");}
     if puppy_extrusion_open {return cg_v(0,puppy_extrusion_length,"Extrusion depth  mm");}
     if puppy_profile_value_id {
@@ -177,6 +182,7 @@ fn puppy_number_close() {
     puppy_placement_slot=-1;
     puppy_connector_slot=-1;
     puppy_connector_rename=0;
+    puppy_rename_close();
     puppy_step_path_entry=0;
     if puppy_number_paste {gui_clipboard_cancel(puppy_number_paste);puppy_number_paste=0;}
     puppy_variable_slot=-1;puppy_drop(puppy_number_text);puppy_number_text=0;puppy_toolbar_dirty=1;
@@ -184,6 +190,7 @@ fn puppy_number_close() {
 }
 fn puppy_number_apply(project) {
     let text=puppy_number_text+24;
+    if puppy_rename_mode {return puppy_rename_apply(project,text);}
     if puppy_connector_rename {return puppy_connector_rename_apply(project,text);}
     if puppy_revolve_open {return puppy_revolve_apply(project);}
     if puppy_profile_value_id {return puppy_profile_apply(project,text);}
@@ -237,6 +244,7 @@ fn puppy_number_apply(project) {
         return puppy_title(project,"Enter a decimal from -500 to 500 with up to six places");
     }
     if puppy_shell_open {return puppy_shell_set_thickness(project,value);}
+    if puppy_edge_kind {return puppy_edge_set_size(project,value);}
     if puppy_extrusion_open {return puppy_extrusion_set_depth(project,value);}
     let field=puppy_active_field(project);
     if field && puppy_value_unchanged(project,field,value) {
@@ -267,10 +275,11 @@ fn puppy_number_replace(text,remove_left,remove_right) {
     if puppy_step_path_entry && length+n-(end-at)>4095 {return puppy_title(cad_project_open(puppy_history+24),"STEP path is too long");}
     if puppy_line_report && length+n-(end-at)>limit {return puppy_title(cad_project_open(puppy_history+24),"Expression entry is too long");}
     if puppy_sheet_entry && length+n-(end-at)>256 {return puppy_title(cad_project_open(puppy_history+24),"Drawing field is too long");}
+    if puppy_rename_mode && length+n-(end-at)>256 {return puppy_title(cad_project_open(puppy_history+24),"Name is too long");}
     while i<length {
         let c=load8(text+i);
-        if (puppy_shell_open || puppy_revolve_open) && (c<48 || c>57) && c!=46 && c!=43 && c!=45 {return 1;}
-        if c<32 || c==127 || (!puppy_sheet_entry && !puppy_step_path_entry && !puppy_line_report && (c>126 || length+n-(end-at)>40)) {
+        if (puppy_shell_open || puppy_revolve_open || puppy_edge_kind) && (c<48 || c>57) && c!=46 && c!=43 && c!=45 {return 1;}
+        if c<32 || c==127 || (!puppy_sheet_entry && !puppy_rename_mode && !puppy_step_path_entry && !puppy_line_report && (c>126 || length+n-(end-at)>40)) {
             return puppy_title(cad_project_open(puppy_history+24),"Enter a decimal number of up to 40 characters");
         }
         i=i+1;
@@ -278,6 +287,7 @@ fn puppy_number_replace(text,remove_left,remove_right) {
     let next=puppy_snapshot(m_cat(m_slice(old,at),m_cat(text,old+end)));
     puppy_drop(puppy_number_text);puppy_number_text=next;puppy_number_cursor=at+length;
     puppy_number_selected=0;let project=cad_project_open(puppy_history+24);
+    if puppy_rename_mode {return puppy_title(project,puppy_rename_prompt_text());}
     if puppy_shell_open {return puppy_title(project,"Wall thickness");}
     if puppy_revolve_open {return puppy_revolve_preview(project);}
     if puppy_step_path_entry {return puppy_title(project,"Open STEP file   |   Enter a path");}

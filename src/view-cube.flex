@@ -15,13 +15,14 @@ fn puppy_view_name(face) {
     if face==3 {return "Back";}if face==4 {return "Left";}if face==5 {return "Bottom";}return "Isometric";
 }
 fn puppy_standard_view(face) {
-    puppy_yaw=45000;puppy_pitch=35264;puppy_roll=0;puppy_views_open=0;
-    if face==0 {puppy_yaw=90000;puppy_pitch=0;}
-    if face==1 {puppy_yaw=0;puppy_pitch=0;}
-    if face==2 {puppy_yaw=90000;puppy_pitch=90000;}
-    if face==3 {puppy_yaw=-90000;puppy_pitch=0;}
-    if face==4 {puppy_yaw=180000;puppy_pitch=0;}
-    if face==5 {puppy_yaw=90000;puppy_pitch=-90000;}
+    let yaw=45000;let pitch=35264;puppy_views_open=0;
+    if face==0 {yaw=90000;pitch=0;}
+    if face==1 {yaw=0;pitch=0;}
+    if face==2 {yaw=90000;pitch=90000;}
+    if face==3 {yaw=-90000;pitch=0;}
+    if face==4 {yaw=180000;pitch=0;}
+    if face==5 {yaw=90000;pitch=-90000;}
+    puppy_camera_set_angles(yaw,pitch,0);
     let project=cad_project_open(puppy_history+24);
     if cad_project_is_studio(project) {gui__zero(puppy_pan,24);puppy_zoom=280;}
     return puppy_title(project,m_cat(puppy_view_name(face)," view"));

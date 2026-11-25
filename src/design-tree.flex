@@ -3,6 +3,7 @@
 import "sketch-visibility.flex";
 import "connector-editor.flex";
 import "assembly-choice.flex";
+import "rename.flex";
 
 global puppy_design_open=1;
 global puppy_design_focus=0;
@@ -356,6 +357,7 @@ fn puppy_design_menu_entries(project,row) {
     if puppy_design_sketch_row(row) {
         let label="Show sketch";if load64(row+88) {label="Hide sketch";}
         cg_push(entries,cg_v(label,3,0));
+        cg_push(entries,cg_v("Rename",10,0));
         if !puppy_sketch && puppy_design_owner(row)==cad_project_part(project) {
             cg_push(entries,cg_v("Sketch support",9,0));
         }
@@ -365,6 +367,14 @@ fn puppy_design_menu_entries(project,row) {
     }
     if puppy_connector_row(row) && puppy_design_owner(row)==cad_project_item(project) {
         cg_push(entries,cg_v("Rename ID",7,0));cg_push(entries,cg_v("Attach to",8,0));
+    }
+    if puppy_design_renameable(row) && !puppy_design_sketch_row(row) {
+        cg_push(entries,cg_v("Rename",10,0));
+    }
+    let kind=load64(row+16);
+    if (!load64(row+32) && (m_eq(kind,"part") || m_eq(kind,"assembly")))
+        || (cad_project_is_studio(project) && !load64(row+32) && m_eq(load64(row),"Parts")) {
+        cg_push(entries,cg_v("Rename file",11,0));
     }
     return entries;
 }
@@ -402,6 +412,8 @@ fn puppy_design_menu_activate(choice) {
             if command==7 {puppy_connector_rename_begin(project,load64(row+24));}
             if command==8 {puppy_connector_attach_begin(project,load64(row+24));}
             if command==9 {puppy_support_begin(project,load64(row+24));}
+            if command==10 {puppy_rename_item_begin(project,row);}
+            if command==11 {puppy_rename_file_begin(project);}
         }
     }
     return 1;

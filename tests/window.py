@@ -271,7 +271,7 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window,"Editing Base sketch")
         key("F12")
         verify(window,"Part workspace")
-        click(window,325,55)
+        click(window,251,55)
         verify(window,"Editing Base sketch")
         key("F3")
         xlib.XResizeWindow(connection,window,812,640)
@@ -312,7 +312,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,part_link,20)
         verify(window,"Part workspace")
         assert "  |  Base  |  Solid" in title(window)
-        click(window,325,55)
+        click(window,251,55)
         verify(window,"Editing Base sketch")
         assembly_link,part_link=breadcrumb_links(window,Path(tmp)/"nested-sketch-revisited.png")
         click(window,assembly_link,20)  # Skip Part and go straight to the original assembly.
@@ -406,7 +406,7 @@ with tempfile.TemporaryDirectory() as tmp:
         standalone_part.write_text(json.dumps(saved))
         app,window=open_app(standalone_part)
         assert breadcrumb_links(window,Path(tmp)/"standalone-part.png")==[]
-        click(window,325,55)
+        click(window,251,55)
         verify(window,"Editing Base sketch")
         part_link,=breadcrumb_links(window,"workspace-standalone-sketch-breadcrumb.png")
         click(window,part_link,20)
@@ -481,7 +481,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,85,238)
         verify(window,"Editing Preview sketch")
         key("F3")
-        click(window,400,55)
+        click(window,539,55)
         verify(window,"Extrusion preview")
         _,part_link=breadcrumb_links(window,"workspace-extrusion-breadcrumbs.png")
         click(window,part_link,20)
@@ -641,7 +641,7 @@ with tempfile.TemporaryDirectory() as tmp:
         xlib.XSync(connection,0)
         time.sleep(.22)
 
-        click(window,325,55)
+        click(window,251,55)
         verify(window,"Editing Sketch 1")
         click(window,440,378)
         click(window,520,338)
@@ -698,7 +698,7 @@ with tempfile.TemporaryDirectory() as tmp:
         app,window=open_app(plane_path,"Click two rectangle corners",design_tree=True)
         click(window,900,20)
         verify(window,"Part workspace")
-        click(window,503,55)
+        click(window,211,55)
         verify(window,"Choose a plane for the new sketch")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"new-sketch-planes.png"],check=True)
         key("Escape")
@@ -834,7 +834,7 @@ with tempfile.TemporaryDirectory() as tmp:
         original_graph=saved_extrusion_graph()
 
         def preview_symmetric_extrusion():
-            click(window,400,55)  # Extrude
+            click(window,539,55)  # Extrude
             verify(window,"Extrusion preview")
             key("e")
             verify(window,"Symmetric")
@@ -923,7 +923,7 @@ with tempfile.TemporaryDirectory() as tmp:
         click(window,90,186)
         key("Return")
         verify(window,"Editing Hole sketch")
-        click(window,400,55)
+        click(window,539,55)
         verify(window,"Extrusion preview")
         key("o")
         verify(window,"Cut")
@@ -1122,7 +1122,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 assert counts[profile-1]>300 and counts[2-profile]==0, counts
             key("o")
             verify(window,"|  cut")
-            click(window,400,55)
+            click(window,539,55)
             verify(window,"Extrusion preview / Cut / Blind")
             capture(window,f"projected-divider-preview-{profile}.png",False,surface=(76,167,192))
             key("Return")
@@ -1216,7 +1216,7 @@ with tempfile.TemporaryDirectory() as tmp:
                        if color==(112,191,245))>150
         key("o")
         verify(window,"|  cut")
-        click(window,400,55)
+        click(window,539,55)
         verify(window,"Extrusion preview / Cut / Blind")
         key("d")
         key("Control_L+a")
@@ -5540,7 +5540,7 @@ with tempfile.TemporaryDirectory() as tmp:
         path=Path(tmp)/"Patterned pads.pcad"
         path.write_bytes((root/"rust/fixtures/patterns.pcad").read_bytes())
         app,window=open_app(path,"Click two rectangle corners")
-        click(window,765,55)
+        click(window,671,55)
         verify(window,"linear-pattern-1   Columns   3")
         def set_pattern_field(value,wanted):
             key("F2")
@@ -6028,7 +6028,7 @@ with tempfile.TemporaryDirectory() as tmp:
         original=json.loads((root/"rust/fixtures/face-sketch.pcad").read_bytes())
         path.write_text(json.dumps(original))
         app,window=open_app(path)
-        click(window,696,55)
+        click(window,411,55)
         verify(window,"Diameter 20 mm   DOF 3")
         key("F3")
         type_value("bore = 1 cm")
@@ -6583,7 +6583,7 @@ with tempfile.TemporaryDirectory() as tmp:
         original=(root/"rust/fixtures/graph-constrained-line.pcad").read_bytes()
         path.write_bytes(original)
         app,window=open_app(path,"Click two rectangle corners")
-        click(window,665,55)
+        click(window,631,55)
         verify(window,"100 mm   DOF 2")
         click(window,57,55)
         verify(window,"Set value")
@@ -6655,7 +6655,7 @@ with tempfile.TemporaryDirectory() as tmp:
         path=Path(tmp)/"Constrained plate.pcad"
         path.write_bytes((libs/"cad/tests/fixtures/constrained-plate.pcad").read_bytes())
         app,window=open_app(path)
-        click(window,696,55)
+        click(window,411,55)
         verify(window,"bottom   20 mm   DOF 0")
         click(window,480,55)
         verify(window,"New variable")
@@ -6683,7 +6683,7 @@ with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([root/"rust/target/debug/puppycad","--export",path,reference],check=True)
         compare_solid_packages(package,reference)
         assert math.isclose(package_geometry(package)[1][0][1][1],1606.25,abs_tol=.001)
-        click(window,696,55)
+        click(window,411,55)
         verify(window,"bottom   32.125 mm   DOF 0")
         subprocess.run(["magick","import","-window",hex(window),output_dir/"constrained-plate.png"],check=True)
         key("F2")
@@ -6940,7 +6940,7 @@ with tempfile.TemporaryDirectory() as tmp:
         app, window = open_app(path)
         key('Tab')
         verify(window,'width 160 mm')
-        click(window,130,20)
+        click(window,491,55)
         verify(window,'Set value')
         key('Control_L+c')
         type_value('1.0000007')
@@ -6998,7 +6998,7 @@ with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp)/"History.pcad"
         path.write_bytes((root/"rust/fixtures/feature-tree.pcad").read_bytes())
         app, window = open_app(path)
-        click(window, 600, 55)
+        click(window, 371, 55)
         verify(window, "1 / 3   Extrusion 1   active")
         click(window, 75, 124)
         verify(window, "Extrusion 3   suppressed")
@@ -8312,7 +8312,7 @@ with tempfile.TemporaryDirectory() as tmp:
         verify(window, 'Click the opposite corner')
         click(window, 640, 258)
         verify(window, 'Sketch edited')
-        click(window, 317, 55)
+        click(window, 331, 55)
         verify(window, 'Click the centre')
         click(window, 480, 358)
         click(window, 520, 358)
@@ -8326,7 +8326,7 @@ with tempfile.TemporaryDirectory() as tmp:
         key('Escape')
         app.wait(3)
         app, window = open_app(path, 'Click two rectangle corners')
-        click(window, 402, 55)
+        click(window, 539, 55)
         verify(window, 'Extrusion preview')
         key('Return')
         verify(window, 'Extrusion 1  depth 10 mm')
@@ -8355,7 +8355,7 @@ with tempfile.TemporaryDirectory() as tmp:
         app.wait(3)
         path = Path(tmp) / 'Bracket.pcad'
         app, window = open_app(path, 'Click two rectangle corners')
-        click(window, 590, 55)
+        click(window, 251, 55)
         verify(window, 'Click the two endpoints')
         bracket = [(400, 438), (600, 438), (600, 398), (480, 398), (480, 278), (400, 278)]
         for start, end in zip(bracket, bracket[1:] + bracket[:1]):
@@ -8549,7 +8549,7 @@ with tempfile.TemporaryDirectory() as tmp:
         original = json.loads((root / 'rust/fixtures/extruded-rectangle.pcad').read_bytes())
         path.write_text(json.dumps(original))
         app, window = open_app(path)
-        click(window, 503, 55)
+        click(window, 211, 55)
         verify(window, 'Choose a plane for the new sketch')
         subprocess.run(['magick','import','-window',hex(window),output_dir/'new-sketch-on-part.png'],check=True)
         click(window, 420, 55)
@@ -8578,7 +8578,7 @@ with tempfile.TemporaryDirectory() as tmp:
         key('v')
         verify(window, '|  Sketch  |  Sketch 2')
         capture(window, 'picked-face-sketch.png', True)
-        click(window, 664, 55)
+        click(window, 645, 55)
         verify(window, '|  cut')
         key('e')
         verify(window, 'depth 10 mm')
@@ -8636,14 +8636,14 @@ with tempfile.TemporaryDirectory() as tmp:
         base['name'] = 'Base'
         path.write_text(json.dumps(document))
         app, window = open_app(path)
-        click(window, 665, 21)
+        click(window, 851, 20)
         verify(window, 'Click two rectangle corners')
         click(window, 440, 398)
         click(window, 520, 318)
         verify(window, 'Sketch edited')
         key('e')
         verify(window, 'depth 10 mm')
-        click(window, 780, 21)
+        click(window, 891, 20)
         verify(window, 'Choose a part to insert')
         key('Control_L+s')
         verify(window, 'Saved')
@@ -9321,6 +9321,502 @@ with tempfile.TemporaryDirectory() as tmp:
             shutil.copyfile(stl,output_dir/stl.name)
         key("Escape")
         app.wait(3)
+        # Free 3D orbit tumbles smoothly past the +Z pole without gimbal clamping.
+        app, window = open_app(root / 'tests/fixtures/sensor-unit.pcad', 'PCAD design opened')
+        key('1')
+        verify(window, 'Front view')
+        from PIL import Image, ImageChops
+        def grab_viewport(name):
+            shot = output_dir / name
+            subprocess.run(['magick', 'import', '-window', hex(window), shot], check=True)
+            with Image.open(shot) as image:
+                return image.convert('RGB').crop((0, 76, 960, 640))
+        front_view = grab_viewport('free-orbit-front.png')
+        drag(window, 3, (480, 100), (480, 580))
+        past_pole = grab_viewport('free-orbit-past-pole.png')
+        drag(window, 3, (480, 200), (480, 360))
+        upside_down = grab_viewport('free-orbit-upside-down.png')
+        assert ImageChops.difference(front_view, past_pole).getbbox()
+        assert ImageChops.difference(past_pole, upside_down).getbbox()
+        key('1')
+        verify(window, 'Front view')
+        assert not ImageChops.difference(front_view, grab_viewport('free-orbit-front-reset.png')).getbbox()
+        key('Escape')
+        app.wait(3)
+
+        # Direct face selection highlights a connected coplanar region with its boundary outline,
+        # and Shift+S opens a sketch directly on a selected v4 extrusion face.
+        flange_path = Path(tmp) / 'flanged-box.pcad'
+        flange_path.write_text(json.dumps(dict(
+            format='puppycorp.pcad', schema_version=1, units='mm',
+            nodes=[
+                dict(id='outer', type='box', size=[80, 50, 20]),
+                dict(id='flange', type='box', size=[8, 66, 20], position=[-8, -8, 0]),
+                dict(id='body', type='union', a='outer', b='flange'),
+                dict(id='pocket', type='box', size=[64, 34, 14], position=[8, 8, 6]),
+                dict(id='part', type='subtract', a='body', b='pocket'),
+            ],
+            parts=[dict(id='part', node='part', name='Flanged housing', color='#7aa8c2')],
+            assembly=dict(
+                instances=[dict(id='housing', part='part', name='Flanged housing')],
+                mates=[dict(id='ground', type='fixed', parent='world', child='housing')],
+            ),
+        )))
+        app, window = open_app(flange_path, 'PCAD design opened')
+        key('0')
+        verify(window, 'Isometric view')
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        before_face = grab_viewport('face-sel-unselected.png')
+        # Live hover highlights planar faces and visible corner vertices in orthographic view.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 410, 270)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        hover_ortho_face = grab_viewport('face-hover-ortho.png')
+        assert sum(1 for y in range(hover_ortho_face.height) for x in range(hover_ortho_face.width)
+                   if hover_ortho_face.getpixel((x, y)) == (255, 184, 51)) > 150
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 362, 294)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        hover_ortho_vert = grab_viewport('vertex-hover-ortho.png')
+        assert sum(1 for y in range(hover_ortho_vert.height) for x in range(hover_ortho_vert.width)
+                   if hover_ortho_vert.getpixel((x, y)) == (255, 166, 0)) > 20
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        assert not ImageChops.difference(before_face, grab_viewport('hover-ortho-cleared.png')).getbbox()
+        click(window, 410, 270)
+        verify(window, 'Selected Flanged housing   |   Face')
+        rim_face = grab_viewport('face-sel-top-rim.png')
+        rim_outline = sum(1 for y in range(rim_face.height) for x in range(rim_face.width)
+                          if rim_face.getpixel((x, y)) == (255, 166, 0))
+        rim_blue = sum(1 for y in range(rim_face.height) for x in range(rim_face.width)
+                       if rim_face.getpixel((x, y))[2] > rim_face.getpixel((x, y))[0] + 20)
+        assert rim_outline > 150 and rim_blue > 3000, (rim_outline, rim_blue)
+        # Clicking right on a sharp crease edge highlights only that edge in bold orange.
+        click(window, 362, 312)
+        verify(window, 'Selected Flanged housing   |   Edge')
+        edge_view = grab_viewport('edge-sel-vertical.png')
+        edge_orange = sum(1 for y in range(edge_view.height) for x in range(edge_view.width)
+                          if edge_view.getpixel((x, y)) == (255, 166, 0))
+        assert 40 < edge_orange < 1500, edge_orange
+        click(window, 100, 150)
+        assert not ImageChops.difference(before_face, grab_viewport('face-sel-cleared.png')).getbbox()
+        key('Escape')
+        app.wait(3)
+
+        # Curved cylindrical surfaces shade smoothly and hover/select as a single surface
+        # without exposing internal tessellation seams or vertices.
+        peg_path = Path(tmp) / 'pegged-plate.pcad'
+        peg_path.write_text(json.dumps(dict(
+            format='puppycorp.pcad', schema_version=1, units='mm',
+            nodes=[
+                dict(id='plate', type='box', size=[60, 40, 8]),
+                dict(id='peg', type='cylinder', radius=7, height=22, position=[30, 20, 8]),
+                dict(id='body', type='union', a='plate', b='peg'),
+            ],
+            parts=[dict(id='part', node='body', name='Pegged plate', color='#66ad94')],
+            assembly=dict(
+                instances=[dict(id='inst', part='part', name='Pegged plate')],
+                mates=[dict(id='ground', type='fixed', parent='world', child='inst')],
+            ),
+        )))
+        app, window = open_app(peg_path, 'PCAD design opened')
+        key('0')
+        verify(window, 'Isometric view')
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 470, 320)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        cyl_hover_a = grab_viewport('cyl-surface-hover-a.png')
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 490, 320)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        cyl_hover_b = grab_viewport('cyl-surface-hover-b.png')
+        assert not ImageChops.difference(cyl_hover_a, cyl_hover_b).getbbox()
+        cyl_hover_outline = sum(1 for y in range(cyl_hover_a.height) for x in range(cyl_hover_a.width)
+                                if cyl_hover_a.getpixel((x, y)) == (255, 184, 51))
+        cyl_vert_badge = sum(1 for y in range(cyl_hover_a.height) for x in range(cyl_hover_a.width)
+                             if cyl_hover_a.getpixel((x, y)) == (255, 166, 0))
+        assert cyl_hover_outline > 80 and cyl_vert_badge == 0, (cyl_hover_outline, cyl_vert_badge)
+        click(window, 480, 320)
+        verify(window, 'Selected Pegged plate   |   Face')
+        cyl_sel = grab_viewport('cyl-surface-selected.png')
+        cyl_sel_outline = sum(1 for y in range(cyl_sel.height) for x in range(cyl_sel.width)
+                              if cyl_sel.getpixel((x, y)) == (255, 166, 0))
+        assert cyl_sel_outline > 80, cyl_sel_outline
+        key('Escape')
+        app.wait(3)
+
+        block_path = Path(tmp) / 'Face sketch block.pcad'
+        shutil.copyfile(root / 'rust/fixtures/extruded-rectangle.pcad', block_path)
+        app, window = open_app(block_path, 'selects a dimension')
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        before_edge_preview = grab_viewport('edge-preview-before.png')
+        # Hovering a planar face or visible 3D solid vertex in perspective highlights it and clears when moving away.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 480, 290)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        hover_3d_face = grab_viewport('face-hover-3d.png')
+        assert sum(1 for y in range(hover_3d_face.height) for x in range(hover_3d_face.width)
+                   if hover_3d_face.getpixel((x, y)) == (255, 184, 51)) > 150
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 511, 341)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        hover_3d = grab_viewport('vertex-hover-3d.png')
+        assert sum(1 for y in range(hover_3d.height) for x in range(hover_3d.width)
+                   if hover_3d.getpixel((x, y)) == (255, 166, 0)) > 15
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        assert not ImageChops.difference(before_edge_preview, grab_viewport('vertex-hover-3d-cleared.png')).getbbox()
+        # Selecting a 3D vertex and right-clicking opens the vertex context menu.
+        click(window, 511, 341)
+        verify(window, 'Vertex (80, -50, 60 mm)')
+        click(window, 511, 341, button=3)
+        verify(window, 'Center view here')
+        click(window, 540, 381)
+        verify(window, 'Copied 80, -50, 60 mm')
+        click(window, 511, 341, button=3)
+        key('Return')
+        verify(window, 'Centered on vertex')
+        key('Home')
+        verify(window, 'View fitted')
+        click(window, 512, 380)
+        verify(window, 'Selected Block   |   Edge')
+        key('h')
+        verify(window, 'Selected edges 1')
+        chamfer_1 = grab_viewport('chamfer-preview-1mm.png')
+        key('d')
+        type_value('5')
+        key('Return')
+        verify(window, 'Distance 5 mm')
+        chamfer_5 = grab_viewport('chamfer-preview-5mm.png')
+        assert ImageChops.difference(chamfer_1, chamfer_5).getbbox()
+        key('Escape')
+        verify(window, 'Edge finish cancelled')
+        assert not ImageChops.difference(before_edge_preview, grab_viewport('chamfer-cancelled.png')).getbbox()
+        click(window, 512, 380)
+        verify(window, 'Selected Block   |   Edge')
+        key('Shift_L+h')
+        verify(window, 'Selected edges 1')
+        key('d')
+        type_value('0.8')
+        key('Return')
+        verify(window, 'Radius 0.8 mm')
+        key('Return')
+        verify(window, 'Fillet 1  radius 0.8 mm')
+        key('Control_L+z')
+        verify(window, 'Block')
+        key('F12')
+        verify(window, 'Block sketch')
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        sk_none = grab_viewport('vertex-hover-sketch-none.png')
+        sk_green = [(x, y + 76) for y in range(sk_none.height) for x in range(sk_none.width)
+                    if sk_none.getpixel((x, y)) == (143, 217, 184)]
+        assert sk_green
+        sk_corner = (min(x for x, _ in sk_green), min(y for _, y in sk_green))
+        sk_mid = ((min(x for x, _ in sk_green) + max(x for x, _ in sk_green)) // 2, min(y for _, y in sk_green))
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, *sk_corner)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        sk_hover = grab_viewport('vertex-hover-sketch.png')
+        assert sum(1 for y in range(sk_hover.height) for x in range(sk_hover.width)
+                   if sk_hover.getpixel((x, y)) == (255, 166, 0)) > 20
+        # Hovering the midpoint of a sketch edge shows a yellow square marker.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, *sk_mid)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        sk_mid_hover = grab_viewport('sketch-midpoint-hover.png')
+        assert sum(1 for y in range(sk_mid_hover.height) for x in range(sk_mid_hover.width)
+                   if sk_mid_hover.getpixel((x, y)) == (255, 214, 10)) > 40
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        assert not ImageChops.difference(sk_none, grab_viewport('vertex-hover-sketch-cleared.png')).getbbox()
+        click(window, *sk_corner, button=3)
+        verify(window, 'Line from vertex')
+        key('Return')
+        verify(window, 'Click the two endpoints')
+        key('Escape')
+        key('F12')
+        verify(window, 'Part workspace')
+        click(window, 480, 290)
+        verify(window, 'Selected Block   |   Face')
+        v4_face = grab_viewport('face-sel-v4-top.png')
+        v4_outline = sum(1 for y in range(v4_face.height) for x in range(v4_face.width)
+                         if v4_face.getpixel((x, y)) == (255, 166, 0))
+        v4_teal = sum(1 for y in range(v4_face.height) for x in range(v4_face.width)
+                      if v4_face.getpixel((x, y))[1] > v4_face.getpixel((x, y))[0] + 25)
+        assert v4_outline > 100 and v4_teal > 5000, (v4_outline, v4_teal)
+        # Hovering a Part toolbar icon shows its floating tooltip below the button.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 291, 55)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        subprocess.run(['magick', 'import', '-window', hex(window), output_dir / 'part-icon-tooltip.png'], check=True)
+        with Image.open(output_dir / 'part-icon-tooltip.png') as ptip:
+            ptip_rgb = ptip.convert('RGB')
+            assert sum(1 for y in range(74, 100) for x in range(150, 440)
+                       if ptip_rgb.getpixel((x, y)) == (92, 134, 140)) > 150
+        # Clicking the same selected 3D face a second time unselects it cleanly.
+        click(window, 480, 290)
+        verify(window, 'Selection cleared')
+        unselected_3d = grab_viewport('face-sel-v4-unselected.png')
+        assert sum(1 for y in range(unselected_3d.height) for x in range(unselected_3d.width)
+                   if unselected_3d.getpixel((x, y)) == (255, 166, 0)) == 0
+        # Re-select the face and click the Edit Sketch icon to start a new sketch on that face.
+        click(window, 480, 290)
+        verify(window, 'Selected Block   |   Face')
+        click(window, 251, 55)
+        verify(window, 'Click two rectangle corners')
+        key('Control_L+z')
+        verify(window, 'Block')
+        click(window, 480, 290)
+        verify(window, 'Selected Block   |   Face')
+        key('Shift_L+s')
+        verify(window, 'Click two rectangle corners')
+        # Hovering the middle of a supporting face outline edge shows the yellow midpoint square.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        face_sk = grab_viewport('face-sketch-outline.png')
+        # Locate the top horizontal edge of the supporting face outline (excluding full-width axes).
+        face_rows = [y for y in range(20, face_sk.height - 20)
+                     if 50 < sum(1 for x in range(face_sk.width) if face_sk.getpixel((x, y)) == (51, 71, 76)) < face_sk.width - 100]
+        assert face_rows
+        top_y = min(face_rows)
+        top_xs = [x for x in range(face_sk.width) if face_sk.getpixel((x, top_y)) == (51, 71, 76)]
+        face_mid = ((min(top_xs) + max(top_xs)) // 2, top_y + 76)
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, *face_mid)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        face_mid_hover = grab_viewport('face-sketch-midpoint-hover.png')
+        assert sum(1 for y in range(face_mid_hover.height) for x in range(face_mid_hover.width)
+                   if face_mid_hover.getpixel((x, y)) == (255, 214, 10)) > 40
+        # Moving away horizontally/vertically from woken midpoints draws yellow dashed alignment lines.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, face_mid[0], face_mid[1] + 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        infer_v = grab_viewport('face-sketch-infer-line.png')
+        infer_v_ys = [y for y in range(infer_v.height) for x in range(infer_v.width)
+                      if infer_v.getpixel((x, y)) == (255, 214, 10)]
+        assert len(infer_v_ys) > 100 and (max(infer_v_ys) - min(infer_v_ys)) > 120
+        # Wake the left edge midpoint too, then move to the exact face center for dual H+V dashed lines.
+        left_x = min(top_xs)
+        bot_y = max(face_rows)
+        left_mid = (left_x, (top_y + bot_y) // 2 + 76)
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, *left_mid)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, face_mid[0], left_mid[1])
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        infer_dual = grab_viewport('face-sketch-infer-center.png')
+        dual_pts = [(x, y) for y in range(infer_dual.height) for x in range(infer_dual.width)
+                    if infer_dual.getpixel((x, y)) == (255, 214, 10)]
+        assert len(dual_pts) > 200
+        assert (max(x for x, _ in dual_pts) - min(x for x, _ in dual_pts)) > 150
+        assert (max(y for _, y in dual_pts) - min(y for _, y in dual_pts)) > 120
+        # Verify the yellow square marker also renders right at the meeting point.
+        mx, my = face_mid[0], left_mid[1] - 76
+        meet_px = sum(1 for y in range(my - 7, my + 8) for x in range(mx - 7, mx + 8)
+                      if infer_dual.getpixel((x, y)) == (255, 214, 10))
+        assert meet_px > 45, meet_px
+        subprocess.run(['magick', 'import', '-window', hex(window), output_dir / 'extrude-icon-toolbar.png'], check=True)
+        with Image.open(output_dir / 'extrude-icon-toolbar.png') as shot:
+            icon = shot.convert('RGB').crop((531, 47, 547, 63))
+            bright_icon = sum(1 for y in range(16) for x in range(16) if icon.getpixel((x, y))[0] > 200)
+            shaded_icon = sum(1 for y in range(16) for x in range(16) if 110 < icon.getpixel((x, y))[0] <= 200)
+            assert bright_icon > 50 and shaded_icon >= 16, (bright_icon, shaded_icon)
+        # Right-click cancels an in-progress rectangle, and overlapping shapes subdivide into
+        # selectable cuts that highlight on the sketch and can each be extruded individually.
+        key('c')
+        click(window, 440, 290)
+        click(window, 495, 290)
+        verify(window, 'Sketch edited')
+        key('e')
+        verify(window, 'Extruded')
+        key('F12')
+        verify(window, 'Sketch 2')
+        key('r')
+        click(window, 470, 310)
+        click(window, 550, 400, button=3)
+        verify(window, 'Drawing cancelled')
+        click(window, 470, 310)
+        click(window, 580, 440)
+        verify(window, 'Sketch edited')
+        # Overlapping circle + rectangle creates 3 selectable cuts, highlighted in sketch view.
+        cut_shot = grab_viewport('sketch-cuts-highlighted.png')
+        assert sum(1 for y in range(cut_shot.height) for x in range(cut_shot.width)
+                   if cut_shot.getpixel((x, y)) == (255, 176, 69)) > 60
+        key('p')
+        verify(window, 'Profile 2')
+        key('p')
+        verify(window, 'Profile 3')
+        key('p')
+        verify(window, 'Profile 1')
+        # Pressing Escape while sketching a primitive (idle or mid-draw) switches to Select mode.
+        key('r')
+        verify(window, 'Click two rectangle corners')
+        click(window, 470, 310)
+        verify(window, 'Click the opposite corner')
+        key('Escape')
+        verify(window, 'Click a sketch region to select')
+        # Clicking Rectangle icon and pressing Escape while idle also returns to Select.
+        click(window, 291, 55)
+        verify(window, 'Click two rectangle corners')
+        key('Escape')
+        verify(window, 'Click a sketch region to select')
+        # Hovering a toolbar icon shows its floating tooltip right below the button.
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 291, 55)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        subprocess.run(['magick', 'import', '-window', hex(window), output_dir / 'sketch-icon-tooltip.png'], check=True)
+        with Image.open(output_dir / 'sketch-icon-tooltip.png') as tip_shot:
+            tip_rgb = tip_shot.convert('RGB')
+            assert sum(1 for y in range(74, 100) for x in range(210, 380)
+                       if tip_rgb.getpixel((x, y)) == (92, 134, 140)) > 150
+        # Clicking the visible Select icon (first before Line & Rectangle) activates Select mode directly.
+        key('c')
+        verify(window, 'Click the centre')
+        click(window, 211, 55)
+        verify(window, 'Click a sketch region to select')
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 100, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.15)
+        subprocess.run(['magick', 'import', '-window', hex(window), output_dir / 'sketch-select-toolbar.png'], check=True)
+        # Middle-mouse dragging pans the 2D sketch canvas cleanly with the cursor.
+        before_pan = grab_viewport('sketch-before-pan.png')
+        before_green = [(x, y) for y in range(before_pan.height) for x in range(before_pan.width)
+                        if before_pan.getpixel((x, y)) == (143, 217, 184)]
+        assert before_green
+        drag(window, 2, (480, 340), (600, 420))
+        after_pan = grab_viewport('sketch-after-pan.png')
+        after_green = [(x, y) for y in range(after_pan.height) for x in range(after_pan.width)
+                       if after_pan.getpixel((x, y)) == (143, 217, 184)]
+        assert after_green
+        dx_pan = (sum(x for x, _ in after_green) / len(after_green)) - (sum(x for x, _ in before_green) / len(before_green))
+        dy_pan = (sum(y for _, y in after_green) / len(after_green)) - (sum(y for _, y in before_green) / len(before_green))
+        assert 95 < dx_pan < 145 and 55 < dy_pan < 105, (dx_pan, dy_pan)
+        # Pan back to original framing before clicking the 3 cuts directly.
+        drag(window, 2, (600, 420), (480, 340))
+        # Clicking an already-selected cut (Profile 1) unselects it and clears its highlight.
+        click(window, 415, 285)
+        verify(window, 'Profile unselected')
+        unselected_shot = grab_viewport('sketch-cut-unselected.png')
+        assert sum(1 for y in range(unselected_shot.height) for x in range(unselected_shot.width)
+                   if unselected_shot.getpixel((x, y)) == (255, 176, 69)) == 0
+        picked_profiles = set()
+        for cx, cy, shot_name in [
+            (415, 285, 'sketch-cut-circle.png'),
+            (482, 322, 'sketch-cut-lens.png'),
+            (545, 405, 'sketch-cut-rect.png'),
+        ]:
+            click(window, cx, cy)
+            verify(window, 'Profile ')
+            t = title(window)
+            idx = int(t.rsplit('Profile ', 1)[1].split()[0].strip('"'))
+            picked_profiles.add(idx)
+            grab_viewport(shot_name)
+        assert picked_profiles == {1, 2, 3}, picked_profiles
+        # Right-clicking directly inside the rectangle cut offers Extrude profile N.
+        click(window, 545, 405, button=3)
+        verify(window, 'Extrude profile ')
+        grab_viewport('sketch-cut-context-menu.png')
+        key('Return')
+        verify(window, 'Extrusion preview')
+        preview_a = grab_viewport('sketch-cut-extrude-preview.png')
+        # Pressing P inside the Extrude preview switches live to another cut.
+        key('p')
+        verify(window, 'Extrusion preview')
+        preview_b = grab_viewport('sketch-cut-extrude-preview-next.png')
+        # Ensure we are on an un-extruded cut (Profile 2 or 3) and apply the extrusion.
+        if 'already has an extrusion' in title(window):
+            key('p')
+            verify(window, 'Extrusion preview')
+        key('Return')
+        verify(window, 'Extruded')
+        part_extruded = grab_viewport('sketch-cut-extruded-part.png')
+        assert sum(1 for y in range(6, 42) for x in range(180, 780)
+                   if part_extruded.getpixel((x, y)) == (255, 166, 0)) == 0
+        key('Escape')
+        key('Escape')
+        app.wait(3)
+
+        # Renaming parts, sketches, and the project .pcad file itself.
+        rename_src = Path(tmp) / 'untitled.pcad'
+        existing_dst = Path(tmp) / 'taken.pcad'
+        existing_dst.write_text('keep existing')
+        app, window = open_app(rename_src, 'Click two rectangle corners', design_tree=True)
+        key('Control_L+s')
+        verify(window, 'Saved')
+        assert rename_src.exists()
+        # Right-click Part 1 in the Design tree and choose Rename.
+        click(window, 64, 160, button=3)
+        verify(window, 'Selected Part 1')
+        subprocess.run(['magick', 'import', '-window', hex(window), output_dir / 'rename-design-menu.png'], check=True)
+        click(window, 90, 227)  # Rename (3rd entry: Open part, Collapse, Rename, Rename file)
+        verify(window, 'Rename Part 1')
+        type_value('bracket')
+        key('Return')
+        verify(window, 'Renamed to bracket')
+        # Undo restores Part 1 and Redo restores bracket.
+        key('Control_L+z')
+        verify(window, 'untitled')
+        key('Control_L+y')
+        verify(window, 'bracket')
+        # Right-click Sketch 1 and choose Rename.
+        click(window, 64, 212, button=3)
+        verify(window, 'Selected Sketch 1')
+        key('Up')
+        key('Return')
+        verify(window, 'Rename Sketch 1')
+        type_value('profile')
+        key('Return')
+        verify(window, 'Renamed to profile')
+        # Rename the .pcad file via Ctrl+Shift+S; existing targets are protected.
+        key('Control_L+Shift_L+s')
+        verify(window, 'Rename file')
+        subprocess.run(['magick', 'import', '-window', hex(window), output_dir / 'rename-file-bar.png'], check=True)
+        type_value('taken')
+        key('Return')
+        verify(window, 'File already exists')
+        assert existing_dst.read_text() == 'keep existing'
+        key('Control_L+a')
+        type_value('housing')
+        key('Return')
+        verify(window, 'Renamed to housing.pcad')
+        rename_dst = Path(tmp) / 'housing.pcad'
+        assert rename_dst.exists() and not rename_src.exists()
+        saved_renamed = json.loads(rename_dst.read_text())
+        assert saved_renamed['items'][0]['name'] == 'bracket'
+        assert any(n.get('name') == 'profile' for n in saved_renamed['items'][0]['data']['cad']['nodes'])
+        # Zooming out and dragging a large rectangle keeps the preview visible and clamps cleanly.
+        key('F3')
+        for _ in range(10):
+            click(window, 480, 350, button=5)
+        click(window, 480, 350)
+        xlib.XWarpPointer(connection, 0, window, 0, 0, 0, 0, 880, 150)
+        xlib.XSync(connection, 0)
+        time.sleep(.2)
+        big_rect = grab_viewport('sketch-big-rect-preview.png')
+        assert sum(1 for y in range(big_rect.height) for x in range(big_rect.width)
+                   if big_rect.getpixel((x, y)) == (143, 217, 184)) > 400
+        click(window, 880, 150)
+        verify(window, 'Sketch edited')
+        key('Escape')
+        verify(window, 'Click a sketch region to select')
+        key('Escape')
+        key('Escape')
+        app.wait(3)
+
         # A second process may create the requested path before the editor's first save.
         collision = Path(tmp) / 'race.pcad'
         app, window = open_app(collision, 'Click two rectangle corners')
@@ -9328,6 +9824,8 @@ with tempfile.TemporaryDirectory() as tmp:
         key('Control_L+s')
         verify(window, 'File changed on disk')
         assert collision.read_text() == 'external content'
+        key('Escape')
+        verify(window, 'Click a sketch region to select')
         key('Escape')
         app.wait(3)
     finally:
